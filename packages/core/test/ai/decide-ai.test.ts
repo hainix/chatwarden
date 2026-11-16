@@ -24,6 +24,11 @@ const recommends =
     }),
   });
 
+/** The same, at high confidence (the only confidence a gate counts). */
+const highUpheld = (input: AIReadInput): FakeStep => ({
+  output: fakeRead(input, { severity: 'rude', rule: RULE, evidence: [ownRef(input)], confidence: 'high', recommendation: { verdict: 'upheld', severity: 'rude', rule: RULE, evidence: [ownRef(input)] } }),
+});
+
 const store = (w: AiWorld): MemoryAiStore => w.store as MemoryAiStore;
 
 /** A decision by moderator `mod_ann`, with the echo of the read. */
@@ -566,6 +571,39 @@ describe('the casebook row carries what the gates need', () => {
     await w.idle();
     await w.cw.decide(decision(w, r, { actor: '  mod_cy  ', ai: { readId: w.cw.ai.read(r.id)?.id ?? 'none', accepted: false, role: 'owner' } }));
     expect(store(w).loadAiOutcome(r.id)?.decidedBy).toBe('mod_cy');
+  });
+
+  // Review R1a M4: only a person at the desk is a "human" decision. An integration's decision (the api, the coop bridge, the auto filter) still files its
+  // row, but as `service`, with no deciding moderator, so it never earns trust and never counts toward the breadth of distinct deciders.
+  it.each(['api', 'coop', 'auto_filter'] as const)('a decision with source %s files a service row: no deciding moderator, and the gates do not count it', async (source) => {
+    const w = await aiWorld({ level: 2, script: highUpheld });
+    const r = await w.report();
+    await w.idle();
+    const res = await w.cw.decide(decision(w, r, { source, actor: 'svc_bot' }));
+    expect(res.ok).toBe(true);
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ source: 'service', decidedBy: null, agreement: 'agree', aiRule: String(RULE) });
+    expect(store(w).aiGateRows(0, 0)).toEqual([]);
+  });
+
+  it('a moderator decision still files a human row and counts (the control)', async () => {
+    const w = await aiWorld({ level: 2, script: highUpheld });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r, { source: 'moderator', actor: 'mod_ann' }));
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ source: 'human', decidedBy: 'mod_ann' });
+    expect(store(w).aiGateRows(0, 0)).toHaveLength(1);
+  });
+
+  it('three service actors and one moderator make one decider, not four', async () => {
+    const w = await aiWorld({ level: 2, script: highUpheld });
+    const files: Array<[string, 'api' | 'coop' | 'auto_filter' | 'moderator']> = [['svc_a', 'api'], ['svc_b', 'coop'], ['svc_c', 'auto_filter'], ['mod_ann', 'moderator']];
+    for (const [actor, source] of files) {
+      const r = await w.report();
+      await w.idle();
+      await w.cw.decide(decision(w, r, { source, actor }));
+    }
+    const cell = store(w).aiGateRows(0, 0)[0];
+    expect(cell?.counts).toMatchObject({ qualifying: 1, deciders: 1 });
   });
 
   it('a dismissal is filled the same way, and the AI columns keep what the AI said, not the dismissal', async () => {

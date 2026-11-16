@@ -103,7 +103,7 @@ describe('migration 24: the casebook gains the gate columns', () => {
     expect(String(idx?.sql)).toMatch(/ON kit_ai_outcomes \(ai_rule, ai_severity, decided_at\)/);
     insertOutcome(db, 'x', null);
     expect(db.prepare("SELECT source FROM kit_ai_outcomes WHERE report_id = 'x'").get()).toEqual({ source: 'human' });
-    for (const ok of ['human', 'holdback', 'review']) expect(() => db.prepare("UPDATE kit_ai_outcomes SET source = ? WHERE report_id = 'x'").run(ok)).not.toThrow();
+    for (const ok of ['human', 'holdback', 'review', 'service']) expect(() => db.prepare("UPDATE kit_ai_outcomes SET source = ? WHERE report_id = 'x'").run(ok)).not.toThrow();
     for (const bad of ['ai', 'HUMAN', '', 'moderator']) expect(() => db.prepare("UPDATE kit_ai_outcomes SET source = ? WHERE report_id = 'x'").run(bad), bad).toThrow(/CHECK/);
   });
 

@@ -329,7 +329,7 @@ class MemoryAi extends MemoryStore {
     const cells = new Map<string, { rule: string; severity: AiGateRow['severity']; rows: AiOutcomeRow[] }>();
     for (const r of this.aiOutcomes.values()) {
       if (r.decidedAt < since || r.aiRule === null || r.aiSeverity === null) continue;
-      if (r.aiVerdict !== 'upheld' || r.aiConfidence !== 'high' || r.agreement === 'none' || r.source === 'review' || r.badFaith) continue;
+      if (r.aiVerdict !== 'upheld' || r.aiConfidence !== 'high' || r.agreement === 'none' || (r.source !== 'human' && r.source !== 'holdback') || r.badFaith) continue;
       const key = `${r.aiRule}/${r.aiSeverity}`;
       const cell = cells.get(key) ?? { rule: r.aiRule, severity: r.aiSeverity, rows: [] };
       cell.rows.push(r);

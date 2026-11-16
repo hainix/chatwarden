@@ -424,7 +424,6 @@ function compareRules(a: string | null, b: string | null): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** What makes an outcome a teachable example (everything but the rule, severity and time). One text, used by two queries. */
 /**
  * The gate query (design 5.1): one aggregate over the casebook, grouped by the AI's own cell, over the by-cell index. `?1` is the start of the
  * window and `?2` the start of the recent window. The counting rules are the contract's (`Store.aiGateRows`); the in-memory store repeats them.
@@ -447,6 +446,7 @@ SELECT ai_rule AS rule, ai_severity AS severity, COUNT(*) AS qualifying, SUM(cle
        SUM(CASE WHEN decided_at >= ?2 AND clean = 1 THEN 1 ELSE 0 END) AS recent_clean
 FROM q GROUP BY ai_rule, ai_severity`;
 
+/** What makes an outcome a teachable example (everything but the rule, severity and time). One text, used by two queries. */
 const AI_TEACHABLE_SQL = "example_json IS NOT NULL AND agreement <> 'none' AND reversed = 0 AND dont_teach = 0 AND bad_faith = 0";
 
 /** The kit_meta key of the change token's counter. */

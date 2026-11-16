@@ -608,6 +608,7 @@ export class DecisionService {
         actions: norm.actions.map((a) => ({ subject: a.subject, kind: a.kind, durationMs: a.durationMs, rule: a.rule, lineIds: a.lineIds })),
         ai: { readId: norm.ai.readId, accepted: norm.ai.accepted, severity: norm.ai.severity },
         actor: norm.actor,
+        source: norm.source,
         now,
       });
     } catch (err) {

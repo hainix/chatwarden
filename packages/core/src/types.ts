@@ -476,9 +476,10 @@ export interface AiOutcomeInsert {
   decidedBy: string | null;
   /**
    * Where the decision came from: `human` (a person decided with the AI's read in front of them), `holdback` (a case the AI would have acted on and
-   * a person decided instead), `review` (a person confirming an action the AI took). The earn gates read `human` and `holdback` only.
+   * a person decided instead), `review` (a person confirming an action the AI took), `service` (an integration decided: the api, the coop bridge or the
+   * auto filter; there is no deciding moderator). The earn gates read `human` and `holdback` only.
    */
-  source: 'human' | 'holdback' | 'review';
+  source: 'human' | 'holdback' | 'review' | 'service';
 }
 
 /** A stored outcome: what was inserted, and the two marks a later action sets. */

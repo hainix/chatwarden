@@ -284,6 +284,41 @@ describe('gates(): never throws, and is empty when there is nothing to show', ()
     expect(w.cw.ai.gates().cells).toEqual([]);
   });
 
+  it('a clock that throws gives an empty view, not an exception (review R1a M6)', () => {
+    const store = withMemoryAi(new MemoryStore());
+    const base = PRESETS.strict;
+    let failing = false;
+    const service = new AiService({
+      options: { adapter: createFakeModerationAI([]) },
+      store,
+      clock: {
+        now: () => {
+          if (failing) throw new Error('clock gone');
+          return NOW;
+        },
+      },
+      logger: undefined,
+      profile: () => ({ ...base, ai: { ...base.ai, level: 2 } }) as never,
+      rules: defineRules(starterRules('standard')),
+      suggest: () => ({ outcome: 'none', label: '', why: '' }),
+      subscribe: () => () => undefined,
+      audit: () => true,
+      exampleRetentionMs: () => 0,
+    });
+    try {
+      expect(service.gates().at).toBe(NOW);
+      failing = true;
+      let view: AiGatesView | undefined;
+      expect(() => {
+        view = service.gates();
+      }).not.toThrow();
+      expect(view).toMatchObject({ cells: [], actingAvailable: false, version: 1 });
+    } finally {
+      failing = false;
+      service.close();
+    }
+  });
+
   it('a profile that fails to read gives an empty view', async () => {
     const adapter = createFakeModerationAI([]);
     const store = withMemoryAi(new MemoryStore());

@@ -654,7 +654,8 @@ export class AiService implements AiFacade {
   // --- the gates (read-only) ---------------------------------------------------------------------------------------------------
 
   gates(): AiGatesView {
-    const now = this.clock.now();
+    // `now` is read inside the try below: a clock that throws gives the empty view (at 0), never an exception.
+    let now = 0;
     const cfg = this.deps.gateConfig ?? AI_GATE_DEFAULTS;
     const view = (cells: AiGateCell[]): AiGatesView => ({
       version: 1,
@@ -670,6 +671,7 @@ export class AiService implements AiFacade {
       },
     });
     try {
+      now = this.clock.now();
       if (this.level() === 0 || typeof this.store.aiGateRows !== 'function') return view([]);
       const profile = this.deps.profile();
       const levels = CONDUCT_LEVELS.filter((l): l is 'hostile' | 'severe' => (l === 'hostile' || l === 'severe') && profile.aiAutoAct.includes(l));
@@ -1087,8 +1089,10 @@ export class AiService implements AiFacade {
       aiRule: aiRuleRef === null ? null : String(aiRuleRef),
       aiSeverity,
       aiConfidence: injected || read === null ? null : read.confidence,
-      decidedBy: args.actor,
-      source: 'human',
+      // Only a person at the desk is a human decision (design: "a person decided"): an integration's decision is filed as `service`, with no deciding moderator,
+      // so it never earns trust and never counts toward the breadth of distinct deciders.
+      decidedBy: args.source === 'moderator' ? args.actor : null,
+      source: args.source === 'moderator' ? 'human' : 'service',
     };
   }
 

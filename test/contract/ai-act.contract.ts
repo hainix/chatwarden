@@ -119,6 +119,21 @@ export function aiActContract(name: string, make: () => Store): void {
       expect(counts(s).qualifying).toBe(2);
     });
 
+    it('ignores rows with source service (an integration decided: no deciding moderator), and they add no decider', () => {
+      const s = gate(make());
+      put(s, row({ source: 'service', decidedBy: null }), row({ source: 'service', decidedBy: 'svc_a' }));
+      expect(rows(s)).toEqual([]);
+      put(s, row({ source: 'human', decidedBy: 'mod_a' }), row({ source: 'service', decidedBy: 'svc_b' }));
+      expect(counts(s)).toMatchObject({ qualifying: 1, deciders: 1 });
+    });
+
+    it('a service row round-trips with a null decider', () => {
+      const s = gate(make());
+      const r = row({ source: 'service', decidedBy: null });
+      put(s, r);
+      expect(s.loadAiOutcome(r.reportId)).toMatchObject({ source: 'service', decidedBy: null });
+    });
+
     it('a level 1 row (agreement none) is not qualifying', () => {
       const s = gate(make());
       put(s, row({ agreement: 'none', aiVerdict: null, level: 1 }), row({ agreement: 'none', aiRule: '3' }));
