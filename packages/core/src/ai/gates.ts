@@ -142,6 +142,18 @@ export function wilsonUpper(events: number, n: number, z: number = Z95): number 
 }
 
 /**
+ * The instance-wide limits of design ruling 10, as the read-only dashboard shows them (the acting release enforces them and gives them bands): at most
+ * 10 AI actions an hour and 50 a UTC day, and acting pauses while the oldest unreviewed action is older than 72 hours or more than 25 are unreviewed.
+ * @experimental
+ */
+export const AI_ACT_CAP_DEFAULTS: Readonly<{ perHour: number; perDay: number; reviewWithinMs: number; reviewDebtMax: number }> = Object.freeze({
+  perHour: 10,
+  perDay: 50,
+  reviewWithinMs: 72 * 3_600_000,
+  reviewDebtMax: 25,
+});
+
+/**
  * What the store aggregates for one cell and window (design 5.1). Every number is a count of decided reports; there is no identifier in it.
  * @experimental
  */

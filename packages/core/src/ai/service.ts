@@ -19,6 +19,11 @@ import type { Prepared } from './case.js';
 import { assertWithinCeilings, AICeilingError } from './ceilings.js';
 import { actionsOnTarget, AI_EXAMPLES_MIN, pickExampleLines } from './casebook.js';
 import type { AiOutcomeArgs } from './casebook.js';
+import { suggest as ladderSuggest } from '../ladder.js';
+import { AI_ACT_CAP_DEFAULTS, AI_GATE_DEFAULTS, AI_RECENT_DAYS, evaluateCell } from './gates.js';
+import type { AiAppealFacts, AiCellCounts, AiCellGate, AiGateConfig } from './gates.js';
+import { reachOf } from './reach.js';
+import type { AiReach } from './reach.js';
 import { aiPolicyText } from './prompt.js';
 import { sha256Hex } from '../crypto.js';
 import type { AIExampleInput, AIRead, AISignal, ModerationAI } from './types.js';
@@ -214,6 +219,13 @@ export interface AiFacade {
   markReversed(reportId: string, opts?: { corrective?: boolean }): boolean;
   /** A senior's "don't teach" mark on a decided case: the row can never teach again and loses its example text. True when the report has a row. */
   dontTeach(reportId: string): boolean;
+  /**
+   * Every cell the profile could ever act on (each active rule number x the levels in `profile.aiAutoAct`), with each gate's value, its need and whether it
+   * holds, and the reach preview. Read-only: it computes from the stored outcomes and the clock, never from a number a client sent, and nothing in it lets
+   * the AI act (`actingAvailable` is false until the acting release). Staff only. Never throws; an empty view (no cells) with the AI off, without an
+   * adapter, with a store that lacks the gate query, or on any failure.
+   */
+  gates(): AiGatesView;
   /** Resolves when no read is queued or running (tests, graceful shutdown). */
   idle(): Promise<void>;
   /** Run the sweeper once. The timer does this every 60 seconds. */
@@ -221,6 +233,33 @@ export interface AiFacade {
   /** Stop the sweeper and abort the calls in flight. `cw.close()` does this. */
   close(): void;
 }
+
+/**
+ * What `cw.ai.gates()` answers (design 6.3). Every field is a number, a boolean, null or a fixed word: no identifier, no text, no report id.
+ * @experimental
+ */
+export interface AiGatesView {
+  version: 1;
+  /** The window every count is over, in days. */
+  windowDays: number;
+  /** When the view was computed (epoch ms, the kit's clock). */
+  at: number;
+  /** False until the acting release: an open cell here is a number on a dashboard, not a licence. */
+  actingAvailable: boolean;
+  cells: AiGateCell[];
+  instance: {
+    capHour: { used: number; max: number };
+    capDay: { used: number; max: number };
+    reviewDebt: { unreviewed: number; oldestMs: number | null; max: number; maxMs: number };
+  };
+}
+
+/**
+ * One cell of {@link AiGatesView}. `excluded` is true for a rule the owner said the AI may never act on (`ai.actExcludeRules`): it is shown, with its
+ * numbers, and never open.
+ * @experimental
+ */
+export type AiGateCell = AiCellGate & { reach: AiReach[]; counts: AiCellCounts; appeals: AiAppealFacts; actsToday: number; excluded: boolean };
 
 /** How often the sweeper runs. */
 export const SWEEP_EVERY_MS = 60_000;
@@ -325,6 +364,35 @@ export interface AiServiceDeps {
   signals?: (subject: SubjectId) => AISignal[];
   /** The rules with an elevated or high revoke-on-appeal rate (90 days): empty with appeals off. Without it no cautions are sent. */
   cautions?: () => Array<{ rule: number; band: 'elevated' | 'high' }>;
+  /**
+   * The appeals facts of the cells given (rule number and conduct level), one answer each in the same order: the rule-wide sanctions and revokes over 90 days,
+   * and the newest revoke on appeal of an AI sanction in the cell. Without it, or when it throws, every cell reads "appeals not available".
+   */
+  appealFacts?: (cells: ReadonlyArray<{ rule: number; level: 'hostile' | 'severe' }>) => AiAppealFacts[];
+  /** The gate numbers, already checked against their bands (`checkGateConfig`). Default: {@link AI_GATE_DEFAULTS}. */
+  gateConfig?: AiGateConfig;
+}
+
+const DAY_MS = 86_400_000;
+
+/** What a cell with no decision reads: every count zero, no first or last time. */
+const emptyCounts = (): AiCellCounts => ({
+  qualifying: 0,
+  cleanAgree: 0,
+  hardOverride: 0,
+  reduced: 0,
+  deciders: 0,
+  firstAt: null,
+  lastAt: null,
+  recent: { n: 0, cleanAgree: 0 },
+  reviewed: { n: 0, confirmed: 0, hardUndo: 0, lastHardUndoAt: null, secondLastHardUndoAt: null },
+});
+const UNAVAILABLE_APPEALS: AiAppealFacts = Object.freeze({ available: false, ruleSanctions: 0, ruleRevokes: 0, ruleReduces: 0, actRevokeAt: null });
+
+/** The rules the owner said the AI may never act on (`ai.actExcludeRules`, a restrict-only list): whole rule numbers only; anything else is ignored. */
+function excludedRules(profile: ResolvedProfile): Set<number> {
+  const raw: unknown = (profile.ai as unknown as { actExcludeRules?: unknown }).actExcludeRules;
+  return new Set(Array.isArray(raw) ? raw.filter((n): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 1) : []);
 }
 
 const ruleOfText = (rule: string | null): number | 'uncovered' | null => (rule === null ? null : /^\d+$/.test(rule) ? Number(rule) : rule === 'uncovered' ? 'uncovered' : null);
@@ -579,6 +647,64 @@ export class AiService implements AiFacade {
       this.warn('ai.mark_failed', err);
       return false;
     }
+  }
+
+  // --- the gates (read-only) ---------------------------------------------------------------------------------------------------
+
+  gates(): AiGatesView {
+    const now = this.clock.now();
+    const cfg = this.deps.gateConfig ?? AI_GATE_DEFAULTS;
+    const view = (cells: AiGateCell[]): AiGatesView => ({
+      version: 1,
+      windowDays: cfg.windowDays,
+      at: now,
+      // Release 1 never acts: an open cell is a number on a dashboard, not a licence.
+      actingAvailable: false,
+      cells,
+      instance: {
+        capHour: { used: 0, max: AI_ACT_CAP_DEFAULTS.perHour },
+        capDay: { used: 0, max: AI_ACT_CAP_DEFAULTS.perDay },
+        reviewDebt: { unreviewed: 0, oldestMs: null, max: AI_ACT_CAP_DEFAULTS.reviewDebtMax, maxMs: AI_ACT_CAP_DEFAULTS.reviewWithinMs },
+      },
+    });
+    try {
+      if (this.level() === 0 || typeof this.store.aiGateRows !== 'function') return view([]);
+      const profile = this.deps.profile();
+      const levels = CONDUCT_LEVELS.filter((l): l is 'hostile' | 'severe' => (l === 'hostile' || l === 'severe') && profile.aiAutoAct.includes(l));
+      const excluded = excludedRules(profile);
+      const rules = this.deps.rules
+        .active()
+        .map((r) => r.number)
+        .sort((a, b) => a - b);
+      const grid = rules.flatMap((rule) => levels.map((level) => ({ rule, level })));
+      if (grid.length === 0) return view([]);
+      const rows = new Map<string, AiCellCounts>();
+      for (const r of this.store.aiGateRows(now - cfg.windowDays * DAY_MS, now - AI_RECENT_DAYS * DAY_MS)) rows.set(`${r.rule}/${r.severity}`, r.counts);
+      const appeals = this.appealFactsFor(grid);
+      const cells = grid.map(({ rule, level }, i): AiGateCell => {
+        const counts = rows.get(`${rule}/${level}`) ?? emptyCounts();
+        const facts = appeals[i] ?? UNAVAILABLE_APPEALS;
+        const verdict = evaluateCell(counts, facts, cfg, now);
+        const out = excluded.has(rule);
+        // An excluded rule is shown with its numbers and is never open: the owner said the AI may not act on it, whatever the numbers say.
+        return { rule, level, ...verdict, open: verdict.open && !out, reach: reachOf(profile, rule, level, ladderSuggest), counts, appeals: facts, actsToday: 0, excluded: out };
+      });
+      return view(cells);
+    } catch (err) {
+      this.warn('ai.gates_failed', err);
+      return view([]);
+    }
+  }
+
+  /** The appeals facts of each cell, in order; every cell reads "not available" when the kit has no appeals or the read fails. */
+  private appealFactsFor(grid: ReadonlyArray<{ rule: number; level: 'hostile' | 'severe' }>): AiAppealFacts[] {
+    try {
+      const facts = this.deps.appealFacts?.(grid);
+      if (Array.isArray(facts) && facts.length === grid.length) return facts.map((f) => ({ ...f }));
+    } catch (err) {
+      this.warn('ai.gates_appeals_failed', err);
+    }
+    return grid.map(() => ({ ...UNAVAILABLE_APPEALS }));
   }
 
   idle(): Promise<void> {

@@ -1202,6 +1202,16 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           // The counts about the reported person the feed allows (`feeds.ai`), as label, polarity, distinct and window: nothing else leaves.
           // The rules cautioned for by the appeals the moderators lost (revokes only), as bands and rule numbers: never a rate, a count or a person.
           cautions: () => appealService.cautions(),
+          // The appeals side of the gate dashboard (revokes only; a reduce is carried apart and never counts). Read live from the appeals service, never from
+          // the AI: with appeals absent or disabled every cell reads "not available". Nothing yet records an AI action, so no revoke of one is known.
+          appealFacts: (cells) => {
+            if (!appealService.enabled()) return cells.map(() => ({ available: false, ruleSanctions: 0, ruleRevokes: 0, ruleReduces: 0, actRevokeAt: null }));
+            const byRule = new Map(appealService.stats({ days: 90 }).perRule.flatMap((r) => (typeof r.rule === 'number' ? [[r.rule, r] as const] : [])));
+            return cells.map((c) => {
+              const r = byRule.get(c.rule);
+              return { available: true, ruleSanctions: r?.sanctions ?? 0, ruleRevokes: r?.granted ?? 0, ruleReduces: r?.lightened ?? 0, actRevokeAt: null };
+            });
+          },
           signals: (subject) => signals.forAi(subject).map((c) => ({ label: c.label, polarity: c.polarity, distinct: c.distinct, windowDays: c.windowDays })),
         });
   aiRef.service = aiService;

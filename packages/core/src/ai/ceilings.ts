@@ -58,6 +58,28 @@ export function assertWithinCeilings(
 }
 
 /**
+ * The kinds the AI may ever ACT with at level 3: a warning or a chat restriction. Narrower than {@link AI_MAX_KIND}: no automatic note (two notes
+ * make a repeat, so a note would quietly raise the next step against a player), and never a ban or an area ban. A frozen list, not an option.
+ * @experimental
+ */
+export const AI_ACT_KINDS: readonly SanctionKind[] = Object.freeze(['warning', 'chat'] as const);
+
+/**
+ * Whether a ladder step is one the AI may ever apply on its own: a warning (no length) or a chat restriction of more than 0 and at most 24 hours.
+ * A note, a ban, an area ban, a permanent restriction, a step with a wrong shape and no step at all are not. Pure; the actor repeats the whole check
+ * (`assertWithinCeilings`) on the step it computes itself.
+ * @experimental
+ */
+export function stepWithinActCeilings(step: { kind: SanctionKind; durationMs: number | null } | null): boolean {
+  if (typeof step !== 'object' || step === null) return false;
+  const kind: unknown = step.kind;
+  const d: unknown = step.durationMs;
+  if (kind === 'warning') return d === null;
+  if (kind === 'chat') return typeof d === 'number' && Number.isFinite(d) && d > 0 && d <= AI_MAX_PREFILL_MS;
+  return false;
+}
+
+/**
  * Whether the AI may act on this person. Always true now; level 3 will back it with a "do not automate" mark. Called on every
  * path that could ever act. Reads and drafts are advice, so they are produced either way.
  * @experimental
