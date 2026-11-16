@@ -12,11 +12,11 @@ describe('the client has one method for each community route', () => {
       .filter((k) => !(k in plain.routes))
       .map((k) => k.replace('~ref', ''))
       .sort();
-    expect(added).toEqual(['GET /community', 'GET /terms/:id', 'GET /terms/:id/share', 'POST /community/apply', 'POST /community/refresh', 'POST /terms/:id/share', 'POST /terms/lookup']);
+    expect(added).toEqual(['GET /community', 'GET /terms/:id', 'GET /terms/:id/share', 'POST /community/apply', 'POST /community/refresh', 'POST /terms/:id/report', 'POST /terms/:id/share', 'POST /terms/lookup']);
     const own = (await w.direct.addTerm({ term: OWN_WORD, language: 'en' })).id;
     w.sent.length = 0;
     const c = w.client;
-    expect(await c.community()).toMatchObject({ state: 'ready', sharing: true, available: '2026.12.0' });
+    expect(await c.community()).toMatchObject({ state: 'ready', sharing: true, reporting: true, available: '2026.12.0' });
     expect(await c.refreshCommunity()).toMatchObject({ state: 'ready' });
     expect(await c.getTerm(own)).toMatchObject({ id: own, term: OWN_WORD, community: false });
     expect(await c.lookupTerm(OWN_WORD)).toMatchObject({ id: own });
@@ -41,6 +41,19 @@ describe('the client has one method for each community route', () => {
     expect(await c.getTerm('nope').catch((e: unknown) => e)).toMatchObject({ status: 404, code: 'not_found' });
     expect(await c.lookupTerm('nothingatall').catch((e: unknown) => e)).toMatchObject({ status: 404 });
     expect(await c.shareStatus('nope').catch((e: unknown) => e)).toMatchObject({ status: 404 });
+  });
+
+  it('reportTerm posts a closed kind to the report route of one term, and nothing else; a row of the adopter is refused', async () => {
+    const w = await hubWorld({ role: 'owner', community: {} });
+    const own = (await w.direct.addTerm({ term: OWN_WORD, language: 'en' })).id;
+    w.sent.length = 0;
+    expect(await w.client.reportTerm('CWT-2026-00001', { kind: 'innocent_sense' })).toEqual({ status: 'received' });
+    expect(w.sent.map((r) => `${r.method} ${r.path}`)).toEqual(['POST /terms/CWT-2026-00001/report']);
+    expect(w.sent[0]?.body).toEqual({ kind: 'innocent_sense' });
+    expect(w.community?.rig.reportCalls).toEqual([{ termId: 'CWT-2026-00001', kind: 'innocent_sense' }]);
+    expect(await w.client.reportTerm(own, { kind: 'removal' }).catch((e: unknown) => e)).toMatchObject({ status: 409, code: 'not_reportable' });
+    expect(await w.client.reportTerm('nope', { kind: 'removal' }).catch((e: unknown) => e)).toMatchObject({ status: 404 });
+    expect(await (await hubWorld({ role: 'owner' })).client.reportTerm('CWT-2026-00001', { kind: 'removal' }).catch((e: unknown) => e)).toMatchObject({ code: expect.stringMatching(/^(not_found|method_not_allowed)$/) });
   });
 
   it('without community each of them fails with a not found or a method error, which the hub reads as "not set up"', async () => {

@@ -47,6 +47,7 @@ import type {
   Reason,
   ReportCategory,
   ShareInput,
+  ReportInput,
   ShareState,
   Suggestion,
   SuggestInput,
@@ -239,6 +240,8 @@ export interface HubClient {
   lookupTerm(word: string): Promise<TermDetail>;
   /** `POST /terms/:id/share`: send one term of the adopter's own to the community list. */
   shareTerm(id: string, input: ShareInput): Promise<{ status: 'received' | 'known' | 'duplicate' }>;
+  /** `POST /terms/:id/report`: report a problem with a term of the community list (a term id and a closed kind; never the word). */
+  reportTerm(id: string, input: ReportInput): Promise<{ status: 'received' }>;
   /** `GET /terms/:id/share`: where the last share of this term stands, or null when it was never shared. */
   shareStatus(id: string): Promise<ShareState | null>;
 
@@ -345,6 +348,7 @@ export function createHubClient(transport: Transport): HubClient {
     getTerm: (id) => get<TermDetail>(`/terms/${enc(id)}`),
     lookupTerm: (word) => post<TermDetail>('/terms/lookup', { word }),
     shareTerm: (id, input) => post<{ status: 'received' | 'known' | 'duplicate' }>(`/terms/${enc(id)}/share`, input),
+    reportTerm: (id, input) => post<{ status: 'received' }>(`/terms/${enc(id)}/report`, input),
     shareStatus: async (id) => {
       const answer = await get<{ status: ShareState['status'] | null; reason?: ShareState['reason'] }>(`/terms/${enc(id)}/share`);
       return answer.status === null ? null : (answer as ShareState);

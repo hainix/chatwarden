@@ -40,6 +40,10 @@ export interface CommunityRig {
   /** The release the status page reads its languages, licence and counts from. */
   release: () => unknown;
   shareCalls: Array<Record<string, unknown>>;
+  /** What the hub's report action sent to the share object: a term id and a kind. */
+  reportCalls: Array<Record<string, unknown>>;
+  /** What the next `report` answers; a function can wait or throw. */
+  reportResult: unknown | (() => Promise<unknown>);
   statusCalls: string[];
   /** What the next `share` answers; a function can wait or throw. */
   shareResult: unknown | (() => Promise<unknown>);
@@ -49,6 +53,8 @@ export interface CommunityRig {
 export interface CommunityOptions {
   /** Give the community a share object (default true). */
   share?: boolean;
+  /** Let the share object report a community term (default true). */
+  report?: boolean;
   exposeCommunityRows?: boolean;
   /** Put the corpus rows in the live list before the first request (default true). */
   seed?: boolean;
@@ -81,6 +87,8 @@ export function makeCommunity(live: LiveTerms, options: CommunityOptions = {}) {
       terms: COMMUNITY_WORDS.map((term) => ({ term })),
     }),
     shareCalls: [],
+    reportCalls: [],
+    reportResult: { ok: true, id: 'rep_abc123' },
     statusCalls: [],
     shareResult: { ok: true, status: 'received', id: 'sub_abc123' },
     statusResult: { status: 'in_review' },
@@ -110,7 +118,13 @@ export function makeCommunity(live: LiveTerms, options: CommunityOptions = {}) {
       rig.statusCalls.push(id);
       return rig.statusResult;
     },
+    report: async (input: Record<string, unknown>) => {
+      rig.reportCalls.push(structuredClone(input));
+      return typeof rig.reportResult === 'function' ? (rig.reportResult as () => Promise<unknown>)() : rig.reportResult;
+    },
   };
+  // A share object from before reporting existed has no `report`.
+  const shareObject = options.report === false ? { share: share.share, status: share.status } : share;
   if (options.seed !== false) {
     const r = live.syncPack(communityPack(), { actor: COMMUNITY_ACTOR });
     if (!r.ok) throw new Error(`seed refused: ${r.code}`);
@@ -121,7 +135,7 @@ export function makeCommunity(live: LiveTerms, options: CommunityOptions = {}) {
     admin: {
       loader: loader as never,
       live,
-      ...(options.share === false ? {} : { share: share as never }),
+      ...(options.share === false ? {} : { share: shareObject as never }),
       ...(options.exposeCommunityRows === undefined ? {} : { exposeCommunityRows: options.exposeCommunityRows }),
     },
   };

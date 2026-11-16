@@ -2,6 +2,7 @@ import { Component, Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { CommandBarProps } from './shell/CommandBar.js';
 import type { AiPartsProps } from './case/AiParts.js';
+import type { ReportTermProps } from './terms/ReportTerm.js';
 import type { ShareTermProps } from './terms/ShareTerm.js';
 import type { UsePolicy } from './policyHooks.js';
 import type { AiReadView, PolicyState, SignalCountView } from './types.js';
@@ -61,6 +62,7 @@ export const partLoaders: {
   namePanel: () => Promise<ComponentType<PanelProps>>;
   appealList: () => Promise<ComponentType<{ selected: string | null }>>;
   shareTerm: () => Promise<ComponentType<ShareTermProps>>;
+  reportTerm: () => Promise<ComponentType<ReportTermProps>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
@@ -74,6 +76,7 @@ export const partLoaders: {
   namePanel: () => import('./screens/NameSettings.js').then((m) => m.NameSettings),
   appealList: () => import('./appeals/AppealList.js').then((m) => m.AppealList),
   shareTerm: () => import('./terms/ShareTerm.js').then((m) => m.ShareTerm),
+  reportTerm: () => import('./terms/ReportTerm.js').then((m) => m.ReportTerm),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -137,6 +140,7 @@ const appealPanel = lazyPart(() => partLoaders.appealPanel());
 const namePanel = lazyPart(() => partLoaders.namePanel());
 const appealList = lazyPart(() => partLoaders.appealList());
 const shareTerm = lazyPart(() => partLoaders.shareTerm(), true);
+const reportTerm = lazyPart(() => partLoaders.reportTerm(), true);
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;
@@ -168,6 +172,9 @@ export const LazyAppealList = appealList.Part;
 /** The "Share with the community list" disclosure in the term editor: loaded when an editor opens on a term of the adopter's own; an optional extra, never an error. */
 export const LazyShareTerm = shareTerm.Part;
 
+/** The report disclosure in the term editor: loaded when an editor opens on a row the shared list added; an optional extra, never an error. */
+export const LazyReportTerm = reportTerm.Part;
+
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
@@ -182,6 +189,7 @@ export function resetLazyParts(): void {
   namePanel.reset();
   appealList.reset();
   shareTerm.reset();
+  reportTerm.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

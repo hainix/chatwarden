@@ -356,6 +356,144 @@ describe('the Share disclosure in the term editor', () => {
   });
 });
 
+describe('the Report disclosure in the term editor (a community term)', () => {
+  /** Opens Terms with the community rows listed and the editor on the community row `word`. */
+  async function editCommunity(options: WorldOptions = { community: { exposeCommunityRows: true } }, word = 'glarn') {
+    const { w, user, container, unmount } = await openTerms(options);
+    await user.click(showWords());
+    await user.click(screen.getByRole('button', { name: `Edit ${word}` }));
+    await screen.findByRole('form', { name: 'Edit a term' });
+    return { w, user, container, unmount };
+  }
+  const TOGGLE = 'Report a problem with this community term';
+  const NOTE = en['hub.community.report.note'];
+
+  it("is offered for a community row only when the server can report: not for the adopter's own row, not without reporting, not with the list off", async () => {
+    for (const community of [
+      { exposeCommunityRows: true, report: false },
+      { exposeCommunityRows: true, share: false },
+    ] as const) {
+      const { w, unmount } = await editCommunity({ community });
+      await waitFor(() => expect(sent(w, 'GET', '/community')).toHaveLength(1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(screen.queryByRole('button', { name: TOGGLE })).toBeNull();
+      unmount();
+    }
+    // The adopter's own row is shared, never reported.
+    const { user } = await openTerms({ community: {} }, async (x) => {
+      await x.direct.addTerm({ term: OWN_WORD, language: 'en' });
+    });
+    await user.click(showWords());
+    await user.click(screen.getByRole('button', { name: `Edit ${OWN_WORD}` }));
+    await screen.findByRole('form', { name: 'Edit a term' });
+    await screen.findByRole('button', { name: 'Share with the community list' });
+    expect(screen.queryByRole('button', { name: TOGGLE })).toBeNull();
+  });
+
+  it('is closed by default; opening shows what will be sent (the list number and the problem, never the word); Send posts one report', async () => {
+    const { w, user } = await editCommunity();
+    const button = await screen.findByRole('button', { name: TOGGLE });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Share with the community list' })).toBeNull();
+    await user.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(NOTE)).toBeInTheDocument();
+    const payload = screen.getByRole('group', { name: 'What will be sent' });
+    expect([...payload.querySelectorAll('dt')].map((e) => e.textContent)).toEqual(['List number', 'Problem', 'Day', 'Chatwarden version', 'Sent with']);
+    expect(payload).toHaveTextContent('CWT-2026-00001');
+    expect(payload.textContent).not.toContain('glarn');
+    // The default problem is the commonest one; the choice shows in the preview.
+    expect(payload).toHaveTextContent('It blocks ordinary words');
+    await user.selectOptions(screen.getByLabelText('What is the problem?'), 'It is in the wrong category');
+    expect(payload).toHaveTextContent('It is in the wrong category');
+    await user.selectOptions(screen.getByLabelText('What is the problem?'), 'It should not be on the list');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText('Sent. A reviewer will look at it.')).toBeInTheDocument();
+    const posts = w.sent.filter((r) => r.method === 'POST' && /\/report$/.test(r.path));
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.path).toBe('/terms/CWT-2026-00001/report');
+    expect(posts[0]?.body).toEqual({ kind: 'removal' });
+    expect(w.community?.rig.reportCalls).toEqual([{ termId: 'CWT-2026-00001', kind: 'removal' }]);
+    expect(w.community?.rig.shareCalls).toEqual([]);
+    expect(audits(w, 'term.share')).toHaveLength(1);
+    // The panel is closed again, and the toggle keeps the focus.
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+    expect(button).toHaveFocus();
+  });
+
+  it('each problem sends its closed kind', async () => {
+    for (const [words, kind] of [
+      ['It blocks ordinary words', 'innocent_sense'],
+      ['It is in the wrong category', 'wrong_category'],
+      ['It should not be on the list', 'removal'],
+    ] as const) {
+      const { w, user, unmount } = await editCommunity();
+      await user.click(await screen.findByRole('button', { name: TOGGLE }));
+      await user.selectOptions(screen.getByLabelText('What is the problem?'), words);
+      await user.click(screen.getByRole('button', { name: 'Send' }));
+      await screen.findByText('Sent. A reviewer will look at it.');
+      expect(w.community?.rig.reportCalls.map((c) => c.kind)).toEqual([kind]);
+      unmount();
+    }
+  });
+
+  it('opens with Enter on the toggle, Escape closes it and puts the focus back on the toggle; the draft is lost on close', async () => {
+    const { user } = await editCommunity();
+    const button = await screen.findByRole('button', { name: TOGGLE });
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    await user.selectOptions(screen.getByLabelText('What is the problem?'), 'It should not be on the list');
+    await user.keyboard('{Escape}');
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(button).toHaveFocus();
+    expect(screen.getByRole('form', { name: 'Edit a term' })).toBeInTheDocument();
+    await user.click(button);
+    expect(screen.getByLabelText('What is the problem?')).toHaveValue('innocent_sense');
+  });
+
+  it('a report that fails says why in words, keeps the draft and never shows the service text; a double click sends once', async () => {
+    const table: Array<[unknown, string]> = [
+      [{ ok: false, code: 'offline', message: 'SERVICE-SECRET' }, 'The community list could not be reached. Try again later.'],
+      [{ ok: false, code: 'rate_limited', retryAfterMs: 60_000, message: 'SERVICE-SECRET' }, 'You have sent too many today. Try again tomorrow.'],
+      [{ ok: false, code: 'rejected', message: 'SERVICE-SECRET' }, 'The community list did not take this report.'],
+    ];
+    for (const [result, words] of table) {
+      const { w, user, unmount } = await editCommunity();
+      w.community!.rig.reportResult = result;
+      await user.click(await screen.findByRole('button', { name: TOGGLE }));
+      const send = screen.getByRole('button', { name: 'Send' });
+      fireEvent.click(send);
+      fireEvent.click(send);
+      expect(await screen.findByRole('alert')).toHaveTextContent(words);
+      expect(document.body.textContent).not.toContain('SERVICE-SECRET');
+      expect(w.sent.filter((r) => r.method === 'POST' && /\/report$/.test(r.path))).toHaveLength(1);
+      expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('shows no term anywhere: the preview and the catalogue', async () => {
+    const { user } = await editCommunity();
+    await user.click(await screen.findByRole('button', { name: TOGGLE }));
+    const panel = screen.getByRole('group', { name: 'What will be sent' }).parentElement as HTMLElement;
+    for (const word of ALL_WORDS) expect(panel.textContent?.toLowerCase(), word).not.toContain(word);
+    for (const [key, text] of Object.entries(en)) {
+      if (!/^hub\.community\./.test(key)) continue;
+      for (const word of ALL_WORDS) expect(text.toLowerCase(), `${key} holds ${word}`).not.toContain(word);
+    }
+  });
+
+  it('is not offered to a person who cannot write terms (the editor itself is not offered)', async () => {
+    const w = await hubWorld({ community: { exposeCommunityRows: true }, permissions: { 'terms.write': 'owner' }, role: 'moderator' });
+    renderHub(w, { path: '/terms' });
+    await screen.findByRole('region', { name: /^English/ });
+    expect(screen.queryByRole('button', { name: /^Edit /u })).toBeNull();
+    expect(screen.queryByRole('button', { name: TOGGLE })).toBeNull();
+  });
+});
+
 describe('Settings > Community list', () => {
   async function openCommunity(options: WorldOptions = { community: { seed: false } }, role: WorldOptions['role'] = 'owner') {
     const w = await hubWorld({ role, ...options });

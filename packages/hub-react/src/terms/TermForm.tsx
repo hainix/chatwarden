@@ -7,7 +7,7 @@ import { useHub } from '../context.js';
 import type { Problem } from '../decision.js';
 import { termErrorText } from '../labels.js';
 import { useToasts } from '../toasts.js';
-import { LazyShareTerm } from '../lazyParts.js';
+import { LazyReportTerm, LazyShareTerm } from '../lazyParts.js';
 import { HitsConfirm } from './HitsConfirm.js';
 
 /** The longest word or phrase, and note, the server accepts. */
@@ -231,6 +231,9 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, showW
 
       {/* Only a term of the adopter's own can be shared; the disclosure draws nothing unless the server has sharing on. */}
       {editing && kind === 'term' && row.community !== true && !decide && <LazyShareTerm termId={row.id} word={row.word} language={row.language} showWords={showWords} />}
+
+      {/* A row the shared list added can be reported from the same place; the disclosure draws nothing unless the server can send a report. */}
+      {editing && kind === 'term' && row.community === true && !decide && <LazyReportTerm termId={row.id} />}
 
       {hits !== null && (
         <HitsConfirm

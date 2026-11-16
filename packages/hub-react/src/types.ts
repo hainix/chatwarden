@@ -407,6 +407,8 @@ export interface CommunityStatus {
     status: { accepted: number; provisional: number; disputed: number; withdrawn: number };
   } | null;
   sharing: boolean;
+  /** The server can send a report of a community term (the share object has `report`). */
+  reporting: boolean;
 }
 
 /**
@@ -439,6 +441,14 @@ export interface ShareInput {
   category: ShareCategory;
   target?: ShareTarget;
   note?: string | null;
+}
+
+/** `POST /terms/:id/report`: why a person reports a community term. A closed list; there is no free text. @experimental */
+export type ReportKind = 'innocent_sense' | 'wrong_category' | 'removal';
+
+/** `POST /terms/:id/report`. The term is the row's id; the word is never sent. @experimental */
+export interface ReportInput {
+  kind: ReportKind;
 }
 
 /** Why a share was not added: a closed list. @experimental */
