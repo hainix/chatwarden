@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { VERSION } from '../src/index.js';
+import { VERSION } from '../src/version.js';
 import type { Answers, FileSpec, Project, Versions } from '../src/cli/types.js';
 
 // Stand-ins for the shared templates (Task 3), so the plan, apply and report tests do not depend on them. They depend on the answers the

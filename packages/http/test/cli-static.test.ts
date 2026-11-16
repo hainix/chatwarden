@@ -147,9 +147,40 @@ describe('what it reaches', () => {
       // A template's own import lines are inside template strings, which `specifiers` does not read as imports of the file.
       expect(real, rel(file)).toEqual([]);
     }
-    // The one relative import out of src/cli is the VERSION constant of this package.
+    // The one relative import out of src/cli is the VERSION constant of this package, from src/version.ts (not the package root, which loads core).
     const outside = files.flatMap((file) => specifiers(textOf(file)).filter((spec) => spec.startsWith('..') && !resolve(dirname(file), spec).startsWith(cliDir)).map((spec) => `${rel(file)} -> ${spec}`));
-    expect(outside.every((line) => /\.\.\/index\.js$|\.\.\/\.\.\/index\.js$/.test(line))).toBe(true);
+    expect(outside.length).toBeGreaterThan(0);
+    expect(outside.every((line) => line.endsWith(' -> ../version.js')), outside.join('\n')).toBe(true);
+  });
+
+  it('the bin loads only src/cli and src/version.ts: the http root, core and every other package stay out of its start-up', () => {
+    const seen = new Set<string>();
+    const external = new Set<string>();
+    const walk = (file: string): void => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      for (const spec of specifiers(textOf(file))) {
+        if (!spec.startsWith('.')) {
+          if (!spec.startsWith('node:')) external.add(spec);
+          continue;
+        }
+        walk(resolve(dirname(file), spec).replace(/\.js$/, '.ts'));
+      }
+    };
+    walk(join(cliDir, 'bin.ts'));
+    const outside = [...seen].filter((file) => !file.startsWith(cliDir)).map((file) => relative(join(root, 'src'), file).replaceAll('\\', '/'));
+    expect(outside).toEqual(['version.ts']);
+    expect([...external]).toEqual([]);
+    expect(seen.size).toBeGreaterThan(20);
+  });
+
+  it('src/version.ts holds the VERSION constant and imports nothing; the package root re-exports that one', () => {
+    const version = textOf(join(root, 'src', 'version.ts'));
+    expect(version).toMatch(/^export const VERSION = '\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?';$/m);
+    expect(specifiers(version)).toEqual([]);
+    const index = textOf(join(root, 'src', 'index.ts'));
+    expect(index).toMatch(/^export \{ VERSION \} from '\.\/version\.js';$/m);
+    expect(index).not.toMatch(/^export const VERSION/m);
   });
 
   it('no browser-safe entry (./chat, ./admin, ./fetch, and the root entry) reaches src/cli', () => {

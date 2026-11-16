@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -94,7 +94,9 @@ describe('versions', () => {
     expect(pkg.version).toBe(VERSION);
   });
   it.each(published.map((p) => [p.pkg.name, p.dir, p.pkg.version] as const))('%s exports a VERSION constant equal to its manifest version', (_n, dir, version) => {
-    const src = readFileSync(join(root, 'packages', dir, 'src', 'index.ts'), 'utf8').replaceAll('\r\n', '\n');
+    // http keeps the constant in src/version.ts (the CLI imports it without loading the package root); index.ts re-exports it.
+    const file = existsSync(join(root, 'packages', dir, 'src', 'version.ts')) ? 'version.ts' : 'index.ts';
+    const src = readFileSync(join(root, 'packages', dir, 'src', file), 'utf8').replaceAll('\r\n', '\n');
     expect(/^export const VERSION = '([^']*)';$/m.exec(src)?.[1]).toBe(version);
   });
   it('are identical across the fixed group', () => {
