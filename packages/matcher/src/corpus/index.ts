@@ -4,6 +4,7 @@
 export { CorpusError, type CorpusErrorCode, type CorpusStage } from './errors.js';
 export { CORPUS_BASE_URL, CORPUS_KEYS, CORPUS_REVOKED_KEY_IDS, CORPUS_ZIP_PASSWORD, type CorpusKey } from './keys.js';
 export { signedMessage, verifySignature } from './sign.js';
+export { ZIP_LIMITS, readZip, type ZipLimits } from './zip.js';
 export {
   chooseRelease,
   parseIndex,
