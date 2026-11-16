@@ -32,6 +32,9 @@ router.add(adapter.routes); // now also POST /coop/signal
 `read` is yours. Your own AI cost limits apply inside it. The route answers `503` with an empty body when `read` throws, takes more than 8 seconds
 or answers something that is not a number.
 
+The route has one rate limit, shared by every verified request (default 60 a minute; set `signal.rateLimit` on the adapter to change it). If Coop evaluates a burst of jobs
+at once, some calls can get `429`, so raise it when your Coop is busy.
+
 ## Set up Coop
 
 1. Build the plugin: `npx tsc -p examples/coop-signal`. The output is `examples/coop-signal/dist/src/index.js`.

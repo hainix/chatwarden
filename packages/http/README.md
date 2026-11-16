@@ -1122,7 +1122,8 @@ requests (default 60 a minute) is `429` with `retry-after`. Your own AI cost lim
 
 - **Verify before parse.** The callback is checked over the exact bytes before the body is read. The signal route is the same.
 - **Replays.** Coop's signature carries no time, so a captured callback stays valid. A replay is harmless because the decision is idempotent and a closed report
-  is acknowledged, not because it is fresh. If the verification key leaks, rotate it in Coop.
+  is acknowledged, not because it is fresh. A callback that was ignored for a configuration reason (`no_rule`, `unknown_action`, `forbidden`) can still be replayed after you fix
+  the configuration, so a captured one can apply a stale but genuine decision to a report that is still open. The remedy is to rotate the verification key. If the key leaks, rotate it in Coop.
 - **Rate-limit the routes at your edge.** A request with a bad signature still costs a body read and a signature check.
 - **No secret leaves.** Keep the API key, the signal secret and `callbackAuth` out of source control.
 - **Redirects are never followed.** The key is sent only to the `baseUrl` you set.

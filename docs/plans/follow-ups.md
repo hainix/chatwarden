@@ -209,4 +209,5 @@ Found building `@chatwarden/http/coop` (K5 C1 to C7, 2026-11).
   Write the results in `docs/status.md` (K5) when done.
 - **Open: Coop jobs the hub closed first stay in Coop.** The documented API cannot close a job. A reviewer may open a job whose case is settled; the late callback is acknowledged and ignored.
 - **Open: Coop appeals, the Partial Items endpoint and `items/async`.** Not built, on purpose (design section 13).
+- **Open: after step 4 above, delete the signature header shapes Coop does not send** (the hex `v1`, the `t.body` form or the `t=` form, whichever you saw is absent) from `packages/http/src/coop/verify.ts`, and record the finding in `docs/status.md`. Fewer accepted forms is the safer end state.
 - **Open: a bounded signature cache.** Coop's signature has no time, so a replay is harmless only by effect. If Coop ever signs a time, add a window like the signal route's.
