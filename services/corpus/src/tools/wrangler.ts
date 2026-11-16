@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { PutMeta, ReleaseStore } from './publishing.js';
 
 // The release bucket through `wrangler` (the maintainer is logged in with `npx wrangler login`; nothing here holds a credential). The command line is
@@ -57,16 +59,39 @@ export function wranglerStore(options: { bucket: string; run: Runner; scratch: M
   };
 }
 
-/** Runs `npx wrangler <args>` and collects what it printed. The one place the tools start a process. */
-export const nodeRunner: Runner = (args) =>
-  new Promise((resolve, reject) => {
-    const child = spawn('npx', ['--no-install', 'wrangler', ...args], { shell: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
-    let output = '';
-    child.stdout.on('data', (d: Buffer) => void (output += d.toString()));
-    child.stderr.on('data', (d: Buffer) => void (output += d.toString()));
-    child.on('error', () => reject(new Error('wrangler could not be started')));
-    child.on('close', (code) => resolve({ code: code ?? 1, output }));
-  });
+/** The path of wrangler's own bin script, read from its package (no shell and no npx: the same on every platform). */
+export function wranglerBinPath(
+  resolvePackageJson: (id: string) => string = (id) => createRequire(import.meta.url).resolve(id),
+  readText: (path: string) => string = (path) => readFileSync(path, 'utf8'),
+): string {
+  const pkgPath = resolvePackageJson('wrangler/package.json');
+  const bin = (JSON.parse(readText(pkgPath)) as { bin?: unknown }).bin;
+  const rel = typeof bin === 'string' ? bin : (bin as Record<string, unknown> | undefined)?.wrangler;
+  if (typeof rel !== 'string' || rel === '') throw new Error('wrangler has no bin script');
+  return resolve(dirname(pkgPath), rel);
+}
+
+/** A runner that starts node on a script with an argument array and no shell, so a value with spaces or a semicolon stays one argument. */
+export function makeNodeRunner(script: () => string): Runner {
+  return (args) =>
+    new Promise((done, reject) => {
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawn(process.execPath, [script(), ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } });
+      } catch {
+        reject(new Error('wrangler could not be started'));
+        return;
+      }
+      let output = '';
+      child.stdout?.on('data', (d: Buffer) => void (output += d.toString()));
+      child.stderr?.on('data', (d: Buffer) => void (output += d.toString()));
+      child.on('error', () => reject(new Error('wrangler could not be started')));
+      child.on('close', (code) => done({ code: code ?? 1, output }));
+    });
+}
+
+/** Runs wrangler and collects what it printed. The one place the tools start a process. */
+export const nodeRunner: Runner = makeNodeRunner(() => wranglerBinPath());
 
 /** A scratch file in a private temporary folder, removed after the transfer. */
 export const nodeScratch: MakeScratch = async (bytes) => {
