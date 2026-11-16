@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import { parseTermsRelease, readZip } from '@chatwarden/matcher/corpus';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildTermsRelease } from '../src/build/release.js';
 import type { D1Like } from '../src/env.js';
+import { openDump } from '../src/tools/localD1.js';
 import { recordSql } from '../src/tools/record.js';
 import { planTerms } from '../src/tools/seed.js';
 import { ALICE, BOB, makeReviewWorld, type ReviewWorld } from './review-world.js';
@@ -26,9 +27,9 @@ const enabled = process.env.CORPUS_D1_LOCAL === '1';
 const service = fileURLToPath(new URL('..', import.meta.url));
 const wranglerBin = (): string => fileURLToPath(new URL('../../../node_modules/wrangler/bin/wrangler.js', import.meta.url));
 
-function runWrangler(args: string[]): Promise<void> {
+function runWrangler(args: string[], cwd: string = service): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [wranglerBin(), ...args], { cwd: service, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } });
+    const child = spawn(process.execPath, [wranglerBin(), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } });
     let output = '';
     child.stdout.on('data', (d: Buffer) => void (output += d.toString()));
     child.stderr.on('data', (d: Buffer) => void (output += d.toString()));
@@ -41,14 +42,19 @@ describe.skipIf(!enabled)('local D1 smoke: the service on D1\u2019s own engine, 
   let proxy: { env: { DB: D1Like }; dispose(): Promise<void> };
   let db: D1Like;
   let rw: ReviewWorld;
-  const execute = (file: string): Promise<void> => runWrangler(['d1', 'execute', 'chatwarden-corpus', '--local', '--persist-to', dir, '--file', file]);
+  // wrangler's local state lives in `<work>/.wrangler/state`, in a folder of its own, so the smoke never touches the service folder or another run.
+  let work: string;
+  const execute = (file: string): Promise<void> => runWrangler(['d1', 'execute', 'chatwarden-corpus', '--local', '--file', file], work);
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'corpus-d1-'));
+    work = join(dir, 'work');
+    mkdirSync(work);
+    writeFileSync(join(work, 'wrangler.jsonc'), JSON.stringify({ name: 'corpus-smoke', compatibility_date: '2026-11-01', d1_databases: [{ binding: 'DB', database_name: 'chatwarden-corpus', database_id: 'REPLACE_AT_DEPLOY' }] }));
     await execute(join(service, 'schema.sql'));
     await execute(join(service, 'schema.sql')); // idempotent: the owner may apply it again
     const { getPlatformProxy } = await import('wrangler');
-    proxy = (await getPlatformProxy({ configPath: join(service, 'wrangler.jsonc'), persist: { path: join(dir, 'v3') } })) as unknown as typeof proxy;
+    proxy = (await getPlatformProxy({ configPath: join(work, 'wrangler.jsonc'), persist: { path: join(work, '.wrangler', 'state', 'v3') } })) as unknown as typeof proxy;
     db = proxy.env.DB;
     rw = await makeReviewWorld({ db });
     for (const [email, fluent] of [[ALICE, '["en"]'], [BOB, '[]']] as const) await db.prepare('INSERT INTO reviewers (email, fluent, active) VALUES (?, ?, 1)').bind(email, fluent).run();
@@ -61,6 +67,15 @@ describe.skipIf(!enabled)('local D1 smoke: the service on D1\u2019s own engine, 
   }, 60_000);
 
   const count = async (sql: string, ...v: unknown[]): Promise<number> => (await db.prepare(sql).bind(...v).first<{ n: number }>())?.n ?? -1;
+
+  it('the Worker bundles for deployment with the real wrangler.jsonc (a dry run: no account, no upload), and the bundle holds no term list', async () => {
+    const out = join(dir, 'bundle');
+    await runWrangler(['deploy', '--dry-run', '--outdir', out]);
+    expect(existsSync(join(out, 'worker.js'))).toBe(true);
+    const code = readFileSync(join(out, 'worker.js'), 'utf8');
+    expect(code).toContain('/v1/submissions');
+    expect(code).not.toMatch(/-----BEGIN [A-Z ]*PRIVATE KEY-----/);
+  }, 180_000);
 
   it('has every table and both partial unique indexes after the schema was applied by wrangler', async () => {
     const names = (await db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").all<{ name: string }>()).results.map((r) => r.name);
@@ -128,5 +143,14 @@ describe.skipIf(!enabled)('local D1 smoke: the service on D1\u2019s own engine, 
     expect(await count("SELECT COUNT(*) AS n FROM terms WHERE since IS NULL")).toBe(0);
     expect(await count("SELECT COUNT(*) AS n FROM releases WHERE version = '2026.12.0'")).toBe(1);
     expect(readFileSync(record, 'utf8')).not.toMatch(/quissel|tarvo/);
+  }, 180_000);
+
+  it('`wrangler d1 export` writes a dump that the release tool opens, and a release built from the dump is the release built from the database', async () => {
+    const out = join(dir, 'export.sql');
+    await runWrangler(['d1', 'export', 'chatwarden-corpus', '--local', '--output', out], work);
+    const fromDump = await buildTermsRelease(openDump(readFileSync(out, 'utf8')), { clock: rw.clock, version: '2026.12.1', sequence: 2, previous: '2026.12.0', allowBulk: true });
+    const fromD1 = await buildTermsRelease(db, { clock: rw.clock, version: '2026.12.1', sequence: 2, previous: '2026.12.0', allowBulk: true });
+    expect(fromDump.summary.sha256).toBe(fromD1.summary.sha256);
+    expect(fromDump.release.terms.length).toBeGreaterThan(0);
   }, 180_000);
 });

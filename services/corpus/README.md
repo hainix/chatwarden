@@ -123,7 +123,8 @@ address before `PRIVACY.md` is published as it stands.
 Every test runs the service's SQL on `node:sqlite` through an adapter that follows D1. One more runs it on D1's own engine, **locally, with no
 Cloudflare account**, through wrangler's local mode: the schema, the seed and the record SQL are applied with the owner's own `wrangler d1
 execute --local` command, and the app, the review routes and the release builder then run against the real D1 binding (`RETURNING`, `changes()`
-inside a batch, the partial unique indexes, the UNIQUE error text, `instr`). It needs workerd (installed with the workspace) and takes about a
+inside a batch, the partial unique indexes, the UNIQUE error text, `instr`). It also checks that the Worker bundles for deployment with the real
+`wrangler.jsonc` (a dry run) and that `wrangler d1 export` writes a dump the `release` tool opens. It needs workerd (installed with the workspace) and takes about a
 minute, so it does not run with the other tests; it is skipped, with the reason, unless asked for. Run it before the first deploy and after any
 change to `schema.sql` or to a statement:
 
