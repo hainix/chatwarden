@@ -2,6 +2,10 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import { hubElementPlugin } from './packages/hub-element/build/plugin.mjs';
 
+// The corpus service runs on Cloudflare (workerd), not Node; its tools and its tests use node:sqlite, which is complete only from Node 24
+// (Node 22.13 has no StatementSync.columns() and differs on binding). On an older Node the service's tests are left out, not failed.
+const SERVICE_NODE_OK = Number(process.versions.node.split('.')[0]) >= 24;
+
 export default defineConfig({
   resolve: {
     // Workspace packages resolve to their TypeScript source, so tests need no prior `tsc -b`.
@@ -84,8 +88,8 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'kit',
-          include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts', 'examples/ai-anthropic/test/*.test.ts', 'scripts/*.test.ts'],
-          exclude: ['**/node_modules/**', '**/dist/**', 'packages/hub-react/**', 'packages/player-react/**', 'packages/hub-element/**'],
+          include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts', 'examples/ai-anthropic/test/*.test.ts', 'scripts/*.test.ts', 'services/*/test/**/*.test.ts'],
+          exclude: ['**/node_modules/**', '**/dist/**', 'packages/hub-react/**', 'packages/player-react/**', 'packages/hub-element/**', ...(SERVICE_NODE_OK ? [] : ['services/**'])],
           setupFiles: ['./packages/store-sqlite/test/setup.ts'],
         },
       },

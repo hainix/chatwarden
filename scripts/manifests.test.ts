@@ -502,7 +502,7 @@ describe('changesets config', () => {
     expect(config.fixed).toEqual([['@chatwarden/*']]);
   });
   it('ignores the example and the landing site (private, never versioned or published)', () => {
-    expect(config.ignore).toEqual(['@chatwarden/example-ai-anthropic', '@chatwarden/example-tiny-chat', '@chatwarden/example-recipes', '@chatwarden/site']);
+    expect(config.ignore).toEqual(['@chatwarden/example-ai-anthropic', '@chatwarden/example-tiny-chat', '@chatwarden/example-recipes', '@chatwarden/corpus-service', '@chatwarden/site']);
   });
   it('has no linked groups', () => {
     expect(config.linked).toEqual([]);
@@ -512,12 +512,20 @@ describe('changesets config', () => {
     const ai = readJson<Manifest>('examples', 'ai-anthropic', 'package.json');
     const recipes = readJson<Manifest>('examples', 'recipes', 'package.json');
     const site = readJson<Manifest>('site', 'package.json');
-    expect(config.ignore).toEqual([ai.name, tiny.name, recipes.name, site.name]);
+    const service = readJson<Manifest>('services', 'corpus', 'package.json');
+    expect(config.ignore).toEqual([ai.name, tiny.name, recipes.name, service.name, site.name]);
+    expect(service.private).toBe(true);
     expect(recipes.private).toBe(true);
     expect(ai.private).toBe(true);
     expect(tiny.private).toBe(true);
     expect(site.private).toBe(true);
     expect(site.name).toBe('@chatwarden/site');
+  });
+  it('keeps the corpus service private, out of the published set, and on the group version of the matcher it builds on (so npm links the workspace)', () => {
+    const service = readJson<Manifest>('services', 'corpus', 'package.json');
+    expect(names).not.toContain(service.name);
+    expect(service.private).toBe(true);
+    expect(service.dependencies?.['@chatwarden/matcher']).toBe(VERSION);
   });
   it('keeps the landing site out of the published package set', () => {
     expect(names).not.toContain('@chatwarden/site');

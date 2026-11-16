@@ -368,11 +368,22 @@ An array of rows:
 | `collidesWith` | tags of other supported languages in which this spelling is an ordinary word. The loader turns the row **off** when any of those languages is also installed (the matcher does not use `language`, so a Spanish word that is plain English would otherwise block English chat) |
 | `since` | the release that first carried it |
 | `approvals` | number of distinct reviewer approvals (a count only; no reviewer is named) |
-| `positive` | lines that must be blocked by this term (generated from templates by the builder: bare, upper case, in a sentence, glued punctuation, a look-alike spelling); reviewer additions allowed |
-| `negative` | lines that must never be blocked: every dictionary word, in any supported language, that contains the term or collapses to it, plus reviewer additions |
+| `positive` | lines that must be blocked by this term (generated from templates by the builder: bare, upper case, in a sentence, glued punctuation, a look-alike spelling); reviewer additions allowed. **The builder generates at most 8 template lines a term** (the kit parser takes 50; the loader's canary reads every `positive` line whenever an exception is active, so its cost is linear in this number), keeps only those the term itself blocks, and puts the reviewers' lines after them |
+| `negative` | lines that must never be blocked: every dictionary word, in any supported language, that contains the term or collapses to it, plus reviewer additions. At most 50 lines a row (the kit parser's limit): the reviewers' lines first, then the dictionary words, the word itself (in a language where it is ordinary) before the rest |
 
 A row is **active in a store** when `status` is `accepted` or `provisional`, `defaultActive` is true, and `collidesWith` does not meet an
 installed language. `disputed` and `withdrawn` rows are loaded inactive.
+
+**The builder's gates** (`services/corpus/src/build/gates.ts`). The release is built, read back with the kit's own parser, and then judged with the
+real matcher the way a game's loader would use it, **in every selection of the release's languages** (the kit's `releaseToPack` decides which rows
+are on, so a collision row is off when the other language is installed and is asked to leave that language's words alone only when it is not).
+Each of these holds the term out of the release, with a closed code, never a word: a `positive` line its own term does not block
+(`positive_not_blocked`); a `negative` line its own term blocks (`negative_blocked`); a line of an installed language's whole negative corpus (the
+database's, not only the 2 000 lines a file carries) the active pack blocks (`negative_corpus_blocked`); a dictionary word that equals or
+contains a term, in an installed language, that the active pack blocks (`innocent_word_blocked`: this is what holds a term that equals an ordinary
+word of its own language, at any rank). A term that was **already released** (`since` is set) and now fails stops the build instead: nothing
+leaves a published list without a reviewer disputing it. `gate` in the manifest counts the lines checked. More than 200 terms new in one release
+need `--allow-bulk`. The builder writes no exceptions yet (there is no exceptions table): `exceptions.json` is an empty array with zero counts.
 
 ### 6.7 `exceptions.json`, `negative.<lang>.json`
 
@@ -415,8 +426,10 @@ free text never leaves the service.
    kit's `stampBits` option (0 to 26, default 16) is how many zero bits it mints; the service says how many it wants and checks with
    `checkStamp(body, stamp, bits)`.
 3. The kit sends its version as `kit` (default `0.0.0`; `startCorpus` and the hub pass the matcher's version).
-4. The note rules are the service's rules too: at most 200 characters, no control character, no `@`, no digit run longer than 4, no URL
-   (a scheme, `www.`, or a bare host under a common top-level domain).
+4. The note rules are the service's rules too, and the kit and the service apply the same list so the kit never sends a note the service
+   refuses: at most 200 characters; no control character (C0, DEL and C1, U+2028 and U+2029, and the bidi controls U+200E, U+200F, U+061C,
+   U+202A to U+202E and U+2066 to U+2069); and, read in NFKC form (so full-width and compatibility forms do not slip through), no `@`, no run
+   of more than 4 decimal digits of any script, and no URL (a scheme, `www.`, or a bare host under a common top-level domain).
 5. An answer is read at most 8 KiB, every request has a 15 second deadline, and nothing the service says is passed on: `known` carries
    the public term id, `received` carries an id that looks like an id, `400` is `invalid`, `too_large`, `unsupported_language` or `stamp`
    (the kit treats `stamp` as `rejected`).
@@ -500,6 +513,15 @@ unchanged, plus one optional key:
 calibration screen hides while a moderator labels. `group` values are the eval's `CASE_GROUPS`. `expect.severity` is a `ConductLevel` or a
 band of them; `verdict` is one of `upheld`, `noted`, `no_action`, `unclear`; `mustCite` and `mustNotCite` are 1-based line numbers.
 A reader (`parseEvalSet`) accepts exactly these keys and ignores `meta` content it does not know.
+
+**What the service's `checkCase` and eval builder do** (`services/corpus/src/checkCase.ts`, `src/build/eval.ts`). `checkCase` answers closed codes only
+(`identifier`, `contact`, `too_long`, `copy_of_source`, `unknown_term`), never a quote. The rules are read on the NFKC form with hidden characters
+removed. A contributed case is held to **12 lines** whatever its group is called; the 64-line `long-room` exception is the repo's own cases only
+(`meta.source` is `synthetic`; a `derived` or unlabelled case gets 12). `unknown_term` is judged by the `blocked` flag of a line: a line marked
+`blocked: true` must be blocked by the corpus's terms (every status), so a case never introduces a word the term review has not seen. `copy_of_source`
+compares each line with the lines of the case it was paraphrased from, ignoring case, spacing, punctuation and accents. The builder holds a case out
+(by id and code, in the release summary and the printed list, never a line) when it is not a case the kit reads, when its id is used twice, when
+`meta.reviewed` is below 3 (a reference label needs three reviewers), or when `checkCase` refuses it; the rest is published.
 
 ## 7. Signature and key custody
 

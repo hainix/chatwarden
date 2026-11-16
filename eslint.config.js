@@ -34,7 +34,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['scripts/**/*.mjs', 'site/scripts/**/*.mjs', 'packages/hub-element/build/**/*.mjs', 'examples/*/web/*.mjs'],
+    files: ['scripts/**/*.mjs', 'site/scripts/**/*.mjs', 'packages/hub-element/build/**/*.mjs', 'examples/*/web/*.mjs', 'services/*/tools/**/*.mjs'],
     languageOptions: {
       globals: { console: 'readonly', process: 'readonly', Buffer: 'readonly', URL: 'readonly' },
     },
@@ -43,6 +43,11 @@ export default tseslint.config(
     // Plain browser scripts that ship as-is from the site's public/ folder.
     files: ['site/public/**/*.js'],
     languageOptions: { globals: { localStorage: 'readonly', document: 'readonly' } },
+  },
+  {
+    // The corpus service's review page: one plain browser script, served by the Worker after Access has said yes.
+    files: ['services/*/page/**/*.js'],
+    languageOptions: { globals: { document: 'readonly', fetch: 'readonly' } },
   },
   {
     // The recipe goldens are what `chatwarden init` writes for an adopter's Node project: JavaScript there uses Node's and the Web's globals.

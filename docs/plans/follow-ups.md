@@ -151,3 +151,6 @@ Found while building Part A:
 - The loader keeps the index's ETag in memory only, so a new process fetches the index whole; `state.json` could carry it.
 - A cache write failure leaves a verified release unadopted (the previous one stays). A read-only cache folder shows as `failed` / `cache_failed` in the hub.
 - The site headline and copy wait for the first real release and some use of it.
+
+Found while building Part B (the service):
+- A confirmed `wrong_category` report has no category or target edit action yet: it holds the term out (`disputed`) and the only exit is a two-reviewer restore with the category unchanged. Add the edit to the review page before the first real report is confirmed.

@@ -76,8 +76,10 @@ const RETRY_AFTER_MAX_MS = 24 * 60 * 60 * 1000;
 const NOTE_MAX = 200;
 /** A scheme, `www.`, or a bare host under a common top-level domain. The same rule the service applies. */
 const URL_RE = /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|io|dev|gg|me|tv|co|ly|xyz|info|app|gl|to|us|uk|de|fr|es|pt|br|ru|cn|jp|ca|au)\b/i;
-// eslint-disable-next-line no-control-regex -- a control character in a note is refused
-const CONTROL_RE = /[\u0000-\u001f\u007f]/;
+// A control character, plus what could make a reviewer's screen lie: C1 controls, line and paragraph separators, and the bidi controls.
+// The same list as the service's (services/corpus/src/gates.ts), so the kit never sends a note the service refuses.
+// eslint-disable-next-line no-control-regex -- control characters in a note are refused
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -170,7 +172,10 @@ function noteText(v: unknown): string | null | undefined {
   if (typeof v !== 'string') return undefined;
   const t = v.trim();
   if (t === '') return null;
-  if (t.length > NOTE_MAX || t.includes('@') || /\d{5,}/.test(t) || CONTROL_RE.test(t) || URL_RE.test(t)) return undefined;
+  if (t.length > NOTE_MAX || CONTROL_RE.test(t)) return undefined;
+  // The `@`, digit and URL checks run on the NFKC form, so a full-width `@`, a compatibility digit or a full-width dot does not get round them.
+  const n = t.normalize('NFKC');
+  if (n.includes('@') || /\p{Nd}{5,}/u.test(n) || URL_RE.test(n)) return undefined;
   return t;
 }
 

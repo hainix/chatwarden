@@ -14,6 +14,8 @@
     { "path": "packages/player-react" },
     { "path": "packages/hub-element" },
     { "path": "examples/tiny-chat" },
-    { "path": "examples/ai-anthropic" }
+    { "path": "examples/ai-anthropic" },
+    { "path": "services/corpus" },
+    { "path": "services/corpus/types-check" }
   ]
 }

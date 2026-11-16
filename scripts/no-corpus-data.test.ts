@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { readZip } from '../packages/matcher/src/corpus/index.js';
 import { writeZip } from '../packages/matcher/test/corpus-zip-writer.js';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { INVENTED, PRIVATE_KEY_HEADER, checkFiles, isInventedWord } from './no-corpus-data.mjs';
+import { INVENTED, PRIVATE_KEY_HEADER, checkFiles, docProblems, isInventedWord } from './no-corpus-data.mjs';
 
 // The repo holds no real term, no real list and no key (AGENTS.md, design 16). Nothing here knows a real word, so it cannot leak one: it is an
 // ALLOWLIST. Every term, phrase and line of a corpus-shaped JSON file must be made of the invented words (the matcher fixtures' words and their
@@ -150,6 +150,16 @@ describe('files that must not be tracked', () => {
     expect((await run({ [path]: new Uint8Array([1, 2, 3]) })).length).toBeGreaterThan(0);
   });
 
+  it.each(['release-out/terms-2026.12.0.release.json', 'release-out/index.json', 'services/corpus/release-out/x.txt', '.corpus-data/terms.json', 'x/.corpus-data/d1.sql'])('a file in a release output folder (%s) fails, even when it looks harmless', async (path) => {
+    const problems = await run({ [path]: 'hello' });
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0]).toContain(path);
+  });
+
+  it('a folder that only starts with release-out is not one', async () => {
+    expect(await run({ 'release-output/a.txt': 'x', 'docs/release-out-notes.md': 'x' })).toEqual([]);
+  });
+
   it('a key or a .dev.vars fails even inside test/fixtures', async () => {
     const problems = await run({ 'packages/x/test/fixtures/a.pem': 'x', 'packages/x/test/fixtures/.dev.vars': 'x', 'packages/x/test/fixtures/b.key': 'x' });
     expect(problems).toHaveLength(3);
@@ -219,7 +229,7 @@ describe('archives inside test/fixtures', () => {
 describe('the repo rules that back the guard', () => {
   it('.gitignore keeps the real list, private keys and the service secrets out of git', () => {
     const lines = readFileSync(join(ROOT, '.gitignore'), 'utf8').split(/\r?\n/).map((l) => l.trim());
-    for (const rule of ['.corpus-data/', '*.pem', '*.key', '.dev.vars']) expect(lines, rule).toContain(rule);
+    for (const rule of ['.corpus-data/', 'release-out/', '*.pem', '*.key', '.dev.vars']) expect(lines, rule).toContain(rule);
   });
 
   it('AGENTS.md says no corpus data and no key, beside the rule about real terms', () => {
@@ -228,9 +238,62 @@ describe('the repo rules that back the guard', () => {
   });
 
   it('the git ignore rules really ignore those paths (git check-ignore)', () => {
-    for (const path of ['.corpus-data/terms.json', 'keys/a.pem', 'ops/b.key', 'services/corpus/.dev.vars']) {
+    for (const path of ['.corpus-data/terms.json', 'release-out/terms-2026.12.0.zip', 'keys/a.pem', 'ops/b.key', 'services/corpus/.dev.vars']) {
       const out = execFileSync('git', ['check-ignore', '-v', path], { cwd: ROOT, encoding: 'utf8' });
       expect(out, path).toContain('.gitignore');
     }
+  });
+});
+
+describe('the service pages hold no term: every example word in a code span is an invented word or plain vocabulary', () => {
+  const PAGES = ['services/corpus/README.md', 'services/corpus/PRIVACY.md', 'services/corpus/SOURCES.md', 'docs/community-list.md'];
+
+  it.each(PAGES)('%s is clean', (page) => {
+    expect(docProblems(page, readFileSync(join(ROOT, page), 'utf8'))).toEqual([]);
+  });
+
+  it('accepts the invented words, and the vocabulary, and anything that is not a bare lowercase word', () => {
+    const text = 'An example `zorbak` and `quissel1`, a status `provisional`, a flag `--allow-bulk`, a path `src/a.ts`, an id `CWT-2026-00001`, `a.b`, `A`.';
+    expect(docProblems('x.md', text)).toEqual([]);
+  });
+
+  it('refuses a bare word that is neither, naming the file and the line but not the word', () => {
+    const problems = docProblems('docs/x.md', 'first line\nan example `bananaphone` here\nand `zorbak` is fine');
+    expect(problems).toEqual(['docs/x.md:2: a code span with a bare word that is not on the allowlist']);
+    expect(problems.join('')).not.toContain('bananaphone');
+  });
+
+  it('does not read a fenced command block as examples, and does read a fenced JSON corpus file', () => {
+    expect(docProblems('x.md', 'run:\n```sh\nnpx wrangler d1 execute bananaphone\n```\n')).toEqual([]);
+    const block = '```json\n{ "schema": "chatwarden-corpus-negative/1", "language": "en", "lines": ["a bananaphone line"], "knownLosses": [] }\n```\n';
+    expect(docProblems('x.md', block)).toHaveLength(1);
+    const ok = '```json\n{ "schema": "chatwarden-corpus-negative/1", "language": "en", "lines": ["a zorbak line"], "knownLosses": [] }\n```\n';
+    expect(docProblems('x.md', ok)).toEqual([]);
+  });
+
+  it('counts a line right when spans and fences come before it', () => {
+    const text = '`zorbak`\n```sh\nnode a\n```\nplain\n`bananaphone`';
+    expect(docProblems('x.md', text)[0]).toMatch(/x\.md:\d+:/);
+  });
+});
+
+describe('the `lines` of a release file are read too (negative.<lang>.json and positive.json hold their lines under that key)', () => {
+  const runFiles = async (files: Record<string, string>) => {
+    const { root, list } = tree(files);
+    return checkFiles({ root, files: list, unzip });
+  };
+
+  it('refuses a line that is not made of invented and plain words, in a negative file and in a positive file', async () => {
+    const negative = JSON.stringify({ schema: 'chatwarden-corpus-negative/1', language: 'en', lines: ['a plain sentence', 'a bananaphone sentence'], knownLosses: [] });
+    const positive = JSON.stringify({ schema: 'chatwarden-corpus-positive/1', lines: ['you zorbak', 'you bananaphone'] });
+    expect((await runFiles({ 'x/negative.en.json': negative })).join('\n')).toContain('$.lines[1]');
+    expect((await runFiles({ 'x/positive.json': positive })).join('\n')).toContain('$.lines[1]');
+  });
+
+  it('accepts the invented words and the plain ones, and never prints the word', async () => {
+    const ok = JSON.stringify({ schema: 'chatwarden-corpus-negative/1', language: 'en', lines: ['a nice line about glarn lake'], knownLosses: [] });
+    expect(await runFiles({ 'x/negative.en.json': ok })).toEqual([]);
+    const bad = await runFiles({ 'x/negative.en.json': JSON.stringify({ schema: 'chatwarden-corpus-negative/1', lines: ['bananaphone'] }) });
+    expect(bad.join('\n')).not.toContain('bananaphone');
   });
 });

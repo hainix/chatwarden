@@ -1,6 +1,7 @@
 // The guard of design 16: the repo holds no real term, no real list and no key. It is an ALLOWLIST, so it needs no real list to enforce it.
 // - Every term, phrase and line of a corpus-shaped JSON file (a `chatwarden-corpus-` schema, or a release file by name) must be made of the
 //   invented words (and their generated forms) and a short list of ordinary words. Anything else fails.
+// - Nothing tracked in a release output folder (release-out/, .corpus-data/), where the owner's tools write the real list.
 // - No tracked key file, `.dev.vars`, PKCS#8 header, or archive outside `test/fixtures/` (an archive there is read and held to the same list).
 // Messages name the file and the place, never the word: a real one must not land in a CI log. The checks are exported and unit-tested in
 // scripts/no-corpus-data.test.ts; the repo run is the first test there.
@@ -42,7 +43,7 @@ export function badWords(text, strict) {
   return words.filter((w) => !isInventedWord(w) && (strict || !isOrdinary(fold(w))));
 }
 
-const LINE_KEYS = new Set(['positive', 'negative', 'negativeCorpus', 'knownLosses']);
+const LINE_KEYS = new Set(['positive', 'negative', 'negativeCorpus', 'knownLosses', 'lines']);
 const TEXT_KEYS = new Set(['phrase', 'text', 'note']);
 const MAX_DEPTH = 40;
 const MAX_PROBLEMS_PER_FILE = 20;
@@ -92,6 +93,8 @@ export function jsonProblems(name, text) {
 
 const KEY_FILE = /\.(pem|key)$/i;
 const DEV_VARS = /(^|\/)\.dev\.vars$/;
+/** The folders the owner's tools write the real list to (and .gitignore covers): nothing in them is ever tracked, whatever it is called. */
+const OUTPUT_DIR = /(^|\/)(release-out|\.corpus-data)\//;
 const ARCHIVE = /\.(zip|7z|tar|tgz)$|\.tar\.gz$/i;
 const FIXTURES = /(^|\/)test\/fixtures\//;
 const ZIP = /\.zip$/i;
@@ -110,7 +113,8 @@ export async function checkFiles({ root, files, unzip }) {
   const problems = [];
   const dec = new TextDecoder();
   for (const file of files) {
-    if (KEY_FILE.test(file)) problems.push(`${file}: a key file is tracked`);
+    if (OUTPUT_DIR.test(file)) problems.push(`${file}: a file in a release output folder (release-out/, .corpus-data/) is tracked`);
+    else if (KEY_FILE.test(file)) problems.push(`${file}: a key file is tracked`);
     else if (DEV_VARS.test(file)) problems.push(`${file}: a secrets file is tracked`);
     else if (ARCHIVE.test(file)) {
       if (!FIXTURES.test(file)) {
@@ -143,6 +147,47 @@ export async function checkFiles({ root, files, unzip }) {
     const text = bytes.toString('utf8');
     if (PRIVATE_KEY_HEADER.test(text)) problems.push(`${file}: holds a private key header`);
     if (/\.json$/i.test(file)) problems.push(...jsonProblems(file, text));
+  }
+  return problems;
+}
+
+// --- documents -------------------------------------------------------------------------------------------------------------------------------
+// The service's own pages (its README, PRIVACY.md, SOURCES.md and the contributors' page) talk about terms without holding one. Prose cannot be
+// held to an allowlist, but an EXAMPLE can: a word shown as code. So in these pages every code span that is a bare lowercase word (`zorbak`, not
+// `since`, `--flag` or `a.b`) must be an invented word or one of the plain vocabulary words below, and a fenced block that holds a corpus file is
+// read like one. A real word pasted into a page as an example fails, by file and position, never the word.
+
+/** The bare code-span words these pages use as names: statuses, kinds, tools, tables and ordinary vocabulary. Add a word only when a page needs it. */
+export const DOC_VOCABULARY = new Set(
+  (
+    'terms term exceptions positive negative index zip sig manifest eval accepted provisional disputed withdrawn received declined slur abuse sexual other none ' +
+    'ethnicity religion gender sexuality disability nationality rude hostile severe en es pt pin follow fluent active note notes since status kind kinds ' +
+    'reviewers audit counters releases submissions reports reviews cases gate blocked unreviewed identifier contact copy unknown ok ' +
+    'release sign publish zenodo seed keygen verify live check build checkcase innocent sense wrong category removal ' +
+    'wrangler npx npm node tsc vitest sh json text d1 r2 sql ' +
+    'matcher corpus kit loader hub http core store ' +
+    'startcorpus liveterms syncpack observability workers custom domain routes vars secrets report instr source returning'
+  ).split(' '),
+);
+
+const FENCE = /```([a-z0-9]*)\n([\s\S]*?)```/g;
+const SPAN = /`([^`\n]+)`/g;
+
+/** The problems in one document (empty array = good). `name` is the path shown in a message. */
+export function docProblems(name, text) {
+  const problems = [];
+  const prose = String(text).replace(FENCE, (_m, lang, body) => {
+    if ((lang === 'json' || lang === 'jsonc') && /chatwarden-corpus-/.test(body)) problems.push(...jsonProblems(`${name} (a ${lang} block)`, body));
+    // Keep the line count: the block is replaced by as many newlines as it had.
+    return '\n'.repeat(String(_m).split('\n').length - 1);
+  });
+  let line = 1;
+  let last = 0;
+  for (const m of prose.matchAll(SPAN)) {
+    line += (prose.slice(last, m.index).match(/\n/g) ?? []).length;
+    last = m.index;
+    const span = m[1];
+    if (/^[a-z]{3,}$/.test(span) && !isInventedWord(span) && !DOC_VOCABULARY.has(span)) problems.push(`${name}:${line}: a code span with a bare word that is not on the allowlist`);
   }
   return problems;
 }

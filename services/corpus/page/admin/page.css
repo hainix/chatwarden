@@ -1,0 +1,15 @@
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.4; }
+body { margin: 0 auto; max-width: 52rem; padding: 1rem; }
+h1 { font-size: 1.25rem; margin: 0; }
+#who { margin: 0.25rem 0 1rem; opacity: 0.7; }
+#break { padding: 0.75rem; border: 2px solid currentColor; border-radius: 0.5rem; }
+#tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+#tabs button[aria-pressed="true"] { font-weight: 700; }
+#list { list-style: none; margin: 0; padding: 0; }
+#list li { border: 1px solid; border-color: color-mix(in srgb, currentColor 30%, transparent); border-radius: 0.5rem; margin: 0 0 0.75rem; padding: 0.75rem; }
+.meta { opacity: 0.75; font-size: 0.9rem; }
+.word { font-weight: 700; font-size: 1.1rem; margin: 0.25rem 0; }
+.word.masked { letter-spacing: 0.2em; opacity: 0.5; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
+button, select, input { font: inherit; padding: 0.35rem 0.6rem; }
+[hidden] { display: none; }

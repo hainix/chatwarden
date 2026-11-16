@@ -1,0 +1,34 @@
+// The corpus service's Worker. PLACEHOLDERS ONLY: the maintainer creates the D1 database and the R2 bucket (README, "Owner actions"), pastes
+// the database id here at deploy time, and does not commit it back. No account id, database id, secret or key belongs in this file.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chatwarden-corpus",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+
+  // The workers.dev hostname is not served: it sits outside the Cloudflare Access application. The Worker answers on its custom domain only.
+  "workers_dev": false,
+
+  // The queue and term database. Create it with `wrangler d1 create chatwarden-corpus`, then apply schema.sql.
+  "d1_databases": [{ "binding": "DB", "database_name": "chatwarden-corpus", "database_id": "REPLACE_AT_DEPLOY" }],
+
+  // The release bucket (served read-only through the custom domain `releases.chatwarden.dev`, with no code on the read path).
+  "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "chatwarden-releases" }],
+
+  // The review page (page/admin/*). Every path goes through the Worker first, so nothing is served before Access and the reviewer check.
+  "assets": { "directory": "./page", "binding": "ASSETS", "run_worker_first": true, "html_handling": "none", "not_found_handling": "none" },
+
+  // Not secret: the Cloudflare Access team domain and the application's audience tag for /admin/*. Fill in at deploy time.
+  "vars": { "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "", "REPORTS_ORIGIN": "", "REPORTS_HOSTNAME": "" },
+
+  // Secrets are set with `wrangler secret put <NAME>`, never written here. COUNTER_SECRET keys the rate-limit network hash;
+  // TURNSTILE_SECRET is the siteverify secret of the docs-site report form.
+  "secrets": { "required": ["COUNTER_SECRET", "TURNSTILE_SECRET"] },
+
+  // The daily purge: rate-limit counters older than two days, and the notes of submissions decided 90 days ago (src/worker.ts, `scheduled`).
+  "triggers": { "crons": ["17 3 * * *"] }
+
+  // The Worker answers on corpus.chatwarden.dev (a custom domain on the project's zone), set by the owner at deploy time:
+  // "routes": [{ "pattern": "corpus.chatwarden.dev", "custom_domain": true }]
+}
