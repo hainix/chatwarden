@@ -1262,7 +1262,12 @@ Each poll asks EOS for reports **about** your players, 20 at a time, 50 to a pag
 
 The first poll starts from now. It does not read the history from before the adapter started. A poll handles at most `maxPerPoll` new reports; the rest wait for the next poll, and the cursor
 stays behind them. It reads at most 20 pages for each batch. A report whose time is more than 10 minutes before the cursor is not found: EOS is asked only for newer ones. A `429` pauses polling for its `retry-after` (1 to 60 seconds,
-60 if it names none). A bad page, a `5xx` or a network failure ends that poll, is logged by status or class, and leaves the cursor where it was.
+60 if it names none). A bad page, a `5xx` or a network failure ends that batch only: it is logged by status or class, the other batches are still read, and the cursor stays behind
+what that batch had read, so its players are asked about again. A `400`, `404`, `405`, `413`, `414` or `422` on the first page of a batch means EOS refused the request itself (a bad id, say). Asking again
+would get the same answer, so that batch does not hold the cursor; its reports are lost for that poll. Only a `429` stops the whole poll.
+
+What is not covered. If a report is filed and the row that says so cannot be written, the next poll writes the row again and does not file the report twice, but only while the server keeps running: a restart in between
+can file it a second time. If `seatOf` fails for a report and keeps failing for more than 10 minutes, that report is not found again, because the cursor has moved on and EOS is asked only for newer ones.
 
 An EOS report is weak evidence. The kit files what its own checks accept and the moderator decides. You will not see every EOS report in the hub, only the ones your server can place.
 
@@ -1299,6 +1304,7 @@ This adapter was written from EOS's public Web API pages and tested against a fa
 - EOS's rate limits. The pages state none. The adapter backs off on a 429 and a 5xx.
 - That a delete of a sanction EOS no longer has answers `404`, and what the error bodies look like.
 - That the create accepts `automated`, which the example shows and the field table does not list.
+- What EOS answers to the user query for a player who has no sanctions at all. The adapter reads a `404` as "none found" and goes on to create the sanction. If EOS answers something else, the first sanction for a player is not created and the log shows the status.
 - A restart between the kit's revoke and the delete leaves the EOS sanction in place until it expires. A sweep that fixes this is not built.
 
 ## Health probes

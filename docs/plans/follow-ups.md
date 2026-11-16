@@ -226,6 +226,7 @@ Found building `@chatwarden/http/eos` (K5 E1 to E4, 2026-11).
   3. In the hub, apply a **24 hour chat** sanction to the first test player. **Does it appear in the Developer Portal's sanctions list for that player, with your action name, the
      justification "Chatwarden M-XXXXX, Rule n", the tags `cw` and `rule<n>`, and the metadata `cw_ref`?** If the log shows `chatwarden.eos_failed` with a status, note it.
      A 403 on `op` `reconcile` means the client policy lacks `findSanctionsForAnyUser`.
+     This is also the first sanction for that player, so it settles what EOS answers to the user query for a player with no sanctions (the adapter reads a `404` as "none found"). If the sanction is not created and the log shows a status on `reconcile`, note it.
   4. Apply a **permanent ban** to the second test player. **Does it show as permanent (no end time), or does it end at once, or does EOS answer 400?** This settles whether
      `duration: 0` means permanent on create. Tell the maintainer exactly what you see.
   5. Revoke the first sanction in the hub. **Does it disappear from the Developer Portal list within a minute (status Removed)?** Revoke the second too.

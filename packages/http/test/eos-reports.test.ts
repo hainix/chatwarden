@@ -575,6 +575,114 @@ describe('poll: bounds and failures', () => {
     c.adapter.dispose();
   });
 
+  it('a batch the request of which EOS refuses (400 on its first page) is skipped and does not hold the cursor or stop the others', async () => {
+    const c = await eosWorld({ reports: { batch: 1 } });
+    const a = room(c);
+    const b = room(c);
+    const d = room(c);
+    c.players.length = 0;
+    c.players.push(a.targets[0] as string, b.targets[0] as string, d.targets[0] as string);
+    await c.adapter.pollReports();
+    const start = c.w.clock.t;
+    c.w.clock.t += MIN;
+    report(c, { reportingPlayerId: a.reporter, reportedPlayerId: a.targets[0] as string, reasonId: 4, time: iso(start + 10_000) });
+    report(c, { reportingPlayerId: b.reporter, reportedPlayerId: b.targets[0] as string, reasonId: 4, time: iso(start + 20_000) });
+    report(c, { reportingPlayerId: d.reporter, reportedPlayerId: d.targets[0] as string, reasonId: 4, time: iso(start + 30_000) });
+    c.fake.script.push({ on: 'reports', status: 400 });
+    const asked = find(c).length;
+    const out = await c.adapter.pollReports();
+    expect(out.filed).toBe(2);
+    expect(find(c).length - asked).toBe(3);
+    expect(eosLogs(c)).toEqual([['chatwarden.eos_failed', { op: 'poll', status: 400 }]]);
+    // The cursor moved past the healthy batches: the rejected request is not asked about again and again with a window that only grows.
+    expect(cursor(c)?.external).toBe(iso(start + 30_000));
+    c.adapter.dispose();
+  });
+
+  it('a batch that fails in a way that may pass (a 503, a thrown fetch) holds the cursor, and the batches after it are still read and filed', async () => {
+    const c = await eosWorld({ reports: { batch: 1 } });
+    const a = room(c);
+    const b = room(c);
+    c.players.length = 0;
+    c.players.push(a.targets[0] as string, b.targets[0] as string);
+    await c.adapter.pollReports();
+    const start = c.w.clock.t;
+    c.w.clock.t += MIN;
+    report(c, { reportingPlayerId: a.reporter, reportedPlayerId: a.targets[0] as string, reasonId: 4, time: iso(start + 10_000) });
+    report(c, { reportingPlayerId: b.reporter, reportedPlayerId: b.targets[0] as string, reasonId: 4, time: iso(start + 20_000) });
+    for (const script of [{ on: 'reports' as const, status: 503 }, { on: 'reports' as const, fail: true }]) {
+      c.fake.script.push(script);
+      const before = rows(c).length;
+      await c.adapter.pollReports();
+      // The first batch failed; the second was still asked and its report filed (once, over both rounds).
+      expect(find(c).length).toBeGreaterThan(1);
+      expect(Date.parse(cursor(c)?.external ?? '')).toBeLessThanOrEqual(start);
+      expect(rows(c).length).toBeGreaterThanOrEqual(before);
+    }
+    expect(rows(c)).toHaveLength(1);
+    expect(await c.adapter.pollReports()).toMatchObject({ filed: 1 });
+    expect(rows(c)).toHaveLength(2);
+    expect(cursor(c)?.external).toBe(iso(start + 20_000));
+    c.adapter.dispose();
+  });
+
+  it('a batch that hits maxPerPoll ends that batch only: later batches are still asked, the cursor stays behind the unhandled report, and every report is filed once over the polls', async () => {
+    const c = await eosWorld({ reports: { batch: 1, maxPerPoll: 1 } });
+    const a = room(c, 2);
+    const b = room(c);
+    c.players.length = 0;
+    c.players.push(a.targets[0] as string, a.targets[1] as string, b.targets[0] as string);
+    await c.adapter.pollReports();
+    const start = c.w.clock.t;
+    c.w.clock.t += MIN;
+    report(c, { reportingPlayerId: a.reporter, reportedPlayerId: a.targets[0] as string, reasonId: 4, time: iso(start + 10_000) });
+    report(c, { reportingPlayerId: a.reporter, reportedPlayerId: a.targets[1] as string, reasonId: 4, time: iso(start + 11_000) });
+    report(c, { reportingPlayerId: b.reporter, reportedPlayerId: b.targets[0] as string, reasonId: 4, time: iso(start + 20_000) });
+    const calls = find(c).length;
+    expect((await c.adapter.pollReports()).filed).toBe(1);
+    expect(find(c).length - calls).toBe(3);
+    expect(Date.parse(cursor(c)?.external ?? '')).toBeLessThan(start + 11_000);
+    expect((await c.adapter.pollReports()).filed).toBe(1);
+    expect((await c.adapter.pollReports()).filed).toBe(1);
+    expect(await c.adapter.pollReports()).toMatchObject({ filed: 0 });
+    expect(rows(c)).toHaveLength(3);
+    c.adapter.dispose();
+  });
+
+  it('a link write that failed after the report was filed is written on the next poll, and the report is not filed a second time', async () => {
+    let broken = true;
+    const c = await eosWorld({
+      wrapKit: (cw): Chatwarden =>
+        new Proxy(cw, {
+          get: (t, p, rcv) =>
+            p === 'links'
+              ? {
+                  supported: true,
+                  get: (a: never, b: string) => t.links.get(a, b),
+                  put: (row: Parameters<typeof t.links.put>[0]) => {
+                    if (broken && row.system === 'eos-report') throw new Error('disk full');
+                    return t.links.put(row);
+                  },
+                  list: (a: never, q?: never) => t.links.list(a, q),
+                }
+              : (Reflect.get(t, p, rcv) as unknown),
+        }),
+    });
+    const r = room(c);
+    report(c, { reportingPlayerId: r.reporter, reportedPlayerId: r.targets[0] as string, reasonId: 4 });
+    await expect(c.adapter.pollReports()).resolves.toMatchObject({ filed: 1 });
+    expect(rows(c)).toHaveLength(1);
+    broken = false;
+    // The report is still inside the 10 minute window, so EOS hands it back: the link is written now and nothing is filed.
+    expect(await c.adapter.pollReports()).toMatchObject({ filed: 0 });
+    expect(rows(c)).toHaveLength(1);
+    const key = reportKey({ time: c.fake.reports[0]?.time ?? '', reportingPlayerId: r.reporter, reportedPlayerId: r.targets[0] as string, reasonId: 4 });
+    expect(c.cw.links.get('eos-report', key)?.state).toBe('filed');
+    expect(await c.adapter.pollReports()).toMatchObject({ filed: 0 });
+    expect(rows(c)).toHaveLength(1);
+    c.adapter.dispose();
+  });
+
   it('a link write that fails is logged by class; the report was filed and nothing throws', async () => {
     const c = await eosWorld({
       wrapKit: (cw): Chatwarden =>

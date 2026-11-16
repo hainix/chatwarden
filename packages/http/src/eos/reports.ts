@@ -31,6 +31,10 @@ const NOTE_MAX = 500;
 const CONTEXT_MAX = 4096;
 /** How long polling pauses after a 429 that names no wait. */
 const PAUSE_DEFAULT_MS = 60_000;
+/** An answer to the FIRST page of a batch that says the request itself is wrong (a bad id, say). Asking again would get the same answer, so it must not hold the cursor for ever. */
+const REQUEST_REFUSED = new Set([400, 404, 405, 413, 414, 422]);
+/** The most filed reports whose link could not be written that are remembered, so a retry writes the link and does not file again. */
+const UNLINKED_MAX = 1000;
 
 const ID_RE = /^[\x21-\x7e]{1,128}$/;
 const LINE_ID_RE = /^[\x21-\x7e]{1,64}$/;
@@ -119,6 +123,8 @@ export function createReports(cw: Chatwarden, o: ResolvedEosOptions, client: Eos
   let timer: ReturnType<typeof setInterval> | undefined;
   let pausedUntil = 0;
   const lifetime = new AbortController();
+  /** Reports that were filed but whose link write failed: key to the link's state and external. The next poll writes the link again instead of filing the report again. In memory only. */
+  const unlinked = new Map<string, { state: string; external: string }>();
   const fail = (detail: { op: string; error?: string; status?: number }): void => safeWarn(logger, 'chatwarden.eos_failed', detail);
 
   /** The players to ask about: validated, deduplicated, at most 500. An empty list says why in the log. */
@@ -198,38 +204,44 @@ export function createReports(cw: Chatwarden, o: ResolvedEosOptions, client: Eos
     let newest = -Infinity;
     /** The lowest point any unfinished batch has read up to: the cursor must not pass it. */
     let held = Infinity;
-    let stopped = false;
+    /** A 429 or a dispose: no more requests in this poll. */
+    let halt = false;
 
     const batches: string[][] = [];
     for (let i = 0; i < ids.length; i += pull.batch) batches.push(ids.slice(i, i + pull.batch));
 
     for (const batch of batches) {
-      if (stopped || disposed) {
+      if (halt || disposed) {
         held = Math.min(held, previous);
         continue;
       }
+      // One batch that fails or hits the cap ends that batch only: the others are still read, so one bad batch cannot hide newer reports of a healthy one.
       let reach = -Infinity;
       let finished = false;
+      let hold = true;
+      let capped = false;
       for (let page = 0; page < PAGES_MAX && !finished; page++) {
         let reply: EosReply;
         try {
           reply = await find(batch, start, page * PAGE);
         } catch (err) {
           if (!disposed) fail({ op: 'poll', error: errorClass(err) });
-          stopped = true;
           break;
         }
         if (disposed) return result;
         if (reply.status < 200 || reply.status >= 300) {
           fail({ op: 'poll', status: reply.status });
-          if (reply.status === 429) pausedUntil = clock.now() + Math.min(Math.max(reply.retryAfterMs ?? PAUSE_DEFAULT_MS, RETRY_AFTER_FLOOR_MS), RETRY_AFTER_CAP_MS);
-          stopped = true;
+          if (reply.status === 429) {
+            pausedUntil = clock.now() + Math.min(Math.max(reply.retryAfterMs ?? PAUSE_DEFAULT_MS, RETRY_AFTER_FLOOR_MS), RETRY_AFTER_CAP_MS);
+            halt = true;
+          } else if (page === 0 && REQUEST_REFUSED.has(reply.status)) {
+            hold = false;
+          }
           break;
         }
         const elements = isObject(reply.json) ? reply.json['elements'] : undefined;
         if (!Array.isArray(elements)) {
           fail({ op: 'poll', error: 'BadAnswer' });
-          stopped = true;
           break;
         }
         const looked = (elements as unknown[]).slice(0, PAGE_LOOKED_AT);
@@ -245,7 +257,7 @@ export function createReports(cw: Chatwarden, o: ResolvedEosOptions, client: Eos
             // The cap is for new reports; the rest wait for the next poll, and the cursor stays where this batch had read to.
             const key = reportKeyOf(found);
             if (!seenKeys.has(key) && cw.links.get('eos-report', key) === null) {
-              stopped = true;
+              capped = true;
               break;
             }
           }
@@ -254,12 +266,12 @@ export function createReports(cw: Chatwarden, o: ResolvedEosOptions, client: Eos
           newest = Math.max(newest, at);
           reach = Math.max(reach, at);
         }
-        if (stopped) break;
+        if (capped) break;
         const paging = isObject(reply.json) ? reply.json['paging'] : undefined;
         const total = isObject(paging) ? paging['total'] : undefined;
         finished = elements.length < PAGE || (typeof total === 'number' && Number.isFinite(total) && (page + 1) * PAGE >= total);
       }
-      if (!finished) held = Math.min(held, reach === -Infinity ? previous : reach);
+      if (!finished && hold) held = Math.min(held, reach === -Infinity ? previous : reach);
     }
     if (disposed) return result;
 
@@ -282,20 +294,33 @@ export function createReports(cw: Chatwarden, o: ResolvedEosOptions, client: Eos
     const key = reportKeyOf(r);
     if (seenKeys.has(key)) return false;
     seenKeys.add(key);
-    try {
-      if (cw.links.get('eos-report', key) !== null) return false;
-    } catch (err) {
-      fail({ op: 'link', error: errorClass(err) });
-      return false;
-    }
     const link = (state: string, external: string): void => {
       if (disposed) return;
       try {
         cw.links.put({ system: 'eos-report', ref: key, external, state, at: clock.now() });
+        unlinked.delete(key);
       } catch (err) {
         fail({ op: 'link', error: errorClass(err) });
+        // Remember what to write, so the next poll writes it and does not decide again (a filed report would be filed twice).
+        unlinked.delete(key);
+        unlinked.set(key, { state, external });
+        if (unlinked.size > UNLINKED_MAX) unlinked.delete(unlinked.keys().next().value as string);
       }
     };
+    try {
+      if (cw.links.get('eos-report', key) !== null) {
+        unlinked.delete(key);
+        return false;
+      }
+    } catch (err) {
+      fail({ op: 'link', error: errorClass(err) });
+      return false;
+    }
+    const owed = unlinked.get(key);
+    if (owed !== undefined) {
+      link(owed.state, owed.external);
+      return false;
+    }
     const skip = (code: string): true => {
       bump(result.skipped, code);
       link('skipped', code);
