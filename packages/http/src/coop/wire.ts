@@ -35,6 +35,36 @@ export interface CoopReportBody {
   reportedItemsInThread?: Array<{ id: string; typeId: string }>;
 }
 
+/** One field of a Coop item type: its name, Coop's field type and whether Coop must have it. */
+export interface CoopField {
+  name: string;
+  type: string;
+  required: boolean;
+}
+
+/**
+ * The fields `buildReport` sends, per item type: what `setup.checklist()` tells the adopter to create and `setup.verify()` compares. Keep it in step with the
+ * builders below (a test compares it to the fake Coop's own copy of the documented schema). UNVERIFIED: Coop's names for the field types (`STRING`, `NUMBER`,
+ * `DATETIME`) and for a relation (`RELATED_ITEM`); the local end to end settles them.
+ */
+export const ITEM_FIELDS: { readonly user: readonly CoopField[]; readonly line: readonly CoopField[]; readonly report: readonly CoopField[] } = {
+  user: [],
+  line: [
+    { name: 'text', type: 'STRING', required: true },
+    { name: 'author', type: 'STRING', required: true },
+    { name: 'datetime', type: 'DATETIME', required: true },
+    { name: 'handle', type: 'STRING', required: false },
+  ],
+  report: [
+    { name: 'category', type: 'STRING', required: true },
+    { name: 'reportedReason', type: 'STRING', required: false },
+    { name: 'rule', type: 'NUMBER', required: false },
+    { name: 'aiSeverity', type: 'NUMBER', required: false },
+    { name: 'room', type: 'STRING', required: false },
+    { name: 'creator', type: 'RELATED_ITEM', required: true },
+  ],
+};
+
 /** The longest a note, a reason or a piece of evidence is sent or stored. */
 const TEXT_MAX = 500;
 /** The room tags as one string. */
