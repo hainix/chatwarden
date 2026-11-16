@@ -68,6 +68,8 @@ export interface AiOutcomeArgs {
   actions: ReadonlyArray<{ subject: SubjectId; kind: SanctionKind; durationMs: number | null; rule: RuleRef; lineIds: readonly string[] }>;
   /** The echo of the decision, or all-empty (`readId` null, not accepted, no severity) when it carried none. */
   ai: { readId: string | null; accepted: boolean; severity: ConductLevel | null };
+  /** The deciding moderator's staff ref (the decision's actor), kept on the row for the gates' breadth check. */
+  actor: string;
   now: number;
 }
 

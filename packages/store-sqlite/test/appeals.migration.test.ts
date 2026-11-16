@@ -93,6 +93,7 @@ const outcome = (i: number): AiOutcomeInsert => ({
   detail: {} as never,
   badFaith: false,
   example: null,
+  aiRule: null, aiSeverity: null, aiConfidence: null, decidedBy: null, source: 'human',
 });
 
 /** A database at version 21 with notices of every old kind, sanctions, decisions, AI outcomes and an audit row. */
@@ -103,7 +104,14 @@ function openAt21(db: DatabaseSync): SqliteStore {
   // a few more, so the rowid order and a gap (a deleted row) show
   for (let i = 6; i <= 20; i++) store.insertNotice(notice(i, OLD_KINDS[i % 5] as NoticeKind));
   db.prepare("DELETE FROM kit_notices WHERE id = 'n003'").run();
-  for (let i = 0; i < 3; i++) store.insertAiOutcome(outcome(i));
+  // The version-21 table has none of the later columns, so these rows go in the way the kit wrote them then.
+  for (let i = 0; i < 3; i++) {
+    const o = outcome(i);
+    db.prepare(
+      `INSERT INTO kit_ai_outcomes (report_id, read_id, decided_at, level, verdict, rule, severity, ai_verdict, agreement, detail_json, bad_faith, example_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(o.reportId, o.readId, o.decidedAt, o.level, o.verdict, o.rule, o.severity, o.aiVerdict, o.agreement, JSON.stringify(o.detail), o.badFaith ? 1 : 0, null);
+  }
   store.insertAudit({ id: 'a1', at: NOW, actor: 'mod', role: 'moderator', action: 'report.view', target: { type: 'report', ref: 'm1' } });
   return store;
 }
@@ -156,7 +164,7 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
 
     const store = openStore({ db });
     expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
-    expect(snapshot(db)).toEqual({ ...(before as object), outcomes: (before as { outcomes: Array<Record<string, unknown>> }).outcomes.map((r) => ({ ...r, corrective: 0 })) });
+    expect(snapshot(db)).toEqual({ ...(before as object), outcomes: (before as { outcomes: Array<Record<string, unknown>> }).outcomes.map((r) => ({ ...r, corrective: 0, ai_rule: null, ai_severity: null, ai_confidence: null, decided_by: null, source: 'human' })) });
     // the live schema survives the rebuild: the same columns (names, types, nullability, defaults, primary key) and the same three indexes, byte for byte
     expect(columnInfo(db, 'kit_notices')).toEqual(noticeCols);
     expect(indexSql(db, 'kit_notices')).toEqual(noticeIdx);
@@ -234,11 +242,14 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
   it('rows already in kit_ai_outcomes stay readable, and corrective reads 0', () => {
     const db = memDb();
     const old = openAt21(db);
-    const before = [0, 1, 2].map((i) => old.loadAiOutcome(`rep${i}`));
-    expect(before.every((r) => r !== null)).toBe(true);
+    const before = db.prepare('SELECT report_id, rule, verdict, agreement FROM kit_ai_outcomes ORDER BY report_id').all();
+    expect(before).toHaveLength(3);
     old.close();
     const store = openStore({ db });
-    expect([0, 1, 2].map((i) => store.loadAiOutcome(`rep${i}`))).toEqual(before);
+    const after = [0, 1, 2].map((i) => store.loadAiOutcome(`rep${i}`));
+    expect(after.map((r) => ({ report_id: r?.reportId, rule: r?.rule, verdict: r?.verdict, agreement: r?.agreement }))).toEqual(before);
+    // the columns migration 24 added read as nothing known, from a person
+    for (const r of after) expect(r).toMatchObject({ aiRule: null, aiSeverity: null, aiConfidence: null, decidedBy: null, source: 'human', corrective: false });
     expect(db.prepare('SELECT COUNT(*) AS n, SUM(corrective) AS c FROM kit_ai_outcomes').get()).toEqual({ n: 3, c: 0 });
     // a new outcome after the upgrade works as before
     expect(store.insertAiOutcome(outcome(9))).toBe(true);

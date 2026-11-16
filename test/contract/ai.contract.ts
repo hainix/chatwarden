@@ -167,6 +167,11 @@ const outcome = (over: Partial<AiOutcomeInsert> = {}): AiOutcomeInsert => {
     detail: DETAIL,
     badFaith: false,
     example: example(),
+    aiRule: '3',
+    aiSeverity: 'hostile',
+    aiConfidence: 'high',
+    decidedBy: 'mod_a',
+    source: 'human',
     ...over,
   };
 };

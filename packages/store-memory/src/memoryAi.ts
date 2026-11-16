@@ -3,6 +3,7 @@ import type {
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
+  AiGateRow,
   AiOutcomeInsert,
   AiOutcomeRow,
   AiReadDone,
@@ -42,6 +43,7 @@ export type MemoryAiMethods = Required<
     | 'aiExamples'
     | 'aiTeachableCount'
     | 'aiStats'
+    | 'aiGateRows'
     | 'purgeAi'
   >
 >;
@@ -317,6 +319,60 @@ class MemoryAi extends MemoryStore {
     return [...by.values()].sort((a, b) => ruleRank(a.rule) - ruleRank(b.rule) || ruleOrder(a.rule, b.rule));
   }
 
+  aiGateRows(since: number, recentSince: number): AiGateRow[] {
+    // The same counting rules as the SQLite query (see `Store.aiGateRows`); SqliteStore is the reference.
+    const cells = new Map<string, { rule: string; severity: AiGateRow['severity']; rows: AiOutcomeRow[] }>();
+    for (const r of this.aiOutcomes.values()) {
+      if (r.decidedAt < since || r.aiRule === null || r.aiSeverity === null) continue;
+      if (r.aiVerdict !== 'upheld' || r.aiConfidence !== 'high' || r.agreement === 'none' || r.source === 'review' || r.badFaith) continue;
+      const key = `${r.aiRule}/${r.aiSeverity}`;
+      const cell = cells.get(key) ?? { rule: r.aiRule, severity: r.aiSeverity, rows: [] };
+      cell.rows.push(r);
+      cells.set(key, cell);
+    }
+    const out: AiGateRow[] = [];
+    for (const cell of cells.values()) {
+      let cleanAgree = 0;
+      let hardOverride = 0;
+      let reduced = 0;
+      let recentN = 0;
+      let recentClean = 0;
+      let first = Number.POSITIVE_INFINITY;
+      let last = Number.NEGATIVE_INFINITY;
+      const deciders = new Set<string>();
+      for (const r of cell.rows) {
+        const clean = r.agreement === 'agree' && !r.reversed && r.detail.rule === true && r.detail.outcome !== 'milder';
+        const hard = (r.agreement === 'override' && r.verdict === 'no_action') || (r.reversed && r.corrective);
+        if (clean) cleanAgree += 1;
+        if (hard) hardOverride += 1;
+        else if (r.reversed && !r.corrective) reduced += 1;
+        if (r.decidedBy !== null) deciders.add(r.decidedBy);
+        first = Math.min(first, r.decidedAt);
+        last = Math.max(last, r.decidedAt);
+        if (r.decidedAt >= recentSince) {
+          recentN += 1;
+          if (clean) recentClean += 1;
+        }
+      }
+      out.push({
+        rule: cell.rule,
+        severity: cell.severity,
+        counts: {
+          qualifying: cell.rows.length,
+          cleanAgree,
+          hardOverride,
+          reduced,
+          deciders: deciders.size,
+          firstAt: first,
+          lastAt: last,
+          recent: { n: recentN, cleanAgree: recentClean },
+          reviewed: { n: 0, confirmed: 0, hardUndo: 0, lastHardUndoAt: null, secondLastHardUndoAt: null },
+        },
+      });
+    }
+    return out.sort((a, b) => ruleRank(a.rule) - ruleRank(b.rule) || ruleOrder(a.rule, b.rule) || SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+  }
+
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
     const reads = this.aiReads;
     const outcomes = new Map(this.aiOutcomes);
@@ -344,6 +400,9 @@ class MemoryAi extends MemoryStore {
     return { reads: reads.length - keptReads.length, outcomes: gone };
   }
 }
+
+/** The conduct levels, mildest first: the order of `aiGateRows` within a rule. A local copy of core's: this package links no runtime core code. */
+const SEVERITY_ORDER: readonly string[] = ['banter', 'rude', 'hostile', 'severe'];
 
 /** The page sizes used when a limit is omitted, not finite or below 1. Local copies of core's: this package links no runtime core code. */
 const EXAMPLES_DEFAULT_LIMIT = 2;

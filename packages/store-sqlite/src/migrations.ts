@@ -678,4 +678,34 @@ CREATE TABLE kit_links (
 CREATE INDEX kit_links_by_state ON kit_links (system, state, at);
 `,
   },
+  {
+    // AI levels 3 and 4, release 1 (seams and the read-only gate dashboard). Additive: five columns on the casebook (kit_ai_outcomes) and one index;
+    // no table is rebuilt and no row is deleted, and the runner wraps this in one savepoint with the version bump, so a failure leaves version 23.
+    //   The gates read the AI's OWN side of each decision, and the join to kit_ai_reads is not enough: reads are purged at 90 days and the outcomes live
+    //   365. ai_rule and ai_severity are what the AI's recommendation named (the read's own rule and level when it made none), ai_confidence the read's
+    //   confidence (NULL for a read flagged as an injection, so it can never qualify), decided_by the deciding moderator's staff ref (an audit-class
+    //   identifier, never returned to a player). `source` says where the decision came from: 'human' (a person decided, as at level 2), 'holdback' (a case
+    //   the AI would have acted on, decided by a person) or 'review' (a person confirming an AI action; the earn gates ignore it). Existing rows are
+    //   'human'. Rows whose read is gone (or never existed) keep NULL and are not counted by the gates.
+    //       kit_ai_outcomes_by_cell (ai_rule, ai_severity, decided_at): the gate query, one indexed aggregate.
+    version: 24,
+    sql: `
+ALTER TABLE kit_ai_outcomes ADD COLUMN ai_rule       TEXT;
+ALTER TABLE kit_ai_outcomes ADD COLUMN ai_severity   TEXT;
+ALTER TABLE kit_ai_outcomes ADD COLUMN ai_confidence TEXT;
+ALTER TABLE kit_ai_outcomes ADD COLUMN decided_by    TEXT;
+ALTER TABLE kit_ai_outcomes ADD COLUMN source        TEXT NOT NULL DEFAULT 'human' CHECK (source IN ('human', 'holdback', 'review'));
+
+UPDATE kit_ai_outcomes SET
+  ai_rule = (SELECT CASE WHEN r.rec_json IS NOT NULL AND json_valid(r.rec_json) THEN CAST(json_extract(r.rec_json, '$.rule') AS TEXT) ELSE r.rule END
+             FROM kit_ai_reads r WHERE r.id = kit_ai_outcomes.read_id),
+  ai_severity = (SELECT CASE WHEN r.rec_json IS NOT NULL AND json_valid(r.rec_json) THEN json_extract(r.rec_json, '$.severity') ELSE r.severity END
+                 FROM kit_ai_reads r WHERE r.id = kit_ai_outcomes.read_id),
+  ai_confidence = (SELECT CASE WHEN r.injection = 1 THEN NULL ELSE r.confidence END FROM kit_ai_reads r WHERE r.id = kit_ai_outcomes.read_id),
+  decided_by = (SELECT p.actioned_by FROM kit_reports p WHERE p.id = kit_ai_outcomes.report_id)
+WHERE read_id IS NOT NULL;
+
+CREATE INDEX kit_ai_outcomes_by_cell ON kit_ai_outcomes (ai_rule, ai_severity, decided_at);
+`,
+  },
 ];

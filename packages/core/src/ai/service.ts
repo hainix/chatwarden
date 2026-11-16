@@ -919,6 +919,13 @@ export class AiService implements AiFacade {
     const reasonRule = suggestedRule(this.deps.profile().reporting.reasons, report.reportedReason ?? null, this.deps.rules);
     const filedUnder: number | 'uncovered' | null = own.rule ?? rec?.rule ?? read?.rule ?? (typeof reasonRule === 'number' ? reasonRule : null);
 
+    // A case whose read flagged an injection, or whose chat tripped the tripwire, is never taught and never earns trust.
+    const injected = read?.injectionSuspected === true || this.prepare(report).injection;
+    // The AI's own side, kept on the row for the gates (the read is purged at 90 days, the outcome lives 365): what its recommendation named, or the
+    // read's own rule and level when it made none (level 1). Computed here from the stored read, never from the echo.
+    const aiRuleRef = rec !== null ? rec.rule : (read?.rule ?? null);
+    const aiSeverity: ConductLevel | null = rec !== null ? rec.severity : (read?.severity ?? null);
+
     const profile = this.deps.profile();
     const teachable =
       ai.readId !== null &&
@@ -929,8 +936,7 @@ export class AiService implements AiFacade {
       severity !== null &&
       own.rule !== null;
     let example: AiOutcomeInsert['example'] = null;
-    // A case whose read flagged an injection, or whose chat tripped the tripwire, is never taught: its lines would be replayed into later prompts.
-    const injected = read?.injectionSuspected === true || this.prepare(report).injection;
+    // An injected case is never taught: its lines would be replayed into later prompts.
     if (teachable && !injected && severity !== null && own.rule !== null) {
       const cited = new Set([...own.lineIds, ...(rec?.evidence ?? []), ...(read?.evidence ?? [])]);
       const lines = pickExampleLines(this.prepare(report).chosen, cited);
@@ -950,6 +956,11 @@ export class AiService implements AiFacade {
       detail: result.detail,
       badFaith,
       example,
+      aiRule: aiRuleRef === null ? null : String(aiRuleRef),
+      aiSeverity,
+      aiConfidence: injected || read === null ? null : read.confidence,
+      decidedBy: args.actor,
+      source: 'human',
     };
   }
 

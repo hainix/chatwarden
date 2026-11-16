@@ -129,7 +129,7 @@ describe('the corrective example', () => {
   const seed = (k: Kit, count: number): void => {
     for (let n = 1; n <= count; n += 1) {
       const example: AIExample = { rule: 2, severity: 'rude', verdict: 'upheld', lines: [{ who: 'P1', text: `seed words ${n}` }] };
-      const row: AiOutcomeInsert = { reportId: `seed-${n}`, readId: null, decidedAt: NOW - n * 1000, level: 2, verdict: 'upheld', rule: '2', severity: 'rude', aiVerdict: 'upheld', agreement: 'agree', detail: { verdict: true, rule: true, lines: 1, outcome: 'same', oneClick: false }, badFaith: false, example };
+      const row: AiOutcomeInsert = { reportId: `seed-${n}`, readId: null, decidedAt: NOW - n * 1000, level: 2, verdict: 'upheld', rule: '2', severity: 'rude', aiVerdict: 'upheld', agreement: 'agree', detail: { verdict: true, rule: true, lines: 1, outcome: 'same', oneClick: false }, badFaith: false, example, aiRule: null, aiSeverity: null, aiConfidence: null, decidedBy: null, source: 'human' };
       k.store.insertAiOutcome(row);
     }
   };

@@ -29,6 +29,7 @@ export type {
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
+  AiGateRow,
   AiOutcomeDetail,
   AiOutcomeInsert,
   AiOutcomeRow,

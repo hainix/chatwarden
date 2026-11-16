@@ -14,6 +14,7 @@ import type {
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
+  AiGateRow,
   AiOutcomeInsert,
   AiOutcomeRow,
   AiReadDone,
@@ -401,6 +402,11 @@ function aiOutcomeFromRow(r: Record<string, unknown>): AiOutcomeRow {
     reversed: Number(r.reversed) === 1,
     corrective: Number(r.corrective) === 1,
     dontTeach: Number(r.dont_teach) === 1,
+    aiRule: nullableText(r.ai_rule),
+    aiSeverity: nullableText(r.ai_severity) as AiOutcomeRow['aiSeverity'],
+    aiConfidence: nullableText(r.ai_confidence) as AiOutcomeRow['aiConfidence'],
+    decidedBy: nullableText(r.decided_by),
+    source: String(r.source) as AiOutcomeRow['source'],
   };
 }
 
@@ -418,6 +424,28 @@ function compareRules(a: string | null, b: string | null): number {
 }
 
 /** What makes an outcome a teachable example (everything but the rule, severity and time). One text, used by two queries. */
+/**
+ * The gate query (design 5.1): one aggregate over the casebook, grouped by the AI's own cell, over the by-cell index. `?1` is the start of the
+ * window and `?2` the start of the recent window. The counting rules are the contract's (`Store.aiGateRows`); the in-memory store repeats them.
+ */
+export const AI_GATE_ROWS_SQL = `
+WITH q AS (
+  SELECT ai_rule, ai_severity, decided_by, decided_at,
+         CASE WHEN agreement = 'agree' AND reversed = 0 AND json_valid(detail_json) AND json_extract(detail_json, '$.rule') = 1
+                   AND COALESCE(json_extract(detail_json, '$.outcome'), '') <> 'milder' THEN 1 ELSE 0 END AS clean,
+         CASE WHEN (agreement = 'override' AND verdict = 'no_action') OR (reversed = 1 AND corrective = 1) THEN 1 ELSE 0 END AS hard,
+         CASE WHEN reversed = 1 AND corrective = 0 THEN 1 ELSE 0 END AS reduced
+  FROM kit_ai_outcomes
+  WHERE ai_rule IS NOT NULL AND decided_at >= ?1 AND ai_severity IS NOT NULL AND ai_verdict = 'upheld' AND ai_confidence = 'high'
+    AND agreement <> 'none' AND source IN ('human', 'holdback') AND bad_faith = 0
+)
+SELECT ai_rule AS rule, ai_severity AS severity, COUNT(*) AS qualifying, SUM(clean) AS clean, SUM(hard) AS hard,
+       SUM(CASE WHEN reduced = 1 AND hard = 0 THEN 1 ELSE 0 END) AS reduced,
+       COUNT(DISTINCT decided_by) AS deciders, MIN(decided_at) AS first_at, MAX(decided_at) AS last_at,
+       SUM(CASE WHEN decided_at >= ?2 THEN 1 ELSE 0 END) AS recent_n,
+       SUM(CASE WHEN decided_at >= ?2 AND clean = 1 THEN 1 ELSE 0 END) AS recent_clean
+FROM q GROUP BY ai_rule, ai_severity`;
+
 const AI_TEACHABLE_SQL = "example_json IS NOT NULL AND agreement <> 'none' AND reversed = 0 AND dont_teach = 0 AND bad_faith = 0";
 
 /** The kit_meta key of the change token's counter. */
@@ -1020,8 +1048,9 @@ export class SqliteStore implements Store, TermStore {
           this.db
             .prepare(
               `INSERT INTO kit_ai_outcomes
-                 (report_id, read_id, decided_at, level, verdict, rule, severity, ai_verdict, agreement, detail_json, bad_faith, example_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 (report_id, read_id, decided_at, level, verdict, rule, severity, ai_verdict, agreement, detail_json, bad_faith, example_json,
+                  ai_rule, ai_severity, ai_confidence, decided_by, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (report_id) DO NOTHING`,
             )
             .run(
@@ -1038,6 +1067,11 @@ export class SqliteStore implements Store, TermStore {
               row.badFaith ? 1 : 0,
               // A bad-faith row can never teach, so its chat text is not kept.
               row.example === null || row.badFaith ? null : JSON.stringify(row.example),
+              row.aiRule,
+              row.aiSeverity,
+              row.aiConfidence,
+              row.decidedBy,
+              row.source,
             ).changes,
         ) > 0,
     );
@@ -1138,6 +1172,29 @@ export class SqliteStore implements Store, TermStore {
         oneClick: Number(r.one_click),
       }))
       .sort((a, b) => compareRules(a.rule, b.rule));
+  }
+
+  aiGateRows(since: number, recentSince: number): AiGateRow[] {
+    const rows = this.transaction(() => this.db.prepare(AI_GATE_ROWS_SQL).all(since, recentSince));
+    return rows
+      .map(
+        (r): AiGateRow => ({
+          rule: String(r.rule),
+          severity: String(r.severity) as AiGateRow['severity'],
+          counts: {
+            qualifying: Number(r.qualifying),
+            cleanAgree: Number(r.clean),
+            hardOverride: Number(r.hard),
+            reduced: Number(r.reduced),
+            deciders: Number(r.deciders),
+            firstAt: Number(r.first_at),
+            lastAt: Number(r.last_at),
+            recent: { n: Number(r.recent_n), cleanAgree: Number(r.recent_clean) },
+            reviewed: { n: 0, confirmed: 0, hardUndo: 0, lastHardUndoAt: null, secondLastHardUndoAt: null },
+          },
+        }),
+      )
+      .sort((a, b) => compareRules(a.rule, b.rule) || CONDUCT_LEVELS.indexOf(a.severity) - CONDUCT_LEVELS.indexOf(b.severity));
   }
 
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
