@@ -27,3 +27,13 @@ export {
   type CorpusRevokedRelease,
   type CorpusRevokeReason,
 } from './index-file.js';
+export {
+  createCorpusLoader,
+  type CorpusCache,
+  type CorpusLoader,
+  type CorpusLoaderOptions,
+  type CorpusState,
+  type CorpusStatus,
+  type RefreshResult,
+  type Schedule,
+} from './loader.js';

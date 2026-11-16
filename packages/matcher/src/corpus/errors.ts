@@ -19,7 +19,8 @@ export type CorpusErrorCode =
   | 'hash_mismatch'
   | 'bad_zip'
   | 'bad_manifest'
-  | 'bad_pack';
+  | 'bad_pack'
+  | 'cache_failed';
 
 // One fixed sentence per code. Nothing from the input is ever put into a message: the input is a download, a cached file or a
 // term list, and an error is logged and shown, so it must not be able to carry any of that.
@@ -41,6 +42,7 @@ const MESSAGES: Readonly<Record<CorpusErrorCode, string>> = {
   bad_zip: 'corpus: the archive is not valid',
   bad_manifest: 'corpus: the release manifest is not valid',
   bad_pack: 'corpus: the release does not load as a term list',
+  cache_failed: 'corpus: the cache could not be written',
 };
 
 /**
