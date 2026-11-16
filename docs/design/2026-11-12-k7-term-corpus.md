@@ -368,11 +368,22 @@ An array of rows:
 | `collidesWith` | tags of other supported languages in which this spelling is an ordinary word. The loader turns the row **off** when any of those languages is also installed (the matcher does not use `language`, so a Spanish word that is plain English would otherwise block English chat) |
 | `since` | the release that first carried it |
 | `approvals` | number of distinct reviewer approvals (a count only; no reviewer is named) |
-| `positive` | lines that must be blocked by this term (generated from templates by the builder: bare, upper case, in a sentence, glued punctuation, a look-alike spelling); reviewer additions allowed |
-| `negative` | lines that must never be blocked: every dictionary word, in any supported language, that contains the term or collapses to it, plus reviewer additions |
+| `positive` | lines that must be blocked by this term (generated from templates by the builder: bare, upper case, in a sentence, glued punctuation, a look-alike spelling); reviewer additions allowed. **The builder generates at most 8 template lines a term** (the kit parser takes 50; the loader's canary reads every `positive` line whenever an exception is active, so its cost is linear in this number), keeps only those the term itself blocks, and puts the reviewers' lines after them |
+| `negative` | lines that must never be blocked: every dictionary word, in any supported language, that contains the term or collapses to it, plus reviewer additions. At most 50 lines a row (the kit parser's limit): the reviewers' lines first, then the dictionary words, the word itself (in a language where it is ordinary) before the rest |
 
 A row is **active in a store** when `status` is `accepted` or `provisional`, `defaultActive` is true, and `collidesWith` does not meet an
 installed language. `disputed` and `withdrawn` rows are loaded inactive.
+
+**The builder's gates** (`services/corpus/src/build/gates.ts`). The release is built, read back with the kit's own parser, and then judged with the
+real matcher the way a game's loader would use it, **in every selection of the release's languages** (the kit's `releaseToPack` decides which rows
+are on, so a collision row is off when the other language is installed and is asked to leave that language's words alone only when it is not).
+Each of these holds the term out of the release, with a closed code, never a word: a `positive` line its own term does not block
+(`positive_not_blocked`); a `negative` line its own term blocks (`negative_blocked`); a line of an installed language's whole negative corpus (the
+database's, not only the 2 000 lines a file carries) the active pack blocks (`negative_corpus_blocked`); a dictionary word that equals or
+contains a term, in an installed language, that the active pack blocks (`innocent_word_blocked`: this is what holds a term that equals an ordinary
+word of its own language, at any rank). A term that was **already released** (`since` is set) and now fails stops the build instead: nothing
+leaves a published list without a reviewer disputing it. `gate` in the manifest counts the lines checked. More than 200 terms new in one release
+need `--allow-bulk`. The builder writes no exceptions yet (there is no exceptions table): `exceptions.json` is an empty array with zero counts.
 
 ### 6.7 `exceptions.json`, `negative.<lang>.json`
 
