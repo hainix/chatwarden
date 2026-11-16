@@ -237,6 +237,40 @@ describe.each(['posix', 'win32'] as const)('applyPlan (%s)', (kind: PathKind) =>
     expect(world.files()).toEqual(['package.json']);
   });
 
+  it('a symlink planted at the temp name never makes init write through it (a cloned repo cannot redirect a write)', async () => {
+    const world = mk({ files: { 'package.json': '{}', 'victim.txt': 'precious\n' }, links: { 'src/.kit.ts.chatwarden-tmp': 'victim.txt' } });
+    const result = await applyPlan(world.env, planOf([{ path: 'src/kit.ts', content: 'export const a = 1;\n' }]), OPTS);
+    expect(world.read('victim.txt')).toBe('precious\n');
+    // The planted link was removed (not followed) and the file was written the normal way.
+    expect(result.error).toBeUndefined();
+    expect(world.read('src/kit.ts')).toBe('export const a = 1;\n');
+    expect(world.writes().filter((o) => o.op === 'writeFile').every((o) => o.flag === 'wx')).toBe(true);
+  });
+
+  it('a temp file left by an interrupted run is replaced, not an error', async () => {
+    const world = mk({ files: { 'package.json': '{}', 'src/.kit.ts.chatwarden-tmp': 'half' } });
+    const result = await applyPlan(world.env, planOf([{ path: 'src/kit.ts', content: 'ok\n' }]), OPTS);
+    expect(result.error).toBeUndefined();
+    expect(world.read('src/kit.ts')).toBe('ok\n');
+    expect(world.has('src/.kit.ts.chatwarden-tmp')).toBe(false);
+  });
+
+  it('a file whose only difference is CRLF line endings is unchanged and is not rewritten (a Windows autocrlf checkout)', async () => {
+    const world = mk({ files: { 'package.json': '{}', 'a.ts': 'one\r\ntwo\r\n' } });
+    const result = await applyPlan(world.env, planOf([{ path: 'a.ts', content: 'one\ntwo\n' }]), OPTS);
+    expect(actions(result)).toEqual({ 'a.ts': 'unchanged' });
+    expect(exitCodeOf(result)).toBe(0);
+    expect(world.read('a.ts')).toBe('one\r\ntwo\r\n');
+    expect(world.writes()).toEqual([]);
+  });
+
+  it('a real difference next to CRLF endings is still a conflict', async () => {
+    const world = mk({ files: { 'package.json': '{}', 'a.ts': 'one\r\nTWO\r\n' } });
+    const result = await applyPlan(world.env, planOf([{ path: 'a.ts', content: 'one\ntwo\n' }]), OPTS);
+    expect(actions(result)).toEqual({ 'a.ts': 'skipped' });
+    expect(exitCodeOf(result)).toBe(2);
+  });
+
   it('two plan entries with the same path are refused as unsafe', async () => {
     const world = mk();
     const plan: Plan = { ...planOf([]), files: [{ path: 'a.ts', content: '1\n' }, { path: 'a.ts', content: '2\n' }] };

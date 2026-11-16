@@ -82,7 +82,10 @@ async function writeAtomic(env: CliEnv, absolute: string, content: string): Prom
   await env.fs.mkdir(folder, { recursive: true });
   const temp = env.path.join(folder, `.${env.path.basename(absolute)}.chatwarden-tmp`);
   try {
-    await env.fs.writeFile(temp, content, { flag: 'w' });
+    // A stale or planted entry at the temp name (a symbolic link in a cloned repo) is removed, never followed: `rm` does not follow a link, and
+    // `wx` fails rather than open an existing name.
+    await env.fs.rm(temp, { force: true });
+    await env.fs.writeFile(temp, content, { flag: 'wx' });
     await env.fs.rename(temp, absolute);
   } catch (cause) {
     try {
@@ -128,7 +131,8 @@ export async function applyPlan(env: CliEnv, plan: Plan, options: ApplyOptions):
         result.files.push({ path: target.path, action: 'created' });
         continue;
       }
-      if (existing.text === target.content) {
+      // Line endings alone do not make a conflict: a Windows checkout with autocrlf turns an untouched file into CRLF. The file is never rewritten.
+      if (existing.text.replaceAll('\r\n', '\n') === target.content) {
         result.files.push({ path: target.path, action: 'unchanged' });
         continue;
       }

@@ -143,8 +143,11 @@ export function createWorld(options: WorldOptions = {}): World {
       const parent = real(p.dirname(key(file)));
       if (entries.get(parent)?.kind !== 'dir') throw errno('ENOENT', file);
       const target = p.join(parent, p.basename(file));
-      if (flag === 'wx' && entries.has(target)) throw errno('EEXIST', file);
-      entries.set(target, { kind: 'file', content: data });
+      const existing = entries.get(target);
+      if (flag === 'wx' && existing) throw errno('EEXIST', file);
+      // Like a real open(2): flag 'w' follows a symbolic link and writes to what it points at.
+      if (existing?.kind === 'link') entries.set(existing.target, { kind: 'file', content: data });
+      else entries.set(target, { kind: 'file', content: data });
     },
     async rename(from, to) {
       record({ op: 'rename', path: from, to });
