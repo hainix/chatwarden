@@ -9,6 +9,9 @@ tests use a D1-shaped adapter over `node:sqlite` (`test/d1.ts`) and a Map-backed
 no key**: tests use invented words and keys generated at run time, and `scripts/no-corpus-data.mjs` guards the repo. The real lists, the seed
 and the dictionary live outside the repository (the design's `.corpus-data/`), and the tools below refuse to write them inside a git tree.
 
+The tools and the tests need **Node 24 or later** (they use `node:sqlite`, which Node 22 does not fully have). The Worker itself runs on
+Cloudflare, not Node. On an older Node the repo's test run leaves the service's tests out.
+
 Status: pre-release, as-is, no support promise.
 
 Nothing has been deployed.
