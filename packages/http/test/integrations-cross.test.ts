@@ -441,7 +441,7 @@ describe('logs hold event names and error classes only (Review Focus 3)', () => 
 
 // ---- 2. construction errors never echo a value ----
 
-const BAD_VALUES: unknown[] = ['LEAKstring with a space and é ☃', 987654.321, { LEAKkey: 'LEAKvalue' }, ['LEAKelement'], -987654, { __proto__: null, LEAKnull: 'LEAKnullvalue' }];
+const BAD_VALUES: unknown[] = ['LEAKstring with a space and \u00e9 \u2603', 987654.321, { LEAKkey: 'LEAKvalue' }, ['LEAKelement'], -987654, { __proto__: null, LEAKnull: 'LEAKnullvalue' }];
 const LEAKY = /LEAK|987654/i;
 
 const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
