@@ -1,3 +1,4 @@
+import type { AccessConfig } from './access.js';
 import type { D1Like } from './env.js';
 
 /** The injected clock: every time in the service comes from here (the Worker entry is the one place that reads the system clock). */
@@ -23,6 +24,10 @@ export interface AppDeps {
   random?: (length: number) => Uint8Array;
   /** Leading zero bits the hashcash stamp of a submission must have (default 16, design 6.8). */
   stampBits?: number;
+  /** Cloudflare Access for `/admin/*`. Without it the review page and its API do not exist (404). */
+  access?: AccessConfig;
+  /** The review page's static files (`page/admin/*`): the Worker's ASSETS binding in production, files in a test. Null when there is no such file. */
+  assets?: (name: string) => Promise<Response | null>;
 }
 
 /** Logs an event without ever letting the logger break a request. */

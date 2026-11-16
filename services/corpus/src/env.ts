@@ -56,6 +56,8 @@ export interface Env {
   /** The Cloudflare Access team domain, such as `example.cloudflareaccess.com`, and the application's audience tag (S4). */
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
+  /** The review page's static files (Workers Static Assets, `page/admin/*`). Reached only after Access and the reviewer table have said yes. */
+  ASSETS?: { fetch(request: Request): Promise<Response> };
   /** Secret: the Turnstile secret for the docs-site report form (S5). */
   TURNSTILE_SECRET?: string;
 }

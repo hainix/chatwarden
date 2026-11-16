@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS submissions (
   reason TEXT CHECK (reason IS NULL OR reason IN ('known_innocent','not_a_term','duplicate','needs_context','other')),
   term_id TEXT,
   received_day TEXT NOT NULL,
-  decided_at TEXT
+  decided_at TEXT,
+  -- held: a gate failure found at review (a closed code); the submission stays in the queue, no term is made until a reviewer overrides it.
+  held TEXT
 );
 CREATE INDEX IF NOT EXISTS submissions_word_key ON submissions (word_key);
 CREATE INDEX IF NOT EXISTS submissions_installation ON submissions (installation, status);
@@ -44,6 +46,12 @@ CREATE TABLE IF NOT EXISTS reviews (
   fluent INTEGER NOT NULL, at TEXT NOT NULL,
   UNIQUE (subject_kind, subject_id, reviewer)
 );
+
+-- The reviewers (design 10.3): who may use /admin, and the languages each is fluent in (a JSON array of tags). The owner maintains this table
+-- by hand (`wrangler d1 execute`). reviewer_installations registers the installation keys (by their hash) a reviewer controls: nobody reviews a
+-- submission from a key registered to them.
+CREATE TABLE IF NOT EXISTS reviewers (email TEXT PRIMARY KEY, fluent TEXT NOT NULL DEFAULT '[]', active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS reviewer_installations (reviewer TEXT NOT NULL, installation TEXT NOT NULL, PRIMARY KEY (reviewer, installation));
 
 -- No free text is stored for a report. channel is `inst:<hash>` (a signed report) or `web:<hash>` (the docs-site form).
 CREATE TABLE IF NOT EXISTS reports (

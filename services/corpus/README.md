@@ -25,6 +25,22 @@ stamp and signed. The network address (`cf-connecting-ip`) is turned into a keye
 stored or logged; an IPv6 address counts as its /64. Logs hold `{ stage, code }` and nothing else. A cron trigger purges counters after two
 days and notes 90 days after a decision.
 
+## The review page
+
+`/admin/*` (the page in `page/admin/`, served from Workers Static Assets, and its API) sits behind a Cloudflare Access application. The Worker
+checks the Access JWT itself (RS256, the team's certs, issuer and audience), then that the email is an active row of `reviewers`. The owner
+keeps that table by hand:
+
+```
+wrangler d1 execute chatwarden-corpus --command "INSERT INTO reviewers (email, fluent) VALUES ('name@example.org', '[\"en\"]')"
+```
+
+`fluent` is a JSON array of language tags. `reviewer_installations` lists the installation hashes (sha256 of the raw public key, hex) a reviewer
+controls: they cannot review those submissions. The lists never carry a word or a note; a reveal does, and is counted, audited and reminds the
+reviewer to take a break every 20. Rules (design 10.3), enforced in SQL: the first approval makes a term provisional, the second by a different
+reviewer makes it accepted when one approver is fluent, a slur needs a target, one reviewer's word disputes a term and two restore it, and every
+action writes an audit row in the same transaction.
+
 ## Owner actions
 
 Written up with the tools (later tasks): create the D1 database and the R2 bucket, apply `schema.sql`, set the secrets

@@ -1,8 +1,10 @@
+import { createAccessVerifier } from './access.js';
 import { submit, status, ID_RE } from './arrival.js';
 import { purgeExpired } from './counters.js';
 import { logEvent, type AppDeps, type Clock } from './deps.js';
 import type { Env } from './env.js';
 import { json, methodNotAllowed, notFound } from './http.js';
+import { handleAdmin } from './review.js';
 
 export type { AppDeps, Clock, LogEvent } from './deps.js';
 
@@ -18,9 +20,11 @@ const SUBMISSIONS = '/v1/submissions';
 /** The routes, over `deps`. Throws only for a configuration that cannot work (no secret). */
 export function createApp(deps: AppDeps): App {
   if (typeof deps.secret !== 'string' || deps.secret.length === 0) throw new RangeError('createApp: secret is required');
+  const verifier = deps.access === undefined ? null : createAccessVerifier(deps.access, deps.clock, (e) => logEvent(deps, e.stage, e.code));
   return {
     async fetch(request: Request): Promise<Response> {
       const { pathname } = new URL(request.url);
+      if (pathname === '/admin' || pathname.startsWith('/admin/')) return handleAdmin(request, deps, verifier);
       if (pathname === SUBMISSIONS) return request.method === 'POST' ? submit(request, deps) : methodNotAllowed('POST');
       if (pathname.startsWith(`${SUBMISSIONS}/`)) {
         const id = pathname.slice(SUBMISSIONS.length + 1);
@@ -49,13 +53,39 @@ const logToConsole = (event: { stage: string; code: string; count?: number }): v
 };
 
 function depsFor(env: Env): AppDeps {
-  return { db: env.DB, clock: systemClock, secret: env.COUNTER_SECRET, log: logToConsole };
+  const deps: AppDeps = { db: env.DB, clock: systemClock, secret: env.COUNTER_SECRET, log: logToConsole };
+  if (env.ACCESS_TEAM_DOMAIN !== undefined && env.ACCESS_TEAM_DOMAIN !== '' && env.ACCESS_AUD !== undefined && env.ACCESS_AUD !== '') {
+    deps.access = { teamDomain: env.ACCESS_TEAM_DOMAIN, aud: env.ACCESS_AUD };
+  }
+  const assets = env.ASSETS;
+  if (assets !== undefined) {
+    deps.assets = async (name) => {
+      try {
+        return await assets.fetch(new Request(`https://assets.invalid/admin/${name}`));
+      } catch {
+        return null;
+      }
+    };
+  }
+  return deps;
+}
+
+/** One app per environment, so the Access keys it has fetched are kept between requests. */
+const apps = new WeakMap<object, App>();
+
+function appFor(env: Env): App {
+  let app = apps.get(env);
+  if (app === undefined) {
+    app = createApp(depsFor(env));
+    apps.set(env, app);
+  }
+  return app;
 }
 
 export default {
   fetch(request: Request, env: Env): Promise<Response> {
     try {
-      return createApp(depsFor(env)).fetch(request);
+      return appFor(env).fetch(request);
     } catch {
       logEvent(depsFor(env), 'worker', 'misconfigured');
       return Promise.resolve(json(500, { error: 'internal' }));

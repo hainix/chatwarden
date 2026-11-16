@@ -112,7 +112,7 @@ export interface World {
 export async function makeWorld(over: Partial<AppDeps> = {}): Promise<World> {
   const db = createD1();
   await applySchema(db);
-  const clock = makeClock(START);
+  const clock = (over.clock as TestClock | undefined) ?? makeClock(START);
   const logs: LogEvent[] = [];
   const consoleOutput: string[] = [];
   const originals = { warn: console.warn, error: console.error, log: console.log, info: console.info };

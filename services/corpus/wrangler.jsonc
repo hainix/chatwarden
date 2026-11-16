@@ -13,6 +13,9 @@
   // The release bucket (served read-only through the custom domain `releases.chatwarden.dev`, with no code on the read path).
   "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "chatwarden-releases" }],
 
+  // The review page (page/admin/*). Every path goes through the Worker first, so nothing is served before Access and the reviewer check.
+  "assets": { "directory": "./page", "binding": "ASSETS", "run_worker_first": true, "html_handling": "none", "not_found_handling": "none" },
+
   // Not secret: the Cloudflare Access team domain and the application's audience tag for /admin/*. Fill in at deploy time.
   "vars": { "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" },
 

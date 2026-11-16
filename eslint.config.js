@@ -45,6 +45,11 @@ export default tseslint.config(
     languageOptions: { globals: { localStorage: 'readonly', document: 'readonly' } },
   },
   {
+    // The corpus service's review page: one plain browser script, served by the Worker after Access has said yes.
+    files: ['services/*/page/**/*.js'],
+    languageOptions: { globals: { document: 'readonly', fetch: 'readonly' } },
+  },
+  {
     // The recipe goldens are what `chatwarden init` writes for an adopter's Node project: JavaScript there uses Node's and the Web's globals.
     files: ['examples/recipes/cases/**/*.{js,mjs}'],
     languageOptions: {

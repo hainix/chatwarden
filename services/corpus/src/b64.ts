@@ -20,9 +20,9 @@ export function b64uEncode(bytes: Uint8Array): string {
   return out;
 }
 
-/** The `length` bytes that `text` spells, or null for anything else (padding, another alphabet, a wrong length, a non-canonical tail). */
-export function b64uDecode(text: unknown, length: number): Uint8Array | null {
-  if (typeof text !== 'string' || text.length !== Math.ceil((length * 4) / 3) || !/^[A-Za-z0-9_-]+$/.test(text)) return null;
+/** The bytes that `text` spells in canonical base64url (the alphabet only, no padding, no stray trailing bits), or null. */
+export function b64uToBytes(text: unknown): Uint8Array | null {
+  if (typeof text !== 'string' || text.length === 0 || text.length % 4 === 1 || !/^[A-Za-z0-9_-]+$/.test(text)) return null;
   const standard = text.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (text.length % 4)) % 4);
   let binary: string;
   try {
@@ -32,7 +32,13 @@ export function b64uDecode(text: unknown, length: number): Uint8Array | null {
   }
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
-  return out.length === length && b64uEncode(out) === text ? out : null;
+  return b64uEncode(out) === text ? out : null;
+}
+
+/** The `length` bytes that `text` spells, or null for anything else (padding, another alphabet, a wrong length, a non-canonical tail). */
+export function b64uDecode(text: unknown, length: number): Uint8Array | null {
+  const out = b64uToBytes(text);
+  return out !== null && out.length === length ? out : null;
 }
 
 export const hex = (bytes: Uint8Array): string => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
