@@ -85,5 +85,8 @@ export interface Versions {
   chatwarden: string;
 }
 
-/** What the plan needs to know about the project beyond the answers. */
-export type Project = Pick<Detected, 'manager' | 'react'>;
+/**
+ * What the plan needs to know about the project beyond the answers. `platform` (`process.platform`) only changes how the install command is printed:
+ * on `win32` each package is double-quoted, because a bare `^` is cmd.exe's escape character and would turn a range into an exact pin.
+ */
+export type Project = Pick<Detected, 'manager' | 'react'> & { platform?: string };

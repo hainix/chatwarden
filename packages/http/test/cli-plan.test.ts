@@ -127,6 +127,25 @@ describe('buildPlan', () => {
 describe('buildPlan: the install command', () => {
   const caret = `^${VERSION}`;
 
+  it('on win32 every package is double-quoted, so cmd.exe keeps the caret (a bare ^ is its escape character and the range would become an exact pin)', () => {
+    for (const manager of MANAGERS) {
+      const built = plan({}, { manager, react: true, platform: 'win32' });
+      expect(built.install.packages.every((spec) => !spec.includes('"'))).toBe(true); // the list itself stays plain
+      const words = built.install.command.split(' ').slice(2);
+      expect(words.length).toBeGreaterThan(4);
+      for (const word of words) expect(word, word).toMatch(/^"@chatwarden\/[a-z-]+@\^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?"$|^"(react|react-dom|socket\.io-client)"$/);
+      expect(built.install.command).toContain(`"@chatwarden/core@${caret}"`);
+    }
+  });
+
+  it('elsewhere the printed command has no quotes (sh and PowerShell take the caret as it is)', () => {
+    for (const platform of [undefined, 'linux', 'darwin']) expect(plan({}, { ...PROJECT, ...(platform === undefined ? {} : { platform }) }).install.command).not.toContain('"');
+  });
+
+  it('the files are the same on every platform: only the printed command changes', () => {
+    expect(plan({}, { ...PROJECT, platform: 'win32' }).files).toEqual(plan({}, { ...PROJECT, platform: 'linux' }).files);
+  });
+
   it('is built per manager (npm install, pnpm add, yarn add, bun add) with caret ranges of the http VERSION', () => {
     const verbs: Record<(typeof MANAGERS)[number], string> = { npm: 'npm install', pnpm: 'pnpm add', yarn: 'yarn add', bun: 'bun add' };
     for (const manager of MANAGERS) {

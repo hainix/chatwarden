@@ -60,6 +60,8 @@ export interface CliEnv {
   env: Record<string, string | undefined>;
   /** `process.platform`: `'win32'`, `'darwin'`, `'linux'`. */
   platform: string;
+  /** `process.execPath`: the node binary running the CLI. install.ts runs a package manager's own script with it. */
+  execPath: string;
   /** Both stdin and stdout are a terminal: a prompt makes sense. */
   isTTY: boolean;
   spawn: Spawner;
@@ -91,6 +93,7 @@ export function nodeEnv(spawn: Spawner = noSpawner): CliEnv {
     stderr: { write: (chunk) => nodeProcess.stderr.write(chunk) },
     env: nodeProcess.env,
     platform: nodeProcess.platform,
+    execPath: nodeProcess.execPath,
     isTTY: Boolean(nodeProcess.stdin.isTTY && nodeProcess.stdout.isTTY),
     spawn,
   };

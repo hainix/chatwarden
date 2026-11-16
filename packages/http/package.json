@@ -25,6 +25,9 @@
     "url": "git+https://github.com/hainix/chatwarden.git",
     "directory": "packages/http"
   },
+  "bin": {
+    "chatwarden": "./dist/src/cli/bin.js"
+  },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
   "exports": {
@@ -47,6 +50,10 @@
     "./fetch": {
       "types": "./dist/src/fetch.d.ts",
       "default": "./dist/src/fetch.js"
+    },
+    "./cli": {
+      "types": "./dist/src/cli/index.d.ts",
+      "default": "./dist/src/cli/index.js"
     }
   },
   "typesVersions": {
@@ -62,6 +69,9 @@
       ],
       "fetch": [
         "dist/src/fetch.d.ts"
+      ],
+      "cli": [
+        "dist/src/cli/index.d.ts"
       ]
     }
   },

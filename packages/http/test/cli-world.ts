@@ -234,6 +234,7 @@ export function createWorld(options: WorldOptions = {}): World {
     stderr: { write: (chunk) => errChunks.push(chunk) },
     env: options.env ?? {},
     platform: options.platform ?? (kind === 'win32' ? 'win32' : 'linux'),
+    execPath: kind === 'win32' ? 'C:\\node\\node.exe' : '/usr/bin/node',
     isTTY: options.isTTY ?? false,
     spawn,
   };

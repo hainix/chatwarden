@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import * as http from '../src/index.js';
 import type { CompiledRoutes, FetchHandler, FetchOptions, KitResponse, KitStream, Mounts, RouteTable } from '../src/index.js';
 import * as fetchEntry from '../src/fetch.js';
+import * as cliEntry from '../src/cli/index.js';
 import type { KitStream as AdminKitStream } from '../src/admin-entry.js';
 import type { KitStream as DeclaredKitStream } from '../src/types.js';
 import * as wire from '../src/chat/wire.js';
@@ -67,6 +68,12 @@ describe('the public exports an adapter author needs', () => {
       const text = readFileSync(new URL(entry, import.meta.url), 'utf8');
       expect(text).toMatch(/export type \{[^}]*KitStream[^}]*\} from '\.\/types\.js'/);
     }
+  });
+
+  it('exports: runCli is the one function of ./cli, and the root entry does not carry the CLI', () => {
+    expect(typeof cliEntry.runCli).toBe('function');
+    expect(Object.keys(cliEntry).sort()).toEqual(['runCli']);
+    for (const name of ['runCli', 'installCommand', 'checkProject', 'createPrompter', 'buildPlan']) expect(name in http, name).toBe(false);
   });
 
   it('exports: toFetch is on the root and is the one from ./fetch, with its three types', () => {

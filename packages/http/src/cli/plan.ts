@@ -126,7 +126,9 @@ export function buildPlan(answers: Answers, versions: Versions, templates: Templ
   }
 
   const packages = installPackages(answers, versions, project);
-  const command = `${INSTALL_VERBS[project.manager]} ${packages.join(' ')}`;
+  // cmd.exe reads a bare ^ as its escape character; inside double quotes it is literal, and sh and PowerShell take the quotes in their stride.
+  const shown = project.platform === 'win32' ? packages.map((spec) => `"${spec}"`) : packages;
+  const command = `${INSTALL_VERBS[project.manager]} ${shown.join(' ')}`;
   const warnings: string[] = [];
   if (answers.chat === 'box' && !project.react) {
     warnings.push('The chat box is a React component and this project has no React: react and react-dom are on the install line; without React, use the ChatTransport seam (see the recipe).');

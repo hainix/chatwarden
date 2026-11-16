@@ -36,9 +36,10 @@ export interface Result {
   install?: { ran: boolean; failed?: boolean };
 }
 
-/** 0 done, 1 an unsafe path, 2 some files skipped because they differ, 3 could not write. */
+/** 0 done, 1 an unsafe path, 2 some files skipped because they differ, 3 could not write or install (a failed install is the louder result). */
 export function exitCodeOf(result: Result): 0 | 1 | 2 | 3 {
   if (result.error) return result.error.kind === 'unsafe' ? 1 : 3;
+  if (result.install?.failed) return 3;
   return result.files.some((file) => file.action === 'skipped') ? 2 : 0;
 }
 
