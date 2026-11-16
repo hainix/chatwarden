@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CORPUS_ZIP_PASSWORD, readZip, ZIP_LIMITS } from '@chatwarden/matcher/corpus';
+import { BuildError, packRelease } from '../src/build/release.js';
 import { writeReleaseZip } from '../src/build/zip.js';
 
 // The release zip writer (design 6.4): the kit's own reader is the judge. A test that passes here means a game can open the file.
@@ -71,5 +72,27 @@ describe('writeReleaseZip', () => {
     const zip = writeReleaseZip([{ name: 'a.json', data }], { password: CORPUS_ZIP_PASSWORD, time: T });
     expect(zip.length).toBeLessThan(data.length / 20);
     expect((await readZip(zip)).get('a.json')?.length).toBe(data.length);
+  });
+});
+
+describe('packRelease: an archive the kit would not read is a BuildError with a message that says so, not an opaque failure', () => {
+  const ok = [{ name: 'a.json', data: enc.encode('[]') }];
+  it('packs like writeReleaseZip', () => {
+    expect(packRelease(ok, T)).toEqual(writeReleaseZip(ok, { password: CORPUS_ZIP_PASSWORD, time: T }));
+  });
+  it('turns the writer’s limits (size, count) into too_large, with the limit in the message and no name or word', () => {
+    const big = [{ name: 'big.json', data: new Uint8Array(ZIP_LIMITS.expanded + 1) }];
+    const err = (() => {
+      try {
+        packRelease(big, T);
+      } catch (e) {
+        return e;
+      }
+      return null;
+    })();
+    expect(err).toBeInstanceOf(BuildError);
+    expect(err).toMatchObject({ code: 'too_large' });
+    expect(String((err as Error).message)).toMatch(/32 MiB|too large|larger/);
+    expect(() => packRelease(Array.from({ length: ZIP_LIMITS.entries + 1 }, (_, i) => ({ name: `f${i}.json`, data: enc.encode('[]') })), T)).toThrow(expect.objectContaining({ code: 'too_large' }));
   });
 });

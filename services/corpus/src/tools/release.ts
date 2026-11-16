@@ -46,6 +46,11 @@ export async function main(argv: readonly string[], io: ToolIo): Promise<number>
     await io.write(`${out}/terms-${version}.release.json`, `${JSON.stringify({ summary: result.summary, held: result.held, stamped: result.stamped }, null, 2)}\n`);
     const words = args['show-words'] === true ? new Map(result.release.terms.map((t) => [t.id, t.term])) : undefined;
     io.out(renderDiff(result.diff, words).trimEnd());
+    if (result.unrecorded.length > 0) {
+      io.out('');
+      io.out(`warning: ${result.unrecorded.length} term(s) of the previous release have no since in the database (its record SQL was not applied): ${result.unrecorded.join(', ')}`);
+    }
+    if (result.positiveUncovered > 0) io.out(`note: ${result.positiveUncovered} row(s) have no pack-wide positive line (the kit reads at most 2000 in a file); their own lines are still in the release.`);
     io.out('');
     io.out(`built ${zipPath} (${result.summary.bytes} bytes, sha-256 ${result.summary.sha256}), index sequence ${sequence}`);
     io.out('next: read the diff, then sign it (tools/sign.mjs).');

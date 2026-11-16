@@ -82,7 +82,7 @@ export function checkCase(input: unknown, source?: unknown, options: CheckOption
   const found = new Set<CaseCode>();
   const lines = typeof input === 'object' && input !== null ? linesOf((input as { lines?: unknown }).lines) : null;
   if (lines === null) return { ok: false, codes: ['identifier'] };
-  const c = input as { note?: unknown; group?: unknown; meta?: { source?: unknown } };
+  const c = input as { note?: unknown; reason?: unknown; group?: unknown; meta?: { source?: unknown } };
 
   // The repo's own long-room cases (synthetic) may be long; nothing else may.
   const longRoom = c.group === 'long-room' && typeof c.meta === 'object' && c.meta !== null && c.meta.source === 'synthetic';
@@ -91,6 +91,8 @@ export function checkCase(input: unknown, source?: unknown, options: CheckOption
   const texts = lines.map((l) => l.text);
   if (typeof c.note === 'string') texts.push(c.note);
   if (typeof c.note === 'string' && c.note.length > MAX_CASE_NOTE) found.add('too_long');
+  // The reason and the group are published as free strings too: the same patterns run over them (after the lines and the note, so the line order holds).
+  for (const extra of [c.reason, c.group]) if (typeof extra === 'string') texts.push(extra);
   for (const l of lines) {
     if (typeof l.who !== 'string' || !SPEAKERS.includes(l.who)) found.add('identifier');
     if (l.text.length > MAX_CASE_LINE) found.add('too_long');

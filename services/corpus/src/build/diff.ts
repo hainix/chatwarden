@@ -11,6 +11,8 @@ export interface TermsDiff {
   added: string[];
   changed: { id: string; fields: string[] }[];
   unchanged: number;
+  /** Ids that were in the previous release and are not in this one. */
+  removed: string[];
   /** Terms the gates kept out of this release, by id and code. */
   held: GateFailure[];
 }
@@ -42,7 +44,9 @@ export function diffTerms(previousVersion: string | null, previous: readonly Ter
     if (fields.length === 0) unchanged += 1;
     else changed.push({ id: row.id, fields });
   }
-  return { previous: previousVersion, total: next.length, byStatus, added, changed, unchanged, held: [...held] };
+  const now = new Set(next.map((r) => r.id));
+  const removed = (previous ?? []).filter((r) => !now.has(r.id)).map((r) => r.id).sort();
+  return { previous: previousVersion, total: next.length, byStatus, added, changed, unchanged, removed, held: [...held] };
 }
 
 /**
@@ -57,6 +61,7 @@ export function renderDiff(diff: TermsDiff, words?: ReadonlyMap<string, string>)
     `added: ${diff.added.length}, changed: ${diff.changed.length}, unchanged: ${diff.unchanged}, held out by the gates: ${diff.held.length}`,
   ];
   if (diff.added.length > 0) lines.push('', 'added:', ...diff.added.map((id) => `  ${tag(id)}`));
+  if (diff.removed.length > 0) lines.push('', `removed: ${diff.removed.length}`, ...diff.removed.map((id) => `  ${tag(id)}`));
   if (diff.changed.length > 0) lines.push('', 'changed:', ...diff.changed.map((c) => `  ${tag(c.id)}: ${c.fields.join(', ')}`));
   if (diff.held.length > 0) lines.push('', 'held out (fix, dispute or override them, then build again):', ...diff.held.map((h) => `  ${tag(h.id)}: ${h.code}`));
   return `${lines.join('\n')}\n`;

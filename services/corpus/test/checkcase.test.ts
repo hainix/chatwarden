@@ -75,6 +75,16 @@ describe('checkCase refuses: a handle-shaped speaker, a URL, an email, a phone n
     expect(checkCase(make([line('fine')], { note: 'a plain note about tone' }))).toEqual({ ok: true });
   });
 
+  it('applies the same rules to the reason and the group, which are published too', () => {
+    expect(codes(make([line('fine')], { reason: 'reported by user#4821' }))).toEqual(['identifier']);
+    expect(codes(make([line('fine')], { group: 'see https://example.test' }))).toEqual(['contact']);
+    expect(codes(make([line('fine')], { reason: 'write to mail@example.test' }))).toEqual(['contact']);
+    expect(codes(make([line('fine')], { group: 'room 192.0.2.7' }))).toEqual(['identifier']);
+    expect(checkCase(make([line('fine')], { reason: 'harassment', group: 'long-room' }))).toEqual({ ok: true });
+    expect(checkCase(make([line('fine')], { reason: null }))).toEqual({ ok: true });
+    expect(checkCase(make([line('fine')], { reason: 12, group: undefined }))).toEqual({ ok: true });
+  });
+
   it('holds a case to 12 lines: 12 pass, 13 are too long', () => {
     expect(MAX_CASE_LINES).toBe(12);
     expect(checkCase(make(Array.from({ length: 12 }, (_, i) => line(`line ${i}`))))).toEqual({ ok: true });

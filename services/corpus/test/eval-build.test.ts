@@ -168,6 +168,23 @@ describe('the privacy rules hold at build time too: a case that fails checkCase 
 });
 
 describe('options and errors', () => {
+  it('more than 500 cases in one language is a clear BuildError (the kit reads at most 500), with the count, not an opaque self-check failure', () => {
+    const cases = Array.from({ length: 501 }, (_, i) => mk(`rude-quissel-${i}`));
+    const err = (() => {
+      try {
+        build({ en: cases });
+      } catch (e) {
+        return e;
+      }
+      return null;
+    })();
+    expect(err).toBeInstanceOf(BuildError);
+    expect(err).toMatchObject({ code: 'too_many_cases' });
+    expect(String((err as Error).message)).toContain('500');
+    expect(String((err as Error).message)).toContain('501');
+    expect(build({ en: cases.slice(0, 500) }).set.cases).toHaveLength(500);
+  });
+
   it('refuses a version, a sequence, a language or a corpus that is not valid, with a fixed BuildError', () => {
     for (const bad of [{ version: '2026.13.0' }, { sequence: 0 }, { previous: 'x' }, { languages: ['en', 'xx'] }, { languages: [] }] as Partial<EvalBuildOptions>[]) {
       expect(() => build({}, bad), JSON.stringify(bad)).toThrow(BuildError);

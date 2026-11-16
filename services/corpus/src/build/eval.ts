@@ -1,13 +1,14 @@
 import { VERSION } from '@chatwarden/matcher';
-import { CORPUS_ZIP_PASSWORD, parseEvalSet, type EvalSet } from '@chatwarden/matcher/corpus';
+import { parseEvalSet, type EvalSet } from '@chatwarden/matcher/corpus';
 import { checkCase, type CaseCode } from '../checkCase.js';
 import type { Clock } from '../deps.js';
 import { isoSeconds } from '../counters.js';
 import { SUPPORTED_LANGUAGES } from '../wordkey.js';
-import { BuildError } from './release.js';
+import { BuildError, packRelease } from './release.js';
 import { sha256Hex, summarise, type ReleaseSummary } from './summary.js';
 import { ATTRIBUTION, evalReadme, LICENSE_SPDX, LICENSE_TXT } from './texts.js';
-import { writeReleaseZip } from './zip.js';
+
+const MAX_CASES_PER_LANGUAGE = 500; // what the kit reads
 
 // The eval and calibration set builder (design 6.10, 12): `cases.<lang>.json` for each language, a manifest with the counts per language and per
 // group (and no matcher gate), and the zip. A case is kept out of the release, by id and a closed code, when it is not a case the kit reads, when
@@ -168,6 +169,10 @@ export function buildEvalRelease(cases: Record<string, readonly unknown[]>, o: E
   }
   held.sort((a, b) => byCodeUnit(a.id, b.id) || byCodeUnit(a.language, b.language));
 
+  for (const l of languages) {
+    const n = kept[l]?.length ?? 0;
+    if (n > MAX_CASES_PER_LANGUAGE) throw new BuildError('too_many_cases', [], `${l} has ${n}`);
+  }
   const { files } = layout(kept, languages, o);
   let set: EvalSet;
   try {
@@ -175,7 +180,7 @@ export function buildEvalRelease(cases: Record<string, readonly unknown[]>, o: E
   } catch {
     throw new BuildError('self_check');
   }
-  const zip = writeReleaseZip([...files].map(([name, data]) => ({ name, data })), { password: CORPUS_ZIP_PASSWORD, time: o.clock.now() });
+  const zip = packRelease([...files].map(([name, data]) => ({ name, data })), o.clock.now());
   const counts: Record<string, Record<string, number>> = {};
   for (const l of languages) counts[l] = { cases: (set.byLanguage[l] ?? []).length };
   return { files, zip, summary: summarise({ kind: 'eval', version: o.version, sequence: o.sequence, minKit: o.minKit ?? VERSION, languages: counts, zip }), set, held };

@@ -30,6 +30,27 @@ describe('diffTerms', () => {
   });
 });
 
+describe('removed terms', () => {
+  it('lists the ids that were in the previous release and are not in this one, in order, and nothing for none', () => {
+    const a = row();
+    const b = row({ id: 'CWT-2026-00002', term: 'vlemmo' });
+    const c = row({ id: 'CWT-2026-00003', term: 'quissel' });
+    expect(diffTerms('2026.11.0', [c, a, b], [a], []).removed).toEqual(['CWT-2026-00002', 'CWT-2026-00003']);
+    expect(diffTerms('2026.11.0', [a], [a, b], []).removed).toEqual([]);
+    expect(diffTerms(null, null, [a], []).removed).toEqual([]);
+  });
+
+  it('is printed by id, with no word, and only when there is one', () => {
+    const a = row();
+    const b = row({ id: 'CWT-2026-00002', term: 'vlemmo' });
+    const text = renderDiff(diffTerms('2026.11.0', [a, b], [a], []));
+    expect(text).toContain('removed: 1');
+    expect(text).toContain('CWT-2026-00002');
+    expect(text).not.toContain('vlemmo');
+    expect(renderDiff(diffTerms('2026.11.0', [a], [a], []))).not.toContain('removed');
+  });
+});
+
 describe('the diff prints ids and counts only', () => {
   const d = diffTerms('2026.11.0', [row()], [row({ status: 'disputed' }), row({ id: 'CWT-2026-00002', term: 'vlemmo' })], [{ id: 'CWT-2026-00009', code: 'negative_blocked' }]);
 

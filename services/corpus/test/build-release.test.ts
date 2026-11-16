@@ -264,6 +264,53 @@ describe('a term that fails the cross-language gate is held, not published', () 
     expect(String((err as Error).message)).not.toMatch(/zorbak/);
   });
 
+  it('a term the previous release carried counts as published even when its `since` was never recorded: a failing gate stops the build', async () => {
+    await w.term({ id: 'CWT-2026-00001', term: 'zorbak', since: null });
+    const first = await build({ version: '2026.11.0', previous: null });
+    expect((await read(first)).terms.map((t) => t.id)).toEqual(['CWT-2026-00001']);
+    await w.negative('en', ['the zorbak line']);
+    const err = await build({ previous: '2026.11.0', previousTerms: (await read(first)).terms }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'gate_failed', ids: ['CWT-2026-00001'] });
+  });
+
+  it('without the previous rows the same term (since unset) is held, as before', async () => {
+    await w.term({ id: 'CWT-2026-00001', term: 'zorbak', since: null });
+    await w.negative('en', ['the zorbak line']);
+    expect((await build()).held).toEqual([{ id: 'CWT-2026-00001', code: 'negative_corpus_blocked' }]);
+  });
+
+  it('reports the published terms whose `since` the database still lacks (the record SQL was not applied), by id', async () => {
+    await w.term({ id: 'CWT-2026-00001', term: 'zorbak', since: null });
+    await w.term({ id: 'CWT-2026-00002', term: 'vlemmo', since: '2026.11.0' });
+    await w.term({ id: 'CWT-2026-00003', term: 'quissel', since: null });
+    const first = await build({ version: '2026.11.0', previous: null });
+    const prev = (await read(first)).terms;
+    const next = await build({ previous: '2026.11.0', previousTerms: prev });
+    expect(next.unrecorded).toEqual(['CWT-2026-00001', 'CWT-2026-00003']);
+    expect((await build()).unrecorded).toEqual([]);
+  });
+
+  // distinct made-up words with no repeated neighbour letters (the word key folds repeats): x between letters from a 25-letter alphabet
+  const manyWord = (n: number): string => {
+    const letters = 'abcdefghijklmnopqrstuvwy';
+    let out = 'zorb';
+    for (let rest = n + 1000; rest > 0; rest = Math.floor(rest / letters.length)) out += `x${letters[rest % letters.length]}`;
+    return out;
+  };
+
+  it('says how many rows got no pack-wide positive line when there are more than the kit reads (2 000)', async () => {
+    for (let i = 1; i <= 2003; i += 1) await w.term({ id: `CWT-2026-${String(i).padStart(5, '0')}`, term: manyWord(i) });
+    const r = await build({ allowBulk: true });
+    expect(r.positiveUncovered).toBe(3);
+    const small = await build({ allowBulk: true, languages: ['en'] });
+    expect(small.positiveUncovered).toBe(3);
+  });
+
+  it('is zero when every row has one', async () => {
+    await w.term({ id: 'CWT-2026-00001', term: 'zorbak' });
+    expect((await build()).positiveUncovered).toBe(0);
+  });
+
   it('a collision is judged the way the loader judges it: the row is off when the other language is installed, so the row is published and its negatives hold', async () => {
     // "quissel" is an ordinary Spanish word here. The English row collides with es, and the equal word is one of its negatives.
     await w.term({ id: 'CWT-2026-00001', term: 'quissel', languages: ['en'] });

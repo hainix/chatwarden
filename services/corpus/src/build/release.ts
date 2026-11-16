@@ -26,7 +26,7 @@ const MAX_POSITIVE_FILE_LINES = 2000;
 const VERSION_RE = /^\d{4}\.(?:0[1-9]|1[0-2])\.(?:0|[1-9]\d{0,2})$/;
 const SELECTABLE = new Set(['accepted', 'provisional']);
 
-export type BuildErrorCode = 'bad_options' | 'bad_row' | 'bulk_guard' | 'gate_failed' | 'bad_pack' | 'self_check';
+export type BuildErrorCode = 'bad_options' | 'bad_row' | 'bulk_guard' | 'gate_failed' | 'bad_pack' | 'self_check' | 'too_large' | 'too_many_cases';
 
 const MESSAGES: Record<BuildErrorCode, string> = {
   bad_options: 'the build options are not valid',
@@ -35,14 +35,17 @@ const MESSAGES: Record<BuildErrorCode, string> = {
   gate_failed: 'a published term fails the gates; dispute or fix it before building',
   bad_pack: 'the built release does not load in the kit',
   self_check: 'the built release was not read back by the kit',
+  too_large: 'the release is larger than the kit reads (at most 32 entries, 8 MiB zipped, 32 MiB unzipped); drop terms, lines or cases, or build one language at a time',
+  too_many_cases: 'a language has more eval cases than the kit reads (500 a language)',
 };
 
 /** A build refusal: a fixed message and a closed code. `ids` (row ids only, never words) names the rows a gate or a check is about. */
 export class BuildError extends Error {
   readonly code: BuildErrorCode;
   readonly ids: string[];
-  constructor(code: BuildErrorCode, ids: readonly string[] = []) {
-    super(MESSAGES[code]);
+  /** `detail` is fixed text with a count in it, never a word. */
+  constructor(code: BuildErrorCode, ids: readonly string[] = [], detail?: string) {
+    super(detail === undefined ? MESSAGES[code] : `${MESSAGES[code]}: ${detail}`);
     this.name = 'BuildError';
     this.code = code;
     this.ids = [...ids];
@@ -78,6 +81,10 @@ export interface BuildResult {
   held: GateFailure[];
   /** The ids of the rows this release gave their `since` to: the database is told once the release is out (a held row is not one). */
   stamped: string[];
+  /** How many rows have no pack-wide positive line because the kit reads at most 2 000 of them in a file. */
+  positiveUncovered: number;
+  /** Terms the previous release carried whose `since` the database still lacks (the record SQL was not applied): published, but not recorded as such. */
+  unrecorded: string[];
   diff: TermsDiff;
   gate: GateCounts;
 }
@@ -159,6 +166,8 @@ const json = (value: unknown): Uint8Array => new TextEncoder().encode(`${JSON.st
 interface Layout {
   files: Map<string, Uint8Array>;
   positiveOwner: Map<string, string>;
+  /** Rows that would have a pack-wide positive line but are past the kit's 2 000 a file. */
+  positiveUncovered: number;
 }
 
 /** The archive's entries for these rows (the manifest first; `gate` is what the manifest says the gates found). */
@@ -174,10 +183,13 @@ function layout(drafts: readonly Draft[], snapshot: Snapshot, o: BuildOptions, l
   }
   // The pack-wide lines: one sentence for each row that is on for a game with every language installed.
   const positiveOwner = new Map<string, string>();
+  let positiveUncovered = 0;
   for (const { row } of drafts) {
     if (!SELECTABLE.has(row.status) || !row.defaultActive || row.collidesWith.some((l) => languages.includes(l))) continue;
     const line = row.positive.find((l) => l === `you ${row.term}`) ?? row.positive[0];
-    if (line !== undefined && !positiveOwner.has(line) && positiveOwner.size < MAX_POSITIVE_FILE_LINES) positiveOwner.set(line, row.id);
+    if (line === undefined || positiveOwner.has(line)) continue;
+    if (positiveOwner.size < MAX_POSITIVE_FILE_LINES) positiveOwner.set(line, row.id);
+    else positiveUncovered += 1;
   }
   data.set('positive.json', json({ schema: 'chatwarden-corpus-positive/1', lines: [...positiveOwner.keys()] }));
   const files: Record<string, { bytes: number; sha256: string }> = {};
@@ -205,7 +217,7 @@ function layout(drafts: readonly Draft[], snapshot: Snapshot, o: BuildOptions, l
   for (const [name, bytes] of data) out.set(name, bytes);
   out.set('LICENSE.txt', new TextEncoder().encode(LICENSE_TXT));
   out.set('README.txt', new TextEncoder().encode(termsReadme(o.version)));
-  return { files: out, positiveOwner };
+  return { files: out, positiveOwner, positiveUncovered };
 }
 
 function readBack(files: ReadonlyMap<string, Uint8Array>, o: BuildOptions): TermsRelease {
@@ -213,6 +225,16 @@ function readBack(files: ReadonlyMap<string, Uint8Array>, o: BuildOptions): Term
     return parseTermsRelease(files, { version: o.version, sequence: o.sequence });
   } catch {
     throw new BuildError('self_check');
+  }
+}
+
+/** The release archive, or a BuildError that says it is too large (the writer refuses what the kit's reader would). */
+export function packRelease(entries: readonly { name: string; data: Uint8Array }[], time: number): Uint8Array {
+  try {
+    return writeReleaseZip(entries, { password: CORPUS_ZIP_PASSWORD, time });
+  } catch (e) {
+    if (e instanceof RangeError) throw new BuildError('too_large');
+    throw e;
   }
 }
 
@@ -239,7 +261,7 @@ export function buildFromSnapshot(snapshot: Snapshot, o: BuildOptions): BuildRes
     if (report.failures.length === 0) {
       const done = layout(drafts, snapshot, o, languages, report.counts);
       const final = readBack(done.files, o);
-      const zip = writeReleaseZip([...done.files].map(([name, data]) => ({ name, data })), { password: CORPUS_ZIP_PASSWORD, time: o.clock.now() });
+      const zip = packRelease([...done.files].map(([name, data]) => ({ name, data })), o.clock.now());
       const counts: Record<string, Record<string, number>> = {};
       for (const l of languages) counts[l] = { terms: final.manifest.counts.terms[l] as number, exceptions: final.manifest.counts.exceptions[l] as number };
       held.sort((a, b) => byCodeUnit(a.id, b.id));
@@ -250,12 +272,16 @@ export function buildFromSnapshot(snapshot: Snapshot, o: BuildOptions): BuildRes
         release: final,
         held,
         stamped: drafts.filter((d) => d.record.since === null).map((d) => d.row.id),
+        positiveUncovered: done.positiveUncovered,
+        unrecorded: (o.previousTerms ?? []).filter((p) => byId.get(p.id)?.since === null).map((p) => p.id).sort(byCodeUnit),
         diff: diffTerms(o.previous, o.previousTerms ?? null, final.terms, held),
         gate: report.counts,
       };
     }
     // A term that was already published may not quietly leave the list; one that never was is held back, and the gates run again without it.
-    const published = report.failures.filter((f) => byId.get(f.id)?.since !== null && byId.get(f.id)?.since !== undefined);
+    // (a term the previous release carried is published even when the database does not yet say so)
+    const carried = new Set((o.previousTerms ?? []).map((p) => p.id));
+    const published = report.failures.filter((f) => carried.has(f.id) || (byId.get(f.id)?.since !== null && byId.get(f.id)?.since !== undefined));
     if (published.length > 0) throw new BuildError('gate_failed', published.map((f) => f.id));
     const out = new Set(report.failures.map((f) => f.id));
     for (const f of report.failures) held.push({ id: f.id, code: f.code as GateCode });

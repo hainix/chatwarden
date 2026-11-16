@@ -98,6 +98,7 @@ describe('release.mjs', () => {
     expect(rel.manifest.previous).toBe('2026.12.0');
     expect(all()).toContain('release follows 2026.12.0');
     expect(all()).toContain('CWT-2026-00002: status');
+    expect(all()).toContain('warning: 1 term(s) of the previous release have no since in the database');
   });
 
   it('prints a closed code for a refused build (the bulk guard), with ids only, and exits 1', async () => {

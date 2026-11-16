@@ -32,26 +32,45 @@ export interface ToolIo {
   err(line: string): void;
 }
 
+/**
+ * Reads a line from `input` with the typed characters not echoed to `output`. Enter answers; Ctrl+C rejects ("cancelled") and so does a closed
+ * input. Nothing typed is ever written to `output`.
+ */
+export function readHiddenFrom(prompt: string, input: NodeJS.ReadableStream, output: NodeJS.WritableStream): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const rl = createInterface({ input, output, terminal: true });
+    const hooked = rl as unknown as { _writeToOutput: (text: string) => void };
+    const write = hooked._writeToOutput.bind(rl);
+    let asked = false;
+    let settled = false;
+    hooked._writeToOutput = (text: string) => {
+      if (!asked) write(text);
+    };
+    const finish = (run: () => void): void => {
+      if (settled) return;
+      settled = true;
+      asked = false;
+      rl.close();
+      run();
+    };
+    output.write(prompt);
+    asked = true;
+    rl.on('SIGINT', () => {
+      output.write(String.fromCharCode(10));
+      finish(() => reject(new Error('cancelled')));
+    });
+    rl.question('', (answer) => {
+      output.write(String.fromCharCode(10));
+      finish(() => resolve(answer));
+    });
+    rl.on('close', () => finish(() => reject(new Error('no answer'))));
+  });
+}
+
 /** Reads a line from the terminal with the typed characters not echoed. */
 function readHidden(prompt: string): Promise<string> {
   if (!process.stdin.isTTY) return Promise.reject(new Error('no terminal to ask on'));
-  return new Promise((resolve, reject) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const write = (rl as unknown as { _writeToOutput: (text: string) => void })._writeToOutput.bind(rl);
-    let asked = false;
-    (rl as unknown as { _writeToOutput: (text: string) => void })._writeToOutput = (text: string) => {
-      if (!asked) write(text);
-    };
-    process.stdout.write(prompt);
-    asked = true;
-    rl.question('', (answer) => {
-      asked = false;
-      process.stdout.write('\n');
-      rl.close();
-      resolve(answer);
-    });
-    rl.on('close', () => reject(new Error('no answer')));
-  });
+  return readHiddenFrom(prompt, process.stdin, process.stdout);
 }
 
 export function nodeIo(): ToolIo {
