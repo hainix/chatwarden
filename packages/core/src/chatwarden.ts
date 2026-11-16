@@ -44,7 +44,7 @@ import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js'
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
-import { applySanction, SanctionIndex } from './sanctions.js';
+import { applySanction, normalizeRefCode, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
 import {
@@ -53,6 +53,7 @@ import {
   blockedNameItems,
   listSanctionGroups,
   reporterRecord,
+  sanctionByRef,
   sanctionsOfPerson,
 } from './staffViews.js';
 import { reporterAccuracyFor } from './reporterAccuracy.js';
@@ -61,6 +62,7 @@ import type {
   BlockedDays,
   BlockedItem,
   BlockedNameItem,
+  PersonSanctionView,
   ReporterRecord,
   SanctionGroupView,
   SanctionListInput,
@@ -497,6 +499,15 @@ export interface Chatwarden {
      * unknown source. Carries subject ids and staff-only text: never send to a player.
      */
     list(q?: SanctionListInput): SanctionPage;
+    /**
+     * One group's staff view, with its canonical `person`, by the player-quotable reference code (`M-` plus five characters; case and
+     * surrounding spaces are ignored, and a bare five characters is read as `M-` plus them). Null for a code nobody holds, a malformed one
+     * or one with an ambiguous letter (never throws for a string; a non-string is a `TypeError`). Revoked and ended groups are found: the
+     * code never changes. Built from the group's subject row only (never an IP row). Synchronous. Carries staff-only text (reason, actor):
+     * never send to a player. A store without `sanctionGroupByRef` is read through its newest 1 000 groups.
+     * @experimental
+     */
+    byRef(refCode: string): PersonSanctionView | null;
   };
   /**
    * Subscribe to what happens in the kit: `'report.created'`, `'report.closed'`, `'sanction.applied'`,
@@ -1408,6 +1419,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       },
       forPerson: (subject) => sanctionsOfPerson(store, subjects, subject, clock.now()),
       list: (q) => listSanctionGroups(store, subjects, q ?? {}, clock.now()),
+      byRef: (refCode) => {
+        const code = normalizeRefCode(refCode);
+        return code === null ? null : sanctionByRef(store, subjects, code, clock.now());
+      },
     },
     on: bus.on,
     names: {

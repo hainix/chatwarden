@@ -245,6 +245,10 @@ export class MemoryStore implements Store {
     return touched.length;
   }
 
+  sanctionGroupByRef(refCode: string): string | null {
+    return this.refOwners.get(refCode) ?? null;
+  }
+
   sanctionRefCode(groupId: string): string | null {
     return this.sanctions.find((r) => r.groupId === groupId)?.refCode ?? null;
   }
@@ -295,6 +299,7 @@ export class MemoryStore implements Store {
       .filter((r) => {
         if (r.targetType !== 'subject') return false;
         if (wanted !== null && !wanted.has(r.value)) return false;
+        if (q.groupId !== undefined && r.groupId !== q.groupId) return false;
         if (q.source !== undefined && r.source !== q.source) return false;
         if (q.activeAt !== undefined && !(r.revokedAt === null && (r.endsAt === null || r.endsAt > q.activeAt))) return false;
         if (q.since !== undefined && r.startsAt < q.since && !(q.alsoPermanent === true && r.endsAt === null && r.revokedAt === null)) {

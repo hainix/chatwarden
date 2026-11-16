@@ -216,6 +216,8 @@ export interface SanctionListQuery {
   /** Keyset cursor: only rows older than this (`startsAt` below it, or equal with an id below `beforeId`). `beforeId` without `before` is ignored. */
   before?: number;
   beforeId?: string;
+  /** Only the rows of this sanction group (its subject row: an IP row is never listed). Optional, additive (0.1.12). */
+  groupId?: string;
   /** Clamped to 1..200 (a fraction is floored). */
   limit: number;
 }
@@ -882,6 +884,13 @@ export interface Store {
    * still found: the code never changes. For the `sanction.revoked` event.
    */
   sanctionRefCode(groupId: string): string | null;
+
+  /**
+   * OPTIONAL (0.1.12, `@experimental`). The sanction group that holds this exact ref code (`M-` plus five characters, already
+   * normalised: upper case), or null. Revoked and ended groups are found: the code never changes. A store without it makes
+   * `cw.sanctions.byRef` read the newest 1 000 groups through {@link Store.listSubjectSanctions} instead.
+   */
+  sanctionGroupByRef?(refCode: string): string | null;
 
   /**
    * The person a sanction group is about and the rule it cites, for the `sanction.revoked` event: the group's SUBJECT row

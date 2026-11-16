@@ -183,6 +183,63 @@ export function sanctionsContract(name: string, make: () => Store): void {
       });
     });
 
+    describe('sanctionGroupByRef (optional) and the groupId listing filter', () => {
+      const byRef = (s: Store, code: string): string | null => {
+        if (typeof s.sanctionGroupByRef !== 'function') throw new Error('this store has no sanctionGroupByRef');
+        return s.sanctionGroupByRef(code);
+      };
+
+      it('sanctionGroupByRef returns the group id for a code, null for an unknown one, and still finds it after the group is revoked', () => {
+        const s = make();
+        s.insertSanctionGroup(group('g1', 'M-AAAAA'));
+        s.insertSanctionGroup([row({ groupId: 'g2', refCode: 'M-BBBBB', endsAt: NOW - 1 })]);
+        s.insertSanctionGroup(group('g3', 'M-CCCCC'));
+        expect(byRef(s, 'M-AAAAA')).toBe('g1');
+        expect(byRef(s, 'M-BBBBB')).toBe('g2');
+        expect(byRef(s, 'M-ZZZZZ')).toBeNull();
+        expect(byRef(s, '')).toBeNull();
+        s.revokeSanctionGroup('g1', 'boss', NOW, 'x');
+        expect(byRef(s, 'M-AAAAA')).toBe('g1');
+        expect(byRef(s, 'M-CCCCC')).toBe('g3');
+      });
+
+      it('is exact: another case or a prefix of a code is not a match', () => {
+        const s = make();
+        s.insertSanctionGroup(group('g1', 'M-AAAAA'));
+        expect(byRef(s, 'm-aaaaa')).toBeNull();
+        expect(byRef(s, 'M-AAAA')).toBeNull();
+        expect(byRef(s, 'M-AAAAAA')).toBeNull();
+      });
+
+      it('finds the code of a group written in a transaction that committed, and not one that rolled back', () => {
+        const s = make();
+        expect(() =>
+          s.transaction(() => {
+            s.insertSanctionGroup(group('g1', 'M-AAAAA'));
+            throw new Error('boom');
+          }),
+        ).toThrow('boom');
+        expect(byRef(s, 'M-AAAAA')).toBeNull();
+        s.transaction(() => {
+          s.insertSanctionGroup(group('g2', 'M-BBBBB'));
+        });
+        expect(byRef(s, 'M-BBBBB')).toBe('g2');
+      });
+
+      it('listSubjectSanctions with a groupId returns the subject row of that group only (never its ip row), revoked or not', () => {
+        const s = make();
+        s.insertSanctionGroup(group('g1', 'M-AAAAA', { value: 's_one' }));
+        s.insertSanctionGroup(group('g2', 'M-BBBBB', { value: 's_two' }));
+        s.revokeSanctionGroup('g2', 'boss', NOW, 'x');
+        const one = s.listSubjectSanctions({ groupId: 'g1', limit: 10 });
+        expect(one.map((r) => [r.groupId, r.targetType, r.value])).toEqual([['g1', 'subject', 's_one']]);
+        const two = s.listSubjectSanctions({ groupId: 'g2', limit: 10 });
+        expect(two.map((r) => r.groupId)).toEqual(['g2']);
+        expect(two[0]?.revokedAt).toBe(NOW);
+        expect(s.listSubjectSanctions({ groupId: 'nope', limit: 10 })).toEqual([]);
+      });
+    });
+
     describe('loadSubjectActions', () => {
       it('returns subject rows only, at or after since, revoked and ended included, with revokedAt', () => {
         const s = make();

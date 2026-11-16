@@ -92,6 +92,7 @@ export {
   MAX_SANCTION_DURATION_MS,
   SANCTION_KINDS,
   SanctionError,
+  normalizeRefCode,
   SANCTION_SOURCES,
   SanctionIndex,
   validateSanctionInput,

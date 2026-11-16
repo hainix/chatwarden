@@ -584,6 +584,13 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  sanctionGroupByRef(refCode: string): string | null {
+    const row = this.transaction(() =>
+      this.db.prepare("SELECT group_id FROM kit_sanctions WHERE ref_code = ? AND target_type = 'subject' LIMIT 1").get(refCode),
+    ) as { group_id: string } | undefined;
+    return row === undefined ? null : row.group_id;
+  }
+
   sanctionRefCode(groupId: string): string | null {
     const row = this.transaction(() =>
       this.db.prepare('SELECT ref_code FROM kit_sanctions WHERE group_id = ? LIMIT 1').get(groupId),
@@ -632,6 +639,10 @@ export class SqliteStore implements Store, TermStore {
     if (q.subjects !== undefined) {
       where.push(`target_value IN (${q.subjects.map(() => '?').join(', ')})`);
       args.push(...q.subjects);
+    }
+    if (q.groupId !== undefined) {
+      where.push('group_id = ?');
+      args.push(q.groupId);
     }
     if (q.source !== undefined) {
       where.push('source = ?');
