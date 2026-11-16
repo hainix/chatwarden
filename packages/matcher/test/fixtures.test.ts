@@ -112,10 +112,15 @@ describe('matcher package manifest', () => {
       types: './dist/src/corpus/index.d.ts',
       default: './dist/src/corpus/index.js',
     });
+    expect(pkg.exports['./corpus/node']).toEqual({
+      types: './dist/src/corpus/node/index.d.ts',
+      default: './dist/src/corpus/node/index.js',
+    });
     expect(pkg.typesVersions['*']).toEqual({
       fixtures: ['dist/src/fixtures/index.d.ts'],
       'test-fixtures': ['dist/src/fixtures/testFixtures.d.ts'],
       corpus: ['dist/src/corpus/index.d.ts'],
+      'corpus/node': ['dist/src/corpus/node/index.d.ts'],
     });
   });
   it('no export points into dist/test', () => {

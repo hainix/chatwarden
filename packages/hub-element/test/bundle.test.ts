@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { userEvent } from '@testing-library/user-event';
 import { waitFor } from '@testing-library/dom';
@@ -34,6 +34,15 @@ afterAll(() => {
 });
 
 describe('the built scripts', () => {
+  it('carry nothing of the shared term list: no verifier, loader, zip reader or release string (K7 stays on the server)', () => {
+    for (const file of [standalonePath, modulePath]) {
+      const text = readFileSync(file, 'utf8');
+      for (const marker of ['chatwarden-corpus', 'chatwarden-terms', 'corpus.refresh_failed', 'CorpusError', 'readZip', 'createCorpusLoader']) {
+        expect(text.includes(marker), marker).toBe(false);
+      }
+    }
+  });
+
   it('the module registers nothing when imported; defineChatwardenHub registers it, twice is fine', async () => {
     const mod = (await load(modulePath)) as typeof import('../src/index.js');
     expect(customElements.get('chatwarden-hub')).toBeUndefined();

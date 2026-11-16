@@ -97,7 +97,8 @@ const KIT_RE = /^\d{1,9}\.\d{1,9}\.\d{1,9}(?:[-+].*)?$/;
 /** Enough that no real `minKit` is above it: used when the caller does not say which kit this is. */
 const ANY_KIT = '999999999.0.0';
 
-const defaultSchedule: Schedule = {
+/** The default timer: `setTimeout`, unref'd where the platform has it so a pending refresh never keeps a program alive. */
+export const systemSchedule: Schedule = {
   after(ms, fn) {
     const timer = setTimeout(fn, ms) as unknown as { unref?: () => void };
     timer.unref?.();
@@ -213,7 +214,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
   const cache = o.cache;
   const clock = o.clock;
   const keys: readonly CorpusKey[] = o.keys ?? CORPUS_KEYS;
-  const schedule: Schedule = o.schedule ?? defaultSchedule;
+  const schedule: Schedule = o.schedule ?? systemSchedule;
   const mode = o.apply ?? 'manual';
   const kit = o.kit ?? ANY_KIT;
   const select = o.select;

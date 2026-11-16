@@ -937,3 +937,93 @@ describe('browser bundle: runs in a context with no Node globals', () => {
     expect(inCtx).toEqual([native.clientKey(longInput), native.ip(longInput)]);
   });
 });
+
+// The shared term list (K7) is verified and loaded on the server. Nothing of it may ride into a page: not the verifier, the loader or the
+// zip reader, and above all not a term, which the signed releases hold and the kit never ships (the 0.1.3 failure). The isomorphic subpath
+// `@chatwarden/matcher/corpus` is for a CI job or a server; bundled ALONE it must still have no Node import and run in a bare context.
+describe('browser bundle: the shared term list stays out of a page', () => {
+  const isCorpus = (p: string): boolean => /packages\/matcher\/(?:dist\/)?src\/corpus\//.test(p.replaceAll('\\', '/'));
+  const MARKERS = ['chatwarden-corpus', 'chatwarden-terms', 'corpus.refresh_failed'];
+
+  it('the size build and the build with the AI module hold no input from the matcher corpus folder and none of its strings', () => {
+    for (const meta of [metafile, aiMetafile, chatMetafile]) expect(Object.keys(meta.inputs).filter(isCorpus)).toEqual([]);
+    for (const [name, code] of Object.entries({ esm, iife, aiEsm, aiIife, chatEsm, chatIife })) {
+      for (const marker of MARKERS) expect(code.includes(marker), `${name} has ${marker}`).toBe(false);
+    }
+  });
+
+  it('the matcher root entry does not import the corpus folder (a bundle of the root alone holds none of it)', async () => {
+    const out = await build({ ...common, entryPoints: undefined, stdin: { contents: "export * from '@chatwarden/matcher';", resolveDir: ROOT, loader: 'ts' }, format: 'esm' });
+    expect(Object.keys(out.metafile.inputs).filter(isCorpus)).toEqual([]);
+    for (const marker of MARKERS) expect(out.outputFiles[0]!.text.includes(marker), marker).toBe(false);
+  }, 60_000);
+
+  it('the hub-react graph holds none of it either (the hub-element bundle is checked in its own package test, where it is built)', async () => {
+    for (const entry of ['packages/hub-react/dist/src/index.js']) {
+      if (!existsSync(`${ROOT}${entry}`)) throw new Error(`${entry} is not built: run \`npm run build\` first`);
+      const out = await build({ ...common, entryPoints: [`${ROOT}${entry}`], format: 'esm' });
+      expect(Object.keys(out.metafile.inputs).filter(isCorpus), entry).toEqual([]);
+      for (const marker of MARKERS) expect(out.outputFiles[0]!.text.includes(marker), `${entry} has ${marker}`).toBe(false);
+    }
+  }, 120_000);
+
+  describe('@chatwarden/matcher/corpus on its own', () => {
+    let corpusEsm = '';
+    let corpusIife = '';
+    let corpusMeta: Metafile;
+    beforeAll(async () => {
+      const stdin = { contents: "export * from '@chatwarden/matcher/corpus';", resolveDir: ROOT, loader: 'ts' as const };
+      const a = await build({ ...common, entryPoints: undefined, stdin, format: 'esm' });
+      corpusEsm = a.outputFiles[0]!.text;
+      const b = await build({ ...common, entryPoints: undefined, stdin, format: 'iife', globalName: 'Corpus', minify: true });
+      corpusIife = b.outputFiles[0]!.text;
+      corpusMeta = b.metafile;
+    }, 60_000);
+
+    it('was built from the matcher dist, with no node: specifier and no Node builtin, and without the node folder', () => {
+      const inputs = Object.keys(corpusMeta.inputs).map((p) => p.replaceAll('\\', '/'));
+      expect(inputs).toContain('packages/matcher/dist/src/corpus/index.js');
+      expect(inputs).toContain('packages/matcher/dist/src/corpus/loader.js');
+      expect(inputs.filter((p) => p.includes('/corpus/node/'))).toEqual([]);
+      expect(corpusEsm).not.toMatch(/(?:from|import)\s*\(?\s*["']node:/);
+      expect(corpusEsm).not.toMatch(/\brequire\s*\(/);
+      expect(corpusIife).not.toMatch(/["']node:/);
+    });
+
+    it('runs verifySignature in the bare context: a good signature, a flipped bit, and a loader that reports offline', async () => {
+      const pair = (await webcrypto.subtle.generateKey('Ed25519', true, ['sign', 'verify'])) as { privateKey: webcrypto.CryptoKey; publicKey: webcrypto.CryptoKey };
+      const publicKey = Buffer.from(await webcrypto.subtle.exportKey('raw', pair.publicKey)).toString('base64url');
+      const payload = new TextEncoder().encode('{"an":"index"}');
+      const prefix = new TextEncoder().encode('chatwarden-corpus/1\u0000index\u0000');
+      const message = new Uint8Array([...prefix, ...payload]);
+      const sig = Buffer.from(await webcrypto.subtle.sign('Ed25519', pair.privateKey, message)).toString('base64url');
+      const ctx = browserContext();
+      run(ctx, corpusIife);
+      const script = (flip: boolean) => `(async () => {
+        const bytes = new Uint8Array(${JSON.stringify([...payload])});
+        ${flip ? 'bytes[3] ^= 1;' : ''}
+        const keys = [{ id: 'k1', publicKey: ${JSON.stringify(publicKey)} }];
+        const file = { schema: 'chatwarden-corpus-sig/1', alg: 'Ed25519', keyId: 'k1', sig: ${JSON.stringify(sig)} };
+        try { return JSON.stringify(await Corpus.verifySignature('index', bytes, file, keys)); } catch (e) { return JSON.stringify({ code: e.code, stage: e.stage, name: e.name }); }
+      })()`;
+      expect(JSON.parse(await run<Promise<string>>(ctx, script(false)))).toEqual({ keyId: 'k1' });
+      expect(JSON.parse(await run<Promise<string>>(ctx, script(true)))).toEqual({ code: 'bad_signature', stage: 'verify', name: 'CorpusError' });
+      const loader = `(async () => {
+        const files = new Map();
+        const cache = { read: async (n) => files.get(n) ?? null, write: async (n, b) => { files.set(n, b); }, remove: async (n) => { files.delete(n); } };
+        const l = Corpus.createCorpusLoader({ select: { languages: ['en'] }, cache, clock: { now: () => 1 }, follow: 'stable',
+          keys: [{ id: 'k1', publicKey: ${JSON.stringify(publicKey)} }], fetch: async () => { throw new Error('no network here'); }, logger: { warn() {} } });
+        const r = await l.refresh();
+        return JSON.stringify({ state: r.status.state, code: r.status.lastError.code, stage: r.status.lastError.stage, pack: l.pack() });
+      })()`;
+      expect(JSON.parse(await run<Promise<string>>(ctx, loader))).toEqual({ state: 'none', code: 'offline', stage: 'index', pack: null });
+    });
+
+    it('the context really is bare, and the bundle read none of Node', () => {
+      const ctx = browserContext();
+      run(ctx, corpusIife);
+      expect(run(ctx, 'typeof process + typeof Buffer + typeof require + typeof module')).toBe('undefinedundefinedundefinedundefined');
+      expect(run(ctx, 'Object.keys(Corpus).includes("fileCache") || Object.keys(Corpus).includes("startCorpus")')).toBe(false);
+    });
+  });
+});
