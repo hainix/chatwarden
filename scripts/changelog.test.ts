@@ -214,3 +214,60 @@ describe('the 0.1.5 notes (every CHANGELOG that has them)', () => {
     for (const dir of with015) expect(section015(dir), dir).toBe(first);
   });
 });
+
+// 0.1.10 (fast adoption): the notes ship in every tarball and cannot be edited after publish, so what an adopter needs to know is pinned here. The
+// text is the same in all ten; it names the bin, the three subpaths and what did not change.
+const section0110 = (dir: string): string => {
+  const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+  const at = text.indexOf('## 0.1.10');
+  const end = text.indexOf('\n## 0.1.9', at);
+  return at < 0 ? '' : text.slice(at, end < 0 ? undefined : end).replace(/\s+/g, ' ');
+};
+
+describe('the 0.1.10 notes (all ten CHANGELOGs)', () => {
+  it.each(dirs)('%s: has a 0.1.10 section above 0.1.9, as patch changes', (dir) => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    expect(text.indexOf('## 0.1.10')).toBeGreaterThan(-1);
+    expect(text.indexOf('## 0.1.10')).toBeLessThan(text.indexOf('## 0.1.9'));
+    expect(section0110(dir)).toContain('### Patch Changes');
+  });
+
+  it.each(dirs)('%s: starts with what the release adds, and names the bin and the three subpaths', (dir) => {
+    const s = section0110(dir);
+    expect(s).toContain('Adds a setup command, a Web fetch adapter and a test kit');
+    for (const needle of ['`chatwarden init`', 'the `chatwarden` bin of `@chatwarden/http`', '`@chatwarden/http/fetch`', '`toFetch`', '`@chatwarden/store-memory/testing`', '`@chatwarden/http/cli`']) {
+      expect(s, needle).toContain(needle);
+    }
+  });
+
+  it.each(dirs)('%s: says what init takes and gives: flags, --json, --check, the four exit codes, and that it never overwrites', (dir) => {
+    const s = section0110(dir);
+    for (const needle of ['`--json`', '`--check`', '`--dry-run`', '`--yes`', 'Exit codes: 0', '1 a usage error', '2 applied but some files were skipped', '3 could not write or install', 'never edits a file that exists', 'never uses the network', 'writes no secret']) {
+      expect(s, needle).toContain(needle);
+    }
+  });
+
+  it.each(dirs)('%s: lists the @experimental names and says what did not change', (dir) => {
+    const s = section0110(dir);
+    expect(s).toContain('`@experimental` until 0.2');
+    for (const name of ['`toFetch`', '`Mounts`', '`FetchOptions`', '`FetchHandler`', '`runCli`', '`CliEnv`']) expect(s, name).toContain(name);
+    expect(s).toContain('No migration');
+    expect(s).toContain('No new package is published');
+    expect(s).toContain('No peer floor changes');
+  });
+
+  it('the 0.1.10 notes are the same text in all ten', () => {
+    const first = section0110(dirs[0] as string);
+    expect(first.length).toBeGreaterThan(500);
+    for (const dir of dirs) expect(section0110(dir), dir).toBe(first);
+  });
+
+  it('the flags the notes name exist, and the words are the code\'s (a flag the notes name that init does not have would be a lie in a tarball)', async () => {
+    const { OPTIONS } = await import('../packages/http/src/cli/args.js');
+    const flags = new Set<string>(OPTIONS.map((o: { name: string }) => `--${o.name}`));
+    flags.add('--no-discord');
+    const named = [...section0110('http').matchAll(/`(--[a-z-]+)`/g)].map((m) => m[1] as string);
+    expect(named.length).toBeGreaterThan(8);
+    for (const flag of named) expect(flags.has(flag), flag).toBe(true);
+  });
+});

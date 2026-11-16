@@ -174,6 +174,19 @@ describe('peer floors', () => {
   it.each([...NEEDS_NEW_KIT])('%s needs core ^0.1.9 (appeals and names: the optional Store methods and row types, cw.appeals, cw.names, cw.people.accountIds, the new events and types)', (name) => {
     expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.9');
   });
+  it('no peer floor changed by this release (0.1.10 uses nothing new in core or http, so the sets above are as 0.1.9 left them)', () => {
+    // A floor at the group version would mean a package imports a name that only this release has; this release adds only subpaths and a bin.
+    for (const { pkg } of published) {
+      for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {}).filter(([n]) => ownScope(n))) {
+        expect(range, `${pkg.name} peer ${peer}`).not.toBe(`^${VERSION}`);
+        expect(['^0.1.0', '^0.1.5', '^0.1.9']).toContain(range);
+      }
+    }
+    expect(peerRangeOf('@chatwarden/http', '@chatwarden/core')).toBe('^0.1.9');
+    expect(peerRangeOf('@chatwarden/store-memory', '@chatwarden/core')).toBe('^0.1.9');
+    expect(peerRangeOf('@chatwarden/hub-react', '@chatwarden/http')).toBe('^0.1.9');
+    expect(peerRangeOf('@chatwarden/hub-element', '@chatwarden/hub-react')).toBe('^0.1.5');
+  });
   it('the new floors are the ones in NEEDS_NEW_KIT: store-memory, store-sqlite, http, discord, hub-react and player-react, and no other package', () => {
     expect([...NEEDS_NEW_KIT].sort()).toEqual(['@chatwarden/discord', '@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/store-memory', '@chatwarden/store-sqlite']);
     const peering = published.filter((p) => (p.pkg.peerDependencies?.['@chatwarden/core'] ?? '') !== '' && p.pkg.peerDependencies?.['@chatwarden/core'] !== PEER_RANGE).map((p) => p.pkg.name).sort();

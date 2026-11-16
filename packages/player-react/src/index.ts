@@ -1,4 +1,4 @@
-export const VERSION = '0.1.9';
+export const VERSION = '0.1.10';
 
 export { NoticeQueue } from './NoticeQueue.js';
 export type { NoticeQueueProps } from './NoticeQueue.js';
