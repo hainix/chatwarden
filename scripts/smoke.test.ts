@@ -332,3 +332,28 @@ describe("the init step (the packed bin, run in the ESM consumer)", () => {
     expect(readFileSync(join(root, 'scripts', 'smoke', 'esm', 'tsconfig.json'), 'utf8')).toMatch(/"jsx": "react-jsx"/);
   });
 });
+
+describe('the consumer scenario and the K5 integrations', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const scenario = readFileSync(join(root, 'scripts', 'smoke', 'scenario.ts'), 'utf8');
+  it('imports each subpath (types under NodeNext and under moduleResolution node, then the real function) and the in-memory links wrapper', () => {
+    expect(scenario).toContain("from '@chatwarden/http/discord'");
+    expect(scenario).toContain("from '@chatwarden/http/coop'");
+    expect(scenario).toContain("from '@chatwarden/http/eos'");
+    expect(scenario).toContain('withMemoryLinks');
+  });
+  it('runs each adapter from the packed tarballs with no network, and checks the root does not export them', () => {
+    for (const call of ['discordBot(', 'registerCommands(', 'coop(', 'eos(']) expect(scenario, call).toContain(call);
+    expect(scenario).toContain('await integrations(');
+    expect(scenario).toMatch(/'discordBot', 'registerCommands', 'coop', 'eos'/);
+  });
+  it('checks a store without links is refused with a RangeError, cw.links on both stores, and cw.sanctions.byRef', () => {
+    expect(scenario).toContain('RangeError');
+    expect(scenario).toContain('cw.links.supported');
+    expect(scenario).toContain('sanctions.byRef(');
+  });
+  it('gives every request a stub fetch: the scenario never reaches Discord, Coop or EOS', () => {
+    expect(scenario).toMatch(/const stub: typeof fetch/);
+    expect(scenario.match(/fetch: stub/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+  });
+});

@@ -347,3 +347,64 @@ describe('the 0.1.11 notes (all ten CHANGELOGs)', () => {
     expect(readFileSync(join(root, 'packages', 'matcher', 'src', 'liveTerms.ts'), 'utf8')).toContain('syncPack(');
   });
 });
+
+// 0.1.12 (the Discord bot, Coop and EOS): the notes are in all ten CHANGELOGs and cannot be edited after publish, so what an adopter must be told is pinned here.
+const section012 = (dir: string): string => {
+  const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+  const at = text.indexOf('## 0.1.12');
+  const end = text.indexOf('\n## 0.1.11', at);
+  return at < 0 ? '' : text.slice(at, end < 0 ? undefined : end);
+};
+
+describe('the 0.1.12 notes (the Discord bot, Coop and EOS), in all ten CHANGELOGs', () => {
+  const NEEDLES = [
+    // The three subpaths, and what the Discord feed gained.
+    '@chatwarden/http/discord',
+    '@chatwarden/http/coop',
+    '@chatwarden/http/eos',
+    '`components`',
+    '`discordFeed`',
+    '`registerCommands`',
+    '`sweep()`',
+    'productUserIdsOf',
+    // The core additions and the migration.
+    '`cw.sanctions.byRef`',
+    '`cw.links`',
+    '`withMemoryLinks`',
+    '`getLink`',
+    'Migration 23',
+    'one-way',
+    'Back up the database',
+    // What is unverified and experimental.
+    'UNVERIFIED',
+    '`@experimental`',
+    'D10',
+    'C8',
+    'E5',
+    // The unions, the floors.
+    'No widened union',
+    'peer floors raised on purpose',
+    '`@chatwarden/core` `^0.1.12`',
+    '`@chatwarden/store-memory`',
+    '`@chatwarden/store-sqlite`',
+  ];
+  it.each(dirs)('%s names every one of them', (dir) => {
+    const s = section012(dir);
+    expect(s.length, `${dir} has a 0.1.12 section`).toBeGreaterThan(1000);
+    for (const needle of NEEDLES) expect(s, `${dir}: ${needle}`).toContain(needle);
+  });
+  it('nine of the ten carry exactly the same text, and the matcher carries it too with the pending share-client note after it', () => {
+    const others = dirs.filter((d) => d !== 'matcher');
+    const first = section012(others[0] as string);
+    for (const dir of others) expect(section012(dir), dir).toBe(first);
+    const body = first.trimEnd();
+    expect(section012('matcher').startsWith(body)).toBe(true);
+  });
+  it('the pending note about the share client is in the matcher CHANGELOG, once', () => {
+    const s = section012('matcher');
+    expect(s.split("The share client's note rules now match the term-corpus service's").length - 1).toBe(1);
+  });
+  it('no consumed changeset is left behind but the config', () => {
+    expect(readdirSync(join(root, '.changeset')).sort()).toEqual(['config.json']);
+  });
+});

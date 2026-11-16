@@ -3,6 +3,7 @@
 // must compile under both NodeNext and `module: commonjs` + `moduleResolution: node`, so: no top-level await, no import.meta.
 // Any failed assertion throws and the process exits non-zero.
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -14,9 +15,13 @@ import { renderToString } from 'react-dom/server';
 import { createChatwarden, VERSION as CORE_VERSION } from '@chatwarden/core';
 import type { RawWho, Store } from '@chatwarden/core';
 import { discordFeed } from '@chatwarden/discord';
+import * as httpRoot from '@chatwarden/http';
 import { healthRoutes, playerRoutes, VERSION as HTTP_VERSION } from '@chatwarden/http';
 import { adminRoutes, createRouter } from '@chatwarden/http/admin';
 import { chatRoutes, createRoomBroadcaster } from '@chatwarden/http/chat';
+import { coop } from '@chatwarden/http/coop';
+import { discordBot, registerCommands } from '@chatwarden/http/discord';
+import { eos } from '@chatwarden/http/eos';
 import { toExpress } from '@chatwarden/http/express';
 import { defineChatwardenHub, VERSION as ELEMENT_VERSION } from '@chatwarden/hub-element/standalone';
 import { createHubClient, Hub, memoryRouter, routerTransport, VERSION as HUB_VERSION } from '@chatwarden/hub-react';
@@ -30,7 +35,7 @@ import { syntheticTermPack as legacySyntheticTermPack } from '@chatwarden/matche
 import { createPlayerClient, routerTransport as playerTransport, VERSION as PLAYER_VERSION } from '@chatwarden/player-react';
 import { ChatBox, sseTransport } from '@chatwarden/player-react/chat';
 import { createProfanityFilter } from '@chatwarden/profanity';
-import { createMemoryStore } from '@chatwarden/store-memory';
+import { createMemoryStore, withMemoryLinks } from '@chatwarden/store-memory';
 import { openStore } from '@chatwarden/store-sqlite';
 
 const ROOM = 'lobby';
@@ -56,6 +61,7 @@ async function main(): Promise<void> {
   await scenario('store-memory', memory, buildMatcher(pack.terms, pack.exceptions));
 
   await corpus();
+  await integrations();
 
   console.log('smoke scenario: ok');
 }
@@ -100,6 +106,71 @@ async function corpus(): Promise<void> {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * The three integrations from the packed tarballs (K5): each subpath resolves under NodeNext and under `module: commonjs` + `moduleResolution: node`, none is on the
+ * root, and each adapter builds, hands back its routes, and disposes. A store with no links is refused; both real stores have them. No network: every `fetch` is a stub.
+ */
+async function integrations(): Promise<void> {
+  const stub: typeof fetch = () => Promise.resolve(new Response('[]', { status: 200 }));
+  for (const name of ['discordBot', 'registerCommands', 'coop', 'eos']) assert.equal(name in httpRoot, false, `${name} is not on the root of @chatwarden/http`);
+
+  const kit = async (store: Store) => createChatwarden({ store, secret: 'smoke-secret-not-for-production', platform: { identify: (ctx) => ctx as RawWho }, clock, retention: false });
+  const sqlite = await kit(openStore({ path: ':memory:' }));
+  assert.equal(sqlite.links.supported, true, 'cw.links.supported on the SQLite store');
+  assert.equal(sqlite.sanctions.byRef('M-AAAAA'), null, 'byRef answers null for a code nobody has');
+  const memory = await kit(createMemoryStore());
+  assert.equal(memory.links.supported, false, 'a plain memory store has no links');
+  const withLinks = await kit(withMemoryLinks(createMemoryStore()));
+  assert.equal(withLinks.links.supported, true, 'withMemoryLinks gives the memory store links');
+
+  const der = generateKeyPairSync('ed25519').publicKey.export({ format: 'der', type: 'spki' });
+  const bot = discordBot(sqlite, {
+    applicationId: '111111111111111111',
+    publicKey: Buffer.from(der.subarray(der.length - 32)).toString('hex'),
+    guildId: '222222222222222222',
+    roles: { moderator: ['333333333333333301'] },
+    hubLink: (kind, id) => `https://hub.example.test/${kind}/${encodeURIComponent(id)}`,
+    actions: { dismiss: true, suggestion: true },
+    fetch: stub,
+  });
+  assert.equal(typeof bot.routes['POST /discord/interactions'], 'function', 'the interactions route');
+  assert.ok(bot.commands().length > 0, 'the command list');
+  assert.equal(bot.components({ kind: 'report', reportId: 'r1' })?.length, 1, 'one row of buttons');
+  assert.deepEqual(
+    await registerCommands({ applicationId: '111111111111111111', botToken: 'smoke.bot-token_1', guildId: '222222222222222222', commands: bot.commands(), fetch: stub }),
+    { ok: true, count: 0 },
+  );
+  bot.dispose();
+
+  const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ format: 'pem', type: 'spki' }).toString();
+  const coopOptions = {
+    baseUrl: 'https://coop.example.test',
+    apiKey: 'smoke-api-key-0001',
+    webhookPublicKey: rsa,
+    itemTypes: { user: 'type-user', line: 'type-line', report: 'type-report' },
+    evidence: 'none' as const,
+    actions: { 'action-1': { verdict: 'no_action' as const } },
+    fetch: stub,
+  };
+  const adapter = coop(sqlite, coopOptions);
+  assert.equal(typeof adapter.routes['POST /coop/actions'], 'function', 'the Coop callback route');
+  assert.ok(adapter.setup.checklist().toText().length > 0, 'the setup checklist');
+  assert.deepEqual(await adapter.sweep(), { sent: 0, skipped: 0, failed: 0 }, 'nothing to send');
+  adapter.dispose();
+  assert.throws(() => coop(memory, coopOptions), RangeError, 'Coop refuses a store with no links');
+
+  const eosOptions = {
+    deploymentId: 'smoke-deployment',
+    clientId: 'smoke-client',
+    clientSecret: 'smoke-secret-value',
+    sanctions: { productUserIdsOf: () => [] as string[], actions: { chat: 'chatwarden-chat' } },
+    fetch: stub,
+  };
+  const pusher = eos(withLinks, eosOptions);
+  pusher.dispose();
+  assert.throws(() => eos(memory, eosOptions), RangeError, 'EOS refuses a store with no links');
 }
 
 async function scenario(label: string, store: Store, matcher: Matcher): Promise<void> {
