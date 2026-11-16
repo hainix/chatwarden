@@ -65,7 +65,7 @@ describe('registerCommands', () => {
     const bad: Array<[Record<string, unknown>, string]> = [
       [{ applicationId: 'not-a-number-zorbak' }, 'not-a-number-zorbak'],
       [{ applicationId: '123' }, '123'],
-      [{ applicationId: 12345678901234567 }, '12345678901234567'],
+      [{ applicationId: 12_345_678 }, '12345678'],
       [{ guildId: '2222222222222222/../x' }, '2222222222222222/../x'],
       [{ guildId: '' }, 'discordBot'],
       [{ botToken: '' }, 'discordBot'],
