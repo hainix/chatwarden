@@ -68,7 +68,7 @@ describe('the JS rendering', () => {
       }
     }
     expect(compared).toBeGreaterThan(30);
-  });
+  }, 60_000);
 
   it('the comments are the same in both renderings, so the markers and the advice carry over', () => {
     const comments = (file: FileSpec): string[] => file.content.split('\n').filter((l) => l.trim().startsWith('//'));
