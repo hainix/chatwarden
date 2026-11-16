@@ -244,10 +244,11 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
   /**
    * What a post with components learns from Discord's answer (nothing for any other post). An application-owned webhook's message names its application
    * (`application_id`, a snowflake); one made by hand does not, and its interactive buttons were ignored, so there is nothing to edit later: `foreign`.
-   * Otherwise the id of the message, when it is a plain token.
+   * Otherwise the id of the message, when it is a plain token. An answer that cannot be read at all (an empty or odd body, a proxy's page) says nothing
+   * either way: no verdict, so one odd answer cannot turn the buttons off for good.
    */
   const messageIdOf = (message: ForumMessage, json: Json): { messageId: string } | { foreign: true } | Record<string, never> => {
-    if (!hasComponents(message)) return {};
+    if (!hasComponents(message) || json === null) return {};
     if (!isSnowflake(json?.application_id)) return { foreign: true };
     const id = json?.id;
     return typeof id === 'string' && PLAIN_ID_RE.test(id) ? { messageId: id } : {};

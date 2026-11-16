@@ -2166,6 +2166,36 @@ describe('the webhook must be the application\'s own (K5 design 6.2)', () => {
     expect(logged).toEqual([['chatwarden.discord_components_ignored', undefined]]);
   });
 
+  it('one answer that cannot be read does not turn the buttons off for good: no log, the next report post still carries them, and a hand-made answer afterwards still does', async () => {
+    const k = fakeKit();
+    const person = sid();
+    const a = k.addReport({ targetPerson: person });
+    const b = k.addReport({ targetPerson: person });
+    const c = k.addReport({ targetPerson: person });
+    const e = k.addReport({ targetPerson: person });
+    // Answers by call: the thread opens normally; the second call's body is unreadable; the third is a good bot answer; the fourth is a hand-made one.
+    const plan = (n: number, call: { url: URL }) => {
+      if (n === 0) return { status: 200, json: { id: 'm0', channel_id: 'T1', application_id: '111111111111111111' } };
+      if (n === 1) return { status: 200, text: 'upstream hiccup' };
+      if (n === 2) return { status: 200, json: { id: 'm2', application_id: '111111111111111111' } };
+      return { status: 200, json: call.url.searchParams.has('thread_id') ? { id: `m${n}` } : { id: `m${n}`, channel_id: 'T9' } };
+    };
+    const { d, logged, asked } = make(k, plan);
+    await k.emit(created(a.id));
+    await settle();
+    await k.emit(created(b.id));
+    await settle();
+    expect(logged).toEqual([]);
+    await k.emit(created(c.id));
+    await settle();
+    expect(asked).toEqual([a.id, b.id, c.id]);
+    for (const call of d.calls) expect(call.url.searchParams.get('with_components')).toBe('true');
+    expect(logged).toEqual([]);
+    await k.emit(created(e.id));
+    await settle();
+    expect(logged).toEqual([['chatwarden.discord_components_ignored', undefined]]);
+  });
+
   it('an answer that names an application (a bot-made webhook) is ours: no log, and the strip works as before', async () => {
     const k = fakeKit();
     const r = k.addReport({ targetPerson: sid() });

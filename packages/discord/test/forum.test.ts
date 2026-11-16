@@ -672,6 +672,16 @@ describe('editing a message (K5 D2)', () => {
     expect(await c).toEqual({ ok: true });
   });
 
+  it('a 200 whose body cannot be read says nothing about the webhook: no verdict, no message id, not foreign', async () => {
+    const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'x', custom_id: 'cw1:x' }] }];
+    for (const text of ['', 'not json', 'null', '[]', '"x"', '<html>proxy page</html>']) {
+      const { forum } = client(() => ({ status: 200, text }));
+      const b = forum.post('T5', { content: 'x', components: ROW });
+      await settle();
+      expect(await b, text).toEqual({ ok: true });
+    }
+  });
+
   it('a message id in the answer that is not a plain token is not passed on', async () => {
     const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'x', custom_id: 'cw1:x' }] }];
     const { forum } = client(() => ({ status: 200, json: { id: '../../evil', channel_id: 'T5', application_id: '111111111111111111' } }));
