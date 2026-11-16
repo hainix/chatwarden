@@ -98,7 +98,12 @@ export function fakeLoader(live: LiveTerms, over: Partial<FakeStatus> = {}): Fak
 
 export type ShareCall = { term: string; language: string; category: string; target?: string; note?: string | null };
 
+export type ReportCall = { termId: string; kind: string };
+
 export interface FakeShare {
+  reportCalls: ReportCall[];
+  reportResult: unknown;
+  report: (input: ReportCall) => Promise<unknown>;
   calls: ShareCall[];
   statusCalls: string[];
   result: unknown;
@@ -110,6 +115,13 @@ export interface FakeShare {
 
 export function fakeShare(): FakeShare {
   const f: FakeShare = {
+    reportCalls: [],
+    reportResult: { ok: true, id: 'rep_abc123' },
+    report: async (input) => {
+      f.reportCalls.push(structuredClone(input));
+      if (f.throws) throw new Error(`report exploded on ${input.termId}`);
+      return f.reportResult;
+    },
     calls: [],
     statusCalls: [],
     result: { ok: true, status: 'received', id: 'sub_abc123' },
@@ -132,6 +144,8 @@ export function fakeShare(): FakeShare {
 export interface CommunityOptions extends Omit<WorldOptions, 'community'> {
   /** Give the community a share object (default true). */
   share?: boolean;
+  /** Let the share object report a community term (default true). */
+  report?: boolean;
   exposeCommunityRows?: boolean;
   /** Put the corpus rows in the live list before the first request (default true). */
   seedCorpus?: boolean;
@@ -142,6 +156,8 @@ export interface CommunityOptions extends Omit<WorldOptions, 'community'> {
 export async function communityWorld(over: CommunityOptions = {}) {
   let loader!: FakeLoader;
   const share = fakeShare();
+  // A share object from before reporting existed has no `report`.
+  const shareObject = over.report === false ? { share: share.share, status: share.status } : share;
   const w = await world({
     ...over,
     community: (live) => {
@@ -149,7 +165,7 @@ export async function communityWorld(over: CommunityOptions = {}) {
       return {
         loader: loader as never,
         live,
-        ...(over.share === false ? {} : { share: share as never }),
+        ...(over.share === false ? {} : { share: shareObject as never }),
         ...(over.exposeCommunityRows === undefined ? {} : { exposeCommunityRows: over.exposeCommunityRows }),
       };
     },

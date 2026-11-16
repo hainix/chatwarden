@@ -38,6 +38,7 @@ const TABLE = {
   same_decider: { status: 409, message: 'The person who made the decision cannot decide its appeal.' },
   gone: { status: 409, message: 'The sanction this appeal was about is gone.' },
   not_shareable: { status: 409, message: 'This term cannot be shared.' },
+  not_reportable: { status: 409, message: 'Only a term of the community list can be reported.' },
   nothing_to_apply: { status: 409, message: 'There is no verified community list to apply.' },
   apply_refused: { status: 409, message: 'The community list could not be applied; nothing was changed.' },
   pending_rename: { status: 409, message: 'A rename is already waiting for this player.' },

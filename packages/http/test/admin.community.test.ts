@@ -24,6 +24,7 @@ describe('GET /community', () => {
       languages: ['en', 'es'],
       license: { spdx: 'CC-BY-4.0', attribution: 'Contains the Chatwarden community term list (chatwarden.dev), CC BY 4.0.' },
       sharing: true,
+      reporting: true,
       counts: { terms: { en: 3, es: 0 }, exceptions: { en: 1, es: 0 }, status: { accepted: 2, provisional: 1, disputed: 0, withdrawn: 0 } },
     });
     noWords(res.body);

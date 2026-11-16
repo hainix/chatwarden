@@ -75,6 +75,8 @@ export interface CommunityShareInput {
 export interface CommunityShareClient {
   share(input: CommunityShareInput): Promise<unknown>;
   status(id: string): Promise<unknown>;
+  /** Report a problem with a term of the list: a term id and a closed kind. Without it the hub shows no report action. */
+  report?(input: { termId: string; kind: 'innocent_sense' | 'wrong_category' | 'removal' }): Promise<unknown>;
 }
 
 /** What `adminRoutes` takes as `community`. */
@@ -100,6 +102,7 @@ export const isUntouchedCommunityRow = (r: { addedBy?: string | null; updatedBy?
 
 const CATEGORIES: readonly string[] = ['slur', 'abuse', 'sexual', 'other'];
 const TARGETS: readonly string[] = ['ethnicity', 'religion', 'gender', 'sexuality', 'disability', 'nationality', 'other'];
+const REPORT_KINDS: readonly string[] = ['innocent_sense', 'wrong_category', 'removal'];
 const SHARE_STATUSES: readonly string[] = ['received', 'in_review', 'accepted', 'declined', 'merged'];
 const SHARE_REASONS: readonly string[] = ['known_innocent', 'not_a_term', 'duplicate', 'needs_context', 'other'];
 const IMMEDIATE: readonly string[] = ['received', 'known', 'duplicate'];
@@ -178,6 +181,7 @@ function statusBody(community: CommunityAdmin): Record<string, unknown> {
     lastError: e === null || e === undefined ? null : { code: String(e.code), stage: String(e.stage) },
     ...releaseFacts(community.loader),
     sharing: community.share !== undefined,
+    reporting: typeof community.share?.report === 'function',
   };
 }
 
@@ -210,6 +214,14 @@ function shareBody(body: Record<string, unknown>): { category: CommunityShareInp
   return out;
 }
 
+/** `{ kind }`, checked: nothing else is accepted, so a report cannot carry text, a word or an id of the body's own. */
+function reportBody(body: Record<string, unknown>): 'innocent_sense' | 'wrong_category' | 'removal' {
+  if (Object.keys(body).some((k) => k !== 'kind')) throw new ValidationError();
+  const { kind } = body;
+  if (typeof kind !== 'string' || !REPORT_KINDS.includes(kind)) throw new ValidationError();
+  return kind as 'innocent_sense' | 'wrong_category' | 'removal';
+}
+
 /**
  * The community routes, mounted when the adopter passes `community`:
  * - `GET /community` (`terms.read`): the loader's status, the release's languages, licence and counts, and whether sharing is on. No term.
@@ -220,7 +232,9 @@ function shareBody(body: Record<string, unknown>): { category: CommunityShareInp
  * - `POST /terms/lookup { word }` (`terms.read`): the row for an exact word (folded), or 404. The word is in the body, never the URL.
  * - with `community.share`: `POST /terms/:id/share { category, target?, note? }` (`terms.write`; audit `term.share`, target `term:<id>`; answer
  *   `{ status }` only; 409 `not_shareable` for a community row) and `GET /terms/:id/share` (`terms.read`; `{ status, reason? }`, or `{ status: null }` for a term never shared).
- * A failed share is a fixed error code (`share_unavailable` 502, `share_refused` 422, `rate_limited` 429, 400), never the service's text.
+ * - with a `community.share` that can `report`: `POST /terms/:id/report { kind }` (`terms.write`; the row must be a community row, else 409
+ *   `not_reportable`; sends the term id and the kind, never the word; audit `term.share`, target `term:<id>`; answer `{ status: 'received' }`).
+ * A failed share or report is a fixed error code (`share_unavailable` 502, `share_refused` 422, `rate_limited` 429, 400), never the service's text.
  */
 export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): RouteTable {
   const { live, loader } = community;
@@ -304,6 +318,29 @@ export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): R
       c.audit('term.share', { type: 'term', ref: id }, 'best-effort');
       return { status: 200, body: { status: result.status } };
     });
+
+    if (typeof share.report === 'function') {
+      const report = share.report.bind(share);
+      table['POST /terms/:id~ref/report'] = ctx.secure('terms.write', async (c) => {
+        const id = c.params.id as string;
+        const kind = reportBody(bodyObject(c.req));
+        const row = find(id);
+        if (row === undefined) throw new NotFoundError();
+        // The service knows the list's own ids; a row the adopter made is not on the list, so there is nothing to report.
+        if (!isCommunityRow(row)) throw new HttpError('not_reportable');
+        let result: unknown;
+        try {
+          result = await report({ termId: id, kind });
+        } catch (e) {
+          safeWarn(ctx.logger, 'chatwarden.http_share_failed', { error: errorClass(e) });
+          throw new HttpError('share_unavailable');
+        }
+        if (!isObject(result) || result.ok !== true) throw shareFailure(result);
+        // A report sends a term id and a kind, never the word. No new audit name exists for it: it is the same outward call as a share.
+        c.audit('term.share', { type: 'term', ref: id }, 'best-effort');
+        return { status: 200, body: { status: 'received' } };
+      });
+    }
 
     table['GET /terms/:id~ref/share'] = ctx.secure('terms.read', async (c) => {
       const id = c.params.id as string;
