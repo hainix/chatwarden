@@ -415,8 +415,10 @@ free text never leaves the service.
    kit's `stampBits` option (0 to 26, default 16) is how many zero bits it mints; the service says how many it wants and checks with
    `checkStamp(body, stamp, bits)`.
 3. The kit sends its version as `kit` (default `0.0.0`; `startCorpus` and the hub pass the matcher's version).
-4. The note rules are the service's rules too: at most 200 characters, no control character, no `@`, no digit run longer than 4, no URL
-   (a scheme, `www.`, or a bare host under a common top-level domain).
+4. The note rules are the service's rules too, and the kit and the service apply the same list so the kit never sends a note the service
+   refuses: at most 200 characters; no control character (C0, DEL and C1, U+2028 and U+2029, and the bidi controls U+200E, U+200F, U+061C,
+   U+202A to U+202E and U+2066 to U+2069); and, read in NFKC form (so full-width and compatibility forms do not slip through), no `@`, no run
+   of more than 4 decimal digits of any script, and no URL (a scheme, `www.`, or a bare host under a common top-level domain).
 5. An answer is read at most 8 KiB, every request has a 15 second deadline, and nothing the service says is passed on: `known` carries
    the public term id, `received` carries an id that looks like an id, `400` is `invalid`, `too_large`, `unsupported_language` or `stamp`
    (the kit treats `stamp` as `rejected`).

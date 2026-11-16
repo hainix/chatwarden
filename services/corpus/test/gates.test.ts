@@ -187,8 +187,28 @@ describe('arrivalGate: the cheap checks, one closed code each', () => {
   });
 });
 
+// The same list sits in packages/matcher/test/corpus-share.test.ts (SERVICE_REFUSES): the kit never sends a note the service refuses.
+export const NOTE_CASES = [
+  'next line \u0085 here',
+  'c1 control \u009f here',
+  'line separator \u2028 here',
+  'paragraph separator \u2029 here',
+  'left to right \u200e mark',
+  'right to left \u200f mark',
+  'arabic letter mark \u061c here',
+  'right to left \u202e override',
+  'embedding \u202a start',
+  'isolate \u2066 mark',
+  'pop isolate \u2069 mark',
+  'full width \uff20 sign',
+  'call \uff11\uff12\uff13\uff14\uff15',
+  'call \u0661\u0662\u0663\u0664\u0665',
+  'example\uff0ecom',
+  'see \uff48\uff54\uff54\uff50\uff1a\uff0f\uff0fx',
+];
 describe('the note rules (design 6.8): at most 200 characters, no control character, no @, no digit run over 4, no URL', () => {
   const bad = [
+    ...NOTE_CASES,
     'see https://example.test/x',
     'http://x',
     'ftp://host',

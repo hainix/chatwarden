@@ -214,6 +214,38 @@ describe('what is checked before anything is sent', () => {
     }
   });
 
+  // The same list sits in services/corpus/test/gates.test.ts (NOTE_CASES): the kit never sends a note the service refuses.
+  const SERVICE_REFUSES = [
+    'next line \u0085 here',
+    'c1 control \u009f here',
+    'line separator \u2028 here',
+    'paragraph separator \u2029 here',
+    'left to right \u200e mark',
+    'right to left \u200f mark',
+    'arabic letter mark \u061c here',
+    'right to left \u202e override',
+    'embedding \u202a start',
+    'isolate \u2066 mark',
+    'pop isolate \u2069 mark',
+    'full width \uff20 sign',
+    'call \uff11\uff12\uff13\uff14\uff15',
+    'call \u0661\u0662\u0663\u0664\u0665',
+    'example\uff0ecom',
+    'see \uff48\uff54\uff54\uff50\uff1a\uff0f\uff0fx',
+  ];
+  it.each(SERVICE_REFUSES)('note: %j is refused here as the service refuses it (invalid, nothing sent)', async (note) => {
+    const w = await world();
+    expect(await w.share.share(input({ note }))).toEqual({ ok: false, code: 'invalid' });
+    expect(w.sent).toHaveLength(0);
+  });
+
+  it('note: ordinary non-ASCII text is still sent (accents, an emoji, four digits)', async () => {
+    for (const note of ['caf\u00e9 \u00f1', 'rude \u{1f600}', 'rank \uff11\uff12\uff13\uff14']) {
+      const w = await world();
+      expect((await w.share.share(input({ note }))).ok, JSON.stringify(note)).toBe(true);
+    }
+  });
+
   it('note: 200 characters ok, 201 refused; a URL, an @name, a 5-digit run: refused; null ok', async () => {
     const ok = ['x'.repeat(200), null, undefined, '', '   ', 'heard in a match, aimed at a team', 'cost 1234 gold', 'one 2 three 4 five 5', 'wait... what', 'a.b', 'end of line.Yes', '1.2.3.4'.slice(0, 3)];
     for (const note of ok) {
