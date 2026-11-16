@@ -2,6 +2,7 @@ import { readZip } from '@chatwarden/matcher/corpus';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { doiSql } from '../src/tools/record.js';
 import { main as zenodo } from '../src/tools/zenodo.js';
 import { publishToZenodo, zenodoMetadata, type ZenodoRelease } from '../src/tools/zenodoClient.js';
 import { makeBuildWorld } from './build-world.js';
@@ -247,5 +248,50 @@ describe('zenodo (the tool)', () => {
     ];
     for (const argv of cases) expect(await run(argv), argv.join(' ')).toBe(1);
     expect(fake.calls).toEqual([]);
+  });
+
+  it('writes the SQL that records the DOI beside the result file, and prints the command; the sandbox writes none', async () => {
+    expect(await run(base())).toBe(0);
+    expect(readFileSync(join(tw.dir, 'doi-terms-2026.12.0.sql'), 'utf8')).toBe(doiSql('terms', '2026.12.0', '10.5281/zenodo.2001'));
+    expect(tw.everything()).toContain('wrangler d1 execute chatwarden-corpus --remote --file');
+  });
+
+  describe('--sandbox keeps its own result file, so a sandbox run never stands in for the real one', () => {
+    const SANDBOX = 'https://sandbox.zenodo.org';
+    const runSandbox = (argv: string[]) => zenodo(argv, tw.io, { fetch: new FakeZenodo({ id: 1000, version: '2026.11.0' }, SANDBOX).fetch });
+
+    it('writes zenodo-sandbox-<kind>-<version>.json with sandbox: true, and no production result file', async () => {
+      expect(await runSandbox([...base(), '--sandbox'])).toBe(0);
+      expect(existsSync(join(tw.dir, 'zenodo-terms-2026.12.0.json'))).toBe(false);
+      expect(existsSync(join(tw.dir, 'doi-terms-2026.12.0.sql'))).toBe(false);
+      const result = JSON.parse(readFileSync(join(tw.dir, 'zenodo-sandbox-terms-2026.12.0.json'), 'utf8')) as Record<string, unknown>;
+      expect(result).toMatchObject({ kind: 'terms', version: '2026.12.0', sandbox: true });
+      expect(String(result.fileUrl)).toContain('sandbox.zenodo.org');
+      expect(String(result.doi).startsWith('10.5072/')).toBe(true);
+    });
+
+    it('a production run after a sandbox run still goes to Zenodo (it is not "already on Zenodo")', async () => {
+      expect(await runSandbox([...base(), '--sandbox'])).toBe(0);
+      tw.out.length = 0;
+      expect(await run(base())).toBe(0);
+      expect(tw.out.join(String.fromCharCode(10))).not.toContain('already on Zenodo');
+      expect(fake.calls.length).toBeGreaterThan(0);
+      const prod = JSON.parse(readFileSync(join(tw.dir, 'zenodo-terms-2026.12.0.json'), 'utf8')) as Record<string, unknown>;
+      expect(prod.sandbox).toBeUndefined();
+      expect(String(prod.doi).startsWith('10.5281/')).toBe(true);
+    });
+
+    it('a second sandbox run is "already" the sandbox one', async () => {
+      await runSandbox([...base(), '--sandbox']);
+      tw.out.length = 0;
+      expect(await runSandbox([...base(), '--sandbox'])).toBe(0);
+      expect(tw.out.join(String.fromCharCode(10))).toContain('already on the Zenodo SANDBOX');
+    });
+
+    it('says in its output that the archive is a sandbox one and not to use it as a mirror', async () => {
+      await runSandbox([...base(), '--sandbox']);
+      expect(tw.out.join(String.fromCharCode(10))).toMatch(/sandbox/i);
+      expect(tw.out.join(String.fromCharCode(10))).not.toContain('publish --mirror <the zenodo-... result file');
+    });
   });
 });

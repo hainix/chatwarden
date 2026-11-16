@@ -1,16 +1,18 @@
 import { parseTermsRelease, readZip } from '@chatwarden/matcher/corpus';
+import { ToolError } from './errors.js';
 import { BuildError, buildTermsRelease, nextSequence, nextVersion } from '../build/release.js';
 import { renderDiff } from '../build/diff.js';
 import { parseArgs, UsageError, valueOf } from './args.js';
 import type { ToolIo } from './io.js';
 import { openDump } from './localD1.js';
+import { defaultOutDir, guardOutDir } from './outdir.js';
 
 // `tools/release.mjs`: build a terms release from a copy of the database (design 7). It reads a SQL dump, never the live database, writes the
 // zip and a small summary next to it, and prints the diff: counts and ids, no word unless `--show-words`. It does not sign, upload or record.
 
 const SPEC = { dump: 'value', out: 'value', previous: 'value', version: 'value', sequence: 'value', languages: 'value', 'allow-bulk': 'flag', 'show-words': 'flag' } as const;
 
-export const RELEASE_USAGE = `usage: release --dump <d1-export.sql> [--out <dir>] [--previous <last-terms-zip>] [--version YYYY.MM.N] [--sequence N] [--languages en,es,pt] [--allow-bulk] [--show-words]`;
+export const RELEASE_USAGE = `usage: release --dump <d1-export.sql> [--out <dir outside any git tree>] [--previous <last-terms-zip>] [--version YYYY.MM.N] [--sequence N] [--languages en,es,pt] [--allow-bulk] [--show-words]`;
 
 const decoder = new TextDecoder();
 
@@ -19,7 +21,8 @@ export async function main(argv: readonly string[], io: ToolIo): Promise<number>
     const args = parseArgs(argv, SPEC);
     const dump = valueOf(args, 'dump');
     if (dump === undefined) throw new UsageError('--dump is required');
-    const out = valueOf(args, 'out') ?? 'release-out';
+    const out = valueOf(args, 'out') ?? defaultOutDir(io);
+    guardOutDir(out, io);
     const db = openDump(decoder.decode(await io.read(dump)));
     const version = valueOf(args, 'version') ?? (await nextVersion(db, io.clock));
     const sequenceText = valueOf(args, 'sequence');
@@ -51,6 +54,8 @@ export async function main(argv: readonly string[], io: ToolIo): Promise<number>
     if (e instanceof UsageError) {
       io.err(e.message);
       io.err(RELEASE_USAGE);
+    } else if (e instanceof ToolError) {
+      io.err(`${e.code}: ${e.message}`);
     } else if (e instanceof BuildError) {
       io.err(`${e.code}: ${e.message}${e.ids.length > 0 ? ` (${e.ids.join(', ')})` : ''}`);
     } else {

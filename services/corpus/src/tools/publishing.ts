@@ -72,6 +72,8 @@ export interface PublishInput {
   sequence?: number;
   revokedKeyIds?: readonly string[];
   revokedReleases?: readonly CorpusRevokedRelease[];
+  /** Sign a new index even when nothing in it would change but the sequence and the freshness (the live index is nearing its expiry). */
+  refresh?: boolean;
   /** Build, sign and verify the new index but upload nothing: the result holds it. */
   dryRun?: boolean;
 }
@@ -186,7 +188,17 @@ export async function publishRelease(input: PublishInput): Promise<PublishResult
     return { ...e, mirrors: [...have, ...add.filter((m) => !have.some((h) => h.url === m.url))] };
   };
   const merged = entries.map(merge);
-  const unchanged = existing !== undefined && JSON.stringify(merged) === JSON.stringify(entries);
+  const revokedKeyIds = [...new Set([...(live?.raw.revokedKeyIds ?? []), ...(input.revokedKeyIds ?? [])])];
+  const known = (live?.raw.revokedReleases ?? []).map((r) => `${r.kind}:${r.version}`);
+  const revokedReleases = [...(live?.raw.revokedReleases ?? [])];
+  for (const r of input.revokedReleases ?? []) {
+    const id = `${r.kind}:${r.version}`;
+    if (known.includes(id)) continue;
+    known.push(id);
+    revokedReleases.push(r);
+  }
+  const revocationsChanged = revokedKeyIds.length !== (live?.raw.revokedKeyIds ?? []).length || revokedReleases.length !== (live?.raw.revokedReleases ?? []).length;
+  const unchanged = existing !== undefined && JSON.stringify(merged) === JSON.stringify(entries) && !revocationsChanged && input.refresh !== true;
   if (unchanged) return { published: false, sequence: liveSequence, indexBytes: (live as NonNullable<typeof live>).bytes, indexSig: decoder.decode((live as NonNullable<typeof live>).sig), uploaded: [] };
   const releases = existing === undefined
     ? [
@@ -208,9 +220,6 @@ export async function publishRelease(input: PublishInput): Promise<PublishResult
     : merged;
   const latest: Record<string, string> = { ...(live?.raw.latest ?? {}) };
   if (existing === undefined && (latest[summary.kind] === undefined || versionAbove(summary.version, latest[summary.kind] as string))) latest[summary.kind] = summary.version;
-  const revokedKeyIds = [...new Set([...(live?.raw.revokedKeyIds ?? []), ...(input.revokedKeyIds ?? [])])];
-  const known = (live?.raw.revokedReleases ?? []).map((r) => `${r.kind}:${r.version}`);
-  const revokedReleases = [...(live?.raw.revokedReleases ?? []), ...(input.revokedReleases ?? []).filter((r) => !known.includes(`${r.kind}:${r.version}`))];
   const index: RawIndex = {
     schema: 'chatwarden-corpus-index/1',
     sequence,
@@ -222,18 +231,90 @@ export async function publishRelease(input: PublishInput): Promise<PublishResult
     latest,
     releases: releases,
   };
+  const files: ReleaseFile[] = [];
+  if (existing === undefined) {
+    const name = summary.zip.split('/').pop() as string;
+    files.push({ key: `${PREFIX}${summary.zip}`, bytes: input.zip, meta: { contentType: 'application/zip', cacheControl: IMMUTABLE, contentDisposition: `attachment; filename="${name}"` } });
+    files.push({ key: `${PREFIX}${summary.sig}`, bytes: zipSigBytes, meta: { contentType: 'application/json', cacheControl: IMMUTABLE } });
+  }
+  return commitIndex({ store, now, index, live, keys: input.keys, signIndex: input.signIndex, dryRun: input.dryRun === true, files });
+}
+
+export interface RefreshInput {
+  store: ReleaseStore;
+  clock: Clock;
+  signIndex: (bytes: Uint8Array) => Promise<string> | string;
+  keyId: string;
+  keys: readonly CorpusKey[];
+  sequence?: number;
+  revokedKeyIds?: readonly string[];
+  revokedReleases?: readonly CorpusRevokedRelease[];
+  dryRun?: boolean;
+}
+
+/**
+ * Sign the live index again, with the next sequence and a fresh 90 days, and with any revocations added, without a release (design 7: the index
+ * has to be refreshed before it expires, and a key or a release can be revoked at any time). The releases and `latest` stay as they are.
+ */
+export async function refreshIndex(input: RefreshInput): Promise<PublishResult> {
+  const now = input.clock.now();
+  const live = await readLive(input.store, input.keys);
+  if (live === null) throw new ToolError('bad_index', 'there is no live index to refresh; publish a release first');
+  if (input.sequence !== undefined && input.sequence <= live.raw.sequence) throw new ToolError('sequence', "the sequence must be above the live index's; it is never lowered");
+  const revokedKeyIds = [...new Set([...live.raw.revokedKeyIds, ...(input.revokedKeyIds ?? [])])];
+  const known = live.raw.revokedReleases.map((r) => `${r.kind}:${r.version}`);
+  const revokedReleases = [...live.raw.revokedReleases];
+  for (const r of input.revokedReleases ?? []) {
+    const id = `${r.kind}:${r.version}`;
+    if (known.includes(id)) continue;
+    known.push(id);
+    revokedReleases.push(r);
+  }
+  const index: RawIndex = {
+    schema: 'chatwarden-corpus-index/1',
+    sequence: input.sequence ?? live.raw.sequence + 1,
+    issuedAt: isoSeconds(now),
+    expiresAt: isoSeconds(now + FRESH_DAYS * DAY_MS),
+    keyId: input.keyId,
+    revokedKeyIds,
+    revokedReleases,
+    latest: live.raw.latest,
+    releases: live.raw.releases,
+  };
+  return commitIndex({ store: input.store, now, index, live, keys: input.keys, signIndex: input.signIndex, dryRun: input.dryRun === true, files: [] });
+}
+
+interface ReleaseFile {
+  key: string;
+  bytes: Uint8Array;
+  meta: PutMeta;
+}
+
+/** Signs the index, verifies it with the kit, and (unless a dry run) uploads the files, then the signature and the index as a pair. */
+async function commitIndex(c: {
+  store: ReleaseStore;
+  now: number;
+  index: RawIndex;
+  live: { raw: RawIndex; bytes: Uint8Array; sig: Uint8Array } | null;
+  keys: readonly CorpusKey[];
+  signIndex: (bytes: Uint8Array) => Promise<string> | string;
+  dryRun: boolean;
+  files: readonly ReleaseFile[];
+}): Promise<PublishResult> {
+  const { store, now, index, live } = c;
+  const sequence = index.sequence;
   const indexBytes = encoder.encode(`${JSON.stringify(index)}\n`);
-  const indexSig = await input.signIndex(indexBytes);
+  const indexSig = await c.signIndex(indexBytes);
   try {
-    await verifySignature('index', indexBytes, indexSig, input.keys);
+    await verifySignature('index', indexBytes, indexSig, c.keys);
     parseIndex(indexBytes, now);
   } catch {
     throw new ToolError('bad_index', 'the new index does not verify or does not parse (is it over the 256 KiB the kit reads?); nothing was uploaded');
   }
 
-  if (input.dryRun === true) return { published: true, sequence, indexBytes, indexSig: textOf(indexSig), uploaded: [] };
+  if (c.dryRun) return { published: true, sequence, indexBytes, indexSig: textOf(indexSig), uploaded: [] };
 
-  // 4. Upload: a robots file once, the release files, read back and verified; then the signature and the index as a pair.
+  // Upload: a robots file once, the release files, read back and verified; then the signature and the index as a pair.
   const uploaded: string[] = [];
   const put = async (key: string, bytes: Uint8Array, meta: PutMeta): Promise<void> => {
     try {
@@ -246,20 +327,20 @@ export async function publishRelease(input: PublishInput): Promise<PublishResult
   if (live === null && (await store.read('robots.txt').catch(() => 'error' as const)) === null) {
     await put('robots.txt', encoder.encode('User-agent: *\nDisallow: /\n'), { contentType: 'text/plain; charset=utf-8', cacheControl: FIVE_MINUTES });
   }
-  if (existing === undefined) {
-    const zipKey = `${PREFIX}${summary.zip}`;
-    const sigKey = `${PREFIX}${summary.sig}`;
-    const name = summary.zip.split('/').pop() as string;
-    await put(zipKey, input.zip, { contentType: 'application/zip', cacheControl: IMMUTABLE, contentDisposition: `attachment; filename="${name}"` });
-    await put(sigKey, zipSigBytes, { contentType: 'application/json', cacheControl: IMMUTABLE });
-    await readBack(store, zipKey, input.zip);
-    await readBack(store, sigKey, zipSigBytes);
-  }
+  for (const f of c.files) await put(f.key, f.bytes, f.meta);
+  for (const f of c.files) await readBack(store, f.key, f.bytes);
   const indexSigBytes = bytesOf(indexSig);
-  const restore = async (): Promise<void> => {
-    if (live === null) return;
-    await store.write(`${PREFIX}index.json.sig`, live.sig, { contentType: 'application/json', cacheControl: FIVE_MINUTES }).catch(() => undefined);
-    await store.write(`${PREFIX}index.json`, live.bytes, { contentType: 'application/json', cacheControl: FIVE_MINUTES }).catch(() => undefined);
+  /** Puts the previous pair back; true only when both writes went through. */
+  const restore = async (): Promise<boolean> => {
+    if (live === null) return true;
+    const meta = { contentType: 'application/json', cacheControl: FIVE_MINUTES };
+    try {
+      await store.write(`${PREFIX}index.json.sig`, live.sig, meta);
+      await store.write(`${PREFIX}index.json`, live.bytes, meta);
+      return true;
+    } catch {
+      return false;
+    }
   };
   await put(`${PREFIX}index.json.sig`, indexSigBytes, { contentType: 'application/json', cacheControl: FIVE_MINUTES });
   try {
@@ -267,8 +348,15 @@ export async function publishRelease(input: PublishInput): Promise<PublishResult
     await readBack(store, `${PREFIX}index.json`, indexBytes);
     await readBack(store, `${PREFIX}index.json.sig`, indexSigBytes);
   } catch (e) {
-    await restore();
-    if (e instanceof ToolError) throw new ToolError(e.code, `${e.message}; the previous index and signature were put back`);
+    const restored = await restore();
+    if (e instanceof ToolError) {
+      throw new ToolError(
+        e.code,
+        restored
+          ? `${e.message}; the previous index and signature were put back`
+          : `${e.message}; the previous index and signature could NOT be put back: the bucket may hold a signature that does not match its index, so run publish again or restore index.json and index.json.sig by hand`,
+      );
+    }
     throw e;
   }
   return { published: true, sequence, indexBytes, indexSig: textOf(indexSig), uploaded };

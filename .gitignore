@@ -5,6 +5,8 @@ dist/
 .smoke/
 CLAUDE.local.md
 .corpus-data/
+release-out/
+.vitest/
 *.pem
 *.key
 .dev.vars

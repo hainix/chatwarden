@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import type { Clock } from '../deps.js';
 
@@ -25,6 +26,8 @@ export interface ToolIo {
   /** Asks for a secret on the terminal without echoing it. Rejects when there is no terminal. */
   secret(prompt: string): Promise<string>;
   fetch: typeof fetch;
+  /** The owner's home directory (where the tools put release folders by default). */
+  home: string;
   out(line: string): void;
   err(line: string): void;
 }
@@ -61,6 +64,7 @@ export function nodeIo(): ToolIo {
     ensureDir: async (path) => void (await mkdir(path, { recursive: true })),
     secret: readHidden,
     fetch: (input, init) => fetch(input, init),
+    home: homedir(),
     out: (line) => void process.stdout.write(`${line}\n`),
     err: (line) => void process.stderr.write(`${line}\n`),
   };

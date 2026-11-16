@@ -1,6 +1,7 @@
 // The guard of design 16: the repo holds no real term, no real list and no key. It is an ALLOWLIST, so it needs no real list to enforce it.
 // - Every term, phrase and line of a corpus-shaped JSON file (a `chatwarden-corpus-` schema, or a release file by name) must be made of the
 //   invented words (and their generated forms) and a short list of ordinary words. Anything else fails.
+// - Nothing tracked in a release output folder (release-out/, .corpus-data/), where the owner's tools write the real list.
 // - No tracked key file, `.dev.vars`, PKCS#8 header, or archive outside `test/fixtures/` (an archive there is read and held to the same list).
 // Messages name the file and the place, never the word: a real one must not land in a CI log. The checks are exported and unit-tested in
 // scripts/no-corpus-data.test.ts; the repo run is the first test there.
@@ -92,6 +93,8 @@ export function jsonProblems(name, text) {
 
 const KEY_FILE = /\.(pem|key)$/i;
 const DEV_VARS = /(^|\/)\.dev\.vars$/;
+/** The folders the owner's tools write the real list to (and .gitignore covers): nothing in them is ever tracked, whatever it is called. */
+const OUTPUT_DIR = /(^|\/)(release-out|\.corpus-data)\//;
 const ARCHIVE = /\.(zip|7z|tar|tgz)$|\.tar\.gz$/i;
 const FIXTURES = /(^|\/)test\/fixtures\//;
 const ZIP = /\.zip$/i;
@@ -110,7 +113,8 @@ export async function checkFiles({ root, files, unzip }) {
   const problems = [];
   const dec = new TextDecoder();
   for (const file of files) {
-    if (KEY_FILE.test(file)) problems.push(`${file}: a key file is tracked`);
+    if (OUTPUT_DIR.test(file)) problems.push(`${file}: a file in a release output folder (release-out/, .corpus-data/) is tracked`);
+    else if (KEY_FILE.test(file)) problems.push(`${file}: a key file is tracked`);
     else if (DEV_VARS.test(file)) problems.push(`${file}: a secrets file is tracked`);
     else if (ARCHIVE.test(file)) {
       if (!FIXTURES.test(file)) {

@@ -38,6 +38,8 @@ export interface ZenodoResult {
   fileUrl: string;
   recordId: number;
   depositionId: number;
+  /** Present (true) only in a sandbox result. */
+  sandbox?: true;
 }
 
 export interface ZenodoMetadata {

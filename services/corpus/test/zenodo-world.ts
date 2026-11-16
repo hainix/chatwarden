@@ -38,7 +38,11 @@ export class FakeZenodo {
   private fileCounter = 0;
   draftOf = new Map<number, number>();
 
-  constructor(first: { id: number; version: string; files?: string[] }) {
+  /** The host this fake answers for (the sandbox's, in the tests that use it). */
+  base = ZENODO;
+
+  constructor(first: { id: number; version: string; files?: string[] }, base: string = ZENODO) {
+    this.base = base;
     this.depositions.set(first.id, {
       id: first.id,
       conceptrecid: '999',
@@ -46,7 +50,7 @@ export class FakeZenodo {
       submitted: true,
       metadata: { title: 'old', version: first.version, upload_type: 'dataset' },
       files: (first.files ?? ['old.zip']).map((filename, i) => ({ id: `f${i}`, filename, filesize: 10 })),
-      doi: `10.5281/zenodo.${first.id}`,
+      doi: `${base === ZENODO ? 10.5281 : 10.5072}/zenodo.${first.id}`,
       record_id: first.id,
     });
   }
@@ -61,7 +65,7 @@ export class FakeZenodo {
       metadata: d.metadata,
       files: d.files,
       ...(d.doi === undefined ? {} : { doi: d.doi, doi_url: `https://doi.org/${d.doi}`, record_id: d.record_id }),
-      links: { bucket: `${ZENODO}/api/files/bucket-${d.id}`, ...(draft === undefined ? {} : { latest_draft: `${ZENODO}/api/deposit/depositions/${draft}` }) },
+      links: { bucket: `${this.base}/api/files/bucket-${d.id}`, ...(draft === undefined ? {} : { latest_draft: `${this.base}/api/deposit/depositions/${draft}` }) },
     };
   }
 
@@ -81,8 +85,8 @@ export class FakeZenodo {
       this.badAuth += 1;
       return new Response('{"message":"unauthorized"}', { status: 401 });
     }
-    if (!url.startsWith(ZENODO)) return new Response('no', { status: 404 });
-    const path = url.slice(ZENODO.length);
+    if (!url.startsWith(this.base)) return new Response('no', { status: 404 });
+    const path = url.slice(this.base.length);
     const raw = init?.body;
     const json = typeof raw === 'string' ? (JSON.parse(raw) as unknown) : undefined;
     this.calls.push({ method, path, ...(json !== undefined ? { body: json } : raw !== undefined && raw !== null ? { body: (raw as Uint8Array).length } : {}) });
@@ -143,7 +147,7 @@ export class FakeZenodo {
       d.state = 'done';
       d.submitted = true;
       d.record_id = d.id;
-      d.doi = `10.5281/zenodo.${d.id}`;
+      d.doi = `${this.base === ZENODO ? '10.5281' : '10.5072'}/zenodo.${d.id}`;
       return Response.json(this.resource(d), { status: 202 });
     }
     return new Response('{"message":"no such route"}', { status: 404 });

@@ -35,6 +35,7 @@ export function makeToolWorld(over: { secrets?: string[]; env?: Record<string, s
     ...real,
     clock,
     env: over.env ?? {},
+    home: join(dir, 'home'),
     write: (path, data, options) => {
       writes.push({ path, mode: options?.mode, exclusive: options?.exclusive });
       return real.write(path, data, options);

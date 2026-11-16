@@ -7,6 +7,7 @@ import { parseArgs, UsageError, valueOf } from './args.js';
 import { ToolError } from './errors.js';
 import type { ToolIo } from './io.js';
 import { openDump } from './localD1.js';
+import { defaultOutDir, guardOutDir } from './outdir.js';
 
 // `tools/eval.mjs` (design 6.10, 12): build an eval and calibration release from a folder of `cases.<lang>.json` and a copy of the database (the
 // corpus's terms, for the unknown-term check), or check one case before a reviewer sees it. The release it writes is read by the same `sign`,
@@ -44,7 +45,8 @@ async function build(argv: readonly string[], io: ToolIo): Promise<void> {
   const dir = valueOf(args, 'cases');
   const dumpPath = valueOf(args, 'dump');
   if (dir === undefined || dumpPath === undefined) throw new UsageError('--cases and --dump are required');
-  const out = valueOf(args, 'out') ?? 'release-out';
+  const out = valueOf(args, 'out') ?? defaultOutDir(io);
+  guardOutDir(out, io);
   const languages = valueOf(args, 'languages')?.split(',') ?? [...SUPPORTED_LANGUAGES];
   const { db, matcher } = await corpusOf(io, dumpPath);
   const cases: Record<string, unknown[]> = {};

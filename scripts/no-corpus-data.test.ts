@@ -150,6 +150,16 @@ describe('files that must not be tracked', () => {
     expect((await run({ [path]: new Uint8Array([1, 2, 3]) })).length).toBeGreaterThan(0);
   });
 
+  it.each(['release-out/terms-2026.12.0.release.json', 'release-out/index.json', 'services/corpus/release-out/x.txt', '.corpus-data/terms.json', 'x/.corpus-data/d1.sql'])('a file in a release output folder (%s) fails, even when it looks harmless', async (path) => {
+    const problems = await run({ [path]: 'hello' });
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0]).toContain(path);
+  });
+
+  it('a folder that only starts with release-out is not one', async () => {
+    expect(await run({ 'release-output/a.txt': 'x', 'docs/release-out-notes.md': 'x' })).toEqual([]);
+  });
+
   it('a key or a .dev.vars fails even inside test/fixtures', async () => {
     const problems = await run({ 'packages/x/test/fixtures/a.pem': 'x', 'packages/x/test/fixtures/.dev.vars': 'x', 'packages/x/test/fixtures/b.key': 'x' });
     expect(problems).toHaveLength(3);
@@ -219,7 +229,7 @@ describe('archives inside test/fixtures', () => {
 describe('the repo rules that back the guard', () => {
   it('.gitignore keeps the real list, private keys and the service secrets out of git', () => {
     const lines = readFileSync(join(ROOT, '.gitignore'), 'utf8').split(/\r?\n/).map((l) => l.trim());
-    for (const rule of ['.corpus-data/', '*.pem', '*.key', '.dev.vars']) expect(lines, rule).toContain(rule);
+    for (const rule of ['.corpus-data/', 'release-out/', '*.pem', '*.key', '.dev.vars']) expect(lines, rule).toContain(rule);
   });
 
   it('AGENTS.md says no corpus data and no key, beside the rule about real terms', () => {
@@ -228,7 +238,7 @@ describe('the repo rules that back the guard', () => {
   });
 
   it('the git ignore rules really ignore those paths (git check-ignore)', () => {
-    for (const path of ['.corpus-data/terms.json', 'keys/a.pem', 'ops/b.key', 'services/corpus/.dev.vars']) {
+    for (const path of ['.corpus-data/terms.json', 'release-out/terms-2026.12.0.zip', 'keys/a.pem', 'ops/b.key', 'services/corpus/.dev.vars']) {
       const out = execFileSync('git', ['check-ignore', '-v', path], { cwd: ROOT, encoding: 'utf8' });
       expect(out, path).toContain('.gitignore');
     }
