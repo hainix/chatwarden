@@ -256,6 +256,13 @@ export function nodeImportProblems({ pkg, files }) {
 }
 
 /**
+ * Shipped files that hold the text of other files and no imports of their own: the templates of `chatwarden init`. Their import lines sit inside
+ * template strings (the line `import { x } from '@chatwarden/player-react'` is what the adopter's file will say). A real import there is stopped by
+ * packages/http/test/cli-static.test.ts, which allows relative imports only.
+ */
+const TEXT_ONLY = /^dist\/src\/cli\/templates\//;
+
+/**
  * One message per (file, package) where a shipped `.js` file (`dist/src/**`, or a bundle in `dist`) imports a package that an installer would not
  * have: it must be a Node builtin, the package itself, or in dependencies or peerDependencies. devDependencies do not count.
  * @param {{ pkg: Record<string, any>, files: Array<{ path: string, source: string }> }} input
@@ -264,7 +271,7 @@ export function undeclaredImports({ pkg, files }) {
   const declared = new Set([pkg.name, ...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {})]);
   const problems = [];
   for (const { path, source } of files) {
-    if (!isShippedJs(path)) continue;
+    if (!isShippedJs(path) || TEXT_ONLY.test(path)) continue;
     for (const name of bareImports(source)) {
       if (!declared.has(name)) {
         problems.push(`${path} imports "${name}", which is not in dependencies or peerDependencies (a consumer would not have it)`);

@@ -321,6 +321,19 @@ describe('undeclaredImports', () => {
     ];
     expect(undeclaredImports({ pkg, files })).toEqual([]);
   });
+  it('skips the init CLI templates: they hold the text of the files init writes, whose import lines are not imports of this package', () => {
+    const text = ["export const x = `import { a } from '@chatwarden/player-react';", "import b from '${spec(ctx, from)}';`;"].join(String.fromCharCode(10));
+    const http = { name: '@chatwarden/http', peerDependencies: { '@chatwarden/core': '^0.1.0' } };
+    expect(undeclaredImports({ pkg: http, files: [file('dist/src/cli/templates/chat.js', text), file('dist/src/cli/templates/sub/x.js', text)] })).toEqual([]);
+  });
+  it('but looks at every other file of the CLI, and at a folder that only starts like the templates folder', () => {
+    const http = { name: '@chatwarden/http', peerDependencies: { '@chatwarden/core': '^0.1.0' } };
+    const out: string[] = undeclaredImports({
+      pkg: http,
+      files: ['dist/src/cli/index.js', 'dist/src/cli/templates-extra/x.js', 'dist/src/templates/x.js'].map((path) => file(path, "import ws from 'ws';")),
+    });
+    expect(out).toHaveLength(3);
+  });
   it('treats a package with no dependency fields at all as declaring nothing', () => {
     const out: string[] = undeclaredImports({ pkg: { name: '@chatwarden/bare' }, files: [file('dist/src/a.js', "import x from 'x';\nimport fs from 'node:fs';\n")] });
     expect(out).toHaveLength(1);
