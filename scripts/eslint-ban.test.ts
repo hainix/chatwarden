@@ -185,3 +185,95 @@ describe('the rule names exactly the five modules', () => {
     expect(refused.sort()).toEqual([...WRITERS].sort());
   });
 });
+
+// The import ban alone does not stop `this.store.insertSanctionGroup(...)` on the Store type the AI module is handed. A second selector forbids
+// member access to the store's writers from packages/core/src/ai (design 6.1): a static call, `this.store.x`, `store['x']`, an optional call,
+// a destructuring and a method passed as a callback all name the writer, and each is caught.
+const STORE_WRITERS = [
+  'insertSanctionGroup',
+  'revokeSanctionGroup',
+  'closeReport',
+  'insertDecision',
+  'insertNotice',
+  'withdrawNotice',
+  'withdrawNoticeGroup',
+  'insertStrike',
+  'upsertMute',
+  'deleteMute',
+  'pruneMutes',
+  'closeGap',
+  'decideAppeal',
+];
+
+const SEAM_SRC = ['packages/core/src/ai/x.ts', 'packages/core/src/ai/sub/x.ts'];
+const seamMessages = async (code: string, file: string): Promise<string[]> => (await messages(code, file)).filter((m) => /store's writers/.test(m));
+
+describe.each(SEAM_SRC)('%s', (file) => {
+  const shapes = (w: string): Array<[string, string]> => [
+    [`export function f(store: { ${w}(x: unknown): void }): void {\n  store.${w}({});\n}\n`, 'a static call'],
+    [`export class C {\n  store!: { ${w}(x: unknown): void };\n  run(): void {\n    this.store.${w}({});\n  }\n}\n`, 'this.store.x'],
+    [`export function f(store: Record<string, (x: unknown) => void>): void {\n  store['${w}']({});\n}\n`, "store['x']"],
+    [`export function f(store: Record<string, (x: unknown) => void>): void {\n  store[\`${w}\`]({});\n}\n`, 'store[`x`]'],
+    [`export function f(store: { ${w}?(x: unknown): void }): void {\n  store.${w}?.({});\n}\n`, 'an optional call'],
+    [`export function f(store: { ${w}(x: unknown): void }): void {\n  store?.${w}({});\n}\n`, 'an optional chain'],
+    [`export function f(store: { ${w}(x: unknown): void }): void {\n  const { ${w} } = store;\n  ${w}({});\n}\n`, 'a destructuring'],
+    [`export function f(store: { ${w}(x: unknown): void }): void {\n  const { ${w}: go } = store;\n  go({});\n}\n`, 'a renaming destructuring'],
+    [`export function f(store: Record<string, (x: unknown) => void>): void {\n  const { '${w}': go } = store;\n  go({});\n}\n`, 'a string-key destructuring'],
+    [`export function f(store: { ${w}(x: unknown): void }, xs: unknown[]): void {\n  xs.forEach(store.${w});\n}\n`, 'a callback'],
+  ];
+
+  it.each(STORE_WRITERS)('ESLint: ai/ cannot call %s (every shape of the access)', async (w) => {
+    for (const [code, shape] of shapes(w)) expect((await seamMessages(code, file)).length, `${w}: ${shape}`).toBeGreaterThan(0);
+  });
+
+  it('ESLint: ai/ cannot call insertSanctionGroup, revokeSanctionGroup, closeReport, insertDecision, or the notice, strike and mute writers', async () => {
+    for (const w of STORE_WRITERS) {
+      for (const [code, shape] of shapes(w)) expect((await seamMessages(code, file)).length, `${w}: ${shape}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('says why, and names the seam', async () => {
+    const [code] = shapes('insertSanctionGroup')[0] as [string, string];
+    expect((await seamMessages(code, file)).join('\n')).toMatch(/store's writers.*aiActor/s);
+  });
+
+  it('allows the store reads the AI module uses, and a different name that merely starts like a writer', async () => {
+    const reads = [
+      'export function f(store: { loadReport(id: string): unknown }): unknown {\n  return store.loadReport("r1");\n}\n',
+      'export function f(store: { loadAiRead(id: string): unknown }): unknown {\n  return store.loadAiRead("r1");\n}\n',
+      'export function f(store: { closeReportLater(id: string): void }): void {\n  store.closeReportLater("r1");\n}\n',
+      'export function f(store: { insertAiOutcome(r: unknown): void }): void {\n  store.insertAiOutcome({});\n}\n',
+      'export function f(o: { closeReportCount: number }): number {\n  return o.closeReportCount;\n}\n',
+    ];
+    for (const code of reads) expect(await messages(code, file), code).toEqual([]);
+  });
+
+  it('a writer name used as an object key or a method definition is not a member access', async () => {
+    const code = 'export const impl = { closeReport(): void {}, insertDecision: (): void => {} };\nexport class C {\n  insertNotice(): void {}\n}\n';
+    expect(await seamMessages(code, file)).toEqual([]);
+  });
+});
+
+describe('ESLint: the same call outside ai/ is allowed', () => {
+  it.each(['packages/core/src/x.ts', 'packages/core/src/aiActor/x.ts', 'packages/core/src/decide.ts', 'packages/http/src/x.ts', 'packages/core/test/ai/x.ts', 'packages/core/src/aiding/x.ts'])(
+    '%s may call every store writer',
+    async (file) => {
+      for (const w of STORE_WRITERS) {
+        const code = `export function f(store: { ${w}(x: unknown): void }): void {\n  store.${w}({});\n  const { ${w}: go } = store;\n  go({});\n}\n`;
+        expect(await messages(code, file), `${file} ${w}`).toEqual([]);
+      }
+    },
+  );
+});
+
+describe('ESLint: the existing import ban still fires for type-only imports, re-exports and dynamic imports', () => {
+  it.each([
+    ["import type { X } from '../decide.js';\nexport type A = X;\n", 'a type-only import'],
+    ["export { x } from '../sanctions.js';\n", 'a re-export'],
+    ["export * from '../notices.js';\n", 'a star re-export'],
+    ["export const a = await import('../strikes.js');\n", 'a dynamic import'],
+    ["export const a = await import('../mutes.js');\n", 'a dynamic import of mutes'],
+  ])('refuses %s (%s) in the ai folder, with the seam rule beside it', async (code) => {
+    expect((await messages(code, 'packages/core/src/ai/x.ts')).join('\n')).toMatch(/AI never writes/);
+  });
+});

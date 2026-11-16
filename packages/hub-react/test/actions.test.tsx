@@ -247,7 +247,7 @@ describe('All actions', () => {
     const f = await w.file();
     await auto(w, f.person);
     w.clock.t += 1000;
-    await w.cw.sanctions.apply({ kind: 'warning', subject: f.person, includeIp: false, durationMs: null, reason: 'ai private', actor: 'ai-reader', source: 'ai', automated: false, rule: 1 });
+    w.aiSanction(f.person, { reason: 'ai private' });
     await all(w);
     expect(list()).toHaveTextContent('AI');
     expect(list()).toHaveTextContent('Automatic filter');

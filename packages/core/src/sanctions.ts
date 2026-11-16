@@ -40,6 +40,16 @@ export class SanctionError extends Error {
 /** Every source a sanction can come from. */
 export const SANCTION_SOURCES: readonly Source[] = ['moderator', 'auto_filter', 'coop', 'api', 'ai'];
 
+/**
+ * True for a source only the kit's own AI actor may write (design 6.1): `'ai'`. A caller of `cw.decide` or `cw.sanctions.apply` that passes it is refused
+ * (`invalid`, a sanction error). Private to core: it is not exported from `index.ts`, so no adopter code can ask whether a source is internal or reuse the
+ * check to let one through.
+ * @internal
+ */
+export function isInternalSource(source: unknown): boolean {
+  return source === 'ai';
+}
+
 /** An IP row never outlives 24 h: addresses are shared (NAT, cafes) and rotate. */
 const IP_MAX_MS = 24 * 3_600_000;
 

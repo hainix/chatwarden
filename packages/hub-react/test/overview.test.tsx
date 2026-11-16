@@ -279,7 +279,7 @@ describe('Overview: Recent actions', () => {
     const [t] = await queue(w, 1, 1);
     await w.cw.sanctions.apply({ kind: 'chat', subject: t!.person, includeIp: false, durationMs: HOUR, reason: 'auto', actor: 'system', source: 'auto_filter', automated: true, rule: 1 });
     w.clock.t += 1000;
-    await w.cw.sanctions.apply({ kind: 'warning', subject: t!.person, includeIp: false, durationMs: null, reason: 'ai', actor: 'ai-reader', source: 'ai', automated: false, rule: 1 });
+    w.aiSanction(t!.person, { reason: 'ai' });
     renderHub(w);
     await ready();
     const list = rows('Recent actions');

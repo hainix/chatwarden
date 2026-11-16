@@ -1,0 +1,126 @@
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+// Design 6.1, the third leg of the seam: only packages/core/src/aiActor (built in the acting release) may write a sanction with `source: 'ai'`.
+// The literal `source: 'ai'` and the literal `automated: true` must not appear anywhere else under packages/*/src. This is a plain text scan, so a
+// new writer cannot slip in beside the actor without a person editing this file on purpose.
+//
+// `automated: true` is also written, today, by two places that are not the AI and are named here with their count: the chat filter's automatic
+// timeout (source auto_filter) and the EOS bridge's queued apply. A third site, or a second one in either file, fails the test.
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const ACTOR_DIR = 'packages/core/src/aiActor/';
+const AUTOMATED_TODAY: Readonly<Record<string, number>> = {
+  'packages/core/src/chat.ts': 1,
+  'packages/http/src/eos/sanctions.ts': 1,
+};
+const SOURCE_AI = /\bsource\s*:\s*['"`]ai['"`]/g;
+const AUTOMATED_TRUE = /\bautomated\s*:\s*true\b/g;
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else if (/\.(ts|tsx|mts|cts|js|mjs)$/.test(e.name)) out.push(p);
+  }
+  return out;
+}
+
+/** Every `packages/<name>/src` file under `base`, as a posix path relative to it. */
+function sources(base: string): string[] {
+  const files: string[] = [];
+  const pkgs = join(base, 'packages');
+  for (const pkg of readdirSync(pkgs, { withFileTypes: true })) {
+    if (!pkg.isDirectory()) continue;
+    const src = join(pkgs, pkg.name, 'src');
+    try {
+      walk(src, files);
+    } catch {
+      // a package without a src folder
+    }
+  }
+  return files.map((f) => relative(base, f).split(sep).join('/')).sort();
+}
+
+interface Found {
+  sourceAi: string[];
+  automated: Record<string, number>;
+}
+
+function scan(base: string): Found {
+  const found: Found = { sourceAi: [], automated: {} };
+  for (const file of sources(base)) {
+    if (file.startsWith(ACTOR_DIR)) continue;
+    // Comment-only lines are prose (strikes.ts names `automated: true` in one); code is what writes a row.
+    const text = readFileSync(join(base, file), 'utf8')
+      .split('\n')
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join('\n');
+    const ai = text.match(SOURCE_AI)?.length ?? 0;
+    if (ai > 0) found.sourceAi.push(`${file} (${ai})`);
+    const auto = text.match(AUTOMATED_TRUE)?.length ?? 0;
+    if (auto > 0) found.automated[file] = auto;
+  }
+  return found;
+}
+
+describe("source 'ai' and automated true for a sanction appear only under core/src/aiActor", () => {
+  it("no file under packages/*/src outside aiActor holds the literal source: 'ai'", () => {
+    expect(scan(root).sourceAi).toEqual([]);
+  });
+
+  it('automated: true appears only in the two places that are not the AI, once each, and under aiActor', () => {
+    expect(scan(root).automated).toEqual(AUTOMATED_TODAY);
+  });
+
+  it('the scan can fail: a temporary file with either literal is found, in any package, and the actor folder is exempt', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-ai-seam-'));
+    try {
+      const put = (rel: string, text: string): void => {
+        mkdirSync(join(dir, rel, '..'), { recursive: true });
+        writeFileSync(join(dir, rel), text);
+      };
+      put('packages/core/src/ok.ts', "export const a = { source: 'moderator', automated: false };\n");
+      expect(scan(dir)).toEqual({ sourceAi: [], automated: {} });
+
+      put('packages/core/src/leak.ts', "export const a = { source: 'ai' };\n");
+      put('packages/http/src/deep/leak2.tsx', 'export const a = { source:"ai", automated:true };\n');
+      put('packages/store-memory/src/leak3.ts', 'export const a = { source: `ai` };\n');
+      put('packages/core/src/aiActor/write.ts', "export const a = { source: 'ai', automated: true };\n");
+      const found = scan(dir);
+      expect(found.sourceAi.sort()).toEqual(['packages/core/src/leak.ts (1)', 'packages/http/src/deep/leak2.tsx (1)', 'packages/store-memory/src/leak3.ts (1)']);
+      expect(found.automated).toEqual({ 'packages/http/src/deep/leak2.tsx': 1 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a look-alike folder is not the actor folder', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-ai-seam-'));
+    try {
+      for (const rel of ['packages/core/src/aiActors/x.ts', 'packages/core/src/aiActor.ts', 'packages/core/src/ai/actor.ts', 'packages/core/src/x/aiActor/y.ts']) {
+        mkdirSync(join(dir, rel, '..'), { recursive: true });
+        writeFileSync(join(dir, rel), "export const a = { source: 'ai' };\n");
+      }
+      expect(scan(dir).sourceAi).toHaveLength(4);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('test and dist folders are not scanned (a test may name the literal)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-ai-seam-'));
+    try {
+      for (const rel of ['packages/core/test/x.ts', 'packages/core/dist/x.js']) {
+        mkdirSync(join(dir, rel, '..'), { recursive: true });
+        writeFileSync(join(dir, rel), "export const a = { source: 'ai', automated: true };\n");
+      }
+      expect(scan(dir)).toEqual({ sourceAi: [], automated: {} });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

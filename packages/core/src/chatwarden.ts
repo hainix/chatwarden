@@ -46,7 +46,7 @@ import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js'
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
-import { applySanction, normalizeRefCode, SanctionIndex } from './sanctions.js';
+import { applySanction, isInternalSource, normalizeRefCode, SanctionError, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
 import {
@@ -1376,6 +1376,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
       apply: async (input) => {
+        // The AI's own source is not for a caller (design 6.1): refused before the clock, the store or the index is touched.
+        if (isInternalSource(input.source)) throw new SanctionError('applySanction: invalid source');
         const now = clock.now();
         const done = await applySanction(store, subjects, input, now, sanctions);
         try {

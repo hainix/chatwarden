@@ -29,6 +29,35 @@ const browserSafeSyntax = [
 const AI_WRITERS = ['decide', 'sanctions', 'strikes', 'mutes', 'notices'];
 const AI_MESSAGE = 'the AI never writes a sanction, a strike, a mute or a notice: packages/core/src/ai may not import decide, sanctions, strikes, mutes or notices.';
 
+// The Store's writers. The import ban above does not stop `this.store.insertSanctionGroup(...)` on the Store type the AI module is handed, so a second
+// selector names the writers themselves. Only packages/core/src/aiActor (design 6.1) may call them for the AI. scripts/eslint-ban.test.ts pins every
+// shape of the access: a static call, `this.store.x`, `store['x']`, an optional call, a destructuring and a method passed as a callback.
+const AI_STORE_WRITERS = [
+  'insertSanctionGroup',
+  'revokeSanctionGroup',
+  'closeReport',
+  'insertDecision',
+  'insertNotice',
+  'withdrawNotice',
+  'withdrawNoticeGroup',
+  'insertStrike',
+  'upsertMute',
+  'deleteMute',
+  'pruneMutes',
+  'closeGap',
+  'decideAppeal',
+];
+export const AI_SEAM_MESSAGE =
+  "the AI never writes: packages/core/src/ai may not use the store's writers (sanctions, decisions, notices, strikes, mutes, closing a report); a sanction by the AI is written only in packages/core/src/aiActor.";
+const aiWriterNames = `/^(${AI_STORE_WRITERS.join('|')})$/`;
+const aiSeamSyntax = [
+  { selector: `MemberExpression[computed=false][property.name=${aiWriterNames}]`, message: AI_SEAM_MESSAGE },
+  { selector: `MemberExpression[computed=true][property.value=${aiWriterNames}]`, message: AI_SEAM_MESSAGE },
+  { selector: `MemberExpression[computed=true][property.type='TemplateLiteral'][property.quasis.0.value.cooked=${aiWriterNames}]`, message: AI_SEAM_MESSAGE },
+  { selector: `ObjectPattern > Property[computed=false][key.name=${aiWriterNames}]`, message: AI_SEAM_MESSAGE },
+  { selector: `ObjectPattern > Property[key.value=${aiWriterNames}]`, message: AI_SEAM_MESSAGE },
+];
+
 export default tseslint.config(
   { ignores: ['**/dist/**', '**/node_modules/**', '.superpowers/**', '**/*.tsbuildinfo', '.smoke/**'] },
   js.configs.recommended,
@@ -91,6 +120,7 @@ export default tseslint.config(
         'error',
         ...browserSafeSyntax.slice(1),
         { selector: `ImportExpression[source.value=/^(\\.{1,2}\\x2f)+(${AI_WRITERS.join('|')})(\\.js)?$/]`, message: AI_MESSAGE },
+        ...aiSeamSyntax,
       ],
     },
   },
