@@ -224,7 +224,7 @@ describe('the follow-up request', () => {
 
   it('a token of the wrong shape sends nothing and logs a class; the slow work is then answered inline', async () => {
     const r = await rig({ fire: (ms) => ms === 2500 });
-    for (const token of ['', 'a b', 'tok/evil', 'tok?x=1', 'x'.repeat(600), 'toké', 'tok..x']) {
+    for (const token of ['', 'a b', 'tok/evil', 'tok?x=1', 'x'.repeat(600), 'tok\u00E9', 'tok..x']) {
       const body = r.client.interaction(2, LOOKUP_DATA);
       const res = await r.send(r.client.signed({ ...body, token }));
       expect(answerOf(res).type).toBe(4);
