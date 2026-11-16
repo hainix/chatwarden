@@ -644,3 +644,176 @@ describe('the Discord bot in the project docs', () => {
     }
   });
 });
+
+describe('packages/http/README.md, Coop', () => {
+  const doc = section(http, 'Coop');
+  const js = (code: string): string => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  const sub = (heading: string): string => {
+    const start = doc.indexOf(`\n### ${heading}\n`);
+    expect(start, `subsection ${heading}`).toBeGreaterThanOrEqual(0);
+    const next = doc.indexOf('\n### ', start + 1);
+    return doc.slice(start, next === -1 ? undefined : next);
+  };
+
+  it('every documented option exists, and every option is documented', () => {
+    const source = read('../src/coop/options.ts');
+    const block = /export interface CoopOptions \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? '';
+    const fields = [...block.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+    expect(fields.length).toBeGreaterThanOrEqual(18);
+    const names = rows(sub('Coop options')).flatMap((r) => [...(r[0] as string).matchAll(/`(\w+)`/g)].map((m) => m[1] as string));
+    for (const field of fields) expect(names, field).toContain(field);
+    for (const name of names) expect(fields, name).toContain(name);
+  });
+
+  it('the READMEs list the @experimental names, every one the entry exports', () => {
+    const entry = read('../src/coop/index.ts');
+    const exported = [
+      ...[...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim()).filter(Boolean)),
+      ...[...entry.matchAll(/^export (?:interface|function) (\w+)/gm)].map((m) => m[1] as string),
+    ];
+    expect(new Set(exported)).toEqual(new Set(['coop', 'CoopAdapter', 'CoopOptions', 'CoopDecision', 'SweepResult', 'CoopChecklist', 'CoopChecklistItemType', 'CoopVerification']));
+    for (const name of exported) expect(doc, name).toContain(`\`${name}\``);
+    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+  });
+
+  it('says the entry is not in the root, needs links, and sets up in order: run Coop, create by hand, copy ids, wire it, verify, file a test report', () => {
+    expect(flat(doc)).toContain('not in the package root');
+    expect(flat(doc)).toContain('`cw.links`');
+    const order = ['Run Coop', 'Create things in Coop by hand', 'Copy the ids into the options', 'Add it to your server', 'Check it', 'File a test report'].map((needle) => doc.indexOf(needle));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    for (const needle of ['user strikes off', '/coop/actions', 'Webhook Signature Verification Key']) expect(flat(doc), needle).toContain(needle);
+  });
+
+  it('documents the three item types with every field the builders send, and the action list with every shape the options accept', async () => {
+    const { ITEM_FIELDS } = await import('../src/coop/wire.js');
+    const items = sub('The three item types');
+    for (const kind of ['line', 'report'] as const) {
+      for (const f of ITEM_FIELDS[kind]) {
+        const row = items.split('\n').find((l) => l.includes(`\`${f.name}\``));
+        expect(row, f.name).toBeDefined();
+        expect(row, f.name).toContain(`\`${f.type}\``);
+        expect(row, f.name).toContain(f.required ? 'yes' : 'no');
+      }
+    }
+    expect(flat(items)).toContain('never sets `csam`');
+    const actions = flat(sub('Which Coop actions mean what'));
+    for (const needle of ["verdict: 'upheld', kind: 'warning'", "verdict: 'upheld', kind: 'chat', durationMs", "verdict: 'noted'", "verdict: 'no_action'", "verdict: 'bad_faith'", 'coop:<the moderator', '`report.decide`', 'first of the callback']) {
+      expect(actions, needle).toContain(needle);
+    }
+  });
+
+  it('documents the callback steps, every answer and every ignore reason the code has', () => {
+    const callback = flat(sub('The callback'));
+    for (const needle of ['64 KiB', '`413`', '`rawBody`', 'Coop-Signature', 't=<time>,v1=<signature>', '`callbackAuth`', '`400`', '`503`', '`401 { "error": "unauthorized" }`', '"outcome": "ignored"', '`"applied"`', '`"replay"`', '`chatwarden.coop_callback_ignored`']) {
+      expect(callback, needle).toContain(needle);
+    }
+    const reasons = /export type IgnoreReason = ([^;]+);/.exec(read('../src/coop/wire.ts'))?.[1] ?? '';
+    const codes = [...reasons.matchAll(/'(\w+)'/g)].map((m) => m[1] as string);
+    expect(codes.length).toBeGreaterThanOrEqual(9);
+    for (const code of codes) expect(callback, code).toContain(`\`${code}\``);
+  });
+
+  it('says the conflict rules in plain words: first decision wins, replays, nothing guessed, nothing unattended, Ignore sends nothing', () => {
+    const rules = flat(sub('When two places decide'));
+    for (const needle of ['The first decision wins', 'reason `closed`', 'A repeated callback is harmless', 'is not guessed', 'Nothing unattended', 'strike threshold', 'Ignore sends nothing', 'Dismiss action']) expect(rules, needle).toContain(needle);
+  });
+
+  it('documents the privacy switches, what is never sent, the replay posture and the log events', () => {
+    const privacy = flat(sub('Privacy'));
+    for (const needle of ['`evidence` (no default)', '`includeNote`', '`handles`', 'The room id, the seat ids, client keys and IP addresses are never sent', '`chatwarden.coop_failed`', '`chatwarden.coop_callback_ignored`', '`chatwarden.coop_dropped`', '`actorNote` and `decisionReason`']) {
+      expect(privacy, needle).toContain(needle);
+    }
+    const notes = flat(sub('Coop: security notes'));
+    for (const needle of ['Verify before parse', 'Replays', 'carries no time', 'rotate it in Coop', 'Rate-limit the routes at your edge', 'Redirects are never followed']) expect(notes, needle).toContain(needle);
+  });
+
+  it('documents the signal route: the scheme, the caps, the answers and that the plugin is a copy-in example', () => {
+    const signal = flat(sub('The signal route (optional)'));
+    for (const needle of ['`POST /coop/signal`', 'x-chatwarden-timestamp', 'x-chatwarden-signature', 'five minute window', 'At most 50 lines', '400 characters', '64 KiB', '`503` with an empty body', '`429`', '`retry-after`', 'examples/coop-signal', 'not published', 'No identifier']) {
+      expect(signal, needle).toContain(needle);
+    }
+  });
+
+  it('lists what is not confirmed yet', () => {
+    const open = flat(sub('Not confirmed yet'));
+    for (const needle of ['`t=...,v1=...`', 'Invalidate reports', '`creator`', '`datetime`', '@roostorg/coop-types', '@roostorg/types', 'Nothing has run against a real Coop']) expect(open, needle).toContain(needle);
+  });
+
+  it('the wiring block compiles (scripts/readme.test.ts) and runs against fakes: the route verifies a signed callback, the checklist prints, dispose is clean', async () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    expect(blocks).toHaveLength(2);
+    const block = blocks[0] as string;
+    expect(block.startsWith("import express from 'express';")).toBe(true);
+    // The startup lines call Coop over the network: run everything but them, and check they are there.
+    expect(block).toMatch(/\/\/ at startup\nconsole\.log\(adapter\.setup\.checklist\(\)\.toText\(\)\);.*\nadapter\.setup\.verify\(\)\.then\(.*\nvoid adapter\.sweep\(\);.*\n\n\/\/ on shutdown\nadapter\.dispose\(\);/);
+    const body = block
+      .split('\n')
+      .filter((l) => !l.startsWith('import '))
+      .join('\n')
+      .replace(/\n\/\/ at startup\n[\s\S]*?\n\n\/\/ on shutdown\nadapter\.dispose\(\);\n?$/, '\n');
+    const { createChatwarden } = await import('@chatwarden/core');
+    const { MemoryStore, withMemoryLinks } = await import('@chatwarden/store-memory');
+    const { toExpress } = await import('../src/express.js');
+    const { coop } = await import('../src/coop/index.js');
+    const { default: express } = await import('express');
+    const { createRouter } = await import('../src/router.js');
+    const { ITEM_TYPES, ACTION, sharedPair, newRsaPair, callbackBody, callbackRequest, COOP_URL, API_KEY } = await import('./coop-world.js');
+    const cw = await createChatwarden({ store: withMemoryLinks(new MemoryStore()), secret: 'readme-secret-0123456789', platform: { identify: (ctx) => ctx as never }, retention: false, logger: { warn: () => undefined } });
+    const env: Record<string, string> = {
+      COOP_URL,
+      COOP_API_KEY: API_KEY,
+      COOP_WEBHOOK_KEY: sharedPair().publicPem,
+      COOP_TYPE_USER: ITEM_TYPES.user,
+      COOP_TYPE_LINE: ITEM_TYPES.line,
+      COOP_TYPE_REPORT: ITEM_TYPES.report,
+      COOP_ACTION_WARN: ACTION.warn,
+      COOP_ACTION_CHAT_24H: ACTION.chat,
+      COOP_ACTION_DISMISS: ACTION.dismiss,
+      COOP_POLICY_HARASSMENT: 'policy-harass',
+    };
+    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
+    const make = new AsyncFunction('express', 'coop', 'toExpress', 'cw', 'process', `${js(body)}\nreturn { adapter, app };`);
+    const out = (await make(express, coop, toExpress, cw, { env })) as { adapter: ReturnType<typeof coop>; app: unknown };
+    expect(Object.keys(out.adapter.routes)).toEqual(['POST /coop/actions']);
+    const router = createRouter(out.adapter.routes);
+    // A correctly signed callback for a report this kit does not have is acknowledged and ignored; a wrong key is the one 401.
+    expect(await router(callbackRequest(callbackBody('no-such-report')))).toEqual({ status: 200, body: { ok: true, outcome: 'ignored' } });
+    expect((await router(callbackRequest(callbackBody('no-such-report'), { pair: newRsaPair() }))).status).toBe(401);
+    const list = out.adapter.setup.checklist();
+    expect(list.toText()).toContain('Community Rule 1');
+    expect(list.actions).toHaveLength(3);
+    out.adapter.dispose();
+    expect((await router(callbackRequest(callbackBody('no-such-report')))).status).toBe(401);
+    await cw.close();
+  });
+
+  it('the signal block shows the option that adds the route', () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    const block = blocks[1] as string;
+    expect(block).toContain('signal: {');
+    expect(block).toContain('secret: process.env.COOP_SIGNAL_SECRET!');
+    expect(block).toContain('read: async (lines)');
+  });
+});
+
+describe('Coop in the project docs', () => {
+  const status = flat(read('../../../docs/status.md'));
+  const follow = flat(read('../../../docs/plans/follow-ups.md'));
+
+  it('the root README has the row; CLAUDE.md names the adapter and the example', () => {
+    const rootText = flat(root);
+    expect(rootText).toContain('`coop` from `@chatwarden/http/coop`');
+    expect(rootText).toContain('Review in Coop');
+    const claude = flat(read('../../../CLAUDE.md'));
+    expect(claude).toContain('`@chatwarden/http/coop`');
+    expect(claude).toContain('`examples/coop-signal`');
+  });
+
+  it('status says what is built and what the owner checks; follow-ups tell the owner exactly what to do (task C8)', () => {
+    for (const needle of ['Coop (built', '`chatwarden.coop_callback_ignored`', 'Nothing has run against a real Coop', "The owner's live check (K5 C8)", '`examples/coop-signal`']) expect(status, needle).toContain(needle);
+    for (const needle of ['the live Coop check (task C8)', 'docker compose', '`setup.checklist()`', '`setup.verify()`', 'Webhook Signature Verification Key', 'Ignore', 'Invalidate', '`datetime`', '`creator`', '@roostorg/coop-types', 'integrations.config.json', '`chatwarden.coop_failed`']) {
+      expect(follow, needle).toContain(needle);
+    }
+  });
+});

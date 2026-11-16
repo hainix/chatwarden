@@ -919,6 +919,224 @@ token is never logged and never stored. Work that throws gives the fixed failure
   the bot is application-owned, and that the command's default visibility value is right. If the first is wrong the feed logs
   `chatwarden.discord_components_ignored` and posts without buttons.
 
+## Coop
+
+`@experimental` until 0.2. [Coop](https://github.com/roostorg/coop) is an open-source review tool. This adapter sends each report to Coop as a job, so reviewers
+can work there. When a reviewer decides, Coop calls your server, and the kit applies the decision through the same checks as the hub.
+
+The kit stays the source of truth. Coop is a place to review. Only the kit writes sanctions, notices and the status of a report. A job in Coop does not
+change the report: it stays open in the hub until someone decides it.
+
+It is in its own entry, `@chatwarden/http/coop`, and not in the package root, because it uses `node:crypto`. It does nothing when you import it. It needs a
+store that has `cw.links` (the memory store with `withMemoryLinks`, or SQLite from 0.1.12); without one, `coop(...)` throws a `RangeError`.
+
+### Set up, in order
+
+1. **Run Coop.** Use Coop's own Docker Compose set-up. In Coop, open Settings, then API Keys. Make an API key. Copy the **Webhook Signature Verification Key** too.
+   It is a public key in PEM form.
+2. **Create things in Coop by hand.** Coop has no way to create item types, policies or actions from outside, so the adapter prints a checklist. Call
+   `adapter.setup.checklist().toText()` once and follow it. It lists the three item types and their fields, one policy for each of your Community Rules, and the
+   actions to make. Each action gets the callback URL (your public URL plus `/coop/actions`) and **user strikes off**.
+3. **Copy the ids into the options.** Coop gives each item type, policy and action an id. Put them in `itemTypes`, `actions` and `rules` (below).
+4. **Add it to your server.** The route needs the exact request body, so use an adapter that supplies `rawBody` (`toExpress` does), with no body parser before it. The block below is the whole wiring.
+
+```ts
+import express from 'express';
+import { coop } from '@chatwarden/http/coop';
+import { toExpress } from '@chatwarden/http/express';
+
+const adapter = coop(cw, {
+  baseUrl: process.env.COOP_URL!, // https, or http on localhost for a local Coop
+  apiKey: process.env.COOP_API_KEY!,
+  webhookPublicKey: process.env.COOP_WEBHOOK_KEY!, // the PEM from Settings, API Keys
+  itemTypes: { user: process.env.COOP_TYPE_USER!, line: process.env.COOP_TYPE_LINE!, report: process.env.COOP_TYPE_REPORT! },
+  evidence: 'excerpt', // required: 'none' or 'excerpt'. There is no default.
+  actions: {
+    [process.env.COOP_ACTION_WARN!]: { verdict: 'upheld', kind: 'warning' },
+    [process.env.COOP_ACTION_CHAT_24H!]: { verdict: 'upheld', kind: 'chat', durationMs: 86_400_000 },
+    [process.env.COOP_ACTION_DISMISS!]: { verdict: 'no_action' },
+  },
+  rules: { [process.env.COOP_POLICY_HARASSMENT!]: 2 }, // Coop policy id -> Community Rule number
+});
+
+const app = express();
+app.use('/', toExpress(adapter.routes)); // POST /coop/actions, with no body parser before it
+
+// at startup
+console.log(adapter.setup.checklist().toText()); // while you set Coop up
+adapter.setup.verify().then((result) => console.log(result)); // read-only: three GETs
+void adapter.sweep(); // send the open reports from the last day that have no job yet
+
+// on shutdown
+adapter.dispose();
+```
+
+5. **Check it.** `adapter.setup.verify()` makes three read-only requests and says which configured ids Coop does not list, which actions have no meaning
+   here, and which item types lack a field. It writes nothing and never returns your key. `{ ok: false, status: 401 }` means Coop refused the key.
+6. **File a test report** and watch the job appear in Coop. Decide it there with one of your actions and watch the hub close the report.
+
+`adapter.sweep()` sends every open report from the last `catchUpMs` (default one day) that has no job yet. Run it at startup. A crash between Coop's answer and
+the kit's note of it sends that report once more at the next sweep. Coop then counts a second report on the same item. That is the only cost.
+
+### Coop options
+
+| Option | What it does |
+| --- | --- |
+| `baseUrl` | Where Coop is. `https`, or `http` on `localhost` and `127.0.0.1`. No user, password, query or fragment. Redirects are never followed. Required. |
+| `apiKey` | Sent as `X-API-KEY`. A secret: never logged, never in a result. Required. |
+| `webhookPublicKey` | Coop's Webhook Signature Verification Key, a public RSA key in PEM form. A private key is refused. Required. |
+| `itemTypes` | `{ user, line, report }`: the ids of the three item types you made in Coop. Required. |
+| `evidence` | `'none'` or `'excerpt'`. Required, no default. `'none'` sends the category, rule, severity and room tags only. `'excerpt'` also sends the chat lines of the report. |
+| `includeNote` | Send the reporter's note. It is player text. Default `false`. |
+| `handles` | `'hidden'` (default) labels people `reporter`, `reported`, `other 1`. `'shown'` also sends each line's handle. |
+| `policies` | `{ byReason, byRule }`: which Coop policy a report is filed under. A reported reason wins over the suggested rule. Optional. |
+| `actions` | Coop action id to the kit decision it means (below). Required. An id that is not listed is acknowledged and ignored. |
+| `rules` | Coop policy id to a Community Rule number. Without a match, the report's suggested rule is used. |
+| `role` | The kit role the callbacks act with. Default `moderator`. A permanent ban needs `senior`. |
+| `permissions` | Overrides of the minimum roles, checked as for the staff routes. |
+| `callbackAuth` | `{ header, value }`. Coop can send a header you set on each action. When this is set, a callback without it gets the same `401`. Compared in constant time. |
+| `catchUpMs` | How far back `sweep()` looks. Default 24 hours; at most 30 days. |
+| `aiSeverity` | `(report) => number`. The kit's AI severity, 0 to 100. It rides in the item as `aiSeverity`, so a Coop routing rule can sort by it. A throw, or a value outside 0 to 100, drops that field and not the report. |
+| `signal` | `{ secret, read, rateLimit? }`. Adds `POST /coop/signal` (below). Off unless set. |
+| `fetch`, `schedule`, `clock`, `random`, `logger` | The `fetch` for Coop, the timer for the signal's time limit, the time source, the retry jitter and where failures are logged. All for tests; the defaults are the global ones. |
+
+`adapter.routes` is the route table. `adapter.sweep()` resolves with `{ sent, skipped, failed }`. `adapter.setup` has `checklist()` and `verify()`.
+`adapter.dispose()` unsubscribes, aborts the request in flight, clears every timer and drops the queue; nothing is written after it, and a disposed adapter's
+routes answer `401`. The names `coop`, `CoopAdapter`, `CoopOptions`, `CoopDecision`, `SweepResult`, `CoopChecklist`, `CoopChecklistItemType` and `CoopVerification`
+are `@experimental` until 0.2.
+
+### The three item types
+
+Make these in Coop, with exactly these field names. Names are case sensitive. `adapter.setup.checklist()` prints the same list.
+
+| Item type | Field | Coop type | Required |
+| --- | --- | --- | --- |
+| Player (`user`) | none | | |
+| Chat line (`line`) | `text` | `STRING` | yes |
+| | `author` | `STRING` | yes |
+| | `datetime` | `DATETIME` | yes |
+| | `handle` | `STRING` | no |
+| Report (`report`) | `category` | `STRING` | yes |
+| | `reportedReason` | `STRING` | no |
+| | `rule` | `NUMBER` | no |
+| | `aiSeverity` | `NUMBER` | no |
+| | `room` | `STRING` | no |
+| | `creator` | `RELATED_ITEM` | yes |
+
+The report is the item. Its id in Coop is the kit's report id, so every callback names exactly one report. A line is not used as the item, because a one-tap
+report has no line and two reports can name one line. `author` is `reporter`, `reported` or `other n`. `room` is the room's own tags as `key=value` pairs, cut to
+200 characters. `creator` is the reported player. The ids the kit sends for people are its own opaque staff refs, never a hash of an account. The kit never
+sets `csam`: it does not detect it. Coop's own pipelines do.
+
+### Which Coop actions mean what
+
+`actions` maps a Coop action id to one of these:
+
+| You write | The kit does |
+| --- | --- |
+| `{ verdict: 'upheld', kind: 'warning' }` | A warning on the reported player. |
+| `{ verdict: 'upheld', kind: 'chat', durationMs }` | A chat restriction for that long. `kind: 'area'` and `kind: 'ban'` work the same. A ban with no `durationMs` is permanent. |
+| `{ verdict: 'noted' }` | A note on the player. Nothing is done to them. |
+| `{ verdict: 'no_action' }` | Closes the report as within the rules. |
+| `{ verdict: 'bad_faith' }` | Closes the report and marks it as bad faith. The Coop decision reason is stored as the evidence; with no reason the callback is ignored. |
+
+The sanction always lands on the person the report is about. Nothing in a Coop callback can pick another person, a role, an actor or a source. The decision is
+recorded with the source `coop`, the actor `coop:<the moderator's email>` and the role you configured, and the audit trail gets a `report.decide` row.
+
+The Community Rule is the first of the callback's policies that `rules` maps to a rule you can still cite. Otherwise it is the report's suggested rule. If there
+is none, a decision that acts on a player (a warning, a restriction, a ban, a note) is ignored. A dismissal and a bad-faith mark need no rule.
+
+### The callback
+
+`POST /coop/actions` is the one URL for every action. In order, and each step refuses without doing anything else:
+
+1. The body must be at most 64 KiB (`413`) and the adapter must have the exact bytes (`rawBody`; if not, `500` and a log line).
+2. The `Coop-Signature` header must verify over those exact bytes with `webhookPublicKey` (RSA, SHA-256). The `t=<time>,v1=<signature>` form the docs also show is
+   accepted, for the body alone or for `<t>.<body>`.
+3. When `callbackAuth` is set, its header must match.
+4. Only then is the body read. It must be JSON with an `item.id` and an `action.id` (`400` if not).
+5. A callback no moderator made is ignored: one with no `actorEmail` (a rule), or with empty `policies` and `rules` (a strike threshold).
+6. The report is read. An unknown report is ignored.
+7. The action id is looked up in `actions`. An unknown one is ignored.
+8. The decision is built, then made through the same path as the hub, as `role`. A refusal is ignored.
+9. A store failure is a `503`, so Coop retries. The decision is all-or-nothing, so a retry is safe.
+
+Every verification failure (a missing or malformed header, a wrong key, a changed byte) is the same `401 { "error": "unauthorized" }`. Everything else that
+Coop could retry in vain is `200 { "ok": true, "outcome": "ignored" }`, with the reason in the log as `chatwarden.coop_callback_ignored`. An applied decision answers `"applied"`
+as its outcome, and the same decision again answers `"replay"`. Nothing else is in the body.
+
+The reason codes are `no_actor`, `no_policies`, `unknown_item`, `closed`, `unknown_action`, `no_rule`, `no_reason`, `forbidden` and `refused`.
+
+### When two places decide
+
+- **The first decision wins.** If the report was decided in the hub (or by a webhook, or from Discord) before Coop's callback arrives, the callback is answered
+  `ignored` with the reason `closed` and applies nothing. The job stays in Coop, because Coop's API cannot close it. A reviewer may open a job whose case is
+  already settled.
+- **A repeated callback is harmless.** The same decision twice is applied once. The second is answered `replay`.
+- **A decision the kit cannot apply is not guessed.** An unknown action, a policy with no rule, a bad-faith mark with no reason, or a permanent ban from a
+  role below `senior` is answered `ignored`, and the report stays open for the hub. A `4xx` would only make Coop retry five times.
+- **Nothing unattended.** A rule-triggered action or a strike threshold is never applied. Make the actions with user strikes off. The kit's own ladder is the
+  only strike logic.
+- **Ignore sends nothing.** Coop's Ignore and "Invalidate reports" are not known to send a callback. A job closed with Ignore leaves the report open in the
+  hub. Use a Dismiss action (`{ verdict: 'no_action' }`) instead.
+
+### Privacy
+
+Chat text leaves the kit only where you say so, and only to your own Coop. There are three switches: `evidence` (no default), `includeNote` (off by default) and `handles` (hidden by
+default). With `evidence: 'none'` no chat line is sent at all. With `handles: 'hidden'` no handle is sent.
+The room id, the seat ids, client keys and IP addresses are never sent. A report that Coop gets holds the staff refs of the reporter and the reported player,
+and nothing that identifies either outside the kit.
+
+A log line carries an event name, an operation, an HTTP status or an error class, and a count. It never holds your key, a URL, a report id, a person, a note
+or any chat text. The events are `chatwarden.coop_failed`, `chatwarden.coop_callback_ignored` and the queue's `chatwarden.coop_dropped`.
+
+A Coop decision's `actorNote` and `decisionReason` are staff text. They are stored only as the decision's private reason (cut to 500 characters). They are in
+no log, no event and no answer.
+
+### The signal route (optional)
+
+With `signal: { secret, read }` the adapter also serves `POST /coop/signal`. A Coop plugin can post the lines of a reported thread and get back a severity
+from 0 to 100, which a Coop rule can compare with a threshold. The copy-in plugin is in `examples/coop-signal` in this repository. It is not published.
+
+```ts
+const adapter = coop(cw, {
+  // ...the options above...
+  signal: {
+    secret: process.env.COOP_SIGNAL_SECRET!, // at least 32 characters
+    read: async (lines) => myAiRead(lines), // your function: [{ label, text }] in, a number from 0 to 100 out
+  },
+});
+```
+
+The request is signed with the kit's own scheme: the headers `x-chatwarden-timestamp` and `x-chatwarden-signature`, a five minute window and a replay
+cache. A bad signature, a stale or future time, a replay and a wrong secret are all the same `401`. The body is `{ lines: [{ label, text }], item?: { text } }`
+and at most 64 KiB. At most 50 lines are read, each text is cut to 400 characters, and the item text is added as a last line. Extra keys are ignored and never
+reach `read`. No identifier is in the request or the answer. The answer is `200 { "severity": n }`, with `n` kept between 0 and 100.
+
+If `read` throws, takes more than 8 seconds, or answers something that is not a number, the answer is `503` with an empty body. More than `rateLimit`
+requests (default 60 a minute) is `429` with `retry-after`. Your own AI cost limits apply inside `read`. The route only reads: it never decides anything.
+
+### Coop: security notes
+
+- **Verify before parse.** The callback is checked over the exact bytes before the body is read. The signal route is the same.
+- **Replays.** Coop's signature carries no time, so a captured callback stays valid. A replay is harmless because the decision is idempotent and a closed report
+  is acknowledged, not because it is fresh. If the verification key leaks, rotate it in Coop.
+- **Rate-limit the routes at your edge.** A request with a bad signature still costs a body read and a signature check.
+- **No secret leaves.** Keep the API key, the signal secret and `callbackAuth` out of source control.
+- **Redirects are never followed.** The key is sent only to the `baseUrl` you set.
+
+### Not confirmed yet
+
+This adapter was written from Coop's public docs and tested against a fake that follows them. Nothing has run against a real Coop. The owner's local
+end-to-end run (`docs/plans/follow-ups.md`) settles these:
+
+- Which signature header Coop 1.2.2 sends: the base64 body signature, or `t=...,v1=...`. The adapter accepts both.
+- That Ignore, Invalidate reports and Move send no callback.
+- That `creator` is honoured as a relation field and that `datetime` is the field Coop orders a thread by (the kit sends it at the top level of each line
+  and in its `data`).
+- Coop's names for the field types, and whether a report job evaluates signals when a rule routes it.
+- The plugin types package: Coop's docs say `@roostorg/coop-types`, its example imports `@roostorg/types`.
+
 ## Health probes
 
 `healthRoutes(cw)` adds two public routes. They say "up" or "not ready" and never why.

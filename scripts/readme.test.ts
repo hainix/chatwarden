@@ -448,6 +448,7 @@ declare const bot: import('@chatwarden/http/discord').DiscordBot;
         '@chatwarden/http/admin': src('http/src/admin-entry.ts'),
         '@chatwarden/http/chat': src('http/src/chat/index.ts'),
         '@chatwarden/http/discord': src('http/src/discord/index.ts'),
+        '@chatwarden/http/coop': src('http/src/coop/index.ts'),
         '@chatwarden/hub-element': src('hub-element/src/index.ts'),
         '@chatwarden/hub-element/standalone': src('hub-element/src/standalone.ts'),
         '@chatwarden/hub-react': src('hub-react/src/index.ts'),
@@ -508,6 +509,12 @@ declare const bot: import('@chatwarden/http/discord').DiscordBot;
     const fromHttp = snippets.filter((s) => s.doc === 'http' && standalone(s.code)).map((s) => s.code);
     expect(fromHttp.some((c) => c.includes('discordBot(cw, {') && c.includes('components: bot.components') && c.includes("from '@chatwarden/http/discord'"))).toBe(true);
     expect(fromHttp.some((c) => c.includes('await registerCommands({') && c.includes('commands: bot.commands()'))).toBe(true);
+  });
+
+  it('the readme code blocks for coop() and its signal option are among them (so they compile with the rest)', () => {
+    const fromHttp = snippets.filter((s) => s.doc === 'http').map((s) => s.code);
+    expect(fromHttp.some((c) => standalone(c) && c.includes('coop(cw, {') && c.includes('toExpress(adapter.routes)') && c.includes("from '@chatwarden/http/coop'"))).toBe(true);
+    expect(fromHttp.some((c) => c.includes('signal: {') && c.includes('COOP_SIGNAL_SECRET'))).toBe(true);
   });
 
   it('all compile in one program, and a deliberate error is caught (control)', { timeout: 120_000 }, () => {

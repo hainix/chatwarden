@@ -178,3 +178,32 @@ Found building `@chatwarden/http/discord` (K5 D1 to D9, 2026-11).
 - **Open: a bot-token post route.** Only if check 1 fails: the feed would post through `POST /channels/{id}/messages` with a bot token instead of a webhook.
 - **Open: `registerCommands` needs a bot.** The one-shot script builds the same `discordBot` to call `bot.commands()`. A plain exported list would avoid building a bot with a kit.
 - **Open: a redelivered interaction.** Discord rarely sends one twice. The bot answers it from memory, and for a slow one it sends the follow-up again (the same text).
+
+## Coop (K5 / 0.1.12), parked
+
+Found building `@chatwarden/http/coop` (K5 C1 to C7, 2026-11).
+
+- **Open, owner: the live Coop check (task C8).** Nothing has talked to a Coop yet; every test uses a fake written from Coop's public docs. Use a local Coop (never a production one),
+  with a throwaway API key. Do these in order, and write down the answer to each of the first five:
+  1. Start a local Coop with its own `docker compose` set-up. In Settings, API Keys, make an API key, and copy the **Webhook Signature Verification Key** (a PEM).
+  2. Start the kit with `coop(cw, ...)` as in the "Coop" section of `packages/http/README.md`, with `evidence: 'excerpt'`. Call `setup.checklist()` and print its `toText()`. Make
+     in Coop exactly what it lists: the three item types with their fields, one policy per Community Rule, and the actions, each with the callback URL (your public URL plus
+     `/coop/actions`, for example through a tunnel) and **user strikes off**. Copy the ids into the options. Run `setup.verify()`. **Does it say `complete: true`?** If an
+     item type or a field is reported missing, compare the names with the checklist. If Coop uses other names for the field types (the kit says `STRING`, `NUMBER`, `DATETIME`
+     and `RELATED_ITEM`), tell the maintainer.
+  3. File a test report in the kit. **Does a job appear in Coop? Does it show the lines in order, with `datetime`, and the reported player as `creator`?** If Coop answers 400,
+     the log shows `chatwarden.coop_failed` with status 400 and attempts 1: the item type fields differ from what the kit sends. Tell the maintainer which.
+  4. Decide the job in Coop with your Warn action. **Does the kit apply it?** The report should close in the hub, the player should get a warning with the source `coop`, and the
+     audit trail should show `report.decide` by `coop:<your email>`. **Which signature header did Coop send?** The adapter accepts both shapes, so it works either way; note
+     whichever you see (a tool such as the Coop server's own log, or a request catcher on the tunnel, shows it).
+  5. Close a job in Coop with **Ignore**, and use "Invalidate reports" on another. **Does the kit get a callback for either?** It should not. If it does, the log shows
+     `chatwarden.coop_callback_ignored`; note the reason and tell the maintainer. Also try Move. The report stays open in the hub in each case.
+  6. Decide a report in the hub first, then decide its job in Coop. The kit should log `chatwarden.coop_callback_ignored` with reason `closed` and change nothing.
+  7. Optional, for the signal: set `signal: { secret, read }` on the adapter, build `examples/coop-signal` (see its README), list it in Coop's `integrations.config.json` by local path
+     and fill its form. **Does it appear as a signal in a rule? Does a report job evaluate it?** Compare the plugin's file with Coop's own example plugin
+     (github.com/roostorg/coop-integration-example): the return shape of `createSignals`, whether a model card is needed, and the package name of the types (`@roostorg/coop-types`
+     in Coop's docs, `@roostorg/types` in its example). Tell the maintainer the differences.
+  Write the results in `docs/status.md` (K5) when done.
+- **Open: Coop jobs the hub closed first stay in Coop.** The documented API cannot close a job. A reviewer may open a job whose case is settled; the late callback is acknowledged and ignored.
+- **Open: Coop appeals, the Partial Items endpoint and `items/async`.** Not built, on purpose (design section 13).
+- **Open: a bounded signature cache.** Coop's signature has no time, so a replay is harmless only by effect. If Coop ever signs a time, add a window like the signal route's.
