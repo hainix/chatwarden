@@ -16,6 +16,7 @@
     { "path": "examples/tiny-chat" },
     { "path": "examples/ai-anthropic" },
     { "path": "examples/coop-signal" },
+    { "path": "examples/coop-signal/tsconfig.test.json" },
     { "path": "services/corpus" },
     { "path": "services/corpus/types-check" }
   ]
