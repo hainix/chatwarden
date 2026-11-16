@@ -1284,6 +1284,7 @@ Logs hold an event name, an operation, an HTTP status or an error class, and a c
 | --- | --- |
 | `chatwarden.eos_failed` | A push or poll step failed. `op` says which: `token`, `resolve`, `reconcile`, `create`, `link`, `apply`, `revoke`, `players`, `seat`, `poll`, `submit`, `enqueue`. With `status` or `error`, and `attempts` for a job that gave up. |
 | `chatwarden.eos_dropped` | The queue was full and dropped its oldest jobs. With a `count`. |
+| `chatwarden.eos_revoke_no_link` | A lift found no link for an account, so nothing was sent to EOS: the sanction was never pushed (the adapter was off, or the push failed for good), or the row is gone. With a `count` only. An `active` link is kept by retention however old, so a sanction lifted long after it was pushed is still removed. |
 | `chatwarden.eos_report_skipped` | A poll left reports out. With a `reason` (`unseated`, `different_room`, `self`, `malformed`, `seat_error`, or `refused_<code>`) and a `count`. |
 
 ### Epic Online Services: security notes
@@ -1305,6 +1306,7 @@ This adapter was written from EOS's public Web API pages and tested against a fa
 - That a delete of a sanction EOS no longer has answers `404`, and what the error bodies look like.
 - That the create accepts `automated`, which the example shows and the field table does not list.
 - What EOS answers to the user query for a player who has no sanctions at all. The adapter reads a `404` as "none found" and goes on to create the sanction. If EOS answers something else, the first sanction for a player is not created and the log shows the status.
+- The link of an EOS sanction that is still `active`, and the poll cursor, are never purged by age. A link marked `removed` is purged with the reports (90 days by default).
 - A restart between the kit's revoke and the delete leaves the EOS sanction in place until it expires. A sweep that fixes this is not built.
 
 ## Health probes

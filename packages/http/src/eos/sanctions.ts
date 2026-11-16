@@ -158,7 +158,12 @@ export function createSanctions(cw: Chatwarden, o: ResolvedEosOptions, client: E
   const revokeOne = async (job: Job, id: string, signal: AbortSignal): Promise<Outcome> => {
     const key = keyOf(job.groupId, id);
     const row = cw.links.get('eos-sanction', key);
-    if (row === null || row.state !== 'active') return { kind: 'done' };
+    if (row === null) {
+      // Nothing to lift: never pushed (the adapter was off, or the push failed for good), or the row is gone. Counted by class only, so a silent divergence leaves a trace.
+      safeWarn(logger, 'chatwarden.eos_revoke_no_link', { count: 1 });
+      return { kind: 'done' };
+    }
+    if (row.state !== 'active') return { kind: 'done' };
     const reply = await client.deleteSanctions([row.external], `Lifted: ${job.refCode}`, signal);
     if (disposed) return { kind: 'done' };
     // A 404 says EOS no longer has it: the same end.

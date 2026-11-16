@@ -1426,7 +1426,11 @@ export interface Store {
    */
   listLinks?(system: LinkSystem, q: { state?: string; limit: number }): LinkRow[];
 
-  /** OPTIONAL (`@experimental`). Delete rows with `at < before` (a row exactly on the line is kept), in every system; returns how many. */
+  /**
+   * OPTIONAL (`@experimental`). Delete rows with `at < before` (a row exactly on the line is kept); returns how many. A row that says it is live
+   * is never deleted by age: an `eos-sanction` row in state `active` (a lift long after the push must still find it) and every `eos-cursor`
+   * row. Once such a row is marked `removed` (or `failed`) its `at` is new and it ages out like any other.
+   */
   purgeLinks?(before: number): number;
 
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term

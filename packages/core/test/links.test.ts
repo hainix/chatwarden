@@ -225,12 +225,10 @@ describe('cw.links and retention', () => {
   it('purge deletes links older than retention.reportsMs and keeps newer ones; a store without the methods purges nothing and reports supported false', async () => {
     const { cw, clock } = await setup();
     cw.links.put(row({ ref: 'old', at: NOW - 91 * DAY }));
-    cw.links.put(row({ system: 'eos-cursor', ref: 'oldcursor', external: '2027-01-01T00:00:00.000Z', state: 'active', at: NOW - 100 * DAY }));
     cw.links.put(row({ ref: 'recent', at: NOW - 89 * DAY }));
     cw.links.put(row({ ref: 'fresh', at: NOW }));
     await cw.purge();
     expect(cw.links.get('coop-report', 'old')).toBeNull();
-    expect(cw.links.get('eos-cursor', 'oldcursor')).toBeNull();
     expect(cw.links.get('coop-report', 'recent')).not.toBeNull();
     expect(cw.links.get('coop-report', 'fresh')).not.toBeNull();
     clock.t += 2 * DAY; // 'recent' is now 91 days old
@@ -241,6 +239,23 @@ describe('cw.links and retention', () => {
     const bare = await setup(new MemoryStore());
     expect(bare.cw.links.supported).toBe(false);
     await expect(bare.cw.purge()).resolves.toBeDefined();
+  });
+
+  it('purge keeps a live link however old: an active eos-sanction link and the eos-cursor row survive, a removed eos-sanction link and an old eos-report row do not', async () => {
+    const { cw } = await setup();
+    const old = NOW - 400 * DAY;
+    cw.links.put(row({ system: 'eos-sanction', ref: 'live', external: 'ref-1', state: 'active', at: old }));
+    cw.links.put(row({ system: 'eos-sanction', ref: 'gone', external: 'ref-2', state: 'removed', at: old }));
+    cw.links.put(row({ system: 'eos-cursor', ref: 'reports', external: '2027-01-01T00:00:00.000Z', state: 'cursor', at: old }));
+    cw.links.put(row({ system: 'eos-report', ref: 'seen', external: 'x', state: 'filed', at: old }));
+    await cw.purge();
+    expect(cw.links.get('eos-sanction', 'live')).not.toBeNull();
+    expect(cw.links.get('eos-cursor', 'reports')).not.toBeNull();
+    expect(cw.links.get('eos-sanction', 'gone')).toBeNull();
+    expect(cw.links.get('eos-report', 'seen')).toBeNull();
+    // A second pass changes nothing, and the live row is still there after a much later clock.
+    await cw.purge();
+    expect(cw.links.get('eos-sanction', 'live')).not.toBeNull();
   });
 
   it('the cutoff follows retention.reportsMs when it is set', async () => {

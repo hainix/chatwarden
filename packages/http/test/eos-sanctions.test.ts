@@ -438,6 +438,19 @@ describe('push: revoke', () => {
     await idle();
     expect(deletes(c)).toHaveLength(0);
     expect(c.fake.sanctions).toHaveLength(0);
+    expect(eosLogs(c)).toEqual([['chatwarden.eos_revoke_no_link', { count: 1 }]]);
+    c.adapter.dispose();
+  });
+
+  it('a revoke that finds a removed link logs nothing (only a missing link is counted)', async () => {
+    const c = await eosWorld();
+    const m = await sanction(c);
+    await until(() => link(c, m)?.state === 'active', 'push');
+    await c.cw.sanctions.revoke(m.groupId, 'ann', 'x');
+    await until(() => link(c, m)?.state === 'removed', 'removal');
+    c.emit({ type: 'sanction.revoked', groupId: m.groupId, refCode: m.refCode, at: 1, subject: m.subject, rule: 1 });
+    await idle();
+    expect(eosLogs(c)).toEqual([]);
     c.adapter.dispose();
   });
 

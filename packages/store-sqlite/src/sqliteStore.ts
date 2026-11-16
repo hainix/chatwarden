@@ -1501,7 +1501,7 @@ export class SqliteStore implements Store, TermStore {
   }
 
   purgeLinks(before: number): number {
-    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_links WHERE at < ?').run(before).changes));
+    return this.transaction(() => Number(this.db.prepare("DELETE FROM kit_links WHERE at < ? AND system <> 'eos-cursor' AND NOT (system = 'eos-sanction' AND state = 'active')").run(before).changes));
   }
 
   listReasons(): ReasonRow[] {

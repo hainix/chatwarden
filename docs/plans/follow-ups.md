@@ -233,6 +233,8 @@ Found building `@chatwarden/http/eos` (K5 E1 to E4, 2026-11).
   6. Send a test report between the two accounts (the game client's report menu, or `POST /player-reports/v1/report` from a script), with both accounts seated in the same room in
      your test server. Wait one poll. **Does a new report appear in the hub, with the message as the note and the reason you mapped?** Then try a report where one player is not seated: the log
      should show `chatwarden.eos_report_skipped` with `unseated` and the hub should show nothing.
+     Also note what the reports query answers for a **wrong deployment id** (change one character, restart, wait one poll): the pull reads a 404 on the first page as "request refused"
+     (with 400, 405, 413, 414 and 422), so if EOS answers 404 for a bad deployment id the log shows `status: 404` on every poll and a misconfiguration looks like a poisoned id. Record the status and the body shape.
   7. Batch size and limits: set `reports.batch` to 20, then 50, then 100 and note the largest the find call accepts without a 400 (the fake accepts 50). Watch the log for `status: 429` in
      any run and note it. The EOS pages state no rate limits.
   8. Ask the maintainer to read your notes, then write the results in `docs/status.md` (K5).

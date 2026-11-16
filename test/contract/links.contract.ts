@@ -93,7 +93,7 @@ export function linksContract(name: string, make: () => Store): void {
     it('purge deletes rows strictly older than the cutoff, in every system, and keeps a row exactly on the line', () => {
       const s = store();
       s.putLink(link({ ref: 'old', at: NOW - DAY }));
-      s.putLink(link({ system: 'eos-sanction', ref: 'old', at: NOW - DAY, external: 'ref-1', state: 'active' }));
+      s.putLink(link({ system: 'eos-sanction', ref: 'old', at: NOW - DAY, external: 'ref-1', state: 'removed' }));
       s.putLink(link({ ref: 'edge', at: NOW }));
       s.putLink(link({ ref: 'new', at: NOW + DAY }));
       expect(s.purgeLinks(NOW)).toBe(2);
@@ -102,6 +102,42 @@ export function linksContract(name: string, make: () => Store): void {
       expect(s.getLink('coop-report', 'edge')).not.toBeNull();
       expect(s.getLink('coop-report', 'new')).not.toBeNull();
       expect(s.purgeLinks(NOW)).toBe(0);
+    });
+
+    it('purge never deletes a live row by age: an active eos-sanction link and the eos-cursor row survive, however old', () => {
+      const s = store();
+      const live = link({ system: 'eos-sanction', ref: 'g1#puid-a', external: 'ref-1', state: 'active', at: NOW - 500 * DAY });
+      const cursor = link({ system: 'eos-cursor', ref: 'reports', external: '2027-01-14T10:00:00.000Z', state: 'cursor', at: NOW - 500 * DAY });
+      const cursorOdd = link({ system: 'eos-cursor', ref: 'other', external: '2027-01-14T10:00:00.000Z', state: 'active', at: NOW - 500 * DAY });
+      for (const r of [live, cursor, cursorOdd]) s.putLink(r);
+      expect(s.purgeLinks(NOW + 1000 * DAY)).toBe(0);
+      expect(s.getLink('eos-sanction', 'g1#puid-a')).toEqual(live);
+      expect(s.getLink('eos-cursor', 'reports')).toEqual(cursor);
+      expect(s.getLink('eos-cursor', 'other')).toEqual(cursorOdd);
+    });
+
+    it('purge still deletes the same system once it is not live: a removed or failed eos-sanction link, and every old coop-report and eos-report row whatever its state', () => {
+      const s = store();
+      s.putLink(link({ system: 'eos-sanction', ref: 'removed', external: 'r', state: 'removed', at: NOW - DAY }));
+      s.putLink(link({ system: 'eos-sanction', ref: 'failed', external: 'r', state: 'failed', at: NOW - DAY }));
+      s.putLink(link({ system: 'eos-sanction', ref: 'active-old', external: 'r', state: 'active', at: NOW - DAY }));
+      s.putLink(link({ system: 'coop-report', ref: 'active-coop', external: 'r', state: 'active', at: NOW - DAY }));
+      s.putLink(link({ system: 'eos-report', ref: 'active-report', external: 'r', state: 'active', at: NOW - DAY }));
+      expect(s.purgeLinks(NOW)).toBe(4);
+      expect(s.getLink('eos-sanction', 'removed')).toBeNull();
+      expect(s.getLink('eos-sanction', 'failed')).toBeNull();
+      expect(s.getLink('coop-report', 'active-coop')).toBeNull();
+      expect(s.getLink('eos-report', 'active-report')).toBeNull();
+      expect(s.getLink('eos-sanction', 'active-old')).not.toBeNull();
+    });
+
+    it('a live eos-sanction link that is then marked removed is purged by its new time, not kept for good', () => {
+      const s = store();
+      s.putLink(link({ system: 'eos-sanction', ref: 'g', external: 'r', state: 'active', at: NOW - 400 * DAY }));
+      expect(s.purgeLinks(NOW)).toBe(0);
+      s.putLink(link({ system: 'eos-sanction', ref: 'g', external: 'r', state: 'removed', at: NOW - 1 }));
+      expect(s.purgeLinks(NOW)).toBe(1);
+      expect(s.getLink('eos-sanction', 'g')).toBeNull();
     });
 
     it('purge counts a re-put row by its new time', () => {

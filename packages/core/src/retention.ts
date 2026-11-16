@@ -238,7 +238,7 @@ export async function purge(
   checkWindow('blockedNamesMs', p.blockedNamesMs);
   return store.transaction(() => {
     const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
-    // Link rows (`cw.links`) are ids only and outlive the report they name by no useful time: the same clock as reports. Not counted in the result.
+    // Link rows (`cw.links`) are ids only and outlive the report they name by no useful time: the same clock as reports. Not counted in the result. A live row (an active EOS sanction, the EOS cursor) is kept by the store whatever its age.
     store.purgeLinks?.(now - p.reportsMs);
     const ai = store.purgeAi?.(now - p.reportsMs, now - p.aiOutcomesMs, now - p.aiExamplesMs) ?? { reads: 0, outcomes: 0 };
     return {

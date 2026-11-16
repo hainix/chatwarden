@@ -48,7 +48,8 @@ class MemoryLinks extends MemoryStore {
   purgeLinks(before: number): number {
     const rows = this.links;
     if (rows === undefined) return 0;
-    const gone = [...rows.entries()].filter(([, r]) => r.at < before);
+    // A live row is kept whatever its age: an active EOS sanction (a lift long after the push must find it) and the EOS cursor.
+    const gone = [...rows.entries()].filter(([, r]) => r.at < before && r.system !== 'eos-cursor' && !(r.system === 'eos-sanction' && r.state === 'active'));
     for (const [key] of gone) rows.delete(key);
     if (gone.length > 0) {
       this.undoWith(() => {
