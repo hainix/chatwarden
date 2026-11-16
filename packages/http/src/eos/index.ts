@@ -3,18 +3,14 @@ import type { Chatwarden } from '@chatwarden/core';
 import { createEosClient } from './client.js';
 import { resolveOptions } from './options.js';
 import type { EosOptions } from './options.js';
+import { createReports } from './reports.js';
+import type { PollResult } from './reports.js';
 import { createSanctions } from './sanctions.js';
 import { createTokenSource } from './token.js';
 
 export type { EosKind, EosOptions, EosSeat } from './options.js';
 
-/** What a poll did: how many reports EOS returned, how many became kit reports, and what was left out or refused, counted by reason code. */
-export interface PollResult {
-  seen: number;
-  filed: number;
-  skipped: Record<string, number>;
-  refused: Record<string, number>;
-}
+export type { PollResult } from './reports.js';
 
 /** What `eos` returns. @experimental */
 export interface EosAdapter {
@@ -41,15 +37,17 @@ export function eos(cw: Chatwarden, options: EosOptions): EosAdapter {
   const tokens = createTokenSource({ clientId: o.clientId, clientSecret: o.clientSecret, deploymentId: o.deploymentId, baseUrl: o.baseUrl, fetch: call, clock: o.clock, logger: o.logger });
   const client = createEosClient({ tokens, baseUrl: o.baseUrl, deploymentId: o.deploymentId, fetch: call });
   const sanctions = createSanctions(cw, o, client);
+  const reports = createReports(cw, o, client);
   let disposed = false;
   return {
-    pollReports: () => Promise.resolve({ seen: 0, filed: 0, skipped: {}, refused: {} }),
-    start() {},
-    stop() {},
+    pollReports: () => reports.poll(),
+    start: () => reports.start(),
+    stop: () => reports.stop(),
     dispose() {
       if (disposed) return;
       disposed = true;
       sanctions.dispose();
+      reports.dispose();
       tokens.dispose();
     },
   };
