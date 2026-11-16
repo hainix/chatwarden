@@ -5,6 +5,7 @@ import { actorName } from '../claims.js';
 import { toHubError } from '../client.js';
 import type { HubError } from '../client.js';
 import { useHub } from '../context.js';
+import { useFeatures } from '../features.js';
 import { useHubData } from '../hooks.js';
 import { termErrorText } from '../labels.js';
 import { useToasts } from '../toasts.js';
@@ -70,11 +71,13 @@ export function Terms() {
   // its id, once, and shown with the rest. After they switch it off it is a touched row and the list holds it.
   const [fetched, setFetched] = useState<TermDetail | null>(null);
   const asked = useRef(false);
+  // Only a server that wired the shared list has a row the list does not hold; for any other a stale id is not asked about (it would be a 404).
+  const { community } = useFeatures();
   useEffect(() => {
-    if (pickedId === null || data === undefined || asked.current || data.terms.some((r) => r.id === pickedId)) return;
+    if (!community || pickedId === null || data === undefined || asked.current || data.terms.some((r) => r.id === pickedId)) return;
     asked.current = true;
     void client.getTerm(pickedId).then(setFetched, () => undefined);
-  }, [pickedId, data, client]);
+  }, [community, pickedId, data, client]);
   const terms = useMemo(() => (data === undefined ? [] : fetched !== null && !data.terms.some((r) => r.id === fetched.id) ? [...data.terms, fetched] : data.terms), [data, fetched]);
   // The marked row takes the focus and the scroll once, when it first appears: a reload after a switch must not take them back.
   const pickedDone = useRef(false);
@@ -315,7 +318,7 @@ export function Terms() {
           />
         </div>
       )}
-      <Tester matchOf={matchOf} loadOne={(id) => client.getTerm(id)} />
+      <Tester matchOf={matchOf} {...(community ? { loadOne: (id: string) => client.getTerm(id) } : {})} />
       {groups.length === 0 ? (
         <Empty>{t('hub.terms.empty')}</Empty>
       ) : (

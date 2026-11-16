@@ -528,6 +528,22 @@ describe('a hand-over to a hidden community row', () => {
     expect(w.sent.filter((r) => r.method === 'GET' && r.path === '/terms').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('with the community list off, a hand-over to a row that is not listed asks for nothing (no GET /terms/:id, so no 404 in the console)', async () => {
+    const w = await hubWorld();
+    renderHub(w, { path: '/terms', onController: (c) => c.session.handoff.set({ kind: 'term', id: 'CWT-2026-99999' }) });
+    await screen.findByRole('region', { name: /^English/ });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(w.sent.filter((r) => /^\/terms\/[^/]+$/.test(r.path))).toEqual([]);
+    expect(sent(w, 'GET', '/community')).toHaveLength(0);
+  });
+
+  it('with the community list on, the same hand-over still asks once', async () => {
+    const w = await hubWorld({ community: {} });
+    renderHub(w, { path: '/terms', onController: (c) => c.session.handoff.set({ kind: 'term', id: 'CWT-2026-00001' }) });
+    await screen.findByRole('region', { name: /^English/ });
+    await waitFor(() => expect(sent(w, 'GET', '/terms/CWT-2026-00001')).toHaveLength(1));
+  });
+
   it('the Tester names a hidden community term by fetching that one row', async () => {
     const { w, user } = await openTerms({ community: {} });
     await user.type(screen.getByLabelText('Message to test'), 'you glarn');
