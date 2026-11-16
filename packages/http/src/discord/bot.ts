@@ -7,8 +7,10 @@ import { Limiter } from '../limiter.js';
 import type { PermissionKey } from '../permissions.js';
 import { roleAtLeast } from '../permissions.js';
 import type { KitRequest, KitResponse } from '../types.js';
-import { TEXT, ephemeral, respond } from './answers.js';
+import { ActFlow, buttonsFor } from './act.js';
+import { TEXT, ephemeral, respond, updateMessage } from './answers.js';
 import type { InteractionAnswer } from './answers.js';
+import { parseCustomId } from './customId.js';
 import { parseInteraction, lookupRef } from './interaction.js';
 import type { ParsedInteraction } from './interaction.js';
 import { lookupAnswer } from './lookup.js';
@@ -21,6 +23,9 @@ import { verifyInteraction } from './verify.js';
 const PING = 1;
 const APPLICATION_COMMAND = 2;
 const MESSAGE_COMPONENT = 3;
+/** A Discord interaction token lives 15 minutes: a redelivery of the same interaction id inside that window gets the same answer. */
+const SEEN_WINDOW_MS = 15 * 60_000;
+const SEEN_MAX = 10_000;
 
 /** The `/chatwarden` command, as registered (K5 design 6.5). `1099511627776` is `1 << 40`, MODERATE_MEMBERS: a default visibility, not the control (the role map is). */
 const COMMANDS: readonly DiscordCommand[] = Object.freeze([
@@ -59,6 +64,8 @@ export function discordBot(cw: Chatwarden, options: DiscordBotOptions): DiscordB
   const fail = (op: string, err: unknown): void => safeWarn(logger, 'chatwarden.discord_bot_failed', { op, error: errorClass(err) });
 
   const limiter = new Limiter(o.rateLimit);
+  /** The answers given to interactions in the last 15 minutes, by interaction id (bounded): a redelivery is answered, not acted on twice. */
+  const seen = new Map<string, { at: number; answer: Promise<InteractionAnswer> }>();
 
   const denied = (reason: 'guild' | 'role' | 'rate' | 'off' | 'claimed'): void => safeWarn(logger, 'chatwarden.discord_bot_denied', { reason });
 
@@ -83,7 +90,7 @@ export function discordBot(cw: Chatwarden, options: DiscordBotOptions): DiscordB
   }
 
   /** Steps 1 to 3 of the click (K5 design 6.6): the guild and the person, the role and its permission, the rate. A refusal is a fixed ephemeral answer and a log reason. */
-  const gate = (i: ParsedInteraction, need: PermissionKey, deniedText: string = TEXT.noRole): { who: Who } | { answer: InteractionAnswer } => {
+  const gate = (i: ParsedInteraction, need: PermissionKey, lackText: string = TEXT.noRole): { who: Who } | { answer: InteractionAnswer } => {
     if (i.guildId !== o.guildId || i.userId === null) {
       denied('guild');
       return { answer: ephemeral(TEXT.notSetUp) };
@@ -91,7 +98,7 @@ export function discordBot(cw: Chatwarden, options: DiscordBotOptions): DiscordB
     const role = kitRoleOf(i.roles, o.roles);
     if (role === null || !roleAtLeast(role, o.permissions[need])) {
       denied('role');
-      return { answer: ephemeral(deniedText) };
+      return { answer: ephemeral(role === null ? TEXT.noRole : lackText) };
     }
     if (limiter.hit(i.userId, clock.now()) > 0) {
       denied('rate');
@@ -115,13 +122,56 @@ export function discordBot(cw: Chatwarden, options: DiscordBotOptions): DiscordB
     return lookupAnswer({ cw, hubLink: o.hubLink, now: () => clock.now(), who: g.who }, ref);
   };
 
+  const act = new ActFlow({ cw, o, denied });
+
+  const component = async (i: ParsedInteraction): Promise<InteractionAnswer> => {
+    if (i.guildId !== o.guildId || i.userId === null) {
+      denied('guild');
+      return ephemeral(TEXT.notSetUp);
+    }
+    const parsed = parseCustomId(i.customId);
+    if (parsed === null) return ephemeral(TEXT.unsupported);
+    if (parsed.verb === 'x') {
+      const g = gate(i, 'reports.read');
+      return 'answer' in g ? g.answer : updateMessage(TEXT.cancelled);
+    }
+    const need = act.needs(parsed);
+    const g = gate(i, need, need === 'reports.decide' ? TEXT.noPermission : TEXT.noRole);
+    if ('answer' in g) return g.answer;
+    return act.click(parsed, g.who);
+  };
+
   /** What a verified interaction gets. */
   const handle = async (body: Record<string, unknown>): Promise<InteractionAnswer | { type: number }> => {
     const i = parseInteraction(body);
     if (i.type === PING) return { type: 1 };
-    if (i.type === APPLICATION_COMMAND) return command(i);
-    if (i.type === MESSAGE_COMPONENT) return ephemeral(TEXT.unsupported);
+    if (i.type === APPLICATION_COMMAND || i.type === MESSAGE_COMPONENT) return remembered(i);
     return ephemeral(TEXT.unsupported);
+  };
+
+  /**
+   * Answer a command or a click once per interaction id: a redelivery inside the window (even one that arrives while the first is still being worked on)
+   * gets the first answer and writes nothing.
+   */
+  const remembered = (i: ParsedInteraction): Promise<InteractionAnswer> => {
+    const now = clock.now();
+    const held = i.id === null ? undefined : seen.get(i.id);
+    if (held !== undefined && now - held.at < SEEN_WINDOW_MS) return held.answer;
+    const answer = (async () => (i.type === APPLICATION_COMMAND ? command(i) : await component(i)))();
+    const id = i.id;
+    if (id !== null) {
+      seen.delete(id);
+      if (seen.size >= SEEN_MAX) {
+        const oldest = seen.keys().next();
+        if (oldest.done !== true) seen.delete(oldest.value);
+      }
+      seen.set(id, { at: now, answer });
+      // A failure is not kept: the redelivery may try again.
+      answer.catch(() => {
+        if (seen.get(id)?.answer === answer) seen.delete(id);
+      });
+    }
+    return answer;
   };
 
   const route = withErrors(async (req: KitRequest): Promise<KitResponse> => {
@@ -147,10 +197,11 @@ export function discordBot(cw: Chatwarden, options: DiscordBotOptions): DiscordB
 
   return {
     routes: { 'POST /discord/interactions': route },
-    components: () => undefined,
+    components: (post) => buttonsFor(o, post),
     commands: () => JSON.parse(JSON.stringify(COMMANDS)) as DiscordCommand[],
     dispose() {
       disposed = true;
+      seen.clear();
     },
   };
 }

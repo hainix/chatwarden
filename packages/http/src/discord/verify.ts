@@ -50,6 +50,7 @@ export function publicKeyOf(hex: unknown): KeyObject | null {
  * - this signature has not been accepted before (`replay`).
  * On success the signature is remembered until its timestamp leaves the window. `now` is epoch milliseconds; `headers` are lower-case named, as the
  * adapters supply them. Never throws.
+ * @experimental
  */
 export function verifyInteraction(
   publicKeyHex: string,

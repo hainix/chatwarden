@@ -8,7 +8,7 @@ import { ReplayCache } from '../webhooks/sign.js';
 import type { DiscordRoleMap } from './types.js';
 import { DEFAULT_TOLERANCE_MS, publicKeyOf } from './verify.js';
 
-/** What the adopter gives `discordBot`. */
+/** What the adopter gives `discordBot`. @experimental */
 export interface DiscordBotOptions {
   /** The Discord application id (a snowflake: 17 to 20 digits). */
   applicationId: string;

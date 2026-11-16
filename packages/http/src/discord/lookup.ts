@@ -18,7 +18,7 @@ const REF_MAX = 12;
 const stamp = (ms: number, style: 'R' | 'f'): string => `<t:${Math.floor(ms / 1000)}:${style}>`;
 
 /** `Rule 2 (Be kind)`, the title escaped and cut; `No Community Rule yet` for an uncovered rule; undefined for none. */
-function ruleText(cw: Chatwarden, rule: PersonSanctionView['rule']): string | undefined {
+export function ruleText(cw: Chatwarden, rule: PersonSanctionView['rule']): string | undefined {
   if (rule === 'uncovered') return 'No Community Rule yet';
   if (typeof rule !== 'number') return undefined;
   const title = cw.rules.all().find((r) => r.number === rule)?.title;

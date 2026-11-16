@@ -35,7 +35,7 @@ export interface DiscordCommand {
   options: readonly DiscordCommandOption[];
 }
 
-/** What `discordBot` returns. */
+/** What `discordBot` returns. @experimental */
 export interface DiscordBot {
   /** `POST /discord/interactions`: mount it with the rest of the kit's routes. The adapter must supply `rawBody`. */
   routes: RouteTable;
