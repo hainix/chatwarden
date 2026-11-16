@@ -91,6 +91,8 @@ export function createSanctions(cw: Chatwarden, o: ResolvedEosOptions, client: E
   const lookup = async (job: Job, id: string, signal: AbortSignal): Promise<{ found: { referenceId: string; removed: boolean } | null } | Outcome> => {
     for (let page = 0; page < LOOKUP_PAGES; page++) {
       const reply = await client.userSanctions(id, { limit: PAGE, offset: page * PAGE, signal });
+      // UNVERIFIED (design 15): what EOS answers for a user who has no sanctions at all. A 404 is read as "none found", so the first sanction of every user is created.
+      if (reply.status === 404) return { found: null };
       if (reply.status < 200 || reply.status >= 300) return bad(reply);
       const body = reply.json;
       const elements = isObject(body) ? body['elements'] : undefined;

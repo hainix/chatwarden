@@ -1,6 +1,6 @@
 import type { Chatwarden } from '@chatwarden/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { eosWorld, makeEos, sanctionKey, sanctionProblems, until } from './eos-world.js';
+import { eosWorld, idle, makeEos, sanctionKey, sanctionProblems, until } from './eos-world.js';
 import type { EosWorld } from './eos-world.js';
 import { world } from './world.js';
 
@@ -153,7 +153,7 @@ describe('push: what is sent', () => {
     const off = await eosWorld();
     await sanction(off, { kind: 'warning' });
     await sanction(off, { kind: 'note' });
-    await new Promise((r) => setTimeout(r, 50));
+    await idle();
     expect(off.fake.calls).toEqual([]);
     off.adapter.dispose();
 
@@ -171,7 +171,7 @@ describe('push: what is sent', () => {
   it('a kind with no action is not pushed and makes no request, not even a lookup', async () => {
     const c = await eosWorld({ sanctions: { actions: { ban: 'chatwarden-ban' } } });
     await sanction(c, { kind: 'chat' });
-    await new Promise((r) => setTimeout(r, 50));
+    await idle();
     expect(c.fake.calls).toEqual([]);
     expect(c.resolved).toEqual([]);
     c.adapter.dispose();
@@ -180,7 +180,7 @@ describe('push: what is sent', () => {
   it('an automatic sanction is pushed only with includeAutomatic: not by sanction.applied, and not by auto.restricted', async () => {
     const off = await eosWorld();
     await sanction(off, { source: 'auto_filter', automated: true, durationMs: 1_800_000 });
-    await new Promise((r) => setTimeout(r, 50));
+    await idle();
     expect(off.fake.calls).toEqual([]);
     // The adapter is not even subscribed to auto.restricted.
     expect(off.subs.map(([t]) => t).sort()).toEqual(['sanction.applied', 'sanction.revoked']);
@@ -200,7 +200,7 @@ describe('push: what is sent', () => {
     expect(body).toMatchObject({ action: 'chatwarden-chat', duration: 1800, automated: true, tags: ['cw', 'rule2'], metadata: { cw_ref: g.refCode, cw_rule: '2' } });
     // The same group again (an event twice) is a no-op: the link exists.
     c.emit({ type: 'auto.restricted', groupId: g.groupId, refCode: g.refCode, second: false, subject });
-    await new Promise((r) => setTimeout(r, 50));
+    await idle();
     expect(creates(c)).toHaveLength(1);
     c.adapter.dispose();
   });
@@ -217,7 +217,7 @@ describe('push: what is sent', () => {
     const w = await world();
     const c = makeEos(w, { sanctions: { includeAutomatic: true } });
     c.emit({ type: 'auto.restricted', groupId: 'g-none', refCode: 'M-AAAAA', second: false, subject: 's_x' });
-    await new Promise((r) => setTimeout(r, 50));
+    await idle();
     expect(c.fake.calls).toEqual([]);
     c.adapter.dispose();
   });
@@ -293,7 +293,7 @@ describe('push: skip when linked, and reconcile before create', () => {
     const before = c.fake.calls.length;
     c.cw.links.put({ system: 'eos-sanction', ref: sanctionKey(g.groupId, 'puid-2'), external: 'ref-2', state: 'removed', at: 1 });
     c.emit({ type: 'sanction.applied', groupId: g.groupId, refCode: g.refCode, kind: 'chat', until: w.clock.t + DAY, rule: 1, source: 'moderator', automated: false, target: subject });
-    await new Promise((r) => setTimeout(r, 50));
+    await idle();
     expect(c.fake.calls).toHaveLength(before);
     expect(c.fake.sanctions).toHaveLength(2);
     c.adapter.dispose();
@@ -423,7 +423,7 @@ describe('push: revoke', () => {
     expect(JSON.stringify(deletes(c)[0]?.body)).not.toContain('quissel');
     // A second revoke event for the same group does nothing more.
     c.emit({ type: 'sanction.revoked', groupId: m.groupId, refCode: m.refCode, at: 1, subject: m.subject, rule: 1 });
-    await new Promise((r) => setTimeout(r, 50));
+    await idle();
     expect(deletes(c)).toHaveLength(1);
     c.adapter.dispose();
   });
@@ -435,7 +435,7 @@ describe('push: revoke', () => {
     const c = makeEos(w);
     c.accounts.set(subject, [PUID]);
     await w.cw.sanctions.revoke(g.groupId, 'ann', 'x');
-    await new Promise((r) => setTimeout(r, 50));
+    await idle();
     expect(deletes(c)).toHaveLength(0);
     expect(c.fake.sanctions).toHaveLength(0);
     c.adapter.dispose();
@@ -447,7 +447,7 @@ describe('push: revoke', () => {
     const n = await sanction(c, { kind: 'note', ids: ['puid-n'] });
     await c.cw.sanctions.revoke(m.groupId, 'ann', 'x');
     await c.cw.sanctions.revoke(n.groupId, 'ann', 'x');
-    await new Promise((r) => setTimeout(r, 50));
+    await idle();
     expect(c.resolved).toEqual([]);
     expect(c.fake.calls).toEqual([]);
     c.adapter.dispose();
@@ -627,6 +627,29 @@ describe('push: failures and retries', () => {
     expect(creates(d)).toHaveLength(0);
     expect(eosLogs(d)).toEqual([['chatwarden.eos_failed', { op: 'apply', status: 403, attempts: 1 }]]);
     d.adapter.dispose();
+  });
+
+  it('a 404 on the user query means this user has no sanctions yet: the sanction is created, with one lookup and no log', async () => {
+    const c = await fakeWorld();
+    c.fake.script.push({ on: 'user', status: 404 });
+    const m = await sanction(c);
+    await tick(0);
+    expect(api(c)).toEqual(['GET users/_', 'POST sanctions']);
+    expect(link(c, m)?.state).toBe('active');
+    expect(eosLogs(c)).toEqual([]);
+    c.adapter.dispose();
+  });
+
+  it('only a 404 on the user query reads as empty: a 400, 401 or 403 from it still stops the create', async () => {
+    for (const status of [400, 401, 403]) {
+      const d = await fakeWorld();
+      d.fake.script.push({ on: 'user', status }, { on: 'user', status });
+      await sanction(d);
+      await tick(0);
+      await tick(30_000);
+      expect(creates(d), String(status)).toHaveLength(0);
+      d.adapter.dispose();
+    }
   });
 
   it('a failure for one account does not stop the others: the good account is linked and a retry repeats only the failed one', async () => {

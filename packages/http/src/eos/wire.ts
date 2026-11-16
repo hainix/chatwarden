@@ -3,7 +3,7 @@ import type { RuleRef } from '@chatwarden/core';
 
 // The pure parts of the EOS adapter: what a sanction body holds, how a link key is made, how text is cut. No I/O. The shapes follow the Sanctions Web API
 // (https://dev.epicgames.com/docs/web-api-ref/sanctions-web-apis): `action` and `source` and tags are `[A-Za-z0-9_-]`, a tag is at most 16 characters, a metadata value at
-// most 128, a justification 1 to 2048. UNVERIFIED (design 15): that `duration: 0` means permanent on create.
+// most 128, a justification 1 to 2048. UNVERIFIED (design 15): that `duration: 0` means permanent on create, and that create accepts the `automated` field (it is in the docs' example, not in the field table).
 
 /** The `source` of every sanction the kit creates in EOS (2 to 64 characters). */
 export const SOURCE = 'chatwarden';
