@@ -1,5 +1,6 @@
 import { errorClass, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, StaffReport } from '@chatwarden/core';
+import { discardBody, readBoundedText } from '../internal/boundedText.js';
 import { MAX_RETRIES, QUEUE_MAX, createDeliveryQueue } from '../internal/deliveryQueue.js';
 import type { Attempt } from '../internal/deliveryQueue.js';
 import type { ResolvedCoopOptions } from './options.js';
@@ -44,8 +45,8 @@ const ANSWER_MAX = 4096;
 /** The report id Coop answered a 201 with, or `unknown` when there is none that can be kept. */
 async function externalOf(res: Response): Promise<string> {
   try {
-    const text = await res.text();
-    if (text.length > ANSWER_MAX) return 'unknown';
+    const text = await readBoundedText(res, ANSWER_MAX);
+    if (text === null) return 'unknown';
     const value: unknown = JSON.parse(text);
     const id = typeof value === 'object' && value !== null ? (value as { reportId?: unknown }).reportId : undefined;
     return typeof id === 'string' && EXTERNAL_RE.test(id) ? id : 'unknown';
@@ -55,13 +56,7 @@ async function externalOf(res: Response): Promise<string> {
 }
 
 /** Throw away a response body we do not read, so the connection is released. */
-function drop(res: Response): void {
-  try {
-    void res.body?.cancel().catch(() => undefined);
-  } catch {
-    // nothing to release
-  }
-}
+const drop = discardBody;
 
 /** A `retry-after` header in whole seconds as milliseconds (the queue clamps it); undefined for anything else. */
 function retryAfterMs(res: Response): number | undefined {

@@ -129,6 +129,43 @@ describe('setup.verify', () => {
     c.adapter.dispose();
   });
 
+  it('a built-in Coop action or a custom one with no mapping does not make a correct setup read as incomplete (K5d review)', async () => {
+    const fake = fullCoop();
+    fake.actions = [
+      ...fake.actions,
+      { id: 'builtin-ignore', name: 'Ignore', actionType: 'IGNORE' } as never,
+      { id: 'builtin-enqueue', name: 'Enqueue to NCMEC', actionType: 'ENQUEUE_TO_NCMEC' } as never,
+      { id: 'action-extra', name: 'Something else', actionType: 'CUSTOM_ACTION' } as never,
+      { id: 'action-shapeless', name: 'No type given' },
+    ];
+    const c = await coopWorld({ fake });
+    const res = await c.adapter.setup.verify();
+    expect(res).toMatchObject({ ok: true, complete: true, actions: { missing: [] } });
+    if (!res.ok) throw new Error('unreachable');
+    // Still reported, as information, and never a built-in.
+    expect(res.actions.unmapped.sort()).toEqual(['action-extra', 'action-shapeless']);
+    c.adapter.dispose();
+  });
+
+  it('verify reads each answer with a byte cap: a huge answer is not buffered and reads as a bad answer', async () => {
+    const pulled = { n: 0 };
+    const huge = (() => {
+      const chunk = new TextEncoder().encode('x'.repeat(8192));
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulled.n += chunk.byteLength;
+          controller.enqueue(chunk);
+        },
+      });
+    })();
+    const c = await coopWorld({ options: { fetch: (() => Promise.resolve(new Response(huge, { status: 200 }))) as unknown as typeof fetch } });
+    const res = await c.adapter.setup.verify();
+    expect(res).toEqual({ ok: false, error: 'BadAnswer' });
+    // The list cap is 1 MB: about that much is pulled, never the whole endless body.
+    expect(pulled.n).toBeLessThan(1_100_000);
+    c.adapter.dispose();
+  });
+
   it('a field Coop requires that the kit does not send is a problem', async () => {
     const extra = { name: 'region', type: 'STRING', required: true };
     const fake = fullCoop({

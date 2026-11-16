@@ -1,5 +1,6 @@
 import { errorClass, lengthLabel, safeWarn } from '@chatwarden/core';
 import type { Chatwarden } from '@chatwarden/core';
+import { discardBody, readBoundedText } from '../internal/boundedText.js';
 import type { CoopDecision, ResolvedCoopOptions } from './options.js';
 import { ITEM_FIELDS } from './wire.js';
 import type { CoopField } from './wire.js';
@@ -132,15 +133,11 @@ export function createSetup(cw: Chatwarden, o: ResolvedCoopOptions): Setup {
     try {
       const res = await call(`${o.baseUrl}${path}`, { method: 'GET', headers: { 'X-API-KEY': o.apiKey }, redirect: 'manual', signal: controller.signal });
       if (res.status < 200 || res.status >= 300) {
-        try {
-          void res.body?.cancel().catch(() => undefined);
-        } catch {
-          // nothing to release
-        }
+        discardBody(res);
         return { status: res.status };
       }
-      const text = await res.text();
-      if (text.length > ANSWER_MAX) return { status: res.status };
+      const text = await readBoundedText(res, ANSWER_MAX);
+      if (text === null) return { status: res.status };
       try {
         return { status: res.status, json: JSON.parse(text) as unknown };
       } catch {
@@ -202,7 +199,8 @@ export function createSetup(cw: Chatwarden, o: ResolvedCoopOptions): Setup {
 
     return {
       ok: true,
-      complete: policiesMissing.length === 0 && actionsMissing.length === 0 && unmapped.length === 0 && typesMissing.length === 0 && fieldProblems.length === 0,
+      // `unmapped` is information only: what Coop lists for an action's type is not confirmed (design 15), so it must not make a correct setup read as incomplete.
+      complete: policiesMissing.length === 0 && actionsMissing.length === 0 && typesMissing.length === 0 && fieldProblems.length === 0,
       policies: { missing: policiesMissing },
       actions: { missing: actionsMissing, unmapped },
       itemTypes: { missing: typesMissing, fieldProblems },

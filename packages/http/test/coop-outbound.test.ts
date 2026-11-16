@@ -75,6 +75,35 @@ describe('outbound: report.created', () => {
     }
   });
 
+  it('a 201 with a huge answer is read with a byte cap: the link says unknown and the body is not buffered (K5d review)', async () => {
+    const pulled = { n: 0 };
+    let sentOne = false;
+    const streaming = ((): typeof fetch => {
+      const chunk = new TextEncoder().encode('x'.repeat(8192));
+      return (() => {
+        sentOne = true;
+        return Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                pulled.n += chunk.byteLength;
+                controller.enqueue(chunk);
+              },
+            }),
+            { status: 201 },
+          ),
+        );
+      }) as unknown as typeof fetch;
+    })();
+    const c = await coopWorld({ options: { fetch: streaming } });
+    const a = await c.w.file('harassment');
+    await until(() => linkOf(c, a.id) !== null, 'link');
+    expect(sentOne).toBe(true);
+    expect(linkOf(c, a.id)).toMatchObject({ external: 'unknown', state: 'sent' });
+    expect(pulled.n).toBeLessThan(64 * 1024);
+    c.adapter.dispose();
+  });
+
   it('a 400 is final and logged by status only; a 401 is final; a redirect is final and never followed', async () => {
     for (const status of [400, 401, 403, 404, 302]) {
       const c = await fakeWorld();
