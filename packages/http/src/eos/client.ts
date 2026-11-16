@@ -83,7 +83,7 @@ export function createEosClient(o: EosClientOptions): EosClient {
       const res = await once(token, method, path, opts);
       if (res.status === 401 && attempt === 0) {
         discardBody(res);
-        o.tokens.invalidate();
+        o.tokens.invalidate(token);
         continue;
       }
       if (res.status >= 200 && res.status < 300) {

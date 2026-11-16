@@ -24,8 +24,11 @@ export class TokenError extends Error {
 export interface TokenSource {
   /** A valid access token: the cached one, the one being fetched, or a new one. Rejects with {@link TokenError}. */
   get(): Promise<string>;
-  /** Forget the token (it was refused): the next `get` asks again. */
-  invalidate(): void;
+  /**
+   * Forget the token that was refused: the next `get` asks again. Name the token (the one the refused call used): if a newer one has been fetched since, it is kept, so two
+   * calls that both got a 401 for the old token cannot throw away the new one. With no name, whatever is cached is forgotten.
+   */
+  invalidate(token?: string): void;
   /** Abort a request in flight and refuse every later `get`. Safe to call more than once. */
   dispose(): void;
 }
@@ -132,8 +135,8 @@ export function createTokenSource(o: TokenSourceOptions): TokenSource {
       });
       return inflight;
     },
-    invalidate() {
-      cached = null;
+    invalidate(token) {
+      if (token === undefined || cached?.token === token) cached = null;
     },
     dispose() {
       if (disposed) return;

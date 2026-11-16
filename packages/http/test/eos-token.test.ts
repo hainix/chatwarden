@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEosClient } from '../src/eos/client.js';
 import { TokenError, createTokenSource } from '../src/eos/token.js';
-import { CLIENT_ID, CLIENT_SECRET, DEPLOYMENT, EOS_URL, fakeEos, recordingLogger } from './eos-world.js';
+import { CLIENT_ID, CLIENT_SECRET, DEPLOYMENT, EOS_URL, fakeEos, idle, recordingLogger } from './eos-world.js';
 import type { FakeEosOptions } from './eos-world.js';
 
 // K5 E1: the client-credentials token (cache, one shared request, refresh before expiry) and the small typed client over `fetch` (one refresh after a 401).
@@ -67,6 +67,46 @@ describe('token', () => {
     await t.tokens.get();
     t.tokens.invalidate();
     expect(await t.tokens.get()).toBe('fake-access-token-2');
+  });
+
+  it('invalidate(token) drops only that token: a fresh one is not discarded by a late 401 for the old one', async () => {
+    const t = setup();
+    const old = await t.tokens.get();
+    t.tokens.invalidate(old);
+    const fresh = await t.tokens.get();
+    expect(fresh).toBe('fake-access-token-2');
+    // A second caller that also saw a 401 for the old token arrives late: the fresh token stays.
+    t.tokens.invalidate(old);
+    expect(await t.tokens.get()).toBe(fresh);
+    expect(t.fake.state.tokenRequests).toBe(2);
+    // The current token is dropped by its own name, and a call with no name still drops whatever is cached.
+    t.tokens.invalidate(fresh);
+    expect(await t.tokens.get()).toBe('fake-access-token-3');
+    t.tokens.invalidate();
+    expect(await t.tokens.get()).toBe('fake-access-token-4');
+  });
+
+  it('the client names the token it was refused, so two calls that both got a 401 ask for one new token between them', async () => {
+    const t = setup();
+    // Hold the second call's answer until the first call has refreshed and finished: its 401 (for the old token) then arrives late.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    let n = 0;
+    const slow = ((input: string | URL | Request, init?: RequestInit) => {
+      const call = String(input).includes('/users/') ? ++n : 0;
+      const answer = t.fake.fetch(input, init);
+      return call === 2 ? gate.then(() => answer) : answer;
+    }) as typeof fetch;
+    const tokens = createTokenSource({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET, deploymentId: DEPLOYMENT, baseUrl: EOS_URL, fetch: slow, clock: t.clock, logger: t.logger });
+    const client = createEosClient({ tokens, baseUrl: EOS_URL, deploymentId: DEPLOYMENT, fetch: slow });
+    await tokens.get();
+    t.fake.expireTokens();
+    const a = client.userSanctions('p-1', { limit: 100, offset: 0 });
+    const b = client.userSanctions('p-1', { limit: 100, offset: 0 });
+    expect((await a).status).toBe(200);
+    release();
+    expect((await b).status).toBe(200);
+    expect(t.fake.tokensIssued()).toBe(2);
   });
 
   it('a failed token request is logged by status and class only, rejects with a TokenError, and is not cached', async () => {
@@ -293,7 +333,7 @@ describe('client', () => {
     t.fake.script.push({ on: 'user', hang: true });
     const controller = new AbortController();
     const pending = t.client.userSanctions('p-1', { limit: 100, offset: 0, signal: controller.signal }).catch((e: unknown) => e);
-    await new Promise((r) => setTimeout(r, 10));
+    await idle();
     controller.abort(new Error('stop'));
     expect(await pending).toBeInstanceOf(Error);
   });

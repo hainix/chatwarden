@@ -444,11 +444,22 @@ export async function eosWorld(over: EosWorldOptions = {}) {
 }
 export type EosWorld = Awaited<ReturnType<typeof eosWorld>>;
 
-/** Wait (real timers) until `check` holds. */
+/** One turn of the event loop: everything already queued (promise callbacks, the fake's answers) runs first. No clock is read and no timer is set. */
+const turn = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * Wait until `check` holds by giving the event loop turns, up to a fixed number of them (a bound on how much work may be chained, not on time). Not for a test
+ * with fake timers (they fake `setImmediate`): use `vi.advanceTimersByTimeAsync` there.
+ */
 export async function until(check: () => boolean, what: string): Promise<void> {
-  const start = Date.now();
-  while (!check()) {
-    if (Date.now() - start > 4000) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 2000; i++) {
+    if (check()) return;
+    await turn();
   }
+  throw new Error(`gave up waiting for ${what}`);
+}
+
+/** Let the adapter run everything it is going to run on its own (a fixed number of turns), for a test that asserts something did NOT happen. */
+export async function idle(turns = 50): Promise<void> {
+  for (let i = 0; i < turns; i++) await turn();
 }
