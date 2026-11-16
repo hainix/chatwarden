@@ -48,6 +48,24 @@ describe.each(['light', 'dark'] as const)('axe on the community list, %s theme',
     expect(await violations(container)).toEqual([]);
   });
 
+  it('the report disclosure on a community term has none: closed, open, after a failure and after a send', async () => {
+    const w = await hubWorld({ community: { exposeCommunityRows: true } });
+    const { container, user } = renderHub(w, { theme, path: '/terms' });
+    await screen.findByRole('region', { name: /^English/ });
+    await user.click(screen.getByRole('checkbox', { name: 'Show words' }));
+    await user.click(screen.getByRole('button', { name: 'Edit glarn' }));
+    await user.click(await screen.findByRole('button', { name: 'Report a problem with this community term' }));
+    expect(await violations(container)).toEqual([]);
+    w.community!.rig.reportResult = { ok: false, code: 'offline' };
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('alert');
+    expect(await violations(container)).toEqual([]);
+    w.community!.rig.reportResult = { ok: true, id: 'rep_abc123' };
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByText('Sent. A reviewer will look at it.');
+    expect(await violations(container)).toEqual([]);
+  });
+
   it('the Community section has none: the status, the question before an apply, a failed check, a miss in Find a word', async () => {
     const w = await hubWorld({ role: 'owner', community: { seed: false } });
     const { container, user } = renderHub(w, { theme, path: '/settings/community' });
