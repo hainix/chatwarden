@@ -2,13 +2,14 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Field } from '../case/ActionEditor.js';
 import { Masked } from '../case/Transcript.js';
 import { toHubError } from '../client.js';
-import type { HubClient, HubError } from '../client.js';
+import type { HubError } from '../client.js';
 import { useHub } from '../context.js';
 import type { Problem } from '../decision.js';
 import type { HubT, HubText } from '../i18n.js';
 import { useFeatures } from '../features.js';
 import { errorText } from '../labels.js';
-import type { CommunityStatus, ShareCategory, ShareState, ShareTarget } from '../types.js';
+import type { ShareCategory, ShareState, ShareTarget } from '../types.js';
+import { communityStatus } from './communityStatus.js';
 
 // "Share with the community list" (design 14, door 1): one disclosure under the term editor, shown only when the server reports
 // `sharing: true` and the row is the adopter's own. Closed by default. Opened, it shows exactly what will be sent (the word masked until
@@ -81,20 +82,6 @@ function sendFailure(t: HubT, error: HubError): string {
   return errorText(t, error);
 }
 
-// One answer of `GET /community` per client for as long as the page lives: opening the editor on another row does not ask again.
-const asked = new WeakMap<HubClient, Promise<CommunityStatus | null>>();
-function community(client: HubClient): Promise<CommunityStatus | null> {
-  let answer = asked.get(client);
-  if (answer === undefined) {
-    answer = client.community().then(
-      (status) => status,
-      () => null,
-    );
-    asked.set(client, answer);
-  }
-  return answer;
-}
-
 /** The disclosure. Draws nothing until the server has said sharing is on. */
 export function ShareTerm({ termId, word, language, showWords }: ShareTermProps) {
   const { t, client } = useHub();
@@ -109,7 +96,7 @@ export function ShareTerm({ termId, word, language, showWords }: ShareTermProps)
   useEffect(() => {
     if (!wired) return;
     let live = true;
-    void community(client).then(async (status) => {
+    void communityStatus(client).then(async (status) => {
       if (!live || status === null || !status.sharing) return;
       setSharing(true);
       try {

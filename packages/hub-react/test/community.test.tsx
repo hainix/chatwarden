@@ -306,6 +306,33 @@ describe('the Share disclosure in the term editor', () => {
     expect(w.sent.filter((r) => r.method === 'POST' && /\/share$/.test(r.path))).toHaveLength(1);
   });
 
+  it('a GET /community that failed once is not remembered: the next editor that opens asks again and offers Share', async () => {
+    let failed = 0;
+    const { w, user } = await editOwn({ community: {} }, (x) => {
+      x.intercept.fn = (req) => {
+        if (req.method !== 'GET' || req.path !== '/community' || failed > 0) return undefined;
+        failed += 1;
+        return { status: 500, body: { error: 'internal', message: 'x' } };
+      };
+    });
+    await waitFor(() => expect(sent(w, 'GET', '/community')).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole('button', { name: 'Share with the community list' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: `Edit ${OWN_WORD}` }));
+    expect(await screen.findByRole('button', { name: 'Share with the community list' })).toBeInTheDocument();
+    expect(sent(w, 'GET', '/community')).toHaveLength(2);
+  });
+
+  it('a GET /community that answered is asked only once per page, however many editors open', async () => {
+    const { w, user } = await editOwn({ community: {} });
+    await screen.findByRole('button', { name: 'Share with the community list' });
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: `Edit ${OWN_WORD}` }));
+    await screen.findByRole('button', { name: 'Share with the community list' });
+    expect(sent(w, 'GET', '/community')).toHaveLength(1);
+  });
+
   it('a person without terms.write is not offered it', async () => {
     const w = await hubWorld({ community: {}, permissions: { 'terms.write': 'owner' }, role: 'moderator' });
     await w.direct.addTerm({ term: OWN_WORD, language: 'en' }).catch(() => undefined);
