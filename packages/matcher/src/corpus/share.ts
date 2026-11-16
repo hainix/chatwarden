@@ -32,15 +32,34 @@ export type ShareResult =
   | { ok: true; status: 'received' | 'known' | 'duplicate'; id?: string }
   | { ok: false; code: 'invalid' | 'too_large' | 'unsupported_language' | 'rate_limited' | 'offline' | 'rejected'; retryAfterMs?: number };
 
+/** Why a person reports a term of the shared list (design 10.6). A closed list: there is no free text. @experimental */
+export type ReportKind = 'innocent_sense' | 'wrong_category' | 'removal';
+
+/** What a report says: which term, and why. The id is the term's public id on the list (`CWT-2026-00042`); the word is never sent. @experimental */
+export interface ReportInput {
+  termId: string;
+  kind: ReportKind;
+}
+
+/** The service takes a report as a ticket and answers with an acknowledgement id at most; the same report twice in a day is also `ok`. @experimental */
+export type ReportResult =
+  | { ok: true; id?: string }
+  | { ok: false; code: 'invalid' | 'rate_limited' | 'offline' | 'rejected'; retryAfterMs?: number };
+
 /** @experimental */
 export interface CommunityShare {
   /** Never throws: every failure is a closed code in the result. */
   share(input: ShareInput): Promise<ShareResult>;
   /** The state of an earlier share, or null (an unknown id, any failure, an answer that is not understood). */
   status(id: string): Promise<{ status: 'received' | 'in_review' | 'accepted' | 'declined' | 'merged'; reason?: string } | null>;
+  /** Report a problem with a term of the shared list: a signed ticket of a term id and a closed kind. Never throws. */
+  report(input: ReportInput): Promise<ReportResult>;
 }
 
 const SCHEMA = 'chatwarden-corpus-submission/1';
+const REPORT_SCHEMA = 'chatwarden-corpus-report/1';
+const REPORT_KINDS: readonly string[] = ['innocent_sense', 'wrong_category', 'removal'];
+const TERM_ID_RE = /^CWT-\d{4}-\d{5}$/;
 const CATEGORIES: readonly string[] = ['slur', 'abuse', 'sexual', 'other'];
 const TARGETS: readonly string[] = ['none', 'ethnicity', 'religion', 'gender', 'sexuality', 'disability', 'nationality', 'other'];
 const STATUSES: readonly string[] = ['received', 'in_review', 'accepted', 'declined', 'merged'];
@@ -175,6 +194,21 @@ function readInput(input: unknown): Submission | null {
   }
 }
 
+/** `{ termId, kind }` read once each, or null for anything that is not a good report. Nothing else on the input is read. */
+function readReport(input: unknown): { termId: string; kind: ReportKind } | null {
+  try {
+    if (input === null || typeof input !== 'object') return null;
+    const raw = input as Record<string, unknown>;
+    const termId = raw.termId;
+    const kind = raw.kind;
+    if (typeof termId !== 'string' || !TERM_ID_RE.test(termId)) return null;
+    if (typeof kind !== 'string' || !REPORT_KINDS.includes(kind)) return null;
+    return { termId, kind: kind as ReportKind };
+  } catch {
+    return null;
+  }
+}
+
 /** The day of `now` in UTC as `YYYY-MM-DD`, or null if the clock gives nothing usable. */
 function dayOf(now: number): string | null {
   if (typeof now !== 'number' || !Number.isFinite(now)) return null;
@@ -245,9 +279,9 @@ export function createCommunityShare(options: CommunityShareOptions): CommunityS
   const kit = o.kit ?? '0.0.0';
   const schedule = o.schedule ?? systemSchedule;
 
-  const warn = (code: string): void => {
+  const warn = (code: string, event = 'corpus.share_failed'): void => {
     try {
-      const out: unknown = o.logger === undefined ? console.warn('corpus.share_failed', { code }) : o.logger.warn('corpus.share_failed', { code });
+      const out: unknown = o.logger === undefined ? console.warn(event, { code }) : o.logger.warn(event, { code });
       if (typeof (out as { then?: unknown } | null | undefined)?.then === 'function') (out as PromiseLike<unknown>).then(undefined, () => undefined);
     } catch {
       // a logger that throws must not break a share
@@ -401,5 +435,42 @@ export function createCommunityShare(options: CommunityShareOptions): CommunityS
     return typeof reason === 'string' && REASONS.includes(reason) ? { status: out, reason } : { status: out };
   }
 
-  return { share, status };
+  const failReport = (code: Extract<ReportResult, { ok: false }>['code'], retryAfterMs?: number): ReportResult => {
+    warn(code, 'corpus.report_failed');
+    return retryAfterMs === undefined ? { ok: false, code } : { ok: false, code, retryAfterMs };
+  };
+
+  async function report(input: ReportInput): Promise<ReportResult> {
+    const report = readReport(input);
+    if (report === null) return failReport('invalid');
+    const day = dayOf(clock.now());
+    if (day === null) return failReport('invalid');
+    // The closed list of keys, in this order, and nothing else. No word, no text, no stamp: a report only opens a ticket.
+    const body = encoder.encode(JSON.stringify({ schema: REPORT_SCHEMA, termId: report.termId, kind: report.kind, day, kit }));
+    const signature = await signed(signedMessage('report', body));
+    if (signature === null) return failReport('rejected');
+    const res = await request(`${origin}/v1/reports`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-cw-key': publicKey, 'x-cw-sig': signature },
+      body,
+    });
+    if (res === null) return failReport('offline');
+    const { status } = res;
+    if (status === 429) {
+      const seconds = res.retryAfter !== null && /^\d{1,9}$/.test(res.retryAfter.trim()) ? Number(res.retryAfter.trim()) : null;
+      return seconds === null ? failReport('rate_limited') : failReport('rate_limited', Math.min(seconds * 1000, RETRY_AFTER_MAX_MS));
+    }
+    if (status === 202 || status === 200) {
+      const json = parseJson(res.body);
+      const s = json?.status;
+      if (status === 202 && s === 'received') return { ok: true, ...idOf(json?.id) };
+      if (status === 200 && s === 'duplicate') return { ok: true };
+      return failReport('rejected');
+    }
+    if (status === 400 && parseJson(res.body)?.error === 'invalid') return failReport('invalid');
+    if (status >= 500) return failReport('offline');
+    return failReport('rejected');
+  }
+
+  return { share, status, report };
 }

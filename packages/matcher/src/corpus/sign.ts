@@ -4,7 +4,7 @@ import { CORPUS_KEYS, CORPUS_REVOKED_KEY_IDS, type CorpusKey } from './keys.js';
 // Signatures. Pure and isomorphic: WebCrypto only, no Buffer, no atob. Every failure is a CorpusError with a fixed message.
 
 const PREFIX = 'chatwarden-corpus/1';
-const KINDS: readonly string[] = ['index', 'zip', 'submission'];
+const KINDS: readonly string[] = ['index', 'zip', 'submission', 'report'];
 const SIG_FILE_SCHEMA = 'chatwarden-corpus-sig/1';
 /** A signature file is a few hundred bytes; anything bigger is not read. */
 const SIG_FILE_MAX = 1024;
@@ -67,11 +67,11 @@ export const asBytes = (view: Uint8Array): Uint8Array => new Uint8Array(view.buf
 
 /**
  * The message a signature covers: `UTF8('chatwarden-corpus/1') 0x00 UTF8(kind) 0x00 bytes`. The kind separates the artifacts, so a
- * valid signature over an index can never be replayed as a zip or a submission.
+ * valid signature over an index can never be replayed as a zip, a submission or a report.
  * @experimental
  */
-export function signedMessage(kind: 'index' | 'zip' | 'submission', bytes: Uint8Array): Uint8Array {
-  if (typeof kind !== 'string' || !KINDS.includes(kind)) throw new RangeError('signedMessage: kind must be index, zip or submission');
+export function signedMessage(kind: 'index' | 'zip' | 'submission' | 'report', bytes: Uint8Array): Uint8Array {
+  if (typeof kind !== 'string' || !KINDS.includes(kind)) throw new RangeError('signedMessage: kind must be index, zip, submission or report');
   if (!isBytes(bytes)) throw new TypeError('signedMessage: bytes must be a Uint8Array');
   const encoder = new TextEncoder();
   const prefix = encoder.encode(PREFIX);

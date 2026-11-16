@@ -55,6 +55,9 @@ export {
   mintStamp,
   type CommunityShare,
   type CommunityShareOptions,
+  type ReportInput,
+  type ReportKind,
+  type ReportResult,
   type ShareInput,
   type ShareResult,
 } from './share.js';
