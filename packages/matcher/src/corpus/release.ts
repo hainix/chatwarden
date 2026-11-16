@@ -263,6 +263,35 @@ function parseException(raw: unknown): ExceptionRow6 {
   return { id: r.id, phrase, languages: languageList(r.languages, f, 1, 8), status: oneOf(r.status, STATUSES, f) };
 }
 
+/**
+ * The manifest says what is in the release; the rows are what is in it. They must agree, so a release whose description was edited
+ * or built from other rows is refused: every language a row lists is a language the manifest lists, the per-language counts
+ * (one per row that lists the language, so a row in two languages counts in both) match for terms and exceptions and name exactly
+ * the manifest's languages, and the status counts match the term rows. `bad_manifest`, never quoting anything.
+ */
+function checkManifestAgainstRows(manifest: ReleaseManifest, terms: readonly TermRow6[], exceptions: readonly ExceptionRow6[]): void {
+  const listed = new Set(manifest.languages);
+  const perLanguage = (rows: readonly { languages: readonly string[] }[]): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const tag of listed) out[tag] = 0;
+    for (const row of rows) {
+      for (const tag of new Set(row.languages)) {
+        if (!listed.has(tag)) throw badManifest();
+        out[tag] = (out[tag] as number) + 1;
+      }
+    }
+    return out;
+  };
+  const same = (a: Record<string, number>, b: Record<string, number>): boolean => {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((k) => Object.hasOwn(b, k) && a[k] === b[k]);
+  };
+  if (!same(perLanguage(terms), manifest.counts.terms) || !same(perLanguage(exceptions), manifest.counts.exceptions)) throw badManifest();
+  const status = { accepted: 0, provisional: 0, disputed: 0, withdrawn: 0 };
+  for (const t of terms) status[t.status] += 1;
+  if (!same(status, manifest.counts.status)) throw badManifest();
+}
+
 function parseNegative(bytes: Uint8Array, language: string): NegativeFile {
   const f = badPack;
   const n = exact(jsonOf(bytes, f), ['schema', 'language', 'lines', 'knownLosses'], f);
@@ -342,6 +371,8 @@ export function parseTermsRelease(files: ReadonlyMap<string, Uint8Array>, expect
       if (words.has(key)) throw badPack();
       words.add(key);
     }
+
+    checkManifestAgainstRows(manifest, terms, exceptions);
 
     const negative: Record<string, NegativeFile> = {};
     for (const [name, bytes] of entries) {

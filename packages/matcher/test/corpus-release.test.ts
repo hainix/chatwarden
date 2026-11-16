@@ -363,3 +363,64 @@ describe('parseTermsRelease', () => {
     }
   });
 });
+
+describe('the manifest agrees with the rows it describes', () => {
+  const counts = (over: Json = {}): Json => ({
+    terms: { en: 5, es: 2, pt: 2 },
+    exceptions: { en: 2, es: 0, pt: 1 },
+    status: { accepted: 4, provisional: 2, disputed: 1, withdrawn: 1 },
+    ...over,
+  });
+  const m = (manifest: Json): Outcome => run(releaseFiles({ manifest }));
+
+  it('the example release is consistent (the counts the helper computes are the counts the design describes)', () => {
+    const out = run(releaseFiles());
+    expect(out.code).toBe('ok');
+    expect(out.release?.manifest.counts).toEqual(counts() as unknown);
+  });
+
+  it('a count that is off by one, in any table, refuses the release as bad_manifest at unpack', () => {
+    const cases: Json[] = [
+      { counts: counts({ terms: { en: 6, es: 2, pt: 2 } }) },
+      { counts: counts({ terms: { en: 4, es: 2, pt: 2 } }) },
+      { counts: counts({ terms: { en: 5, es: 2, pt: 1 } }) },
+      { counts: counts({ exceptions: { en: 3, es: 0, pt: 1 } }) },
+      { counts: counts({ exceptions: { en: 2, es: 1, pt: 1 } }) },
+      { counts: counts({ status: { accepted: 5, provisional: 2, disputed: 1, withdrawn: 1 } }) },
+      { counts: counts({ status: { accepted: 4, provisional: 2, disputed: 0, withdrawn: 2 } }) },
+      { counts: counts({ status: { accepted: 4, provisional: 2, disputed: 1, withdrawn: 0 } }) },
+    ];
+    for (const over of cases) {
+      const out = m(over);
+      expect(out.code, JSON.stringify(over)).toBe('bad_manifest');
+      expect(out.stage).toBe('unpack');
+    }
+  });
+
+  it('a count table that leaves a listed language out, or names one the manifest does not list, is refused', () => {
+    expect(m({ counts: counts({ terms: { en: 5, es: 2 } }) }).code).toBe('bad_manifest');
+    expect(m({ counts: counts({ exceptions: { en: 2, pt: 1 } }) }).code).toBe('bad_manifest');
+    expect(m({ counts: counts({ terms: { en: 5, es: 2, pt: 2, fr: 0 } }) }).code).toBe('bad_manifest');
+  });
+
+  it('a row in a language the manifest does not list is refused (whatever the counts say)', () => {
+    const rows = [...exampleTerms(), termRow({ id: 'CWT-2026-00099', term: 'tarvox', languages: ['fr'] })];
+    expect(withTerms(rows).code).toBe('bad_manifest');
+    const exRows = [...exampleExceptions(), { id: 'CWX-2026-00099', phrase: 'glarn lake', languages: ['fr'], status: 'accepted' }];
+    expect(run(releaseFiles({ exceptions: exRows })).code).toBe('bad_manifest');
+  });
+
+  it('a manifest that lists languages the rows do not use is fine (an empty language is a real state: pt: 0)', () => {
+    const rows = exampleTerms().filter((r) => !(r.languages as string[]).includes('pt'));
+    const out = withTerms(rows);
+    expect(out.code).toBe('ok');
+    expect(out.release?.manifest.counts.terms.pt).toBe(0);
+  });
+
+  it('a row in two languages counts once in each', () => {
+    const rows = [termRow({ id: 'CWT-2026-00001', term: 'zorbak', languages: ['en', 'es'] })];
+    const out = withTerms(rows);
+    expect(out.code).toBe('ok');
+    expect(out.release?.manifest.counts.terms).toEqual({ en: 1, es: 1, pt: 0 });
+  });
+});
