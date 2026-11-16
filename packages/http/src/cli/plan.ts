@@ -1,0 +1,125 @@
+// The plan: what init would do, as pure data (design 5.2). No file system, no clock, no randomness: the same answers give the same plan, byte
+// for byte, on every machine. Applying it is apply.ts's job.
+import type { Answers, EnvName, FileSpec, PackageManager, Plan, Project, TodoItem, Versions } from './types.js';
+
+/** The shared and framework templates (Tasks 3, 5 and 6), as `renderAll` or as the list it returns. Injected so this file is tested with stubs. */
+export type Templates = FileSpec[] | ((answers: Answers, versions: Versions) => FileSpec[]);
+
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+const INSTALL_VERBS: Record<PackageManager, string> = { npm: 'npm install', pnpm: 'pnpm add', yarn: 'yarn add', bun: 'bun add' };
+const SECRET_COMMAND = `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`;
+
+/**
+ * What must never be in a generated file: a carriage return, a machine path, a timestamp, a key-like run of characters (design 5.5 and
+ * Review Focus 2). Returns the kinds found; an empty list is clean. The plan tests run every template through it.
+ */
+export function contentProblems(content: string): string[] {
+  const found: string[] = [];
+  if (content.includes('\r')) found.push('carriage-return');
+  if (/(?:^|[\s'"`(=,])(?:[A-Za-z]:[\\/]|\/(?:Users|home|tmp|var|etc|opt|mnt|root|private)\/)/m.test(content)) found.push('absolute-path');
+  if (/\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(content) || /\b1[5-9]\d{11}\b/.test(content)) found.push('timestamp');
+  const hex = /\b[0-9a-fA-F]{32,}\b/.test(content);
+  const mixed = (content.match(/[A-Za-z0-9+/]{32,}/g) ?? []).some((run) => /\d/.test(run) && /[a-z]/.test(run) && /[A-Z]/.test(run));
+  if (hex || mixed) found.push('long-secret-like-run');
+  return found;
+}
+
+function compare(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function installPackages(answers: Answers, versions: Versions, project: Project): string[] {
+  const names = ['core', 'http', answers.store === 'sqlite' ? 'store-sqlite' : 'store-memory', 'matcher', 'profanity'];
+  if (answers.discord) names.push('discord');
+  if (answers.hub === 'element') names.push('hub-element');
+  if (answers.hub === 'react') names.push('hub-react');
+  if (answers.chat === 'box') names.push('player-react');
+  const packages = names.map((name) => `@chatwarden/${name}@^${versions.chatwarden}`);
+  if ((answers.hub === 'react' || answers.chat === 'box') && !project.react) packages.push('react', 'react-dom');
+  return packages;
+}
+
+function envNames(answers: Answers): EnvName[] {
+  const routes = answers.framework !== 'none';
+  const env: EnvName[] = [{ name: 'CHATWARDEN_SECRET', required: true }];
+  if (routes) env.push({ name: 'CHATWARDEN_ADMIN_TOKEN', required: true });
+  if (answers.store === 'sqlite') env.push({ name: 'CHATWARDEN_DB', required: false });
+  if (answers.discord) env.push({ name: 'DISCORD_WEBHOOK_URL', required: true }, { name: 'DISCORD_MENTION_ROLE_ID', required: false });
+  if (answers.framework === 'next' || answers.framework === 'fetch') env.push({ name: 'CHATWARDEN_TRUST_PROXY', required: false });
+  return env;
+}
+
+function entryLine(answers: Answers): string {
+  const { dir, base } = answers;
+  switch (answers.framework) {
+    case 'express':
+      return `Add one line to your app, before any body parser: await mountChatwarden(app) (from ${dir}/express).`;
+    case 'fastify':
+      return `Register the plugin in your app: await app.register(chatwarden) (from ${dir}/fastify).`;
+    case 'next':
+      return 'Next serves the route handler under app/chatwarden/ by itself: there is nothing to add to your code.';
+    case 'fetch':
+      return `Call the handler from ${dir}/handler for each request under ${base}: const response = await handler(request).`;
+    case 'none':
+      return `Create the kit once at startup with createKit() from ${dir}/kit, and keep it for the life of the server.`;
+  }
+}
+
+function nextSteps(answers: Answers, command: string): string[] {
+  const library = answers.framework === 'none';
+  const variables = library ? 'CHATWARDEN_SECRET' : 'CHATWARDEN_SECRET and CHATWARDEN_ADMIN_TOKEN';
+  const setLine = `Set ${variables} (make a value with: ${SECRET_COMMAND}).`;
+  let last: string;
+  if (library) last = 'Call the check from your chat handler before you broadcast a line (the hook below).';
+  else if (answers.hub === 'none') last = `Start your server and open http://localhost:3000${answers.base}/healthz (use your server's port).`;
+  else last = `Start your server and open http://localhost:3000${answers.base}/mod (use your server's port).`;
+  return [`Install the packages: ${command}`, entryLine(answers), setLine, last];
+}
+
+function todoOf(files: readonly FileSpec[]): TodoItem[] {
+  const todo: TodoItem[] = [];
+  for (const file of files) {
+    if (!file.markers?.length) continue;
+    const lines = file.content.split('\n');
+    lines.forEach((text, index) => {
+      for (const marker of file.markers ?? []) {
+        if (text.includes(marker)) todo.push({ file: file.path, line: index + 1, marker });
+      }
+    });
+  }
+  return todo;
+}
+
+/**
+ * Build the plan. `templates` is `renderAll` (or what it returned); `project` is what detection found beyond the answers: the package manager
+ * and whether React is already a dependency. Throws only on a programming error: a malformed version (it would reach a command line) or two
+ * templates writing the same path.
+ */
+export function buildPlan(answers: Answers, versions: Versions, templates: Templates, project: Project): Plan {
+  if (!VERSION_PATTERN.test(versions.chatwarden)) throw new Error('the version for the install line must be a plain version such as 1.2.3');
+
+  const rendered = typeof templates === 'function' ? templates(answers, versions) : templates;
+  const files: FileSpec[] = rendered
+    .map((file) => ({ ...file, content: file.content.replaceAll('\r\n', '\n'), ...(file.markers ? { markers: [...file.markers] } : {}) }))
+    .sort((a, b) => compare(a.path, b.path));
+  for (let i = 1; i < files.length; i += 1) {
+    if (files[i]?.path === files[i - 1]?.path) throw new Error(`two templates write the same path: ${files[i]?.path}`);
+  }
+
+  const packages = installPackages(answers, versions, project);
+  const command = `${INSTALL_VERBS[project.manager]} ${packages.join(' ')}`;
+  const warnings: string[] = [];
+  if (answers.chat === 'box' && !project.react) {
+    warnings.push('The chat box is a React component and this project has no React: react and react-dom are on the install line; without React, use the ChatTransport seam (see the recipe).');
+  }
+
+  return {
+    answers: { ...answers },
+    files,
+    install: { manager: project.manager, command, packages },
+    env: envNames(answers),
+    nextSteps: nextSteps(answers, command),
+    warnings,
+    todo: todoOf(files),
+  };
+}

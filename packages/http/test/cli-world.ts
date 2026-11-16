@@ -25,6 +25,8 @@ export interface WorldOptions {
   files?: Record<string, string>;
   /** Empty folders by relative posix name. */
   dirs?: string[];
+  /** Folders by absolute path, for a place outside the root (a symlink target that leaves the project). */
+  absDirs?: string[];
   /** Symbolic links: relative posix name of the link to its target (absolute, or relative to the root, posix spelling). */
   links?: Record<string, string>;
   /** Text on standard input (then end of input). Default: empty, ended. */
@@ -93,6 +95,7 @@ export function createWorld(options: WorldOptions = {}): World {
   ensureDirs(key(root));
   for (const [name, content] of Object.entries(options.files ?? {})) putFile(name, content);
   for (const name of options.dirs ?? []) ensureDirs(key(abs(name)));
+  for (const name of options.absDirs ?? []) ensureDirs(p.resolve(name));
   for (const [name, target] of Object.entries(options.links ?? {})) {
     const full = key(abs(name));
     ensureDirs(p.dirname(full));

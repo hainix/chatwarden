@@ -79,3 +79,11 @@ export interface Plan {
   warnings: string[];
   todo: TodoItem[];
 }
+
+/** The versions a template or the install line may name. The kit's packages move together, so one number is right for all of them. */
+export interface Versions {
+  chatwarden: string;
+}
+
+/** What the plan needs to know about the project beyond the answers. */
+export type Project = Pick<Detected, 'manager' | 'react'>;
