@@ -1,3 +1,4 @@
+import { VERSION as KIT } from '@chatwarden/matcher';
 import { chooseRelease, parseIndex, verifySignature, type CorpusIndex } from '@chatwarden/matcher/corpus';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { r2Store } from '../src/tools/publishing.js';
@@ -49,7 +50,7 @@ describe('publish uploads the index after the release files (the fake bucket rec
       notes: 'First release. Plain sentences only.',
     });
     const index = await live();
-    expect(chooseRelease(index, { kind: 'terms', kit: '0.1.11', follow: 'stable' }).version).toBe('2026.12.0');
+    expect(chooseRelease(index, { kind: 'terms', kit: KIT, follow: 'stable' }).version).toBe('2026.12.0');
   });
 
   it('sends the headers of design 6.1: zips attachment and immutable, the index five minutes', async () => {

@@ -1,3 +1,4 @@
+import { VERSION as KIT } from '@chatwarden/matcher';
 import { chooseRelease, parseIndex, verifySignature } from '@chatwarden/matcher/corpus';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { refreshIndex } from '../src/tools/publishing.js';
@@ -55,7 +56,7 @@ describe('re-publishing a live release with a revocation', () => {
     await pw.publish(one.built, one.zipSig);
     await pw.publish(one.built, one.zipSig, { revokedReleases: [{ kind: 'terms', version: '2026.12.0', reason: 'bad_release' }] });
     const index = parseIndex(pw.store.files.get('v1/index.json') as Uint8Array, pw.bw.clock.now());
-    expect(() => chooseRelease(index, { kind: 'terms', kit: '0.1.11', follow: 'stable' })).toThrow(expect.objectContaining({ code: 'revoked_release' }));
+    expect(() => chooseRelease(index, { kind: 'terms', kit: KIT, follow: 'stable' })).toThrow(expect.objectContaining({ code: 'revoked_release' }));
   });
 
   it('refresh: true re-signs an otherwise unchanged index', async () => {
