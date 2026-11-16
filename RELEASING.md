@@ -73,6 +73,10 @@ The `@chatwarden/http` package also ships a command, `chatwarden` (the `bin` in 
    (`changesets` rewrites the pins of a private workspace that depends on a package it bumps), but a dependency you add to the
    example by hand, and any pin a run leaves behind, are yours to set; `scripts/manifests.test.ts` fails CI if one is left. Run
    `npm install` once more so `package-lock.json` follows.
+   The same goes for the term-corpus service: `services/corpus/package.json` pins `@chatwarden/matcher` to the exact group version and the
+   package is in the changesets `ignore` list, so `npm run version` does not touch it. **Bump that pin by hand to the new version at each
+   release** (then `npm install` again): `scripts/manifests.test.ts` fails CI if it lags, and until it is fixed npm would install the registry copy
+   of the matcher instead of linking the workspace.
    The `peerDependencies` ranges stay where they are through a compatible release: `.changeset/config.json` sets
    `onlyUpdatePeerDependentsWhenOutOfRange`, so changesets only raises a peer range when the new version falls outside it.
    `scripts/manifests.test.ts` fails CI if a range moves unexpectedly (it holds each package's floor: `^0.1.0` for `core`, `matcher` and
