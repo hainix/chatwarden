@@ -40,7 +40,8 @@ afterEach(async () => {
 });
 
 async function boot(extra?: (app: FastifyInstance) => void): Promise<Running> {
-  const app = Fastify();
+  // Close drops open stream sockets: a stream the test aborted can still be half-open on a loaded runner, and close would wait on it.
+  const app = Fastify({ forceCloseConnections: true });
   apps.push(app);
   // A route of the app's own, outside the plugin: it keeps Fastify's own JSON parsing.
   app.post('/sibling', async (request) => ({ got: request.body }));

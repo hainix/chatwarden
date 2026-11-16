@@ -102,8 +102,10 @@ describe('every workflow job runs on a free standard runner, with a time limit',
     it(`${file} has jobs`, () => expect(jobs.length).toBeGreaterThan(0));
     for (const job of jobs) {
       const name = job.slice(0, job.indexOf(':'));
-      it(`${file} ${name}: ubuntu-latest and timeout-minutes of at most 60`, () => {
-        expect(job).toMatch(/\n {4}runs-on: ubuntu-latest\n/);
+      // The init CLI's Windows job is the one job on windows-latest (also a free standard runner for a public repository).
+      const runner = name === 'cli-windows' ? 'windows-latest' : 'ubuntu-latest';
+      it(`${file} ${name}: ${runner} and timeout-minutes of at most 60`, () => {
+        expect(job).toMatch(new RegExp(`\\n {4}runs-on: ${runner}\\n`));
         const t = /\n {4}timeout-minutes: (\d+)\n/.exec(job);
         expect(t, 'timeout-minutes').not.toBeNull();
         expect(Number(t?.[1])).toBeLessThanOrEqual(60);

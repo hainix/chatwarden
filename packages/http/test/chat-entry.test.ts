@@ -96,6 +96,6 @@ describe('@chatwarden/http/chat', () => {
     expect(PKG.typesVersions['*'].chat).toEqual(['dist/src/chat/index.d.ts']);
     expect(PKG.files).toContain('dist/src');
     // the existing subpaths are untouched
-    expect(Object.keys(PKG.exports)).toEqual(['.', './admin', './chat', './express']);
+    expect(Object.keys(PKG.exports)).toEqual(['.', './admin', './chat', './express', './fetch', './cli']);
   });
 });

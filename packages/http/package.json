@@ -104,6 +104,7 @@
     "@chatwarden/core": "0.1.10",
     "@chatwarden/discord": "0.1.10",
     "@chatwarden/matcher": "0.1.10",
+    "@chatwarden/profanity": "0.1.10",
     "@chatwarden/store-sqlite": "0.1.10",
     "@types/express": "^5.0.3",
     "express": "^5.1.0"
