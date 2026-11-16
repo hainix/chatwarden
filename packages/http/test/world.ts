@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createChatwarden, createFakeModerationAI } from '@chatwarden/core';
-import type { AiOptions, Chatwarden, ChatwardenOptions, FakeModerationAI, FakeScript, LimitsInput, Logger, Matcher, ProfanityFilter, ProfileOverrides, RawWho, ReportCategory } from '@chatwarden/core';
+import type { AiOptions, Chatwarden, CommunityRules, ChatwardenOptions, FakeModerationAI, FakeScript, LimitsInput, Logger, Matcher, ProfanityFilter, ProfileOverrides, RawWho, ReportCategory } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { openStore } from '@chatwarden/store-sqlite';
@@ -42,6 +42,8 @@ export interface WorldOptions {
   matcher?: Matcher;
   /** The kit's profanity filter (for `names.profanity`). Default none. */
   profanity?: ProfanityFilter;
+  /** The Community Rules (default: the kit's starter rules). */
+  rules?: CommunityRules;
   /** The shared term list's admin (K7): built from the world's `LiveTerms`. Default none: no community routes. */
   community?: (live: LiveTerms) => Parameters<typeof adminRoutes>[1]['community'];
 }
@@ -60,6 +62,7 @@ export async function world(over: WorldOptions = {}) {
     clock,
     logger,
     retention: over.retention ?? false,
+    ...(over.rules === undefined ? {} : { rules: over.rules }),
     ...(over.matcher === undefined ? {} : { matcher: over.matcher }),
     ...(over.profanity === undefined ? {} : { profanity: over.profanity }),
     ...(over.limits === undefined ? {} : { limits: over.limits }),

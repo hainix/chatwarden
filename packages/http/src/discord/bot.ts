@@ -1,13 +1,20 @@
-import { errorClass, safeWarn } from '@chatwarden/core';
-import type { Chatwarden } from '@chatwarden/core';
+import { errorClass, isValidAuditActor, safeWarn } from '@chatwarden/core';
+import type { Chatwarden, Role } from '@chatwarden/core';
 import { bodyObject } from '../admin/validate.js';
 import { BODY_MAX_BYTES, utf8ByteLength } from '../body.js';
 import { HttpError, withErrors } from '../errors.js';
+import { Limiter } from '../limiter.js';
+import type { PermissionKey } from '../permissions.js';
+import { roleAtLeast } from '../permissions.js';
 import type { KitRequest, KitResponse } from '../types.js';
 import { TEXT, ephemeral, respond } from './answers.js';
 import type { InteractionAnswer } from './answers.js';
+import { parseInteraction, lookupRef } from './interaction.js';
+import type { ParsedInteraction } from './interaction.js';
+import { lookupAnswer } from './lookup.js';
 import { resolveOptions } from './options.js';
 import type { DiscordBotOptions } from './options.js';
+import { kitRoleOf } from './roles.js';
 import type { DiscordBot, DiscordCommand } from './types.js';
 import { verifyInteraction } from './verify.js';
 
@@ -51,10 +58,69 @@ export function discordBot(cw: Chatwarden, options: DiscordBotOptions): DiscordB
 
   const fail = (op: string, err: unknown): void => safeWarn(logger, 'chatwarden.discord_bot_failed', { op, error: errorClass(err) });
 
-  /** What a verified interaction gets. Commands and buttons are added by later tasks; until then they are a fixed refusal. */
+  const limiter = new Limiter(o.rateLimit);
+
+  const denied = (reason: 'guild' | 'role' | 'rate' | 'off' | 'claimed'): void => safeWarn(logger, 'chatwarden.discord_bot_denied', { reason });
+
+  /** The audit actor of a Discord user: the adopter's mapping when it gives a valid one, else `discord:<id>` (a mapping that throws or answers junk falls back). */
+  const actorFor = (userId: string): string => {
+    if (o.actorOf !== undefined) {
+      try {
+        const mapped = o.actorOf(userId);
+        if (isValidAuditActor(mapped)) return mapped;
+      } catch {
+        // fall through
+      }
+    }
+    return `discord:${userId}`;
+  };
+
+  /** What the bot needs to know about someone it will act for. */
+  interface Who {
+    userId: string;
+    actor: string;
+    role: Role;
+  }
+
+  /** Steps 1 to 3 of the click (K5 design 6.6): the guild and the person, the role and its permission, the rate. A refusal is a fixed ephemeral answer and a log reason. */
+  const gate = (i: ParsedInteraction, need: PermissionKey, deniedText: string = TEXT.noRole): { who: Who } | { answer: InteractionAnswer } => {
+    if (i.guildId !== o.guildId || i.userId === null) {
+      denied('guild');
+      return { answer: ephemeral(TEXT.notSetUp) };
+    }
+    const role = kitRoleOf(i.roles, o.roles);
+    if (role === null || !roleAtLeast(role, o.permissions[need])) {
+      denied('role');
+      return { answer: ephemeral(deniedText) };
+    }
+    if (limiter.hit(i.userId, clock.now()) > 0) {
+      denied('rate');
+      return { answer: ephemeral(TEXT.slowDown) };
+    }
+    return { who: { userId: i.userId, actor: actorFor(i.userId), role } };
+  };
+
+  const command = (i: ParsedInteraction): InteractionAnswer => {
+    const ref = i.commandName === 'chatwarden' ? lookupRef(i.options) : undefined;
+    if (ref === undefined) {
+      // Not a command this bot has: the guild check still comes first, so a stranger learns nothing either way.
+      if (i.guildId !== o.guildId || i.userId === null) {
+        denied('guild');
+        return ephemeral(TEXT.notSetUp);
+      }
+      return ephemeral(TEXT.unsupported);
+    }
+    const g = gate(i, 'history.read');
+    if ('answer' in g) return g.answer;
+    return lookupAnswer({ cw, hubLink: o.hubLink, now: () => clock.now(), who: g.who }, ref);
+  };
+
+  /** What a verified interaction gets. */
   const handle = async (body: Record<string, unknown>): Promise<InteractionAnswer | { type: number }> => {
-    if (body.type === PING) return { type: 1 };
-    if (body.type === APPLICATION_COMMAND || body.type === MESSAGE_COMPONENT) return ephemeral(TEXT.unsupported);
+    const i = parseInteraction(body);
+    if (i.type === PING) return { type: 1 };
+    if (i.type === APPLICATION_COMMAND) return command(i);
+    if (i.type === MESSAGE_COMPONENT) return ephemeral(TEXT.unsupported);
     return ephemeral(TEXT.unsupported);
   };
 

@@ -1,6 +1,12 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
+import type { Chatwarden } from '@chatwarden/core';
 import type { KitRequest } from '../src/types.js';
+import { discordBot } from '../src/discord/index.js';
+import type { DiscordBotOptions } from '../src/discord/index.js';
+import { createRouter } from '../src/router.js';
+import { world } from './world.js';
+import type { WorldOptions } from './world.js';
 
 // The fake Discord for the bot's tests (K5 D3): an Ed25519 key pair generated here (never a real key), a builder that signs interactions the way
 // Discord does (timestamp + raw body), and a reader for the answers. No network, no real application id or token: every id is obviously fake digits.
@@ -147,3 +153,35 @@ export function recordingLogger() {
   const logged: Array<[string, Record<string, string | number | boolean> | undefined]> = [];
   return { logged, logger: { warn: (event: string, detail?: Record<string, string | number | boolean>) => void logged.push([event, detail]) } };
 }
+
+// ---- a whole bot on a real kit ----
+
+export const hubLink = (kind: 'report' | 'person', id: string): string => `https://hub.example.test/${kind === 'report' ? 'reports' : 'people'}/${encodeURIComponent(id)}`;
+
+export interface BotWorldOptions {
+  options?: Partial<DiscordBotOptions>;
+  world?: WorldOptions;
+  /** Wrap the kit the BOT sees (a proxy that fails a call); the test still reads the real one through `cw` and `w`. */
+  wrapKit?: (cw: Chatwarden) => Chatwarden;
+}
+
+/** The kit (SQLite, a controllable clock), a bot on it with the three roles mapped, a signing client and a `send`. */
+export async function botWorld(over: BotWorldOptions = {}) {
+  const w = await world(over.world);
+  const client = fakeDiscordClient({ now: () => w.clock.now() });
+  const { logged, logger } = recordingLogger();
+  const bot = discordBot(over.wrapKit === undefined ? w.cw : over.wrapKit(w.cw), {
+    applicationId: APP_ID,
+    publicKey: client.publicKeyHex,
+    guildId: GUILD_ID,
+    roles: { moderator: [ROLE_MOD], senior: [ROLE_SENIOR], owner: [ROLE_OWNER] },
+    hubLink,
+    clock: w.clock,
+    logger,
+    ...over.options,
+  });
+  const router = createRouter(bot.routes);
+  return { w, cw: w.cw, client, bot, logged, send: (req: KitRequest) => router(req) };
+}
+
+export type BotWorld = Awaited<ReturnType<typeof botWorld>>;
