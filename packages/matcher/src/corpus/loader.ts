@@ -265,6 +265,8 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
   let persistedRatchet = '0|';
   /** Whether the verified pack has been handed to the live list since this loader was made. */
   let installed = false;
+  /** The newest index that verified (this process or the disk's), for the checks on a cached release. */
+  let lastIndex: CorpusIndex | null = null;
 
   const zipName = (v: string): string => `releases/${kind}-${v}.zip`;
 
@@ -430,6 +432,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
         const parsed = parseIndex(indexBytes, 0);
         if (parsed.keyId !== keyId) throw err('bad_signature', 'verify');
         index = parsed;
+        lastIndex = parsed;
         maxSequence = Math.max(maxSequence, parsed.sequence);
         for (const id of revokedKeyIdsOf(parsed, keyId)) revoked.add(id);
         memIndex = { bytes: indexBytes, sig: indexSig, etag: null };
@@ -480,6 +483,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
     maxSequence = Math.max(maxSequence, index.sequence);
     for (const id of revokedKeyIdsOf(index, keyId)) revoked.add(id);
     memIndex = copy;
+    lastIndex = index;
     return { index, copy, signer: keyId };
   }
 
@@ -554,6 +558,26 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
     }
   }
 
+  /**
+   * After a restart with a newer release waiting (apply `manual`): the live list still holds the app's own pack, so the release state.json
+   * says is applied is read back from the cache (verified again, like any read) and handed over for real. The newer one is only dry-run.
+   * Returns the error to report when the applied version cannot be had, or null.
+   */
+  async function installApplied(live: Pick<LiveTerms, 'syncPack'>): Promise<CorpusError | null> {
+    if (applied === null) return null;
+    const saved = earlyError;
+    try {
+      const cached = await loadCachedRelease(applied, lastIndex);
+      if (cached === null || cached.pack === null) return earlyError ?? err('cache_failed', 'cache');
+      const r = tryApply(live, cached, `corpus:${cached.version}`, false);
+      if (!r.ok) return err('bad_pack', 'validate');
+      installed = true;
+      return null;
+    } finally {
+      earlyError = saved;
+    }
+  }
+
   function persist(): void {
     writeState().catch(() => warn('corpus.refresh_failed', { stage: 'cache', code: 'cache_failed' }));
   }
@@ -592,6 +616,11 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
           failure = err('bad_pack', 'validate');
         }
       } else {
+        // The usual restart: the applied release is in, a newer one waits. The applied pack goes in first, once per process.
+        if (!installed && applied !== null) {
+          const lost = await installApplied(live);
+          if (lost !== null && failure === null) failure = lost;
+        }
         const r = tryApply(live, verified, actor, true);
         pending = r.ok ? r.summary : null;
         if (!r.ok && failure === null) failure = err('bad_pack', 'validate');
