@@ -13,6 +13,8 @@ export const QUEUE_MAX = 1000;
 const DROP_LOG_WINDOW_MS = 60_000;
 /** The thread rows kept in memory before the oldest are forgotten (they are re-read from the store). */
 const CACHE_MAX = 10_000;
+/** The report posts with buttons remembered (report id to thread and message) before the oldest are forgotten. */
+const BUTTON_POSTS_MAX = 10_000;
 const RULE_TITLE_MAX = 120;
 /** The most (kind, reason) pairs of dropped links counted apart; any further reason is counted as `other`. */
 const LINK_KEYS_MAX = 16;
@@ -83,6 +85,8 @@ export interface DiscordFeedOptions {
    * label over 80 characters, a `custom_id` over 100, a `url` over 512 or not http(s)), drops the buttons for that post, never the post,
    * and logs `chatwarden.discord_link_dropped` (op `components`, reason `invalid` or the error class, a count; coalesced like dropped links).
    * Only an application-owned webhook can send interactive buttons; a link button works on any webhook.
+   * When the report closes the feed edits that post to no components (`PATCH` of the webhook message, buttons only, text untouched), if this
+   * run still knows where Discord put it: a restart forgets, and the old post keeps its buttons (the bot answers a click on one from the report).
    */
   components?: (post: { kind: 'report'; reportId: string }) => readonly DiscordActionRow[] | undefined;
 }
@@ -103,14 +107,24 @@ interface ReportView {
   conductLevel?: unknown;
 }
 
-/** One event, ready to deliver. The text is fixed when the event is raised. */
-interface Job {
+/** One post, ready to deliver. The text is fixed when the event is raised. */
+interface PostJob {
   /** The event type, for the log. */
   op: string;
   /** The canonical person (when raised) whose thread this goes to, or the shared thread. */
   target: { person: string } | { shared: Shared };
   message: ForumMessage;
+  /** Set on a report post that carries buttons: where Discord put it is remembered under this report id, for the edit when the report closes. */
+  buttonsOf?: string;
 }
+
+/** Take the buttons off a report's own post (when this run still knows where it is). Looked up when it is delivered, not when it is queued. */
+interface EditJob {
+  op: string;
+  stripOf: string;
+}
+
+type Job = PostJob | EditJob;
 
 /**
  * Feed the staff review queue into a Discord forum, through the forum channel's webhook.
@@ -184,6 +198,17 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
   let busy = false;
   /** Thread rows by key (a canonical subject or a shared key): a failing store write must not open a second thread. */
   const rows = new Map<string, DiscordThreadRow>();
+  /** Where each report post with buttons is, from Discord's answer; memory only (a restart forgets it and the old buttons stay, harmlessly). */
+  const buttonPosts = new Map<string, { threadId: string; messageId: string }>();
+  const rememberButtons = (reportId: string, threadId: string, messageId: string | undefined): void => {
+    if (messageId === undefined) return;
+    buttonPosts.delete(reportId);
+    if (buttonPosts.size >= BUTTON_POSTS_MAX) {
+      const oldest = buttonPosts.keys().next();
+      if (oldest.done !== true) buttonPosts.delete(oldest.value);
+    }
+    buttonPosts.set(reportId, { threadId, messageId });
+  };
 
   const fail = (op: string, err: unknown): void => {
     safeWarn(logger, 'chatwarden.discord_failed', { op, error: errorClass(err) });
@@ -299,7 +324,17 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     return null;
   };
 
+  const deliverStrip = async (reportId: string): Promise<void> => {
+    const where = buttonPosts.get(reportId);
+    // Not known (a restart, an overflow, buttons that never went out): nothing to take off, and nothing is posted instead.
+    if (where === undefined) return;
+    // Once only: whatever comes of it, a second close of the same report does not edit again.
+    buttonPosts.delete(reportId);
+    await forum.edit(where.threadId, where.messageId, { components: [] });
+  };
+
   const deliver = async (job: Job): Promise<void> => {
+    if ('stripOf' in job) return deliverStrip(job.stripOf);
     const shared = 'shared' in job.target ? job.target.shared : null;
     const key = shared !== null ? shared.key : cw.people.canonical((job.target as { person: string }).person);
     const row = shared !== null ? rowOf(key) : findPerson(key);
@@ -307,14 +342,21 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       const label = shared !== null ? shared.label : newLabel();
       const opened = await forum.openThread(label, job.message);
       // Remembered even if dispose() ran meanwhile: the thread exists in Discord, and forgetting it would open a second one.
-      if (opened !== null) keep({ subject: key, threadId: opened.threadId, label, createdAt: clock.now() });
+      if (opened !== null) {
+        keep({ subject: key, threadId: opened.threadId, label, createdAt: clock.now() });
+        if (job.buttonsOf !== undefined) rememberButtons(job.buttonsOf, opened.threadId, opened.messageId);
+      }
       return;
     }
     const posted = await forum.post(row.threadId, job.message);
+    if (posted !== null && 'ok' in posted && job.buttonsOf !== undefined) rememberButtons(job.buttonsOf, row.threadId, posted.messageId);
     if (posted !== null && 'gone' in posted) {
       // The thread was deleted in Discord: the same post opens a new one, once, under the same label. A failure there is given up on.
       const opened = await forum.openThread(row.label, job.message);
-      if (opened !== null) keep({ subject: key, threadId: opened.threadId, label: row.label, createdAt: clock.now() });
+      if (opened !== null) {
+        keep({ subject: key, threadId: opened.threadId, label: row.label, createdAt: clock.now() });
+        if (job.buttonsOf !== undefined) rememberButtons(job.buttonsOf, opened.threadId, opened.messageId);
+      }
     }
   };
 
@@ -431,8 +473,8 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     return rows.length === 0 ? undefined : rows;
   };
 
-  const toPerson = (op: string, person: string | null, fallback: Shared, message: ForumMessage): void => {
-    enqueue({ op, target: person === null ? { shared: fallback } : { person }, message });
+  const toPerson = (op: string, person: string | null, fallback: Shared, message: ForumMessage, buttonsOf?: string): void => {
+    enqueue({ op, target: person === null ? { shared: fallback } : { person }, message, ...(buttonsOf === undefined ? {} : { buttonsOf }) });
   };
 
   // ---- the events ----
@@ -456,7 +498,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       severe,
     );
     const rows = buttonsFor(e.reportId);
-    toPerson(e.type, person, UNATTRIBUTED, rows === undefined ? message : { ...message, components: rows });
+    toPerson(e.type, person, UNATTRIBUTED, rows === undefined ? message : { ...message, components: rows }, rows === undefined ? undefined : e.reportId);
   };
 
   const onClosed = (e: KitEventOf<'report.closed'>): void => {
@@ -472,6 +514,8 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       false,
     );
     toPerson(e.type, person, UNATTRIBUTED, message);
+    // The outcome is posted first, then the buttons come off the report's own post (queued after it, looked up when sent).
+    if (components !== undefined && isString(e.reportId)) enqueue({ op: e.type, stripOf: e.reportId });
   };
 
   const onApplied = (e: KitEventOf<'sanction.applied'>): void => {

@@ -30,6 +30,8 @@ const UNKNOWN_CHANNEL = 10003;
 const SUPPRESS_EMBEDS = 4;
 
 const HOSTS: readonly string[] = ['discord.com', 'discordapp.com'].flatMap((d) => [d, `ptb.${d}`, `canary.${d}`]);
+/** A Discord id or token as it may appear in a path or a query value: no slash, dot, space or query character. */
+const PLAIN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const WEBHOOK_PATH_RE = /^\/api\/webhooks\/(\d{17,20})\/([A-Za-z0-9._-]{1,200})\/?$/;
 
 /** A Discord snowflake as text: 17 to 20 digits. */
@@ -86,11 +88,27 @@ export interface ForumClientOptions {
   random?: () => number;
 }
 
+/** What an edit may change: the buttons of a message and nothing else. */
+export interface ForumEdit {
+  components: readonly DiscordActionRow[];
+}
+
 export interface ForumClient {
-  /** Open a forum thread whose first message is `message`. The thread id, or null when it could not be opened. */
-  openThread(name: string, message: ForumMessage): Promise<{ threadId: string } | null>;
-  /** Post into a thread. `{ gone: true }` when Discord says the thread no longer exists; null when it failed. */
-  post(threadId: string, message: ForumMessage): Promise<{ ok: true } | { gone: true } | null>;
+  /**
+   * Open a forum thread whose first message is `message`. The thread id, or null when it could not be opened. `messageId` is the id of that
+   * first message, answered only for a message with components (the feed edits those later) and only when Discord's answer holds a plain id.
+   */
+  openThread(name: string, message: ForumMessage): Promise<{ threadId: string; messageId?: string } | null>;
+  /**
+   * Post into a thread. `{ gone: true }` when Discord says the thread no longer exists; null when it failed. `messageId` as for `openThread`.
+   */
+  post(threadId: string, message: ForumMessage): Promise<{ ok: true; messageId?: string } | { gone: true } | null>;
+  /**
+   * Edit one of this webhook's messages in a thread: `PATCH .../messages/{messageId}?thread_id=..&with_components=true` with the new components and
+   * no content (so the text is untouched) and `allowed_mentions` empty. Same retries and one-at-a-time order as a post. `{ gone: true }` when
+   * the thread no longer exists; null when it failed or an id is not a plain token (no request is made then).
+   */
+  edit(threadId: string, messageId: string, patch: ForumEdit): Promise<{ ok: true } | { gone: true } | null>;
   /** Abort the request in flight, wake every wait, and answer all pending and later calls with null. Safe to call twice. */
   dispose(): void;
 }
@@ -148,13 +166,13 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
 
   const backoff = (retry: number): number => Math.round(BACKOFF_BASE_MS * 2 ** retry * (1 + (random() * 0.4 - 0.2)));
 
-  const attempt = async (target: string, payload: string): Promise<Attempt> => {
+  const attempt = async (target: string, payload: string, method: 'POST' | 'PATCH'): Promise<Attempt> => {
     const controller = new AbortController();
     aborts.add(controller);
     const timeout = setTimeout(() => controller.abort(new DOMException('The attempt timed out.', 'TimeoutError')), ATTEMPT_TIMEOUT_MS);
     try {
       const res = await fetchFn(target, {
-        method: 'POST',
+        method,
         headers: { 'content-type': 'application/json' },
         body: payload,
         redirect: 'manual',
@@ -183,10 +201,10 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
   };
 
   /** One request with its retries. Logs a failure once, at the end. */
-  const send = async (op: string, target: string, payload: Record<string, unknown>): Promise<Outcome> => {
+  const send = async (op: string, target: string, payload: Record<string, unknown>, method: 'POST' | 'PATCH' = 'POST'): Promise<Outcome> => {
     const body = JSON.stringify(payload);
     for (let tried = 1; ; tried++) {
-      const result = await attempt(target, body);
+      const result = await attempt(target, body, method);
       // An answer that arrived is kept even if dispose() came right behind it: dropping a created thread's id would open a second one.
       if (result.kind === 'ok') return result;
       if (disposed) return { kind: 'failed' };
@@ -221,6 +239,12 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
     return u.toString();
   };
 
+  /** The id of the message Discord answered with, when it is a plain token; only asked for on a post with components. */
+  const messageIdOf = (message: ForumMessage, json: Json): { messageId: string } | Record<string, never> => {
+    const id = json?.id;
+    return hasComponents(message) && typeof id === 'string' && PLAIN_ID_RE.test(id) ? { messageId: id } : {};
+  };
+
   const hasComponents = (message: ForumMessage): boolean => message.components !== undefined && message.components.length > 0;
 
   const payloadOf = (message: ForumMessage, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -238,7 +262,7 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
 
   return {
     openThread: (name, message) =>
-      serial<{ threadId: string } | null>(async () => {
+      serial<{ threadId: string; messageId?: string } | null>(async () => {
         const out = await send('openThread', urlFor(undefined, hasComponents(message)), payloadOf(message, { thread_name: cutText(name, THREAD_NAME_MAX) }));
         if (out.kind === 'final') {
           safeWarn(logger, 'chatwarden.discord_failed', { op: 'openThread', status: out.status, attempts: 1 });
@@ -250,18 +274,34 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
           failLog('openThread', 'bad_response');
           return null;
         }
-        return { threadId };
+        return { threadId, ...messageIdOf(message, out.json) };
       }, null),
 
     post: (threadId, message) =>
-      serial<{ ok: true } | { gone: true } | null>(async () => {
+      serial<{ ok: true; messageId?: string } | { gone: true } | null>(async () => {
         const out = await send('post', urlFor(threadId, hasComponents(message)), payloadOf(message));
-        if (out.kind === 'ok') return { ok: true };
+        if (out.kind === 'ok') return { ok: true, ...messageIdOf(message, out.json) };
         if (out.kind === 'failed') return null;
         const code = out.json?.code;
         // A 404 with another Discord code (10015: the webhook itself is gone) is not a deleted thread.
         if (code === UNKNOWN_CHANNEL || (out.status === 404 && (code === undefined || code === null))) return { gone: true };
         safeWarn(logger, 'chatwarden.discord_failed', { op: 'post', status: out.status, attempts: 1 });
+        return null;
+      }, null),
+
+    edit: (threadId, messageId, patch) =>
+      serial<{ ok: true } | { gone: true } | null>(async () => {
+        if (!PLAIN_ID_RE.test(String(threadId)) || !PLAIN_ID_RE.test(String(messageId))) return null;
+        const u = new URL(`${base}/messages/${messageId}`);
+        u.searchParams.set('thread_id', threadId);
+        u.searchParams.set('with_components', 'true');
+        // No `content`: the text of the post is left as it is. Nothing in an edit can ping anyone.
+        const out = await send('edit', u.toString(), { components: patch.components, allowed_mentions: { parse: [] } }, 'PATCH');
+        if (out.kind === 'ok') return { ok: true };
+        if (out.kind === 'failed') return null;
+        const code = out.json?.code;
+        if (code === UNKNOWN_CHANNEL) return { gone: true };
+        safeWarn(logger, 'chatwarden.discord_failed', { op: 'edit', status: out.status, attempts: 1 });
         return null;
       }, null),
 
