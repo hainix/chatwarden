@@ -27,6 +27,9 @@ export type Role = (typeof ROLES)[number];
  *
  * `term.report` (0.1.11, appended last) is a moderator reporting a problem with a term from the shared list; it targets the `term` id, never the word,
  * and carries no detail. It is a name of its own, so a report is never read as an offer.
+ *
+ * `person.automation` (0.1.13, appended last) is a senior setting or clearing the "do not automate" mark on a person; it targets the `person` and needs it, and
+ * carries no detail (the closed reason code stays in the mark, not in the trail).
  */
 export const AUDIT_ACTIONS = [
   'report.view',
@@ -61,6 +64,7 @@ export const AUDIT_ACTIONS = [
   'term.share',
   'community.apply',
   'term.report',
+  'person.automation',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -84,7 +88,7 @@ const AI_ACTIONS: readonly string[] = ['ai.read', 'ai.rerun', 'ai.outcome'];
 const APPEAL_ACTIONS: readonly string[] = ['appeal.view', 'appeal.decide'];
 
 /** The actions that cannot be recorded without a target. */
-const TARGET_REQUIRED: readonly string[] = [...AI_ACTIONS, 'appeal.decide', 'name.rename_required'];
+const TARGET_REQUIRED: readonly string[] = [...AI_ACTIONS, 'appeal.decide', 'name.rename_required', 'person.automation'];
 
 /** An actor that is the AI itself, not a person: `ai:` and the adapter's id (`ai:anthropic:claude-haiku-5-5`). */
 const AI_ACTOR_PREFIX = 'ai:';
@@ -265,7 +269,7 @@ function parse(input: unknown): AuditRecordInput | null {
   if (!isTargetType(type) || typeof ref !== 'string' || !REF_RE.test(ref)) return null;
   if (AI_ACTIONS.includes(action) && type !== 'report') return null;
   if (APPEAL_ACTIONS.includes(action) && type !== 'appeal') return null;
-  if (action === 'name.rename_required' && type !== 'person') return null;
+  if ((action === 'name.rename_required' || action === 'person.automation') && type !== 'person') return null;
   return { actor, role: roleOut, action, target: { type, ref }, ...extra };
 }
 

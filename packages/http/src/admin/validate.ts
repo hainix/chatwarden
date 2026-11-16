@@ -1,5 +1,5 @@
-import { APPEAL_OUTCOMES, CONDUCT_LEVELS, MAX_SANCTION_DURATION_MS, SANCTION_KIND_ORDER, SANCTION_KINDS } from '@chatwarden/core';
-import type { AppealDecision, AppealOutcome, ConductLevel, DecisionAction, RuleRef, SanctionKind } from '@chatwarden/core';
+import { APPEAL_OUTCOMES, AUTOMATION_CODES, CONDUCT_LEVELS, MAX_SANCTION_DURATION_MS, SANCTION_KIND_ORDER, SANCTION_KINDS } from '@chatwarden/core';
+import type { AppealDecision, AppealOutcome, AutomationCode, ConductLevel, DecisionAction, RuleRef, SanctionKind } from '@chatwarden/core';
 import { parseJson } from '../body.js';
 import { HttpError, ValidationError } from '../errors.js';
 import type { KitRequest } from '../types.js';
@@ -233,4 +233,26 @@ export function bodyRename(body: Record<string, unknown>): RenameBody {
   const rule = body.rule;
   if (typeof rule !== 'number' || !Number.isSafeInteger(rule) || rule < 1) throw new ValidationError();
   return { reason, rule, takeOver };
+}
+
+/** What `PUT /people/:id/automation` takes, checked for shape. */
+export interface AutomationBody {
+  allowed: boolean;
+  code?: AutomationCode;
+}
+
+/**
+ * The body of `PUT /people/:id/automation`: `{ allowed: boolean, code? }`. `allowed: false` needs one of the closed reason codes; `allowed: true` takes no code.
+ * Any other key (free text, an actor) is 400 `forbidden_key`; any other shape is 400 `invalid_request`.
+ */
+export function bodyAutomation(body: Record<string, unknown>): AutomationBody {
+  if (Object.keys(body).some((k) => k !== 'allowed' && k !== 'code')) throw new HttpError('forbidden_key');
+  if (typeof body.allowed !== 'boolean') throw new ValidationError();
+  if (body.allowed) {
+    if (has(body, 'code')) throw new ValidationError();
+    return { allowed: true };
+  }
+  const code = body.code;
+  if (typeof code !== 'string' || !(AUTOMATION_CODES as readonly string[]).includes(code)) throw new ValidationError();
+  return { allowed: false, code: code as AutomationCode };
 }

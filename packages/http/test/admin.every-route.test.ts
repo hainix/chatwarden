@@ -59,6 +59,9 @@ const SPECS: Spec[] = [
   { name: 'POST /reasons', method: 'POST', path: () => '/reasons', body: { label: 'Spam', text: 'Spamming the lobby.' }, lock: { 'reasons.write': 'owner' }, min: 'senior' },
   { name: 'PATCH /reasons/:id', method: 'PATCH', path: (i) => `/reasons/${i.reason}`, body: { label: 'Spam!' }, lock: { 'reasons.write': 'owner' }, min: 'senior' },
   { name: 'POST /reasons/:id/active', method: 'POST', path: (i) => `/reasons/${i.reason}/active`, body: { active: false }, lock: { 'reasons.write': 'owner' }, min: 'senior' },
+  // AI levels 3 and 4 (0.1.13): the gate dashboard's data and the "do not automate" mark. Their own checks are in admin.ai-gates.test.ts and admin.automation.test.ts.
+  { name: 'GET /ai/gates', method: 'GET', path: () => '/ai/gates', lock: { 'policy.read': 'owner' }, min: 'moderator' },
+  { name: 'PUT /people/:id/automation', method: 'PUT', path: (i) => `/people/${i.person}/automation`, body: { allowed: false, code: 'other' }, lock: { 'automation.write': 'owner' }, min: 'senior' },
   { name: 'GET /audit', method: 'GET', path: () => '/audit', lock: { 'audit.read': 'owner' }, min: 'senior' },
 ];
 

@@ -24,6 +24,9 @@ export const PERMISSION_KEYS = [
   'settings',
   'appeals.read',
   'appeals.decide',
+  'ai.review',
+  'ai.pause',
+  'automation.write',
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -38,6 +41,9 @@ export type Permissions = Readonly<Record<PermissionKey, Role>>;
  * same people may already dismiss each report one by one. An adopter who wants a sweep to be a senior's can raise it.
  * `appeals.read` (the inbox, one appeal and the numbers) is `moderator`; `appeals.decide` (uphold, reduce or revoke) is `senior`. A small
  * team whose people are all moderators lowers it: `permissions: { 'appeals.decide': 'moderator' }`.
+ * AI levels 3 and 4 (0.1.13, `@experimental`): `automation.write` (mark a person "do not automate", or clear the mark) is `senior`. `ai.review` (confirm or undo what
+ * the AI did) is `moderator` and `ai.pause` (pause the AI's acting) is `senior`; both are unused until the acting releases and are listed now so the set changes once.
+ * Starting, stopping and undoing the AI's acting are not permissions at all: they are the owner's, fixed in code.
  */
 export const PERMISSIONS: Permissions = Object.freeze({
   'reports.read': 'moderator',
@@ -61,6 +67,9 @@ export const PERMISSIONS: Permissions = Object.freeze({
   settings: 'owner',
   'appeals.read': 'moderator',
   'appeals.decide': 'senior',
+  'ai.review': 'moderator',
+  'ai.pause': 'senior',
+  'automation.write': 'senior',
 });
 
 const isRole = (v: unknown): v is Role => typeof v === 'string' && (ROLES as readonly string[]).includes(v);

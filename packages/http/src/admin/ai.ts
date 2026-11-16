@@ -20,6 +20,10 @@ export interface AiUnavailableBody {
  *   cacheHitRate, invalid, learn, stats }`. `state` is `ok`, `paused_budget`, `unavailable` or `off`; `level` is the effective level (the
  *   hub's setting held to the code's `maxLevel`; 0 without an adapter, where `available` is false); `invalid` counts answers core refused by
  *   code since the process started; `stats` is the casebook (`cw.ai.stats()`): totals, rates and a row per rule.
+ * - `GET /ai/gates` (`policy.read`, audited as `policy.view`, `@experimental`): the gate dashboard's data, `cw.ai.gates()` as it is: a row per rule and conduct level
+ *   the profile could ever act on, with each gate's number against its need and whether the cell is open, the reach preview, the counts and the appeals facts.
+ *   Read-only and computed on the server from the store and the clock (no query or body can supply a number); no id, no text and no staff ref. `actingAvailable`
+ *   is false in this release: nothing here lets the AI act.
  * - `POST /reports/:id/ai/read` (`reports.decide`, audited `ai.rerun`): "read again". 200 `{ status: 'ready', ai }` when the input has not
  *   changed (no call is made), 202 `{ status: 'pending' }` when a read is queued (a read that ended without an answer is retaken once by an
  *   explicit ask, charged to the spend; a read still waiting for its own retry is not retaken, it keeps its time), 409 `ai_off` (level 0, no adapter, or the report is decided; no audit row), 409 `ai_final` (the
@@ -43,6 +47,12 @@ export function aiRoutes(ctx: AdminContext): RouteTable {
       const stats = cw.ai.stats();
       c.audit('policy.view');
       return { status: 200, body: { ...status, learn: cw.profile.ai.learn, stats } };
+    }),
+
+    'GET /ai/gates': ctx.secure('policy.read', (c) => {
+      const view = cw.ai.gates();
+      c.audit('policy.view');
+      return { status: 200, body: view };
     }),
 
     'POST /reports/:id/ai/read': ctx.secure('reports.decide', async (c) => {

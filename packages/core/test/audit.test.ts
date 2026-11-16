@@ -61,6 +61,7 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'term.share',
       'community.apply',
       'term.report',
+      'person.automation',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -105,7 +106,7 @@ describe('cw.audit.record and list', () => {
       const own =
         action === 'appeal.decide'
           ? { target: { type: 'appeal', ref: 'ap1' } }
-          : action === 'name.rename_required'
+          : action === 'name.rename_required' || action === 'person.automation'
             ? { target: { type: 'person', ref: 's_a1' } }
             : {};
       expect(rec(cw, { action, ...detail, ...ai, ...own, ...who })).toBe(true);
@@ -115,6 +116,28 @@ describe('cw.audit.record and list', () => {
       expect(rec(cw, { target: { type, ref: 'x1' } })).toBe(true);
     }
     expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 8);
+  });
+
+  it('person.automation (0.1.13, appended last) needs a person target, carries no detail, and is a name of its own', async () => {
+    const { cw } = await setup();
+    expect(AUDIT_ACTIONS.at(-1)).toBe('person.automation');
+    expect(AUDIT_ACTIONS.filter((a) => a === 'person.automation')).toHaveLength(1);
+    expect(rec(cw, { actor: 'sen_ann', role: 'senior', action: 'person.automation', target: { type: 'person', ref: 's_abc123' } })).toBe(true);
+    // a person, always: no target, or another type, or a detail, is refused
+    expect(rec(cw, { actor: 'sen_ann', role: 'senior', action: 'person.automation' })).toBe(false);
+    for (const type of ['report', 'sanction', 'term', 'exception', 'reason', 'appeal', 'release']) {
+      expect(rec(cw, { actor: 'sen_ann', role: 'senior', action: 'person.automation', target: { type, ref: 'x1' } }), type).toBe(false);
+    }
+    expect(rec(cw, { actor: 'sen_ann', role: 'senior', action: 'person.automation', target: { type: 'person', ref: 's_a' }, detail: { sections: [] } })).toBe(false);
+    // the AI's own actor never records it
+    expect(rec(cw, { actor: 'ai:test:model', role: null, action: 'person.automation', target: { type: 'person', ref: 's_a' } })).toBe(false);
+    // the earlier names are unchanged: the list only grew at the end
+    expect(AUDIT_ACTIONS.slice(0, 32)).toEqual([
+      'report.view', 'report.decide', 'sanction.apply', 'sanction.revoke', 'gap.close', 'term.add', 'term.update', 'term.toggle', 'exception.add', 'exception.update',
+      'exception.toggle', 'history.view', 'suggest', 'policy.view', 'blocked.view', 'case.takeover', 'reason.add', 'reason.update', 'reason.toggle', 'policy.update',
+      'policy.reset', 'report.dismiss_case', 'report.dismiss_reporter', 'ai.read', 'ai.rerun', 'ai.outcome', 'appeal.view', 'appeal.decide', 'name.rename_required',
+      'term.share', 'community.apply', 'term.report',
+    ]);
   });
 
   it('audit: term.share and community.apply are recorded and listed; release is an accepted target type', async () => {

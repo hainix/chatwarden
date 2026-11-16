@@ -119,6 +119,8 @@ describe('adminRoutes: shape', () => {
       'POST /reports/:id/decide',
       'POST /reports/:id/suggest',
       'POST /reports/dismiss-open',
+      // AI levels 3 and 4 (0.1.13): the "do not automate" mark lives with the people routes (its own checks are in admin.automation.test.ts).
+      'PUT /people/:id/automation',
     ]);
   });
 
