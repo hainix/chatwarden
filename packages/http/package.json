@@ -56,6 +56,10 @@
     "./cli": {
       "types": "./dist/src/cli/index.d.ts",
       "default": "./dist/src/cli/index.js"
+    },
+    "./discord": {
+      "types": "./dist/src/discord/index.d.ts",
+      "default": "./dist/src/discord/index.js"
     }
   },
   "typesVersions": {
@@ -74,6 +78,9 @@
       ],
       "cli": [
         "dist/src/cli/index.d.ts"
+      ],
+      "discord": [
+        "dist/src/discord/index.d.ts"
       ]
     }
   },
