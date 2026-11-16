@@ -9,8 +9,18 @@
     "node": ">=22.13"
   },
   "scripts": {
+    "build": "tsc -b .",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "smoke:d1": "node tools/smoke-d1.mjs",
+    "release": "node tools/release.mjs",
+    "eval": "node tools/eval.mjs",
+    "keygen": "node tools/keygen.mjs",
+    "sign": "node tools/sign.mjs",
+    "publish-release": "node tools/publish.mjs",
+    "zenodo": "node tools/zenodo.mjs",
+    "verify-live": "node tools/verify-live.mjs",
+    "seed": "node tools/seed.mjs"
   },
   "dependencies": {
     "@chatwarden/matcher": "0.1.11"
