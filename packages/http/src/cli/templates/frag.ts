@@ -6,7 +6,7 @@ import type { Answers, Lang, Versions } from '../types.js';
 export interface Ctx {
   answers: Answers;
   lang: Lang;
-  /** The suffix of a relative import: `.js` for TypeScript (NodeNext) and for ESM JavaScript, `.mjs` for JavaScript in a CommonJS package, `''` for none. */
+  /** The suffix of a relative import: `.js` for TypeScript (NodeNext) and for ESM JavaScript, `.mjs` for JavaScript in a CommonJS package, `''` for none (Next.js). */
   ext: string;
   /** The extension of a module file: `.ts`, `.js` or `.mjs`. */
   scriptExt: string;
@@ -21,9 +21,11 @@ export interface CtxOptions {
 }
 
 export function makeCtx(answers: Answers, versions: Versions, options: CtxOptions = {}): Ctx {
-  if (answers.lang === 'ts') return { answers, lang: 'ts', ext: '.js', scriptExt: '.ts', jsxExt: '.tsx', versions };
-  const mjs = options.moduleType === 'commonjs';
-  return { answers, lang: 'js', ext: mjs ? '.mjs' : '.js', scriptExt: mjs ? '.mjs' : '.js', jsxExt: '.jsx', versions };
+  // A Next.js project resolves imports with its bundler: no suffix on a relative import, and its JavaScript is .js whatever the package's type.
+  const next = answers.framework === 'next';
+  if (answers.lang === 'ts') return { answers, lang: 'ts', ext: next ? '' : '.js', scriptExt: '.ts', jsxExt: '.tsx', versions };
+  const mjs = options.moduleType === 'commonjs' && !next;
+  return { answers, lang: 'js', ext: next ? '' : mjs ? '.mjs' : '.js', scriptExt: mjs ? '.mjs' : '.js', jsxExt: '.jsx', versions };
 }
 
 /** The TypeScript-only fragment for `ts`, nothing for `js`. */

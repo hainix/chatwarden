@@ -6,11 +6,13 @@ import { authFiles } from './auth.js';
 import { chatFiles } from './chat.js';
 import { envExampleFiles } from './envExample.js';
 import { expressFiles } from './express.js';
+import { fetchHandlerFiles } from './fetchHandler.js';
 import { makeCtx } from './frag.js';
 import type { Ctx, CtxOptions } from './frag.js';
 import { hubFiles } from './hub.js';
 import { hubReactFiles } from './hubReact.js';
 import { kitFiles } from './kit.js';
+import { nextFiles } from './next.js';
 import { termsFiles } from './terms.js';
 
 export { MARKERS } from './header.js';
@@ -21,7 +23,7 @@ type Render = (ctx: Ctx) => FileSpec[];
 const SHARED: Render[] = [kitFiles, authFiles, termsFiles, envExampleFiles];
 
 /** The framework files: each entry returns the files for the answers it applies to, and none for the others. */
-const FRAMEWORK: Render[] = [expressFiles, hubFiles, hubReactFiles, chatFiles];
+const FRAMEWORK: Render[] = [expressFiles, fetchHandlerFiles, nextFiles, hubFiles, hubReactFiles, chatFiles];
 
 /**
  * Every file for these answers, `answers.dir`-relative paths already joined to the folder (a file outside it, such as Next's route, carries its

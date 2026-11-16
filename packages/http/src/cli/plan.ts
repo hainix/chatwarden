@@ -53,6 +53,11 @@ export function envNames(answers: Answers): EnvName[] {
   return env;
 }
 
+/** Where a Next.js project keeps its routes: `src/app` when the project has a `src` folder (the folder init writes to is then under `src`), else `app`. */
+export function nextAppRoot(answers: Answers): string {
+  return answers.dir.startsWith('src/') ? 'src/app' : 'app';
+}
+
 function entryLine(answers: Answers): string {
   const { dir, base } = answers;
   switch (answers.framework) {
@@ -61,7 +66,7 @@ function entryLine(answers: Answers): string {
     case 'fastify':
       return `Register the plugin in your app: await app.register(chatwarden) (from ${dir}/fastify).`;
     case 'next':
-      return 'Next serves the route handler under app/chatwarden/ by itself: there is nothing to add to your code.';
+      return `Next serves the route handler under ${nextAppRoot(answers)}${base}/ by itself: there is nothing to add to your code. This recipe needs Next running as a Node process, not serverless (next start, a container or a VM): the database file and the open chat streams need one long-lived process.`;
     case 'fetch':
       return `Call the handler from ${dir}/handler for each request under ${base}: const response = await handler(request).`;
     case 'none':

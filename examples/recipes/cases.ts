@@ -33,6 +33,10 @@ export const CASES: RecipeCase[] = [
   { name: 'express-sqlite-box-element', check: 'nodenext', answers: answers({ chat: 'box', hub: 'element' }) },
   { name: 'express-memory-minimal', check: 'nodenext', answers: answers({ store: 'memory' }) },
   { name: 'express-discord-js', check: 'js', answers: answers({ hub: 'element', discord: true, lang: 'js' }) },
+  { name: 'next-sqlite-box-react', check: 'bundler', answers: answers({ framework: 'next', chat: 'box', hub: 'react' }) },
+  { name: 'next-memory-minimal', check: 'bundler', answers: answers({ framework: 'next', store: 'memory' }) },
+  { name: 'fetch-memory-element-none', check: 'nodenext', answers: answers({ framework: 'fetch', store: 'memory', chat: 'box', hub: 'none' }) },
+  { name: 'fetch-memory-box-element', check: 'nodenext', answers: answers({ framework: 'fetch', store: 'memory', chat: 'box', hub: 'element' }) },
   { name: 'none-library', check: 'nodenext', answers: answers({ framework: 'none' }) },
 ];
 
