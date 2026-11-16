@@ -397,9 +397,11 @@ with `actions.suggestion`), `[Open report] url hubLink('report', id)` (style 5, 
 `cw1:ok:` (7) + 32 + `:` + 22 = 62 characters (a report id is 22 to 32 characters; a test pins the longest). It is **input**: the confirm
 step re-derives everything from the stored report and the current profile and refuses when the code no longer equals the current suggestion.
 
-**Deferred answers.** The handler races its work against `respondWithinMs`. If the work is not done, it answers `type 5` (a command; ephemeral)
-or `type 6` (a component) at once, and when the work finishes sends one `PATCH https://discord.com/api/v10/webhooks/<applicationId>/<token>/messages/@original`
-(`fetch` option). The interaction token is never logged and never stored. A failed follow-up is logged by class.
+**Deferred answers.** The handler races its work against `respondWithinMs`. If the work is not done, it answers at once, and when the work finishes sends one `PATCH https://discord.com/api/v10/webhooks/<applicationId>/<token>/messages/@original`
+(`fetch` option). The first answer depends on where the click is. A command, and a click on a button of the public report post, are answered `type 5` with flags 64: a
+loading message only the clicker sees, and the follow-up edits that. (Not `type 6` there: `@original` would then be the public post, and the follow-up would rewrite it for the
+whole channel.) `type 6` is only for Confirm and Cancel on the ephemeral preview, whose `@original` is the preview itself. Ruled at the K5c review. The interaction token is never
+logged and never stored. A failed follow-up is logged by class.
 
 ### 6.6 What the click does
 

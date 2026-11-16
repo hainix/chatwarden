@@ -181,6 +181,10 @@ describe('deferred answers: the race', () => {
     expect(again.status).toBe(200);
     await settle(r, 2);
     expect(r.w.audit().filter((a) => a.action === 'history.view')).toHaveLength(1);
+    // The documented cost (docs/plans/follow-ups.md): the follow-up is sent again, the same content to the same message.
+    expect(r.calls).toHaveLength(2);
+    expect(r.calls[1]?.url).toBe(r.calls[0]?.url);
+    expect(r.calls[1]?.body).toEqual(r.calls[0]?.body);
   });
 });
 

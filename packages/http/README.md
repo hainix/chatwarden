@@ -918,6 +918,8 @@ token is never logged and never stored. Work that throws gives the fixed failure
 - **Two things Discord's docs leave open,** checked by hand before you rely on them (see `docs/plans/follow-ups.md`): that a webhook made with
   the bot is application-owned, and that the command's default visibility value is right. If the first is wrong the feed logs
   `chatwarden.discord_components_ignored` and posts without buttons.
+- **One more thing to check by hand:** that a slow click on the public report post shows only the clicker a loading message and leaves the post as it was (the bot answers
+  type 5 with flags 64 there, and type 6 only on the private Confirm and Cancel). Step 5 of the live check in `docs/plans/follow-ups.md` says how.
 
 ## Coop
 

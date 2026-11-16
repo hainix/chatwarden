@@ -171,7 +171,10 @@ Found building `@chatwarden/http/discord` (K5 D1 to D9, 2026-11).
   3. Run `registerCommands`, then type `/chatwarden` in the server. **Does the command show for the roles you expect?** The default visibility is Discord's "Moderate Members"
      permission (`1099511627776`); if it is wrong, fix `default_member_permissions` in `bot.commands()` (the role map is the control, not this).
   4. Click "Nothing wrong here" and Confirm, and the same on "Apply suggestion". The feed should post the outcome and take the buttons off.
-  5. With `respondWithinMs` set to `1` for one run, click again: you should see Discord's "thinking" message and then the answer.
+  5. With `respondWithinMs` set to `1` for one run, click both: (a) "Nothing wrong here" on the public report post, then (b) Confirm on the private preview that (a) opens.
+     **For (a), does the public post stay exactly as it was** (same text, same buttons), with only you seeing a loading message that becomes the preview with Confirm and Cancel?
+     **For (b), does the preview turn into `Done`?** Write down both. This is the third fact Discord's docs leave open: the bot answers a click on the public post with a private
+     loading message (type 5, flags 64) and edits that, so the public post is never rewritten; if the public post changes, tell the maintainer.
   Write the results in `docs/status.md` (K5) when done.
 - **Open: strip after a restart.** The feed keeps `report -> message` in memory. After a restart an old report post keeps its buttons until someone clicks one. A small
   table would fix it but costs a migration; not worth it until someone asks.
