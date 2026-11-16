@@ -304,6 +304,36 @@ describe('appeals', () => {
   });
 });
 
+describe('need codes show the number as configured (review R1a M3)', () => {
+  it('a value moved inside its band is not rounded across the cut', () => {
+    const cfg = checkGateConfig({ agreementLower: 0.875, overrideUpper: 0.045, recentRate: 0.855, appealsRate: 0.015, keepLower: 0.025 });
+    const needs = Object.fromEntries(evaluateCell(counts(), appeals(), cfg, NOW).checks.map((k) => [k.name, k.need]));
+    expect(needs.agreement).toBe('lower>=0.875');
+    expect(needs.override).toBe('upper<=0.045');
+    expect(needs.recency).toBe('recent>=5;rate>=0.855');
+    expect(needs.appeals_rule).toBe('rate<0.015;min:10');
+    expect(needs.keep).toBe('lower<=0.025;pair>14d');
+  });
+  it('the defaults and round values keep two decimals, so the existing codes do not change', () => {
+    const needs = Object.fromEntries(evaluateCell(counts(), appeals(), AI_GATE_DEFAULTS, NOW).checks.map((k) => [k.name, k.need]));
+    expect(needs.agreement).toBe('lower>=0.90');
+    expect(needs.override).toBe('upper<=0.05');
+    expect(needs.recency).toBe('recent>=5;rate>=0.90');
+    expect(check(counts(), appeals(), 'recency', checkGateConfig({ recentRate: 1 })).need).toBe('recent>=5;rate>=1.00');
+    expect(check(counts(), appeals(), 'agreement', checkGateConfig({ agreementLower: 0.95 })).need).toBe('lower>=0.95');
+  });
+  it('the code and the check agree: a bound one step off the displayed number changes the verdict', () => {
+    // 0.875 shown as 0.88 would have read as "need 0.88" while the check used 0.875
+    const c = counts({ qualifying: 100, cleanAgree: 94, hardOverride: 1, recent: { n: 20, cleanAgree: 20 } });
+    const lower = wilsonLower(94, 100);
+    expect(lower).toBeGreaterThan(0.875);
+    expect(lower).toBeLessThan(0.88);
+    const cfg = checkGateConfig({ agreementLower: 0.875 });
+    expect(check(c, appeals(), 'agreement', cfg)).toMatchObject({ ok: true, need: 'lower>=0.875' });
+    expect(okOf(c, appeals(), 'agreement', checkGateConfig({ agreementLower: 0.88 }))).toBe(false);
+  });
+});
+
 describe('keep', () => {
   const reviewed = (o: Partial<AiCellCounts['reviewed']>): AiCellCounts['reviewed'] => ({ n: 0, confirmed: 0, hardUndo: 0, lastHardUndoAt: null, secondLastHardUndoAt: null, ...o });
 
@@ -325,13 +355,62 @@ describe('keep', () => {
     expect(okOf(apart(13 * DAY), appeals(), 'keep')).toBe(false);
     expect(okOf(apart(DAY), appeals(), 'keep')).toBe(false);
   });
-  it('the upper bound counts: 20 reviewed can never hold it (zero undos still leave 16%), 73 can with none and 72 cannot, 500 allows 15', () => {
-    expect(okOf(counts({ reviewed: reviewed({ n: 20, confirmed: 20 }) }), appeals(), 'keep')).toBe(false);
-    expect(okOf(counts({ reviewed: reviewed({ n: 72, confirmed: 72 }) }), appeals(), 'keep')).toBe(false);
-    expect(okOf(counts({ reviewed: reviewed({ n: 73, confirmed: 73 }) }), appeals(), 'keep')).toBe(true);
-    expect(check(counts({ reviewed: reviewed({ n: 500, confirmed: 500 }) }), appeals(), 'keep')).toMatchObject({ ok: true, need: 'upper<=0.05;pair>14d' });
-    expect(okOf(counts({ reviewed: reviewed({ n: 500, confirmed: 500 - 15, hardUndo: 15, lastHardUndoAt: NOW - 100 * DAY }) }), appeals(), 'keep')).toBe(true);
-    expect(okOf(counts({ reviewed: reviewed({ n: 500, confirmed: 500 - 16, hardUndo: 16, lastHardUndoAt: NOW - 100 * DAY }) }), appeals(), 'keep')).toBe(false);
+  // Ruling (2026-11-16): G8 is a LOSS test. A licence is lost when the Wilson LOWER bound of the undo rate is above the cut (0.05): evidence of harm. An upper-bound
+  // keep test cannot be met below 73 reviewed actions even with no undo, so every new licence would be pulled by construction.
+  it('with no undo a cell keeps its licence at any size, from 20 reviewed up (the old upper-bound test failed 20 to 72)', () => {
+    for (const n of [20, 21, 50, 72, 73, 100, 500, 5000]) {
+      expect(okOf(counts({ reviewed: reviewed({ n, confirmed: n }) }), appeals(), 'keep'), `n=${n}`).toBe(true);
+    }
+    expect(check(counts({ reviewed: reviewed({ n: 20, confirmed: 20 }) }), appeals(), 'keep')).toMatchObject({ ok: true, value: 0, need: 'lower<=0.05;pair>14d' });
+  });
+  it('at n = 19 the gate does not apply even when every action was undone; at n = 20 it does', () => {
+    const lots = (n: number): AiCellCounts => counts({ reviewed: reviewed({ n, confirmed: 0, hardUndo: n, lastHardUndoAt: NOW - 100 * DAY, secondLastHardUndoAt: NOW - 200 * DAY }) });
+    expect(check(lots(19), appeals(), 'keep')).toMatchObject({ ok: true, value: null });
+    expect(check(lots(20), appeals(), 'keep')).toMatchObject({ ok: false });
+  });
+  it('at n = 20 the smallest undo count whose lower bound crosses 0.05 is 3; at n = 100 it is 10', () => {
+    const at = (n: number, k: number): AiCellCounts => counts({ reviewed: reviewed({ n, confirmed: n - k, hardUndo: k, lastHardUndoAt: NOW - 100 * DAY, secondLastHardUndoAt: k > 1 ? NOW - 200 * DAY : null }) });
+    expect(wilsonLower(2, 20)).toBeLessThanOrEqual(0.05);
+    expect(wilsonLower(3, 20)).toBeGreaterThan(0.05);
+    expect(okOf(at(20, 0), appeals(), 'keep')).toBe(true);
+    expect(okOf(at(20, 1), appeals(), 'keep')).toBe(true);
+    expect(okOf(at(20, 2), appeals(), 'keep')).toBe(true);
+    expect(okOf(at(20, 3), appeals(), 'keep')).toBe(false);
+    expect(check(at(20, 3), appeals(), 'keep').value).toBeCloseTo(0.052368, 5);
+    expect(wilsonLower(9, 100)).toBeLessThanOrEqual(0.05);
+    expect(wilsonLower(10, 100)).toBeGreaterThan(0.05);
+    expect(okOf(at(100, 9), appeals(), 'keep')).toBe(true);
+    expect(okOf(at(100, 10), appeals(), 'keep')).toBe(false);
+    // more undos never help
+    for (let k = 3; k <= 20; k++) expect(okOf(at(20, k), appeals(), 'keep'), `k=${k}`).toBe(false);
+  });
+  it('exactly at the cut passes (the licence is lost only when the lower bound is above it); a hair below the cut fails', () => {
+    const c = counts({ reviewed: reviewed({ n: 20, confirmed: 17, hardUndo: 3, lastHardUndoAt: NOW - 100 * DAY, secondLastHardUndoAt: NOW - 200 * DAY }) });
+    const lower = wilsonLower(3, 20);
+    expect(okOf(c, appeals(), 'keep', { ...AI_GATE_DEFAULTS, keepLower: lower })).toBe(true);
+    expect(okOf(c, appeals(), 'keep', { ...AI_GATE_DEFAULTS, keepLower: lower - 1e-6 })).toBe(false);
+    expect(okOf(c, appeals(), 'keep', { ...AI_GATE_DEFAULTS, keepLower: lower + 1e-6 })).toBe(true);
+  });
+  it('the cut can be moved inside its band, and the need code says so', () => {
+    const c = counts({ reviewed: reviewed({ n: 20, confirmed: 17, hardUndo: 3, lastHardUndoAt: NOW - 100 * DAY, secondLastHardUndoAt: NOW - 200 * DAY }) });
+    expect(okOf(c, appeals(), 'keep', checkGateConfig({ keepLower: 0.08 }))).toBe(true);
+    expect(okOf(c, appeals(), 'keep', checkGateConfig({ keepLower: 0.01 }))).toBe(false);
+    expect(check(c, appeals(), 'keep', checkGateConfig({ keepLower: 0.045 })).need).toBe('lower<=0.045;pair>14d');
+  });
+  it('a large cell with a few undos keeps its licence (500 reviewed: up to 34 undos; 35 lose it)', () => {
+    const at = (k: number): AiCellCounts => counts({ reviewed: reviewed({ n: 500, confirmed: 500 - k, hardUndo: k, lastHardUndoAt: NOW - 100 * DAY }) });
+    expect(wilsonLower(34, 500)).toBeLessThanOrEqual(0.05);
+    expect(wilsonLower(35, 500)).toBeGreaterThan(0.05);
+    expect(okOf(at(34), appeals(), 'keep')).toBe(true);
+    expect(okOf(at(35), appeals(), 'keep')).toBe(false);
+  });
+  it('the pair rule still counts under the loss test: two undos within 14 days fail at any size', () => {
+    const c = counts({ reviewed: reviewed({ n: 5000, confirmed: 4998, hardUndo: 2, lastHardUndoAt: NOW - 20 * DAY, secondLastHardUndoAt: NOW - 25 * DAY }) });
+    expect(okOf(c, appeals(), 'keep')).toBe(false);
+  });
+  it('inconsistent counts (more undos than reviewed) fail closed', () => {
+    const c = counts({ reviewed: reviewed({ n: 20, confirmed: 0, hardUndo: 25 }) });
+    expect(okOf(c, appeals(), 'keep')).toBe(false);
   });
   it('a single undo has no pair', () => {
     const c = counts({ reviewed: reviewed({ n: 500, confirmed: 499, hardUndo: 1, lastHardUndoAt: NOW - 1 * DAY, secondLastHardUndoAt: null }) });
@@ -411,7 +490,7 @@ describe('every check is returned, in order, and nothing short-circuits', () => 
   it('each need is a fixed code: it carries no free text and no number that came from outside', () => {
     const v = evaluateCell(counts({ qualifying: 7777, cleanAgree: 7000, deciders: 4242 }), appeals({ ruleSanctions: 99_999, ruleRevokes: 12_345 }), AI_GATE_DEFAULTS, NOW);
     for (const c of v.checks) expect(c.need).toMatch(/^[a-z_]+[<>=:]+[0-9.a-z;<>=:]*$/);
-    expect(v.checks.map((c) => c.need)).toEqual(['min:100', 'deciders>=2;span>=14d', 'lower>=0.90', 'upper<=0.05', 'recent>=5;rate>=0.90', 'rate<0.05;min:10', 'none:30d', 'upper<=0.05;pair>14d']);
+    expect(v.checks.map((c) => c.need)).toEqual(['min:100', 'deciders>=2;span>=14d', 'lower>=0.90', 'upper<=0.05', 'recent>=5;rate>=0.90', 'rate<0.05;min:10', 'none:30d', 'lower<=0.05;pair>14d']);
   });
   it('malformed counts (a clean agree above the qualifying, negatives, NaN) never throw and never open a cell', () => {
     for (const bad of [
@@ -441,8 +520,8 @@ describe('the config', () => {
     expect(AI_GATE_DEFAULTS.recentRate).toBe(0.9);
     expect(AI_GATE_DEFAULTS.appealsRate).toBe(0.05);
     expect(AI_GATE_DEFAULTS.reviewedMin).toBe(20);
-    expect(AI_GATE_DEFAULTS.keepUpper).toBe(0.05);
-    expect(FIELDS.sort()).toEqual(['agreementLower', 'appealsRate', 'keepUpper', 'moderators', 'overrideUpper', 'recentCount', 'recentRate', 'reviewedMin', 'spanDays', 'volume', 'windowDays']);
+    expect(AI_GATE_DEFAULTS.keepLower).toBe(0.05);
+    expect(FIELDS.sort()).toEqual(['agreementLower', 'appealsRate', 'keepLower', 'moderators', 'overrideUpper', 'recentCount', 'recentRate', 'reviewedMin', 'spanDays', 'volume', 'windowDays']);
   });
 
   it('the bands are the design table (5.4)', () => {
@@ -457,7 +536,7 @@ describe('the config', () => {
       recentRate: { min: 0.85, max: 1 },
       appealsRate: { min: 0.01, max: 0.1 },
       reviewedMin: { min: 10, max: 200 },
-      keepUpper: { min: 0.01, max: 0.08 },
+      keepLower: { min: 0.01, max: 0.08 },
     });
   });
 

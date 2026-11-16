@@ -41,8 +41,12 @@ export interface AiGateConfig {
   appealsRate: number;
   /** G8: the keep gate applies once this many of the cell's actions were reviewed. */
   reviewedMin: number;
-  /** G8: the upper 95% (Wilson) bound of "undone as not a violation" over the reviewed. */
-  keepUpper: number;
+  /**
+   * G8: a cell LOSES its licence when the lower 95% (Wilson) bound of the rate of "undone as not a violation" over the reviewed is above this: evidence of harm.
+   * It is a loss test, not an earn test: an upper-bound keep test cannot be met below 73 reviewed actions even with no undo, so every new licence would be pulled
+   * by construction (ruling 2026-11-16). The earn gates (G4) keep their upper bounds.
+   */
+  keepLower: number;
 }
 
 /**
@@ -60,7 +64,7 @@ export const AI_GATE_DEFAULTS: Readonly<AiGateConfig> = Object.freeze({
   recentRate: 0.9,
   appealsRate: 0.05,
   reviewedMin: 20,
-  keepUpper: 0.05,
+  keepLower: 0.05,
 });
 
 /**
@@ -79,7 +83,7 @@ export const AI_GATE_BANDS: Readonly<Record<keyof AiGateConfig, Readonly<{ min: 
   recentRate: Object.freeze({ min: 0.85, max: 1 }),
   appealsRate: Object.freeze({ min: 0.01, max: 0.1 }),
   reviewedMin: Object.freeze({ min: 10, max: 200 }),
-  keepUpper: Object.freeze({ min: 0.01, max: 0.08 }),
+  keepLower: Object.freeze({ min: 0.01, max: 0.08 }),
 });
 
 const WHOLE: ReadonlySet<keyof AiGateConfig> = new Set(['windowDays', 'volume', 'moderators', 'spanDays', 'recentCount', 'reviewedMin']);
@@ -223,7 +227,12 @@ const atLeast = (v: number, need: number): boolean => v >= need - EPS;
 const atMost = (v: number, need: number): boolean => v <= need + EPS;
 const below = (v: number, need: number): boolean => v < need - EPS;
 const count = (v: number): number => (Number.isSafeInteger(v) && v > 0 ? v : 0);
-const two = (v: number): string => v.toFixed(2);
+/** A configured number as written, with at least two decimals (0.9 reads 0.90, 0.875 stays 0.875): rounding it could show a need that is not the one checked. */
+const two = (v: number): string => {
+  const t = String(v);
+  const dot = t.indexOf('.');
+  return dot === -1 ? `${t}.00` : t.length - dot === 2 ? `${t}0` : t;
+};
 
 /**
  * Evaluate one cell against every gate at `now`. Pure: the same input gives the same output, nothing is mutated, and it never throws (a malformed
@@ -279,18 +288,19 @@ export function evaluateCell(counts: AiCellCounts, appeals: AiAppealFacts, cfg: 
   const revokeAge = revokeAt === null ? null : now - revokeAt;
   checks.push({ name: 'appeals_acts', ok: appeals.available && (revokeAge === null || revokeAge >= APPEAL_COOLING_DAYS * DAY_MS), value: revokeAge, need: `none:${APPEAL_COOLING_DAYS}d` });
 
-  // G8 keep: once enough of the cell's actions were reviewed, the upper bound of "undone as not a violation", and no two such undos close together.
+  // G8 keep: once enough of the cell's actions were reviewed, the cell LOSES its licence when the lower bound of the "undone as not a violation" rate is above the
+  // cut (evidence of harm), or when two such undos fall close together. Not an upper-bound test: that cannot be met below 73 reviewed actions even with no undo.
   const r = counts.reviewed;
   const reviewedN = count(r.n);
   const undone = Math.min(count(r.hardUndo), reviewedN);
   const applies = reviewedN >= cfg.reviewedMin;
-  const keepUpper = applies ? wilsonUpper(undone, reviewedN) : null;
+  const keepLower = applies ? wilsonLower(undone, reviewedN) : null;
   const pairClose = r.lastHardUndoAt !== null && r.secondLastHardUndoAt !== null && r.lastHardUndoAt - r.secondLastHardUndoAt < UNDO_COOLING_DAYS * DAY_MS;
   checks.push({
     name: 'keep',
-    ok: !applies || (consistent && keepUpper !== null && atMost(keepUpper, cfg.keepUpper) && !pairClose),
-    value: keepUpper,
-    need: `upper<=${two(cfg.keepUpper)};pair>${UNDO_COOLING_DAYS}d`,
+    ok: !applies || (consistent && keepLower !== null && atMost(keepLower, cfg.keepLower) && !pairClose),
+    value: keepLower,
+    need: `lower<=${two(cfg.keepLower)};pair>${UNDO_COOLING_DAYS}d`,
   });
 
   // The cooling latch: the later of the two ends that is still ahead of `now`.
