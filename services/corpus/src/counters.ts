@@ -23,6 +23,8 @@ export const LIMITS = {
   counterDays: 2,
   /** A note is deleted this many days after its submission was decided. */
   noteDays: 90,
+  /** The installation hash of a decided submission is emptied this many days after the decision (design 15). */
+  installationDays: 180,
 } as const;
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -89,13 +91,17 @@ export async function hit(db: D1Like, key: string, day: string): Promise<number>
   return row === null ? 1 : row.n;
 }
 
-/** Deletes what has outlived its use: counters older than two days, and the notes of submissions decided 90 days ago or more. */
-export async function purgeExpired(db: D1Like, clock: Clock): Promise<{ counters: number; notes: number }> {
+/** Deletes what has outlived its use: counters older than two days, the notes of submissions decided 90 days ago or more, and their installation hashes after 180. */
+export async function purgeExpired(db: D1Like, clock: Clock): Promise<{ counters: number; notes: number; installations: number }> {
   const now = clock.now();
   const counters = await db.prepare('DELETE FROM counters WHERE day < ?').bind(addDays(dayOf(now), -LIMITS.counterDays)).run();
   const notes = await db
     .prepare('UPDATE submissions SET note = NULL WHERE note IS NOT NULL AND decided_at IS NOT NULL AND decided_at <= ?')
     .bind(isoSeconds(now - LIMITS.noteDays * DAY_MS))
     .run();
-  return { counters: counters.meta.changes, notes: notes.meta.changes };
+  const installations = await db
+    .prepare("UPDATE submissions SET installation = '' WHERE installation != '' AND decided_at IS NOT NULL AND decided_at <= ?")
+    .bind(isoSeconds(now - LIMITS.installationDays * DAY_MS))
+    .run();
+  return { counters: counters.meta.changes, notes: notes.meta.changes, installations: installations.meta.changes };
 }

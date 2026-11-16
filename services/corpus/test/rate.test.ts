@@ -220,9 +220,27 @@ describe('purgeExpired: counters older than two days go, notes go 90 days after 
     expect(notes).toEqual({ sub_old: null, sub_edge: null, sub_new: 'a note', sub_open: 'a note' });
   });
 
+  it('empties the installation hash 180 days after the decision and not before, never for an undecided submission, and counts each row once', async () => {
+    const add = (id: string, decided: string | null) =>
+      w.db
+        .prepare('INSERT INTO submissions (id, installation, word_key, term, language, category, status, received_day, decided_at) VALUES (?,?,?,?,?,?,?,?,?)')
+        .bind(id, 'hash-' + id, id, id, 'en', 'slur', decided === null ? 'received' : 'declined', TODAY, decided)
+        .run();
+    await add('sub_old', '2026-05-01T00:00:00Z'); // 215 days before
+    await add('sub_edge', '2026-06-05T12:00:00Z'); // exactly 180 days before
+    await add('sub_new', '2026-06-06T00:00:00Z'); // 179 days before
+    await add('sub_open', null);
+    const out = await purgeExpired(w.db, w.clock);
+    expect(out.installations).toBe(2);
+    const kept = Object.fromEntries((await rows('SELECT id, installation FROM submissions')).map((r) => [r.id, r.installation]));
+    expect(kept).toEqual({ sub_old: '', sub_edge: '', sub_new: 'hash-sub_new', sub_open: 'hash-sub_open' });
+    expect((await purgeExpired(w.db, w.clock)).installations).toBe(0);
+    expect(await rows("SELECT term FROM submissions WHERE id = 'sub_old'")).toEqual([{ term: 'sub_old' }]);
+  });
+
   it('is safe to run again and on an empty database', async () => {
-    expect(await purgeExpired(w.db, w.clock)).toEqual({ counters: 0, notes: 0 });
-    expect(await purgeExpired(w.db, w.clock)).toEqual({ counters: 0, notes: 0 });
+    expect(await purgeExpired(w.db, w.clock)).toEqual({ counters: 0, notes: 0, installations: 0 });
+    expect(await purgeExpired(w.db, w.clock)).toEqual({ counters: 0, notes: 0, installations: 0 });
   });
 
   it('runs from the worker\u2019s scheduled handler', async () => {
