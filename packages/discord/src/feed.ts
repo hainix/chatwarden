@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { CATEGORY_TO_RULE, CONDUCT_LEVELS, DEFAULT_SEVERE_RULES, errorClass, safeWarn } from '@chatwarden/core';
-import type { Chatwarden, Clock, DiscordThreadRow, KitEvent, KitEventOf, Limits, Logger, ModerationProfile } from '@chatwarden/core';
+import type { Chatwarden, Clock, DiscordThreadRow, InsightsDigest, KitEvent, KitEventOf, Limits, Logger, ModerationProfile } from '@chatwarden/core';
 import { checkRows } from './components.js';
 import type { DiscordActionRow } from './components.js';
 import { isSnowflake, makeForumClient, parseWebhookUrl } from './forum.js';
@@ -52,6 +52,8 @@ export interface FeedKit {
    * holds an appeal's statement (a real `Chatwarden` answers more and still satisfies it; the feed copies the two times out and drops the rest).
    */
   appeals?: { get(appealId: string): FeedAppealRead | null };
+  /** The Insights digest, for `postDigest` (`cw.insights` is one). Optional: without it `postDigest` posts nothing. */
+  insights?: { digest(days: 7 | 30 | 90): InsightsDigest | null };
 }
 
 /** What the feed reads of one appeal: its sanction's kind and times. */
@@ -102,6 +104,12 @@ export interface DiscordFeedOptions {
 }
 
 export interface DiscordFeed {
+  /**
+   * @experimental Post the Insights digest of the last `days` (7, 30 or 90; default 7) to the staff channel: one message of counts and times, no names, pinging nobody. Returns true when a post was
+   * queued, false when there was nothing to post (Insights off, no `insights` on the kit, a failed read, or the feed disposed). A failed read or a failed post is logged by class and never thrown.
+   * The kit has no scheduler: call this from your own timer. `RangeError` for any other `days`.
+   */
+  postDigest(days?: 7 | 30 | 90): boolean;
   /** Unsubscribe, drop the queue, abort the request in flight and clear every timer. Safe to call more than once. */
   dispose(): void;
 }
@@ -699,6 +707,24 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       }
     };
 
+  /** The digest as staff read it in a channel: counts, then times in words. Facts only; a figure the kit withheld (too few reports) says so. */
+  const digestMessage = (d: InsightsDigest): ForumMessage => {
+    const num = (n: unknown): string => (typeof n === 'number' && Number.isFinite(n) ? String(Math.max(0, Math.trunc(n))) : '0');
+    const span = (ms: unknown): string => humanDuration(typeof ms === 'number' && Number.isFinite(ms) ? ms : 0);
+    const decision =
+      typeof d.medianMs === 'number' && typeof d.p90Ms === 'number'
+        ? `Time to a decision: median ${span(d.medianMs)}, 90th percentile ${span(d.p90Ms)}.`
+        : 'Time to a decision: not enough decided reports for a figure.';
+    const open = Number(d.open) > 0 ? `Longest open wait: ${span(d.longestOpenMs)}.` : 'Longest open wait: none, nothing is open.';
+    const content = fitMessage(`**Insights, last ${num(d.days)} days**`, [
+      `Reports: ${num(d.filed)} filed, ${num(d.decided)} decided, ${num(d.open)} open.`,
+      `Urgent: ${num(d.urgentFiled)} filed, ${num(d.urgentOpen)} open.`,
+      decision,
+      open,
+    ], '');
+    return { content };
+  };
+
   unsubscribes.push(
     cw.on('report.created', fenced(onCreated)),
     cw.on('report.closed', fenced(onClosed)),
@@ -711,6 +737,25 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
   );
 
   return {
+    postDigest(days = 7) {
+      if (days !== 7 && days !== 30 && days !== 90) throw new RangeError('discordFeed: days must be 7, 30 or 90');
+      if (disposed || cw.insights === undefined) return false;
+      let digest: InsightsDigest | null;
+      try {
+        digest = cw.insights.digest(days);
+      } catch (err) {
+        fail('insights.digest', err);
+        return false;
+      }
+      if (digest === null || digest === undefined) return false;
+      try {
+        toPerson('insights.digest', null, UNATTRIBUTED, digestMessage(digest));
+      } catch (err) {
+        fail('insights.digest', err);
+        return false;
+      }
+      return true;
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

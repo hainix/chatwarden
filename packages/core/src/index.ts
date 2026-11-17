@@ -244,6 +244,8 @@ export type {
 export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
 export { CaseWorkflow } from './caseWorkflow.js';
+export { computeInsights, INSIGHTS_DAYS, INSIGHTS_MIN_DECIDED, INSIGHTS_MIN_URGENT, INSIGHTS_ROW_CAP } from './insights.js';
+export type { InsightsBacklog, InsightsDays, InsightsResult } from './insights.js';
 export { COMMENT_MAX, CommentService, hasWorkflowMethods } from './commentService.js';
 export type { ClearEscalationResult, CommentRemoveResult, CommentResult, EscalateResult } from './commentService.js';
 export type { CaseMarkResult } from './caseWorkflow.js';

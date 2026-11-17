@@ -1,3 +1,4 @@
+import { utcDay } from './chatCounter.js';
 import { MUTE_TTL_MS } from './mutes.js';
 import { ProfileError } from './profile.js';
 import { WEBHOOK_KEY_TTL_MS } from './types.js';
@@ -340,8 +341,8 @@ export async function purge(
       // Counter rows are keyed by UTC day: a day goes once it ended before the cutoff (strictly older than the day the cutoff falls in).
       filterHits: store.purgeFilterHits(Math.floor((now - p.filterHitsMs) / DAY_MS)),
       welfareReports,
-      // Daily line counts (Insights): wired in U7.
-      chatCounts: 0,
+      // Daily line counts (Insights), keyed by UTC day like the filter counters: a day goes once it ended before the day the cutoff falls in.
+      chatCounts: store.purgeChatCounts?.(utcDay(now - p.chatCountsMs)) ?? 0,
     };
     // Last: the finish of an erase that kept a remainder (a sanction in force) needs the sanction rows above to be gone, and the sweep of stray rows (a row whose person was
     // erased, written by a process that had not yet heard) needs the persons' rows to be gone first. A stray younger than ten minutes is kept: a subject row can trail its first

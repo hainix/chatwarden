@@ -329,6 +329,8 @@ The staff workflow (`desk.workflow`, off by default): `cw.comments` (`add`, `lis
 most 50 entries, deleted with the report); `cw.cases.escalate` and `clearEscalation` ask a senior or the owner for a second look (a flag and a thread entry; `case.escalated`; deciding clears it; the claim,
 the queue order and take next are untouched); `cw.cases.askedCount()` and `cw.desk.workflowEnabled()`. `createChatwarden` throws a plain message when the setting is on and the store lacks the thread methods.
 
+Insights (`desk.insights`, off by default; `@experimental`): `cw.insights` (`enabled`, `read(days)`, `digest(days)`, `emitDigest(days)`, `flush`) reads how the team is doing over 7, 30 (default for `read`) or 90 days from rows the kit already holds, plus a daily count of lines delivered and refused (`kit_chat_days`: a date and two numbers, written at most once a minute and only while the setting is on; `retention.chatCountsMs` deletes old days and `PurgeResult.chatCounts` counts them). Counts and times only: the median and the 90th percentile of the time to a decision (`null` below 5 decided reports), the longest open wait and its backlog bands, volume by reason, outcome and Community Rule, and reports per 1 000 lines. Never a per-person figure. `computeInsights`, `INSIGHTS_DAYS`, `INSIGHTS_MIN_DECIDED`, `INSIGHTS_MIN_URGENT`, `INSIGHTS_ROW_CAP`, `InsightsResult` and `InsightsBacklog` are exported; `insights.digest` (`InsightsDigest`) is raised by `emitDigest`. The kit has no scheduler: call `emitDigest` (or the Discord feed's `postDigest`) from your own timer.
+
 ## Slow mode and flood control
 
 Optional and off until you set it, `@experimental` until 0.2 and new in 0.1.8. Three checks pace one player's lines in one room: **slow mode**

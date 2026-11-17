@@ -3,6 +3,9 @@ import type { AiFacade, AiOptions, AiService } from './ai/service.js';
 import { AuditService } from './audit.js';
 import type { AuditPage, AuditQuery, AuditRecordInput, Role } from './audit.js';
 import { ChatService } from './chat.js';
+import { ChatCounter, utcDay } from './chatCounter.js';
+import { checkInsightsDays, computeInsights, INSIGHTS_ROW_CAP } from './insights.js';
+import type { InsightsDays, InsightsResult } from './insights.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
 import type { ChatResult, RestrictedAnswer } from './chat.js';
@@ -12,7 +15,7 @@ import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
 import { EventBus } from './events.js';
-import type { Subscribe } from './events.js';
+import type { InsightsDigest, Subscribe } from './events.js';
 import { hashWho, makeHasher } from './hasher.js';
 import { safeWarn, ThrottledWarn } from './log.js';
 import { historyOf, suggest } from './ladder.js';
@@ -565,6 +568,25 @@ export interface Chatwarden {
   desk: {
     /** Whether `desk.workflow` is on in the profile in force (and the store can keep the thread). */
     workflowEnabled(): boolean;
+  };
+  /**
+   * Insights (`desk.insights`, off by default): how the team is doing, from rows the kit already holds plus a daily line counter. Counts and times only: never a person, a handle, text or
+   * a staff member, and no per-person number. @experimental
+   */
+  insights: {
+    /** `desk.insights` is on in the profile in force and the store can read the rows. */
+    enabled(): boolean;
+    /**
+     * One window: `days` 7, 30 (default) or 90 (`RangeError` for anything else). `null` while Insights is off. Flushes this process's line counter first. Reads at most 20 000 reports
+     * (`partial` says when it hit that).
+     */
+    read(days?: InsightsDays): InsightsResult | null;
+    /** The compact numbers of a window (default 7 days), or `null` while off: counts and times, for a message or a webhook. */
+    digest(days?: InsightsDays): InsightsDigest | null;
+    /** Raise `insights.digest` once with `digest(days)` and return it; nothing is raised (and `null` returned) while off. The kit has no scheduler: call it from your own timer. */
+    emitDigest(days?: InsightsDays): InsightsDigest | null;
+    /** Write the line counts held in memory to the store now (also done when the minute changes and at `close()`). */
+    flush(): void;
   };
   /** A cheap "did anything change?" for the moderator queue. */
   changes: {
@@ -1161,7 +1183,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     sink: { add: (rows) => store.addFilterHits(rows), list: (from, to) => store.listFilterHits(from, to) },
   });
 
+  // The daily line counter behind Insights' report rate: counts only while `desk.insights` is on, writes at most once a minute.
+  const chatCounter = new ChatCounter({ clock, store, logger, enabled: () => policy.profileNow().desk.insights });
   const chat = new ChatService({
+    counter: chatCounter,
     roster,
     buffer,
     subjects,
@@ -1450,6 +1475,40 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const caseWorkflow = new CaseWorkflow({ store, clock, emit: (event) => bus.emit(event) });
   const commentService = new CommentService({ store, clock, enabled: () => policy.profileNow().desk.workflow, emit: (event) => bus.emit(event) });
 
+  // Insights: on with `desk.insights` and a store that can read the rows.
+  const insightsOn = (): boolean => policy.profileNow().desk.insights && typeof store.insightRows === 'function';
+  /** One window of Insights, or null when it is off. The rows go back 90 days whatever the window, so an old open report still shows in the wait; the window is cut in `computeInsights`. `RangeError` for a bad `days`, off or on. */
+  const readInsights = (days: number): InsightsResult | null => {
+    const window: InsightsDays = checkInsightsDays(days);
+    if (!insightsOn()) return null;
+    // What this process has counted this minute counts too.
+    chatCounter.flush();
+    const now = clock.now();
+    const from = now - window * 86_400_000;
+    const rows = store.insightRows?.(now - 90 * 86_400_000, INSIGHTS_ROW_CAP) ?? [];
+    const counts = store.chatCounts?.(utcDay(from), utcDay(now)) ?? [];
+    const rules = store.countSanctionsByRule?.(from) ?? [];
+    const labels = new Map(policy.profileNow().reporting.reasons.map((r) => [r.id, r.label] as const));
+    return computeInsights(rows, counts, rules, now, window, (id) => labels.get(id));
+  };
+  const digestOf = (days: number): InsightsDigest | null => {
+    const r = readInsights(days);
+    if (r === null) return null;
+    return {
+      days: r.days,
+      from: r.from,
+      to: r.to,
+      filed: r.reports.filed,
+      decided: r.reports.decided,
+      open: r.reports.open,
+      urgentFiled: r.urgent.filed,
+      urgentOpen: store.countOpenUrgent?.() ?? 0,
+      medianMs: r.decision.medianMs,
+      p90Ms: r.decision.p90Ms,
+      longestOpenMs: r.wait.longestOpenMs,
+    };
+  };
+
   // The AI read service. It listens for new reports and only enqueues; with no adapter it is a facade that is always off.
   const aiService =
     opts.ai === undefined || aiModule === undefined || aiMissing.length > 0
@@ -1716,6 +1775,17 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       remove: (reportId, commentId, actor, role) => commentService.remove(reportId, commentId, actor, role),
     },
     desk: { workflowEnabled: () => policy.profileNow().desk.workflow },
+    insights: {
+      enabled: () => insightsOn(),
+      read: (days = 30) => readInsights(days),
+      digest: (days = 7) => digestOf(days),
+      emitDigest: (days = 7) => {
+        const digest = digestOf(days);
+        if (digest !== null) bus.emit({ type: 'insights.digest', at: clock.now(), digest: { ...digest } });
+        return digest;
+      },
+      flush: () => chatCounter.flush(),
+    },
     changes: { token: () => store.changeToken() },
     reasons: {
       list: () => reasonBook.list(),
@@ -1945,6 +2015,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       // Stop reading and abort calls in flight, and let them end before the store goes.
       ai.close();
       await ai.idle();
+      chatCounter.flush();
       await filterHits.close();
       await subjects.flush();
       store.close();

@@ -51,6 +51,8 @@ const feed = discordFeed(cw, {
 feed.dispose();
 ```
 
+`feed.postDigest(days = 7)` (`@experimental`, new in 0.2.0) posts the Insights digest of the last 7, 30 or 90 days to the same channel on demand: one message of counts and times (reports filed, decided and open, urgent ones, the median and the 90th percentile of the time to a decision, the longest open wait), no names, pinging nobody. It returns `true` when a post was queued and `false` when there was nothing to post (`desk.insights` off, or the feed disposed). The kit has no scheduler: call it from your own timer or cron. A failed read or post is logged by class and never thrown.
+
 `cw` is what `createChatwarden` returned. If you also mount `@chatwarden/http`, `hubLink` can point at its staff routes (for
 example `GET /admin/reports/:id`), or at your own console page that calls them.
 

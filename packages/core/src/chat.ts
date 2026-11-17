@@ -189,6 +189,11 @@ export interface ChatServiceDeps {
    * by class and dropped. @experimental
    */
   onFilterFlag?: (info: { roomId: string; seatId: string; subject: SubjectId; lineId: string; hit: FilterHit }) => void;
+  /**
+   * The daily line counter (`desk.insights`): told once per `accept` result, after the verdict is made, with `delivered` or `refused` (an empty line is not a line and is not told).
+   * A throw is logged by class and dropped; the answer never waits for it and never changes. @experimental
+   */
+  counter?: { delivered(): void; refused(): void };
 }
 
 /** What pacing says about a line: a refusal, or the key to commit under; neither when nothing is paced. */
@@ -269,6 +274,7 @@ export class ChatService {
   private readonly pace: ChatServiceDeps['pace'];
   private readonly filters: ChatServiceDeps['filters'];
   private readonly onFilterFlag: ChatServiceDeps['onFilterFlag'];
+  private readonly counter: ChatServiceDeps['counter'];
   /** The filters run on every line: a failure of them is limited to one log line a minute. */
   private readonly filterWarn: ThrottledWarn;
 
@@ -307,6 +313,7 @@ export class ChatService {
     this.pace = deps.pace;
     this.filters = deps.filters;
     this.onFilterFlag = deps.onFilterFlag;
+    this.counter = deps.counter;
     this.filterWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.pacer = deps.pace === undefined ? undefined : createPacer({ clock: deps.clock, settings: deps.pace.settings });
     this.notices = deps.notices;
@@ -324,11 +331,25 @@ export class ChatService {
    * and the line is refused with `'gate'`, the one reason that means "you cannot chat right now".
    */
   accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult {
+    let result: ChatResult;
     try {
-      return this.run(roomId, seatId, text, opts);
+      result = this.run(roomId, seatId, text, opts);
     } catch (err) {
       this.warn('chat.accept_failed', { error: errName(err) });
-      return refuse('gate');
+      result = refuse('gate');
+    }
+    this.count(result);
+    return result;
+  }
+
+  /** Tell the line counter, once, what became of a line. Never throws. */
+  private count(result: ChatResult): void {
+    if (this.counter === undefined) return;
+    try {
+      if ('deliver' in result) this.counter.delivered();
+      else if (result.refuse.reason !== 'empty') this.counter.refused();
+    } catch (err) {
+      this.warn('chat.counter_failed', { error: errName(err) });
     }
   }
 

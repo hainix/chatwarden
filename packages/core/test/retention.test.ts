@@ -1236,3 +1236,33 @@ describe('desk retention fields (welfareReportsMs, chatCountsMs)', () => {
     await expect(purge(store, NOW, { chatCountsMs: Number.NaN })).rejects.toThrow('purge: invalid chatCountsMs');
   });
 });
+
+describe('daily line counts (retention.chatCountsMs, U7)', () => {
+  const dayOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+
+  it('purge deletes the days that ended before the cutoff day (strict) and keeps the cutoff day and later', async () => {
+    const { store } = setup();
+    const cutoff = NOW - 400 * DAY;
+    store.addChatCounts(dayOf(cutoff - 2 * DAY), 5, 1);
+    store.addChatCounts(dayOf(cutoff - DAY), 5, 1);
+    store.addChatCounts(dayOf(cutoff), 5, 1);
+    store.addChatCounts(dayOf(cutoff + DAY), 5, 1);
+    const res = await purge(store, NOW);
+    expect(res.chatCounts).toBe(2);
+    expect(store.chatCounts('2000-01-01', '2100-01-01').map((r) => r.day)).toEqual([dayOf(cutoff), dayOf(cutoff + DAY)]);
+  });
+
+  it('a shorter chatCountsMs (down to its 31-day floor) deletes sooner', async () => {
+    const { store } = setup();
+    store.addChatCounts(dayOf(NOW - 40 * DAY), 5, 1);
+    store.addChatCounts(dayOf(NOW - 20 * DAY), 5, 1);
+    expect((await purge(store, NOW, { chatCountsMs: 31 * DAY })).chatCounts).toBe(1);
+    expect(store.chatCounts('2000-01-01', '2100-01-01')).toHaveLength(1);
+  });
+
+  it('a store without purgeChatCounts reports 0 and does not throw', async () => {
+    const { store } = setup();
+    (store as unknown as { purgeChatCounts?: unknown }).purgeChatCounts = undefined;
+    expect((await purge(store, NOW)).chatCounts).toBe(0);
+  });
+});

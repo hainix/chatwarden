@@ -129,6 +129,8 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
         'GET /reports/:id',
         'POST /reports/:id/decide',
         'POST /reports/:id/suggest',
+        // Insights (0.2.0): checks in admin.insights.test.ts (it needs desk.insights on).
+        'GET /insights',
         // The staff workflow routes (0.2.0): their own checks are in admin.workflow.test.ts (they need a world with desk.workflow on).
         'POST /reports/:id/comments',
         'DELETE /reports/:id/comments/:cid',

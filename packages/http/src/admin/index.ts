@@ -9,6 +9,7 @@ import type { CommunityAdmin } from './community.js';
 import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
 import { filterRoutes } from './filters.js';
+import { insightRoutes } from './insights.js';
 import { legalRoutes } from './legal.js';
 import { gapRoutes } from './gaps.js';
 import { meRoutes } from './me.js';
@@ -32,6 +33,7 @@ export { appealRoutes } from './appeals.js';
 export type { AiReadAgainBody, AiUnavailableBody } from './ai.js';
 export { auditRoutes } from './audit.js';
 export { blockedRoutes } from './blocked.js';
+export { insightRoutes } from './insights.js';
 export { communityRoutes } from './community.js';
 export type {
   CommunityAdmin,
@@ -103,6 +105,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
     ...privacyRoutes(ctx),
     ...legalRoutes(ctx),
     ...workflowRoutes(ctx),
+    ...insightRoutes(ctx),
     ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),
     ...(terms === undefined
