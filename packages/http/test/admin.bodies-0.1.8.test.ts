@@ -8,7 +8,7 @@ import { world } from './world.js';
 // Byte identity with 0.1.8, against real bodies: `fixtures/bodies-0.1.8.json` holds the responses (status, headers, body, key order) that the
 // 0.1.8 code (origin/main at 2bf9eb8) gave for the fixed run in `bodies018.scenario.ts`: GET /me, GET /changes, GET /people/:ref/history, the
 // reports and the sanctions and blocked lists. With appeals and the name features off (or only their handle masks off) this branch must send the
-// same bytes. The one deliberate difference is the new permission keys in `can` (`appeals.read`, `appeals.decide` in 0.1.9; `ai.review`, `ai.pause`, `automation.write` in 0.1.13), which are set aside.
+// same bytes. The one deliberate difference is the new permission keys in `can` (`appeals.read`, `appeals.decide` in 0.1.9; `ai.review`, `ai.pause`, `automation.write` in 0.1.13) and, in 0.2.0, `noticeText` on the own lines of a report, which are set aside.
 
 const FROZEN = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/bodies-0.1.8.json', import.meta.url)), 'utf8')) as Record<string, unknown>;
 
@@ -32,6 +32,9 @@ function withoutNewPermissions(bodies: Record<string, unknown>): Record<string, 
       delete can['automation.write'];
     }
   }
+  // 0.2.0 adds `noticeText` to each own excerpt line of GET /reports/:id, the one other deliberate difference here.
+  const report = (copy['report'] as { body?: { report?: { excerpt?: Array<Record<string, unknown>> } } } | undefined)?.body?.report;
+  for (const l of report?.excerpt ?? []) delete l['noticeText'];
   return copy;
 }
 
