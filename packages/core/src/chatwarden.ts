@@ -26,7 +26,12 @@ import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
-import { checkFilterRules } from './filters.js';
+import { checkFilterRules, resolveFilters } from './filters.js';
+import type { FilterSettings } from './filters.js';
+import { FilterHits, MemoryHitSink } from './filters/counters.js';
+import type { FilterStats } from './filters/counters.js';
+import { checkLines, createFilterEngine, testLine } from './filters/engine.js';
+import type { FilterCheckResult, FilterTestResult } from './filters/engine.js';
 import { checkPace, mergePace } from './pace.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
@@ -275,6 +280,31 @@ export interface Chatwarden {
     setPace(roomId: string, pace: PaceSettings | null): void;
     /** The pace in force for the room: the profile's (code, then the stored layer) with the room's override applied. Every field filled, `null` is off. @experimental */
     pace(roomId: string): ResolvedPace;
+  };
+  /**
+   * The chat filters (`profile.filters`): what they did, and a way to try them before they act. All off until an owner turns a block on.
+   * @experimental
+   */
+  filters: {
+    /**
+     * What the filters did over the last 7 or 30 UTC days (today included): per counter key (`link.unlisted`, `personal_info.phone`,
+     * `phrase.<id>`, `ratio.caps` ...), the counts by applied action (`count`, `flag`, `mask`, `refuse`, and `flag_capped` when the daily cap
+     * turned a flag into a count). This process's held counts are written first. No person, room or text is in a count. Throws `RangeError` for
+     * another number of days.
+     */
+    stats(q: { days: 7 | 30 }): Promise<FilterStats>;
+    /**
+     * Try one line under the filters in force, or under `candidate` settings that are not saved (throws `ProfileError` for invalid ones):
+     * the verdict (every hit with its kind, detail, action, rule and matched ranges) and the line as it would be delivered (`null` when it
+     * would be refused). Writes nothing and counts nothing. Staff only: the ranges point at the matched part of the line. A line is judged as a
+     * person with no account age, so a `newAccountDays` rule does not act.
+     */
+    test(text: string, candidate?: FilterSettings): FilterTestResult;
+    /**
+     * Run `candidate` settings over `lines` (the adopter's recent lines): per counter key, how many lines it would hit and up to 20 sample lines
+     * with their ranges, and how many lines it would refuse or mask. Writes nothing and counts nothing. At most 5 000 lines are read. Staff only.
+     */
+    check(candidate: FilterSettings, lines: readonly string[]): FilterCheckResult;
   };
   chat: {
     accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult;
@@ -1015,6 +1045,18 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     return merged;
   };
 
+  // The chat filters: the engine (the per-room settings getter and the account-age lookup) and the hit counters, written every 30 seconds
+  // and on close. Counts are held in memory here until the store keeps them; nothing is built per line while every block is off.
+  const filterEngine = createFilterEngine({
+    settings: () => policy.profileNow().filters,
+    accountAgeDays: opts.signals?.accountAgeDays,
+    accountIds: (subject) => subjects.identifiersOf(subject).accounts,
+    canonical: (subject) => subjects.canonical(subject),
+    clock,
+    logger,
+  });
+  const filterHits = new FilterHits({ clock, logger, sink: new MemoryHitSink() });
+
   const chat = new ChatService({
     roster,
     buffer,
@@ -1036,6 +1078,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     notices,
     autoRestrictRule,
     limits: { maxLength: limits.chatMaxLength, rate: limits.chatRate },
+    filters: {
+      settings: () => policy.profileNow().filters,
+      accountIsNew: (subject, days) => filterEngine.accountIsNew(subject, days),
+      count: (hit) => filterHits.count(hit),
+    },
     pace: {
       settings: paceOf,
       canonical: (subject) => subjects.canonical(subject),
@@ -1389,6 +1436,18 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       },
       pace: (roomId) => paceOf(roomId),
     },
+    filters: {
+      stats: (q) => {
+        if (q === null || typeof q !== 'object' || (q.days !== 7 && q.days !== 30)) return Promise.reject(new RangeError('filters.stats: days must be 7 or 30'));
+        return filterHits.stats(q.days);
+      },
+      test: (text, candidate) => {
+        if (typeof text !== 'string') throw new TypeError('filters.test: text must be a string');
+        const settings = candidate === undefined ? policy.profileNow().filters : resolveFilters(candidate, 'candidate');
+        return testLine(filterEngine.evaluateWith(settings, text.trim(), { subject: null }), text.trim());
+      },
+      check: (candidate, lines) => checkLines(filterEngine, resolveFilters(candidate, 'candidate'), lines),
+    },
     chat: {
       accept: (roomId, seatId, text, o) => chat.accept(roomId, seatId, text, o),
       visibleTo: (roomId, viewerSeat, senderSeat) => chat.visibleTo(roomId, viewerSeat, senderSeat),
@@ -1675,6 +1734,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       // Stop reading and abort calls in flight, and let them end before the store goes.
       ai.close();
       await ai.idle();
+      await filterHits.close();
       await subjects.flush();
       store.close();
     },

@@ -367,6 +367,9 @@ export type {
   ResolvedPhraseRule,
   ResolvedRatio,
 } from './filters.js';
+export type { FilterCheckResult, FilterCheckRule, FilterHit, FilterHitKind, FilterRefusal, FilterTestResult, FilterVerdict } from './filters/engine.js';
+export type { FilterKeyCounts, FilterStats } from './filters/counters.js';
+export type { FilterSpan } from './filters/fold.js';
 // Appeals and names settings (@experimental): off until set (names masking in the hub is the one default-on setting).
 export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_STATEMENT_MAX, APPEAL_STATS_MIN_SANCTIONS, normalizeStatement, resolveAppeals, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
 export type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';

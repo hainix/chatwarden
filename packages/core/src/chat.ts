@@ -1,4 +1,9 @@
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
+import { filtersActive } from './filters.js';
+import type { ResolvedFilters } from './filters.js';
+import { evaluateFilters } from './filters/engine.js';
+import type { FilterHit, FilterVerdict } from './filters/engine.js';
+import { maskSpans } from './mask.js';
 import { errorClass, safeWarn, ThrottledWarn } from './log.js';
 import type { MuteService } from './mutes.js';
 import type { NoticeService } from './notices.js';
@@ -36,9 +41,11 @@ import type {
 //   6. rate, 3 per 5 s per room:seat     -> 'rate' (spent even when the line is then blocked)
 //   7. pacing commit                     -- only now does the line count toward the next pacing check
 //   8. matcher hit                       -> buffered as blocked, one strike, maybe an automatic timeout, 'blocked'
-//   9. profanity, by the profile's mode  -> allow: untouched; star: masked; refuse: 'profanity' (never a strike,
+//   9. filters, when any block is on     -> refuse: 'link' | 'personal_info' | 'filter' (never a strike, never buffered, never
+//                                           a notice); mask: the covered text becomes `*`; flag and count only report. Fail open.
+//  10. profanity, by the profile's mode  -> allow: untouched; star: masked; refuse: 'profanity' (never a strike,
 //                                           never buffered, never a notice: swearing is not a rule violation)
-//  10. buffer the delivered line         -> its lineId
+//  11. buffer the delivered line         -> its lineId, then a `flag` hands the line to `onFilterFlag`
 // It never throws. Everything on this path reads in-memory state; the only store writes are the strike
 // (inside StrikeService) and the automatic timeout, and a failure of either is logged and absorbed.
 
@@ -74,8 +81,12 @@ interface BlockedLine {
  * `'slow_mode'`, `'flood'` and `'duplicate'` are pacing refusals and only ever appear once pacing is configured (`profile.pace`, a
  * stored layer or `cw.rooms.setPace`). They carry `retryAfterMs` and nothing else: a pause, not a sanction, so no rule, notice or end
  * time, and never the line.
+ *
+ * `'link'`, `'personal_info'` and `'filter'` are chat-filter refusals (`profile.filters`) and only ever appear once a filter rule says `refuse`.
+ * They carry the Community Rule the rule cites (`rule`) and nothing else: never the matched part, the rule's id or a counter. `'filter'` is what a
+ * phrase rule or a ratio rule (caps, repeats, emoji, mentions) answers. The line was not delivered, not kept and earned no strike. @experimental
  */
-export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason;
+export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason | 'link' | 'personal_info' | 'filter';
 
 export type ChatResult =
   | { deliver: { lineId: string; text: string } }
@@ -160,6 +171,24 @@ export interface ChatServiceDeps {
     canonical: (subject: SubjectId) => SubjectId;
     onFlood?: (info: { roomId: string; subject: SubjectId }) => void;
   };
+  /**
+   * The chat filters. `settings` is read on every line (so a saved change applies at once) and answers every block off for a room that is
+   * not filtered: such a line builds nothing and calls nothing else. `accountIsNew(subject, days)` says whether the speaker's account is younger
+   * than `days` (called only for an unlisted link, and only when `newAccountDays` is set; a throw or anything but `true` reads as not new).
+   * `count` is told of every hit, whatever happens to the line. Every hook is fenced: a throw is logged by class (at most once a minute) and
+   * the line goes on, unfiltered when the engine itself failed. Without `filters` nothing is filtered. @experimental
+   */
+  filters?: {
+    settings: (roomId: string) => ResolvedFilters;
+    accountIsNew?: (subject: SubjectId | null, days: number) => boolean;
+    count: (hit: FilterHit) => void;
+  };
+  /**
+   * Told once, after a delivered line has been kept, when a filter rule says `flag`: the first flagging hit in the fixed order, the line's id
+   * and the speaker. Never called for a guest (no subject), for a refused line or for a line with no flag. A throw or a rejection is logged
+   * by class and dropped. @experimental
+   */
+  onFilterFlag?: (info: { roomId: string; seatId: string; subject: SubjectId; lineId: string; hit: FilterHit }) => void;
 }
 
 /** What pacing says about a line: a refusal, or the key to commit under; neither when nothing is paced. */
@@ -238,6 +267,10 @@ export class ChatService {
   private readonly paceWarn: ThrottledWarn;
   private readonly pacer: Pacer | undefined;
   private readonly pace: ChatServiceDeps['pace'];
+  private readonly filters: ChatServiceDeps['filters'];
+  private readonly onFilterFlag: ChatServiceDeps['onFilterFlag'];
+  /** The filters run on every line: a failure of them is limited to one log line a minute. */
+  private readonly filterWarn: ThrottledWarn;
 
   /**
    * Automatic restrictions that could not be stored (no subject to put a row on, or the write failed), by
@@ -266,6 +299,9 @@ export class ChatService {
     this.typingWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.paceWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.pace = deps.pace;
+    this.filters = deps.filters;
+    this.onFilterFlag = deps.onFilterFlag;
+    this.filterWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.pacer = deps.pace === undefined ? undefined : createPacer({ clock: deps.clock, settings: deps.pace.settings });
     this.notices = deps.notices;
     this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
@@ -425,11 +461,21 @@ export class ChatService {
       return refuse('blocked', { rule: this.autoRestrictRule });
     }
 
+    // The chat filters (links, personal info, phrases, caps and repeats): after the slur matcher and before profanity. A refusal is like a
+    // profanity refusal: not buffered, no strike, no notice, and the line has spent its rate and pacing budget. Every hit is counted, even
+    // on a refused line. A failure of the filters lets the line through as it was typed.
+    const verdict = this.filterLine(roomId, subject, trimmed);
+    if (verdict !== null) {
+      for (const hit of verdict.hits) this.countHit(hit);
+      if (verdict.refuse !== null) return refuse(verdict.refuse.reason, { rule: verdict.refuse.rule });
+    }
+    const filtered = verdict === null ? trimmed : (verdict.softened ?? maskSpans(trimmed, verdict.spans));
+
     // Profanity is softening or a house rule, never a violation: a refusal here is not buffered as a blocked line,
-    // earns no strike, note or notice, and (the rate check having passed) has spent the line's rate budget.
-    const swearing = this.applyProfanity(trimmed);
+    // earns no strike, note or notice, and (the rate check having passed) has spent the line's rate budget. It reads the masked text.
+    const swearing = this.applyProfanity(filtered);
     if (swearing !== null && swearing.hit && this.profanityMode === 'refuse') return refuse('profanity');
-    const delivered = swearing === null || this.profanityMode !== 'star' ? trimmed : swearing.text;
+    const delivered = swearing === null || this.profanityMode !== 'star' ? filtered : swearing.text;
     const lineId = this.buffer.append(roomId, {
       ts: now,
       seatId,
@@ -440,6 +486,8 @@ export class ChatService {
       blocked: false,
       audience,
     });
+    // A `flag` hands the kept line over, once, after it is in the evidence buffer; a guest cannot be reported, so only a known person.
+    if (verdict !== null && verdict.flags.length > 0 && subject !== null) this.tellFlag(roomId, seatId, this.subjects.canonical(subject), lineId, verdict.flags[0]!);
     return { deliver: { lineId, text: delivered } };
   }
 
@@ -475,6 +523,57 @@ export class ChatService {
       pacer.commit(key, text);
     } catch (err) {
       this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) });
+    }
+  }
+
+  /**
+   * The filters' verdict on a line, or null when nothing applies (no filters, every block off) or they failed: a throw anywhere in them
+   * (the settings getter, the engine) is logged by class, at most once a minute, and the line goes on unfiltered. Filters are a
+   * safeguard, not access control, so they fail open (the `gate` hook fails closed).
+   */
+  private filterLine(roomId: string, subject: SubjectId | null, text: string): FilterVerdict | null {
+    const f = this.filters;
+    if (f === undefined) return null;
+    try {
+      const settings = f.settings(roomId);
+      if (typeof settings !== 'object' || settings === null) throw new TypeError('the filter settings are not an object');
+      if (!filtersActive(settings)) return null;
+      return evaluateFilters(settings, text, { accountIsNew: (days) => this.ageIsNew(subject, days) });
+    } catch (err) {
+      this.filterWarn.warn('chatwarden.filter_failed', { error: errorClass(err) });
+      return null;
+    }
+  }
+
+  /** The account-age hook, fenced: anything but a plain `true` (a throw, a promise, null) reads as not new. */
+  private ageIsNew(subject: SubjectId | null, days: number): boolean {
+    const hook = this.filters?.accountIsNew;
+    if (hook === undefined) return false;
+    try {
+      return hook(subject, days) === true;
+    } catch (err) {
+      this.filterWarn.warn('chatwarden.filter_failed', { error: errorClass(err) });
+      return false;
+    }
+  }
+
+  private countHit(hit: FilterHit): void {
+    try {
+      this.filters?.count(hit);
+    } catch (err) {
+      this.filterWarn.warn('chatwarden.filter_failed', { error: errorClass(err) });
+    }
+  }
+
+  /** Hand a flagged line to the facade. Never changes the verdict: a throw or a rejection is logged by class and dropped. */
+  private tellFlag(roomId: string, seatId: string, subject: SubjectId, lineId: string, hit: FilterHit): void {
+    const hook = this.onFilterFlag;
+    if (hook === undefined) return;
+    try {
+      const out: unknown = hook({ roomId, seatId, subject, lineId, hit });
+      if (isThenable(out)) out.then(undefined, (err: unknown) => this.filterWarn.warn('chatwarden.filter_failed', { error: errorClass(err) }));
+    } catch (err) {
+      this.filterWarn.warn('chatwarden.filter_failed', { error: errorClass(err) });
     }
   }
 

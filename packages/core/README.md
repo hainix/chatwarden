@@ -581,6 +581,27 @@ throws: a malformed op is an empty plan. A test runs the real services over a ma
 that what they write equals the plan. `appealReplacementEnd(original, to)` is the end of the sanction a reduction on appeal writes (never later than the original's end);
 the appeals service and the plan share it.
 
+## Chat filters
+
+A small, declarative rule set that sees a chat line after the slur matcher and before profanity (`profile.filters`, an editable policy section). Nothing is
+on until an owner turns a block on, and a filter never writes a strike, a sanction or a timeout. Four blocks, each with an action (`count`, `flag`, `mask`,
+`refuse`) and the Community Rule it cites:
+
+- `links`: a link candidate is found by its shape (a scheme, `www.`, a bare host ending in a link ending, an IPv4 address) and judged against `allow`, `deny`,
+  the built-in invite and shortener packs and `unlisted`. Nothing is fetched or resolved.
+- `personalInfo`: phone numbers, email addresses, card numbers (Luhn), "add me on" lines and, as a heuristic that can only count or flag, a street address.
+- `phrases`: up to 20 rules of patterns written in a fixed vocabulary (a word, `a|b`, `word*`, `*`, `~`), never a regular expression.
+- `ratio`: caps, one character repeated, too many emoji, too many mentions; `mask` softens the line.
+
+A refused author is told the kind (`link`, `personal_info`, `filter`) and the rule, never the matched part. Filters fail open: a throw inside them is logged by class and
+the line goes on. `cw.filters.test(text, candidate?)` tries a line, `cw.filters.check(candidate, lines)` runs candidate settings over recent lines, and
+`cw.filters.stats({ days: 7 | 30 })` reads what the filters did (counts by counter key and applied action, held in memory and written every 30 seconds).
+
+**Experimental in 0.2.0:** `FilterSettings`, `LinkSettings`, `PersonalInfoSettings`, `PhraseRuleSettings`, `RatioSettings`, `ResolvedFilters` and its parts,
+`resolveFilters`, `checkFilters`, `mergeFilters`, `overlayFilters`, `FILTER_SUGGESTIONS`, `FILTER_ACTIONS`, `FILTER_LIMITS`, `SHARED_HOSTING_SUFFIXES`,
+`FilterVerdict`, `FilterHit`, `FilterRefusal`, `FilterStats`, `FilterTestResult`, `FilterCheckResult`, `cw.filters`, `ChatServiceDeps.filters` and the three new
+`RefuseReason` values `link`, `personal_info` and `filter` (an exhaustive `switch` over the reasons needs the new cases to compile).
+
 ## Upgrading to 0.1.9
 
 - **From 0.1.8.** SQLite migration 22 is one-way: a database it has run on cannot be opened by 0.1.8 or older. Back it up first.

@@ -44,7 +44,10 @@ const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.
 // Raised to 140 KB for K4b: `@chatwarden/store-memory/testing` (the test kit, a dev-only module a page does not ship) is in this entry so the same bundle proves it
 // is browser-safe and runs in the bare context; it measured 126.6 KB gzip with it (about 7 KB of it the kit, the scripted chat and the word stubs). The guard still
 // catches large accidental growth, not small features.
-const SIZE_BUDGET_GZIP = 140 * 1024;
+// Raised to 160 KB at 0.2.0: the chat filters (the link, personal-info, ratio and phrase scanners, the engine and the settings) are imported statically
+// by the chat path and add about 13 KB gzip (design note on filters, Ruling 25). If this guard trips again because of them, the engine can be split
+// behind an `import()` loaded when `filters` is first set (the signals precedent); that was not needed to stay under this budget.
+const SIZE_BUDGET_GZIP = 160 * 1024;
 
 /**
  * The browser build without the server-only AI module, as a bundler that splits at `import()` gives a page that never passes an adapter:
@@ -319,7 +322,10 @@ describe('browser bundle: size', () => {
         .sort((x, y) => y[1] - x[1])
         .slice(0, 12)
         .map(([f, n]) => `${n} ${f}`);
-      throw new Error(`bundle is ${gz} bytes gzip, over ${SIZE_BUDGET_GZIP}. Top contributors:\n${top.join('\n')}`);
+      throw new Error(
+        `bundle is ${gz} bytes gzip, over ${SIZE_BUDGET_GZIP}. If the chat filter engine is what tipped it, split it behind a dynamic import() loaded when filters is first set ` +
+          `(Ruling 25 of the filters design); otherwise a large module leaked in. Top contributors:\n${top.join('\n')}`,
+      );
     }
     expect(gz).toBeLessThanOrEqual(SIZE_BUDGET_GZIP);
   });
