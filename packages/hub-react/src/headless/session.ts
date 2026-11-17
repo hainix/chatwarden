@@ -1,5 +1,5 @@
 import type { HubClient } from '../client.js';
-import type { BlockedLine, PolicyDocs, Reason, ReporterRecord } from '../types.js';
+import type { BlockedLine, PolicyDocs, PolicyState, Reason, ReporterRecord } from '../types.js';
 
 // What a moderator working through the queue would otherwise read again for every case. `GET /policy` builds three documents and
 // is audited (`policy.view`), the saved reasons and the blocked lines change rarely, and a reporter's track record is the same
@@ -35,6 +35,12 @@ export interface Session {
   policy(): Promise<PolicyDocs>;
   /** Forget the kept policy: the steps and ladder were saved or reset, so the next ask (a decision bar, a sanction form) reads the new profile. */
   invalidatePolicy(): void;
+  /**
+   * The safety settings in force (the guidance, the studio contact and the reporter's resources), from `GET /policy/profile` (needs `policy.read`; audited like any read of the settings).
+   * Read once and kept for a few minutes, so an urgent case does not read the profile again each time it opens; a save or a reset of the profile forgets it.
+   * @experimental
+   */
+  safety(): Promise<PolicyState['effective']['safety']>;
   /** The saved reasons a moderator can use (switched-off ones left out). */
   reasons(): Promise<Reason[]>;
   /** How the reports a person filed stand. */
@@ -74,6 +80,7 @@ function memo<T>(load: () => Promise<T>, ttl: number | null, now: () => number):
 export function createSession(client: HubClient, now: () => number): Session {
   const reporters = new Map<string, Kept<ReporterRecord>>();
   const policy = memo(() => client.policy({ format: 'markdown', omit: ['rules', 'ladder'] }), null, now);
+  const safety = memo(async () => (await client.policyProfile()).effective.safety, SESSION_TTL_MS, now);
   const reasons = memo(async () => (await client.listReasons()).reasons.filter((r) => r.active), SESSION_TTL_MS, now).get;
   const blocked = memo(async () => (await client.listBlocked({ days: 7 })).items, SESSION_TTL_MS, now).get;
   let waiting: Handoff | null = null;
@@ -89,7 +96,11 @@ export function createSession(client: HubClient, now: () => number): Session {
       },
     },
     policy: policy.get,
-    invalidatePolicy: policy.forget,
+    invalidatePolicy: () => {
+      policy.forget();
+      safety.forget();
+    },
+    safety: safety.get,
     reasons,
     blocked,
     reporter(ref) {

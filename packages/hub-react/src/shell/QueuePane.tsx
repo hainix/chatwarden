@@ -13,7 +13,8 @@ import { hasAiRead } from '../queue.js';
 import { useMode } from '../mode.js';
 import type { ShownRow } from '../live.js';
 import type { Route } from '../router.js';
-import { Avatar, Kbd, Link, PersonChip, Segmented, Skeleton } from '../ui.js';
+import { Avatar, Kbd, Link, PersonChip, Segmented, Skeleton, Tag } from '../ui.js';
+import { UrgentChip, useUrgentAnnouncement } from './UrgentChip.js';
 
 /** The people shown by name on a row before it says "and N more". */
 const VIEWERS_NAMED = 1;
@@ -55,6 +56,8 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
   const focusIn = useRef(false);
   const sync = (): void => queue.setInteracting(pointerIn.current || focusIn.current);
 
+  // A new urgent report is said once, in the pane's own polite status line (the one "N new" uses).
+  const arrived = useUrgentAnnouncement(queue);
   const people = queue.groups.length;
   const summary = listOf([t('hub.queue.people', { count: people }), t('hub.reports.row.reports', { count: queue.reports })], locale);
 
@@ -137,6 +140,7 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
             onChange={(v) => go(v === 'appeals' ? { name: 'appeals' } : { name: 'reports', status: 'open' })}
           />
         )}
+        {piece === undefined && !appealsView && <UrgentChip />}
         {canTake && !appealsView && (
           <button type="button" className="cw-take" onClick={() => void actions.takeNext()} {...(shortcuts ? { 'aria-keyshortcuts': 'N' } : {})}>
             <span className="cw-take-text">
@@ -164,6 +168,11 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
         {!simple && !appealsView && <ReasonFilter />}
       </div>
       <div className="cw-newbar" role="status">
+        {arrived !== null && (
+          <span key={arrived.key} className="cw-sr">
+            {arrived.text}
+          </span>
+        )}
         {!appealsView && queue.incoming > 0 && (
           <button type="button" className="cw-newpill" title={t('hub.queue.newTitle')} onClick={queue.showIncoming}>
             {t('hub.queue.new', { count: queue.incoming })}
@@ -260,6 +269,7 @@ function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; s
           {!simple && <PersonChip person={g.person} />}
         </span>
         <span className="cw-case-cats">
+          {g.urgent === true && <Tag>{t('hub.urgent.row')}</Tag>}
           {g.reasons.map((r) => (
             <span key={r.id ?? 'none'} className="cw-cat">
               {reasonChip(t, r.label)}

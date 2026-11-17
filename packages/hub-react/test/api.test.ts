@@ -1024,6 +1024,7 @@ describe('what is marked @experimental', () => {
     expect(headless.experimentalMembers).toMatchInlineSnapshot(`
       [
         "Changes.appeals",
+        "Changes.asked",
         "Changes.urgent",
         "DecideInput.rename",
         "DecideResult.rename",
@@ -1079,11 +1080,15 @@ describe('what is marked @experimental', () => {
         "PolicyLayer.rooms",
         "PolicyLayer.safety",
         "PolicyLayer.signals",
+        "QueueGroup.urgent",
         "ReportSummary.boosted",
         "ReportSummary.escalatedTo",
         "ReportSummary.handoffAt",
         "ReportSummary.urgent",
         "ReporterRecord.accuracy",
+        "Session.safety",
+        "StaffReport.evidence",
+        "StaffReport.surge",
         "Suggestion.signals",
       ]
     `);

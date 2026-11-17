@@ -76,6 +76,7 @@ export const partLoaders: {
   personPrivacy: () => Promise<ComponentType<PersonPrivacyProps>>;
   caseHold: () => Promise<ComponentType<CaseHoldProps>>;
   playerPreview: () => Promise<ComponentType<PlayerPreviewProps>>;
+  whatToDo: () => Promise<ComponentType<{ id: string }>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
@@ -96,6 +97,7 @@ export const partLoaders: {
   personPrivacy: () => import('./person/Privacy.js').then((m) => m.PersonPrivacy),
   caseHold: () => import('./case/Hold.js').then((m) => m.CaseHold),
   playerPreview: () => import('./preview/PlayerPreview.js').then((m) => m.PlayerPreview),
+  whatToDo: () => import('./case/WhatToDo.js').then((m) => m.WhatToDo),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -176,6 +178,7 @@ function PreviewUnavailable() {
     </p>
   );
 }
+const whatToDo = lazyPart(() => partLoaders.whatToDo(), true);
 const playerPreview = lazyPart(() => partLoaders.playerPreview(), true, <p className="cw-hint cw-pv-hold" aria-hidden="true">{'\u00a0'}</p>, <PreviewUnavailable />);
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
@@ -229,6 +232,9 @@ export const LazyCaseHold = caseHold.Part;
 /** "What the player sees", inside an action (the decision bar, Simple's card, the Person forms, revoke, the appeal card): loaded the first time an action shows it; an optional extra, never an error. */
 export const LazyPlayerPreview = playerPreview.Part;
 
+/** The urgent case's "What to do" panel (the owner's guidance, the studio contact and the two buttons): loaded when an urgent case opens with the panel showing; an optional extra, never an error. */
+export const LazyWhatToDo = whatToDo.Part;
+
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
@@ -250,6 +256,7 @@ export function resetLazyParts(): void {
   personPrivacy.reset();
   caseHold.reset();
   playerPreview.reset();
+  whatToDo.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

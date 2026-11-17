@@ -224,6 +224,12 @@ export interface Claim {
  * @experimental
  */
 export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
+  /** Who marked the case as passed to the game's safety team and when (the first mark only), or null. Staff ids, never a player's. @experimental */
+  handoff?: { at: number; by: string | null } | null;
+  /** With `desk.workflow` on: the staff thread, oldest first. Absent with it off. @experimental */
+  comments?: ReportComment[];
+  /** With `desk.workflow` on: the second look asked of a senior or the owner, or null. Absent with it off. @experimental */
+  escalation?: ReportEscalation | null;
   reportedReasonLabel?: string | null;
   targetHandleFlagged?: boolean;
   reporterHandleFlagged?: boolean;
@@ -235,7 +241,7 @@ export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
    * `noticeText` is on each line some person wrote themselves: the text the player's notice shows for it (delivered, or starred where a term was
    * blocked, never raw). Absent from an older server and from a line nobody wrote.
    */
-  excerpt: Array<StaffReport['excerpt'][number] & { handleFlagged?: boolean; noticeText?: string }>;
+  excerpt: Array<StaffReport['excerpt'][number] & { handleFlagged?: boolean; noticeText?: string; removable?: boolean }>;
 };
 
 /**
@@ -297,6 +303,11 @@ export interface Changes {
    * @experimental
    */
   urgent?: number;
+  /**
+   * With `desk.workflow` on: how many open reports were asked of a senior or the owner for a second look. Absent with it off and from an older server.
+   * @experimental
+   */
+  asked?: number;
 }
 
 /**

@@ -33,6 +33,7 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
         <div className="cw-qrow-who">
           <span className="cw-qrow-name">{name}</span>
           <PersonChip person={group.person} />
+          {group.urgent === true && <Tag>{t('hub.urgent.row')}</Tag>}
           {group.reasons.map((r) => (
             <Tag key={r.id ?? 'none'}>{reasonChip(t, r.label)}</Tag>
           ))}

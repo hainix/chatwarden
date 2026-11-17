@@ -5,7 +5,7 @@ import { BANNER_AFTER_FAILURES, adopt, pollDelay, reconcile } from '../live.js';
 import type { ShownRow } from '../live.js';
 import { filterGroups, groupQueue, hasRanker, loadRanker } from '../queue.js';
 import type { QueueFilter, QueueGroup } from '../queue.js';
-import type { Claim } from '../types.js';
+import type { Claim, ReportSummary } from '../types.js';
 import type { PageSource, Timers } from './env.js';
 import { createStore } from './store.js';
 import type { Store } from './store.js';
@@ -58,6 +58,11 @@ export interface LiveQueueState {
   minute: number;
   /** The appeals waiting, as `GET /changes` last said (only for a caller who may read appeals while they are on); absent otherwise and from an older server. */
   appeals?: number;
+  /**
+   * How many open reports are urgent: what `GET /changes` last said, else (an older server) what the groups hold. The chip reads it; the groups carry the urgent reports themselves, found
+   * by `GET /reports?urgent=1` even when they are older than the pages the queue loads.
+   */
+  urgent: number;
   /** Counts every read of the queue that was put to use, so a screen can reload its own data when the queue moved. */
   revision: number;
   /** When the last read succeeded (the hub's clock), or null. */
@@ -167,6 +172,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     incoming: 0,
     partial: false,
     reports: 0,
+    urgent: 0,
     connection: page.online() ? 'live' : 'offline',
     authError: null,
     minute: 0,
@@ -211,7 +217,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   const keep = (person: string): boolean => interacting || person === openPerson;
 
   /** Reads the queue and puts it on screen: in place (`refresh`), or as it is (`adopt`, for the first read and by request). */
-  const read = async (mode: 'adopt' | 'refresh', known?: { token: string; appeals?: number }): Promise<QueueGroup[]> => {
+  const read = async (mode: 'adopt' | 'refresh', known?: { token: string; appeals?: number; urgent?: number }): Promise<QueueGroup[]> => {
     // Reads can overlap (a poll, Take next, Try again): only the one started last is put to use, so a slow old answer never
     // overwrites a newer one.
     const mine = ++seq;
@@ -219,18 +225,21 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     const seen = known ?? (await client.changes());
     const at = seen.token;
     const all = await fetchAllOpen(client);
+    // An urgent report older than the pages read is found by the urgent list (only asked when the count says there is one), and merged in.
+    const items = await withUrgent(client, all.items, seen.urgent);
     // Longest wait first, unless the server sends AI reads: then the `priority` sort (wait, open reports, the read, the reporter's record).
-    const reads = all.items.some((r) => r.ai != null);
+    const reads = items.some((r) => r.ai != null);
     if (reads) await loadRanker();
     const ranked = reads && hasRanker();
-    const groups = groupQueue(all.items, { sort: reads ? 'priority' : 'oldest', now: now(), rankDown: { now: now() } });
+    const groups = groupQueue(items, { sort: reads ? 'priority' : 'oldest', now: now(), rankDown: { now: now() } });
     if (mine !== seq) return groups;
     token = at;
     commit((prev) => {
       const { appeals: _before, ...base } = prev;
       void _before;
       const shown = mode === 'adopt' || prev.status !== 'ready' ? { rows: adopt(groups), incoming: 0 } : reconcile(prev.rows, groups, keep);
-      return { ...base, ...(seen.appeals === undefined ? {} : { appeals: seen.appeals }), status: 'ready', error: null, groups, ranked, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: all.items.length, updatedAt: now(), revision: prev.revision + 1 };
+      const urgent = seen.urgent ?? groups.reduce((n, g) => n + (g.urgentOpen ?? 0), 0);
+      return { ...base, ...(seen.appeals === undefined ? {} : { appeals: seen.appeals }), urgent, status: 'ready', error: null, groups, ranked, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: items.length, updatedAt: now(), revision: prev.revision + 1 };
     });
     return groups;
   };
@@ -482,6 +491,24 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     },
   };
   return api;
+}
+
+/** The urgent reports are read at most this many pages (200 each): an urgent queue longer than that is a queue nobody can work from the chip. */
+const URGENT_MAX_PAGES = 2;
+
+/**
+ * The open reports and the urgent ones the open pages did not reach, once each (by id). The urgent list is only asked when `GET /changes` says
+ * there is an urgent report; a failed urgent read leaves the ordinary list as it is (the queue is never taken down by it).
+ */
+async function withUrgent(client: HubClient, items: ReportSummary[], urgent: number | undefined): Promise<ReportSummary[]> {
+  if (urgent === undefined || urgent <= 0) return items;
+  try {
+    const extra = await fetchAll((cursor) => client.listReports({ urgent: true, limit: QUEUE_PAGE, ...(cursor === undefined ? {} : { cursor }) }), { maxPages: URGENT_MAX_PAGES });
+    const seen = new Set(items.map((r) => r.id));
+    return [...items, ...extra.items.filter((r) => !seen.has(r.id))];
+  } catch {
+    return items;
+  }
 }
 
 function fetchAllOpen(client: HubClient) {

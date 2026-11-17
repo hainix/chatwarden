@@ -1,12 +1,14 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { AiReadSlot } from '../case/AiRead.js';
+import { CaseMenu } from '../case/CaseMenu.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
 import { useCase } from '../case/CaseContext.js';
 import { DecisionBar } from '../case/DecisionBar.js';
 import { isWaiting } from '../decisions.js';
 import { RecordItem } from '../case/Record.js';
 import { Transcript } from '../case/Transcript.js';
+import { UrgentStrip } from '../case/UrgentStrip.js';
 import type { LinePicks } from '../case/Transcript.js';
 import { useHub } from '../context.js';
 import { LazyCaseHold } from '../lazyParts.js';
@@ -53,7 +55,9 @@ function Header({ detail }: { detail: ReportDetail }) {
         </span>
         <span className="cw-casehead-gap" />
         <Viewing />
+        <CaseMenu />
       </div>
+      <UrgentStrip />
       {showHold && <LazyCaseHold reportId={report.id} hold={held} canHold={can('legal.hold')} canRelease={me.role === 'owner'} onChanged={read.reload} />}
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
         <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>

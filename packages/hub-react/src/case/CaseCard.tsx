@@ -28,6 +28,8 @@ import { AiReadSlot } from './AiRead.js';
 import { RuleField } from './RuleField.js';
 import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { Line } from './Transcript.js';
+import { CaseMenu } from './CaseMenu.js';
+import { UrgentStrip } from './UrgentStrip.js';
 
 // The Simple case view: one card per case. Who, why, what they said, their record, the ladder's suggestion and three ways to
 // answer it. Everything underneath is the Detailed workbench's: the same case read, the same claim, the same decision hold (the five
@@ -399,10 +401,12 @@ export function CaseCard() {
               <NameValue text={personName(target, people, t, true)} flagged={target.handleFlagged} place="head" />
             </h2>
             <NameToggle flagged={target.handleFlagged} place="head" />
+            <CaseMenu />
             <p className="cw-scard-sub">
               {reportedLine(t, locale, report, people, now(), group === null ? null : { reports: group.reports, reasons: group.reasons })}
             </p>
           </header>
+          <UrgentStrip />
           <ReporterWarning report={report} people={people} />
           <AiReadSlot read={c.aiRead} />
           <Said report={report} target={target} people={people} />

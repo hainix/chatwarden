@@ -248,8 +248,10 @@ describe('the stylesheet is a complete token contract', () => {
   // settings forms and the Person page's signal lines add about 2 KB raw. The gzipped limit (the size test) is unchanged and holds.
   // 128 KB at 0.1.13 (AI levels 3 and 4, release 1): the gate table and the Person page's "do not automate" mark add about 2 KB raw; the AI, appeals and names
   // screens of 0.1.7 to 0.1.9 had already brought the file to the old cap. Raised generously, as every release does; the gzipped limit (the size test) is what counts.
-  it('is under 128 KB raw (the size test holds it to 18 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(128 * 1024);
+  // 160 KB at 0.2.0 (urgent lane, desk, careful view and rooms): the chip, strip, panels and menus of the urgent-desk-and-rooms theme add about 10 KB raw, on top of the
+  // names, filters and privacy themes of the same release. Raised generously by the release's rule; the gzipped limit (the size test) is what counts.
+  it('is under 160 KB raw (the size test holds it to its gzipped budget)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(160 * 1024);
   });
 });
 

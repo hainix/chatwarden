@@ -1,5 +1,5 @@
 import { REPORTER_RANK_LAPSE_MS } from '@chatwarden/core';
-import { liveClaim } from './claims.js';
+import { holderOf, liveClaim } from './claims.js';
 import type { AiBrief, Claim, ReportCategory, ReportSummary } from './types.js';
 
 /**
@@ -69,6 +69,16 @@ export interface QueueGroup {
    * capped half point (`signals.conduct`); nothing is hidden, and no other order or chip reads it.
    */
   boosted?: true;
+  /**
+   * Set (true) when an open report of the person is urgent (its reason is flagged urgent, or a moderator marked it). `groupQueue` pins such a group above every other one in every sort,
+   * and the habitual-reporter mark never applies to it. Absent when none is, so a queue with no urgent report has groups as they were.
+   * @experimental
+   */
+  urgent?: true;
+  /** With `urgent`: how many open reports of the person are urgent. */
+  urgentOpen?: number;
+  /** With `urgent`: when the oldest open urgent report was filed. */
+  oldestUrgentAt?: number;
 }
 
 /**
@@ -188,6 +198,8 @@ export function groupQueue(
     let oldestOpenAt: number | null = null;
     let habitualOpen = 0;
     let boosted = false;
+    let urgentOpen = 0;
+    let oldestUrgentAt: number | null = null;
     let claim: Claim | null = null;
     const viewing = new Set<string>();
     for (const r of list) {
@@ -219,6 +231,10 @@ export function groupQueue(
       }
       if (r.status === 'open') {
         if (r.boosted === true) boosted = true;
+        if (r.urgent === true) {
+          urgentOpen += 1;
+          oldestUrgentAt = oldestUrgentAt === null ? r.createdAt : Math.min(oldestUrgentAt, r.createdAt);
+        }
         open += 1;
         if (r.reporterAccuracy?.habitual === true) habitualOpen += 1;
         oldestOpenAt = oldestOpenAt === null ? r.createdAt : Math.min(oldestOpenAt, r.createdAt);
@@ -252,9 +268,11 @@ export function groupQueue(
       viewing: [...viewing].sort(),
       summaries: list,
       ...(boosted ? { boosted: true as const } : {}),
+      ...(urgentOpen > 0 ? { urgent: true as const, urgentOpen, oldestUrgentAt: oldestUrgentAt as number } : {}),
+      // An urgent case is never ranked lower: a threat from a habitual false reporter is still read first.
       ...(rankDown === undefined
         ? {}
-        : { rankedLow: open > 0 && open <= RANK_DOWN_OPEN_MAX && habitualOpen === open && rankDown.now - (oldestOpenAt as number) < REPORTER_RANK_LAPSE_MS }),
+        : { rankedLow: urgentOpen === 0 && open > 0 && open <= RANK_DOWN_OPEN_MAX && habitualOpen === open && rankDown.now - (oldestOpenAt as number) < REPORTER_RANK_LAPSE_MS }),
     });
   }
 
@@ -267,10 +285,10 @@ export function groupQueue(
   };
   if (sort === 'priority' && ranker !== null) ranker(groups, options);
   else groups.sort((a, b) => order[sort === 'priority' ? 'oldest' : sort](a, b) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
-  const sorted = groups;
-  if (rankDown === undefined) return sorted;
   // A stable partition of the chosen order: ordinary cases first, ranked-low ones after, each part keeping its order.
-  return [...sorted.filter((g) => g.rankedLow !== true), ...sorted.filter((g) => g.rankedLow === true)];
+  const sorted = rankDown === undefined ? groups : [...groups.filter((g) => g.rankedLow !== true), ...groups.filter((g) => g.rankedLow === true)];
+  // Urgent cases are pinned above everything else, after every sort (design 5.2), each part keeping its order.
+  return sorted.some((g) => g.urgent === true) ? [...sorted.filter((g) => g.urgent === true), ...sorted.filter((g) => g.urgent !== true)] : sorted;
 }
 
 const NONE: ReadonlySet<string> = new Set();
@@ -326,6 +344,46 @@ export function filterGroups(groups: readonly QueueGroup[], filter: QueueFilter,
     if (filter.claim === 'mine') return held !== null && held.by === me;
     return true;
   });
+}
+
+/**
+ * What the urgent chip says and opens (design 5.2): how many open urgent reports the groups hold, how long the oldest has waited, and the report to open: the oldest urgent
+ * report of a case nobody else holds (a lapsed claim, or yours, is free), else of the oldest case when every urgent case is held (`heldBy` is then who holds it).
+ * Pure: the clock and the caller come in.
+ * @experimental
+ */
+export interface UrgentSummary {
+  count: number;
+  oldestAt: number | null;
+  /** The report the chip opens, or null with nothing urgent. */
+  open: { reportId: string; person: string } | null;
+  /** Who holds the case the chip opens, when someone else does. */
+  heldBy: string | null;
+}
+
+export function urgentSummary(groups: readonly QueueGroup[], me: string, now: number): UrgentSummary {
+  let count = 0;
+  let oldestAt: number | null = null;
+  const urgent: QueueGroup[] = [];
+  for (const g of groups) {
+    if (g.urgent !== true) continue;
+    urgent.push(g);
+    count += g.urgentOpen ?? 0;
+    const at = g.oldestUrgentAt ?? null;
+    if (at !== null && (oldestAt === null || at < oldestAt)) oldestAt = at;
+  }
+  const byAge = (a: QueueGroup, b: QueueGroup): number => (a.oldestUrgentAt ?? 0) - (b.oldestUrgentAt ?? 0) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0);
+  const free = urgent.filter((g) => holderOf(g.claim, me, now).kind !== 'other').sort(byAge)[0];
+  const target = free ?? [...urgent].sort(byAge)[0];
+  if (target === undefined) return { count, oldestAt, open: null, heldBy: null };
+  const wanted = (target.summaries ?? []).filter((r) => r.status === 'open' && r.urgent === true).sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1))[0];
+  const holder = holderOf(target.claim, me, now);
+  return {
+    count,
+    oldestAt,
+    open: { reportId: wanted?.id ?? (target.reportIds[0] as string), person: target.person },
+    heldBy: free === undefined && holder.kind === 'other' ? holder.by : null,
+  };
 }
 
 /** @experimental */

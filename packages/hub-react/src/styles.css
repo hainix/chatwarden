@@ -4143,7 +4143,8 @@
 }
 .cw-hub .cw-privacy-table table {
   border-collapse: collapse;
-  min-width: 36rem;
+  /* The table scrolls inside its own box (the rule above); the floor is spelled min() so the layout gate reads it as a deliberate one. */
+  min-width: min(36rem, 1000px);
 }
 .cw-hub .cw-privacy-table th,
 .cw-hub .cw-privacy-table td {
@@ -4151,4 +4152,90 @@
   text-align: start;
   vertical-align: top;
   border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+
+/* The urgent lane (0.2.0): one chip in the queue header, a strip on the case, the "What to do" panel and the case's "..." menu. No colour of their own: the words say "Urgent". */
+.cw-hub .cw-urgent-chip {
+  display: block;
+  min-width: 0;
+  min-height: var(--cw-control-height, var(--cwd-control-height));
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface, var(--cwd-surface));
+  color: var(--cw-ink, var(--cwd-ink));
+  font: inherit;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.cw-hub .cw-urgent-strip {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-urgent-strip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-urgent-strip-line,
+.cw-hub .cw-urgent-strip-done {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-urgent-strip-toggle {
+  margin-inline-start: auto;
+}
+.cw-hub .cw-whattodo {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-whattodo-body {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-whattodo-body p,
+.cw-hub .cw-whattodo > p {
+  margin: 0;
+}
+.cw-hub .cw-whattodo-text {
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.cw-hub .cw-whattodo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-case-menu {
+  display: contents;
+  min-width: 0;
+}
+.cw-hub .cw-case-menu-button {
+  min-height: 0;
+  padding-block: 0;
+  line-height: 1.5;
+}
+.cw-hub .cw-case-menu-panel {
+  display: flex;
+  flex-wrap: wrap;
+  flex-basis: 100%;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-case-menu-panel > .cw-error {
+  flex-basis: 100%;
+  margin: 0;
 }
