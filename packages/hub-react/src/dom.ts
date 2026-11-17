@@ -133,3 +133,21 @@ export function registerHub(root: Element, entry: HubEntry): () => void {
     }
   };
 }
+
+/**
+ * Hands the browser one file to save: a Blob behind an object URL, a link clicked once and removed again. It is the page's, not the hub's root: a download belongs to the
+ * page (a link inside a shadow root would click the same). Nothing is kept: no copy in storage, no network call.
+ */
+export function saveBlob(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.rel = 'noopener';
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // After the click has been handled; the file is already on its way to the user's disk.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}

@@ -4118,3 +4118,37 @@
 .cw-hub .cw-fhits .cw-table-wrap {
   overflow-x: auto;
 }
+/* Privacy requests (the Settings panel, the erase dialog's counts and the statement table). */
+.cw-hub .cw-privacy-counts {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin: 0;
+}
+.cw-hub .cw-privacy-counts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-privacy-counts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.cw-hub .cw-privacy-kept {
+  margin: 0;
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+}
+.cw-hub .cw-privacy-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.cw-hub .cw-privacy-table table {
+  border-collapse: collapse;
+  min-width: 36rem;
+}
+.cw-hub .cw-privacy-table th,
+.cw-hub .cw-privacy-table td {
+  padding: var(--cw-space-2, var(--cwd-space-2));
+  text-align: start;
+  vertical-align: top;
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}

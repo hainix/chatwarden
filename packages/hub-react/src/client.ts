@@ -8,6 +8,11 @@ import type {
   AppealRow,
   AppealStats,
   AutomationInput,
+  ErasePreviewView,
+  ErasureReceiptView,
+  HoldCodeView,
+  PrivacyExportView,
+  PrivacyStatementView,
   AiActingInput,
   AiActingState,
   AiActingStep,
@@ -231,6 +236,20 @@ export interface HubClient {
    */
   setAutomation(person: string, input: AutomationInput): Promise<{ ok: true }>;
 
+  // Privacy requests and legal hold (0.2.0). The owner's routes (fixed on the server); the hub only offers them to the owner and reads the answer.
+  /** `POST /privacy/find`: the person's ref for an account id, or `{ ref: null }`. Creates no one. Owner only. @experimental */
+  privacyFind(accountId: string): Promise<{ ref: string | null }>;
+  /** `GET /people/:ref/privacy/export`: the export of one person. The route audits before it answers, so a failed audit rejects and nothing is returned. Owner only. @experimental */
+  privacyExport(ref: string): Promise<PrivacyExportView>;
+  /** `POST /people/:ref/privacy/erase`: with `dryRun` the preview (nothing written), otherwise the receipt. `confirm` must be the person's ref. Owner only. @experimental */
+  privacyErase(ref: string, input: { keep: 'safety' | 'none'; confirm: string; dryRun?: boolean }): Promise<ErasePreviewView | ErasureReceiptView>;
+  /** `GET /privacy/statement`: what the kit keeps and for how long. Owner only. @experimental */
+  privacyStatement(): Promise<PrivacyStatementView>;
+  /** `PUT /reports/:id/hold` (needs `legal.hold`, a senior's by default): hold a report for one of the closed codes. 409 `already_held`. @experimental */
+  holdReport(id: string, code: HoldCodeView): Promise<{ ok: true }>;
+  /** `DELETE /reports/:id/hold`: release a hold. Owner only. @experimental */
+  releaseHold(id: string): Promise<{ ok: true }>;
+
   // Rule gaps
   /** `GET /gaps`. */
   listGaps(): Promise<{ items: GapRow[] }>;
@@ -364,6 +383,12 @@ export function createHubClient(transport: Transport): HubClient {
     appealStats: (options = {}) => get<AppealStats>('/appeals/stats', q({ days: options.days })),
     rename: (ref, input) => post<{ ok: true }>(`/people/${enc(ref)}/rename`, input),
     setAutomation: (person, input) => call<{ ok: true }>({ method: 'PUT', path: `/people/${enc(person)}/automation`, body: input }),
+    privacyFind: (accountId) => post<{ ref: string | null }>('/privacy/find', { accountId }),
+    privacyExport: (ref) => get<PrivacyExportView>(`/people/${enc(ref)}/privacy/export`),
+    privacyErase: (ref, input) => post<ErasePreviewView | ErasureReceiptView>(`/people/${enc(ref)}/privacy/erase`, input),
+    privacyStatement: () => get<PrivacyStatementView>('/privacy/statement'),
+    holdReport: (id, code) => call<{ ok: true }>({ method: 'PUT', path: `/reports/${enc(id)}/hold`, body: { code } }),
+    releaseHold: (id) => call<{ ok: true }>({ method: 'DELETE', path: `/reports/${enc(id)}/hold` }),
 
     personHistory: (ref, options = {}) => get<PersonHistory>(`/people/${enc(ref)}/history`, q({ limit: options.limit })),
     listSanctions: (query = {}) => get<Page<SanctionRow>>('/sanctions', q({ cursor: query.cursor, limit: query.limit, source: query.source })),

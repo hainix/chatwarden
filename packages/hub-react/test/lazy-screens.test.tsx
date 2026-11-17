@@ -87,3 +87,62 @@ describe('the pieces of the same names', () => {
     expect(container.querySelector('[data-cw-piece="RecentActions"] .cw-screen-title')).not.toBeNull();
   });
 });
+
+describe('the privacy and legal-hold parts load when needed, not with the hub', () => {
+  it('a moderator opening the Person page, the case and Advanced never asks for the privacy or hold code or routes', async () => {
+    const { partLoaders, resetLazyParts } = await import('../src/lazyParts.js');
+    // Parts fetched by an earlier test stay loaded: forget them so this one sees what it asks for.
+    resetLazyParts();
+    const asked: string[] = [];
+    const real = { ...partLoaders };
+    for (const name of ['personPrivacy', 'privacyPanel', 'caseHold'] as const) {
+      (partLoaders as Record<string, () => unknown>)[name] = () => {
+        asked.push(name);
+        return real[name]();
+      };
+    }
+    try {
+      const w = await hubWorld({ role: 'moderator' });
+      const f = await w.file();
+      for (const path of [`/people/${f.person}`, `/reports/${f.id}`, '/settings/advanced']) {
+        const { unmount } = renderHub(w, { path });
+        await waitFor(() => expect(screen.queryByText('Loading', { exact: false })).not.toBeInTheDocument());
+        unmount();
+      }
+      expect(asked).toEqual([]);
+      expect(w.sent.filter((r) => /privacy|hold|bundle/.test(r.path))).toEqual([]);
+    } finally {
+      Object.assign(partLoaders, real);
+    }
+  });
+
+  it("the owner's Person page asks for the Data requests part, the Advanced screen for the Privacy requests panel, and a held case for the hold part", async () => {
+    const { partLoaders, resetLazyParts } = await import('../src/lazyParts.js');
+    resetLazyParts();
+    const asked = new Set<string>();
+    const real = { ...partLoaders };
+    for (const name of ['personPrivacy', 'privacyPanel', 'caseHold'] as const) {
+      (partLoaders as Record<string, () => unknown>)[name] = () => {
+        asked.add(name);
+        return real[name]();
+      };
+    }
+    try {
+      const w = await hubWorld({ role: 'owner', actor: 'owen@example.test' });
+      const f = await w.file();
+      await w.cw.legal.hold(f.id, { code: 'other', actor: 'senior_gus' });
+      for (const [path, part] of [
+        [`/people/${f.person}`, 'personPrivacy'],
+        ['/settings/advanced', 'privacyPanel'],
+        [`/reports/${f.id}`, 'caseHold'],
+      ] as const) {
+        const { unmount } = renderHub(w, { path });
+        await waitFor(() => expect(asked.has(part), part).toBe(true));
+        unmount();
+      }
+      expect([...asked].sort()).toEqual(['caseHold', 'personPrivacy', 'privacyPanel']);
+    } finally {
+      Object.assign(partLoaders, real);
+    }
+  });
+});

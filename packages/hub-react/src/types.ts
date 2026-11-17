@@ -37,7 +37,7 @@ import type {
   StaffReport,
   Suggestion,
 } from '@chatwarden/core';
-import type { FilterCheckResult, FilterKeyCounts, FilterTestResult } from '@chatwarden/core';
+import type { ErasePreview, ErasureReceipt, FilterCheckResult, FilterKeyCounts, FilterTestResult, HoldCode, PrivacyExport, PrivacyStatement } from '@chatwarden/core';
 import type { AiReadAgainBody, ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
 export type { PolicyLayer, PolicySection };
@@ -55,6 +55,22 @@ export interface FilterStatsView {
 export type FilterTestView = FilterTestResult;
 /** `POST /filters/check`: a candidate over recent lines. @experimental */
 export type FilterCheckView = FilterCheckResult;
+
+/** `GET /people/:ref/privacy/export`: everything the kit holds about one person, as the file the owner downloads. @experimental */
+export type PrivacyExportView = PrivacyExport;
+/** `GET /privacy/statement`: what the kit keeps and for how long, category by category. @experimental */
+export type PrivacyStatementView = PrivacyStatement;
+/** `POST /people/:ref/privacy/erase` with `dryRun`: what an erase would remove and keep. Nothing was written. @experimental */
+export type ErasePreviewView = ErasePreview;
+/** `POST /people/:ref/privacy/erase`: the receipt (counts and words, no person). @experimental */
+export type ErasureReceiptView = ErasureReceipt;
+/** The reasons a report can be held for: a closed list, no free text. @experimental */
+export type HoldCodeView = HoldCode;
+/** What `report.hold` carries on a held report: the code and when, never who. @experimental */
+export interface HoldView {
+  code: HoldCode;
+  at: number;
+}
 
 /**
  * The editable settings as the hub reads them: what is in force, what is saved, and what the kit left out. `limits` is the kit's chat rate and
@@ -202,6 +218,8 @@ export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
   reportedReasonLabel?: string | null;
   targetHandleFlagged?: boolean;
   reporterHandleFlagged?: boolean;
+  /** Present only while the report is held for legal reasons (`legal.hold`): the code and the time, never who. */
+  hold?: HoldView;
   /**
    * `noticeText` is on each line some person wrote themselves: the text the player's notice shows for it (delivered, or starred where a term was
    * blocked, never raw). Absent from an older server and from a line nobody wrote.

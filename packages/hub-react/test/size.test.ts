@@ -26,7 +26,10 @@ const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 // 83,300. The appeal card, the appeals list, the Appeals screen and the Settings panels are chunks loaded when used.
 // Raised to 92 KB at 0.2.0 (names and "What the player sees"), by the same rule: the first load gains the form's `rename` field and its row and off-hint in the
 // decision bar, the client types, the op builders and the lazy wrapper, about 2 KB over the 88 KB it had reached (measured 90,661 gzipped). The panel, its hooks and its words are one lazy chunk.
-const BUDGET = 92 * 1024;
+// Raised to 96 KB at 0.2.0 (privacy requests and legal hold), by the same rule: the first load gains the six audit labels, the wire types and client methods, the Person and
+// case plug-in points and the lazy wrappers, about 1.5 KB over the 92 KB it had reached (measured 94,498 gzipped before the raise). The Person page's Data requests, the erase
+// dialog, the Privacy requests panel, the case's hold dialogs and all their words (`privacy/i18n.ts`) are lazy chunks.
+const BUDGET = 96 * 1024;
 const ENTRY_BUDGET = 52 * 1024;
 
 async function bundle() {
@@ -118,6 +121,12 @@ describe('bundle size', () => {
     const { eagerInputs, chunkRoots } = await bundle();
     expect(chunkRoots.some((r) => r.endsWith('screens/FilterSettings.tsx'))).toBe(true);
     expect(eagerInputs.filter((i) => ['src/filters/', 'screens/FilterSettings', 'policy/filters.ts'].some((part) => i.includes(part)))).toEqual([]);
+  });
+
+  it('the privacy and legal-hold parts are their own lazy chunks: a first load carries none of their dialogs, panel or words (only the types, the client calls and the plug-in points)', async () => {
+    const { eagerInputs, chunkRoots } = await bundle();
+    for (const root of ['person/Privacy.tsx', 'screens/PrivacySettings.tsx', 'case/Hold.tsx']) expect(chunkRoots.some((r) => r.endsWith(root)), root).toBe(true);
+    expect(eagerInputs.filter((i) => ['person/Privacy', 'person/ErasePreview', 'screens/PrivacySettings', 'case/Hold', 'privacy/i18n', 'privacy/download'].some((part) => i.includes(part)))).toEqual([]);
   });
 
   it('bundles none of React, React DOM or the kit', async () => {

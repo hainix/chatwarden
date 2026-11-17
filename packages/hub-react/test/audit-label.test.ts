@@ -107,3 +107,33 @@ describe('ACTION_LABEL', () => {
     expect(ACTION_LABEL.suggest).toBe('hub.audit.label.suggest');
   });
 });
+
+describe('the privacy and legal-hold audit actions (0.2.0)', () => {
+  const SIX = ['privacy.find', 'privacy.export', 'privacy.erase', 'legal.hold', 'legal.release', 'legal.bundle'] as const;
+
+  it('each of the six has a label key, and its text is in the catalog', () => {
+    for (const action of SIX) {
+      expect(AUDIT_ACTIONS, action).toContain(action);
+      const key = ACTION_LABEL[action];
+      expect(key, action).toMatch(/^hub\.audit\.label\.(privacy|legal)\./);
+      expect((en as Record<string, string>)[key], key).toBeTruthy();
+    }
+  });
+
+  it('the words say what was done, in plain terms, with no claim of compliance', () => {
+    const text = SIX.map((a) => (en as Record<string, string>)[ACTION_LABEL[a]] as string);
+    expect(text).toEqual([
+      'Looked up a person for a privacy request',
+      'Exported the data held about a person',
+      'Erased the data held about a person',
+      'Held a report for legal reasons',
+      'Released a legal hold',
+      'Downloaded the evidence bundle of a report',
+    ]);
+    for (const t of text) expect(t).not.toMatch(/complian|lawful|GDPR/i);
+  });
+
+  it('every action the kit records has a label (a new action is a compile error until it has a word)', () => {
+    for (const action of AUDIT_ACTIONS) expect(ACTION_LABEL[action], action).toBeTruthy();
+  });
+});

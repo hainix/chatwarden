@@ -53,6 +53,8 @@ import type { HubCatalog as AiCatalog } from './i18n.js';
  * @experimental
  */
 export const loadAiWords = (): Promise<AiCatalog> => import('./ai/i18n.js').then((m) => m.aiEn);
+/** The English words of the privacy and legal-hold parts (the Person page's Data requests, the erase dialog, Settings > Advanced > Privacy requests, the case's Legal hold), for an adopter to spread into their own catalog. Loaded on demand. @experimental */
+export const loadPrivacyWords = (): Promise<Readonly<Record<string, string>>> => import('./privacy/i18n.js').then((m) => m.privacyEn);
 
 export { buildPath, hashRouter, memoryRouter, normalizePath, parseRoute, tabOf } from './router.js';
 export type { HubRouter, MemoryRouter, ObservableRouter, QueueStatus, Route, SettingsSection, TabName } from './router.js';

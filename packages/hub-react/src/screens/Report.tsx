@@ -9,6 +9,7 @@ import { RecordItem } from '../case/Record.js';
 import { Transcript } from '../case/Transcript.js';
 import type { LinePicks } from '../case/Transcript.js';
 import { useHub } from '../context.js';
+import { LazyCaseHold } from '../lazyParts.js';
 import { LINES_MAX } from '../decision.js';
 import { NameToggle, NameValue } from '../names.js';
 import { personName } from '../excerpt.js';
@@ -23,9 +24,12 @@ import { Empty, Fetched, Link, PersonChip, Tag, Time } from '../ui.js';
 type TabId = 'evidence' | 'reports' | 'history';
 
 function Header({ detail }: { detail: ReportDetail }) {
-  const { t, locale, now } = useHub();
-  const { people, group } = useCase();
+  const { t, locale, now, can, me } = useHub();
+  const { people, group, detail: read } = useCase();
   const { report } = detail;
+  // Legal hold: a quiet line while the report is held (for everyone who can read it), and `...` items for a senior (hold) and the owner (release). Its own chunk.
+  const held = report.hold ?? null;
+  const showHold = held !== null || can('legal.hold');
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
   const label = report.reportedReason === null || report.reportedReason === undefined ? null : (report.reportedReasonLabel ?? report.reportedReason);
@@ -50,6 +54,7 @@ function Header({ detail }: { detail: ReportDetail }) {
         <span className="cw-casehead-gap" />
         <Viewing />
       </div>
+      {showHold && <LazyCaseHold reportId={report.id} hold={held} canHold={can('legal.hold')} canRelease={me.role === 'owner'} onChanged={read.reload} />}
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
         <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>
         {report.badFaith && <Tag tone="warn">{t('hub.report.tag.badFaith')}</Tag>}

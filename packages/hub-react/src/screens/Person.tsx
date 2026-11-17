@@ -4,7 +4,7 @@ import { ReporterStanding, ReporterTotals } from '../case/ReporterStanding.js';
 import { useHub } from '../context.js';
 import { useHubData } from '../hooks.js';
 import { categoryLabel, groupName, kindLabel } from '../labels.js';
-import { LazyPersonAutomation, LazySignalLines } from '../lazyParts.js';
+import { LazyPersonAutomation, LazyPersonPrivacy, LazySignalLines } from '../lazyParts.js';
 import { LocalReveal, NameToggle, NameValue } from '../names.js';
 import { Revoke } from '../person/Revoke.js';
 import { SanctionForm } from '../person/SanctionForm.js';
@@ -133,15 +133,18 @@ export function Person({ person }: { person: string }) {
 }
 
 function PersonBody({ person, onMarked, history, revoking, setRevoking, onRevoked }: { person: string; onMarked: () => void; history: PersonHistory; revoking: string | null; setRevoking: (id: string | null) => void; onRevoked: () => void }) {
-  const { t, can } = useHub();
+  const { t, can, me } = useHub();
   const standing = history.sanctions.filter((s) => s.active && s.revokedAt === null);
   const entries = useMemo(() => timelineOf(history), [history]);
   const canRevoke = can('sanctions.revoke');
   // "Do not automate" (AI levels 3 and 4): a quiet line while the person is marked, and a `...` item for a senior. Its code is its own chunk, fetched only when one of the two applies.
   const automation = can('automation.write') || history.automation !== undefined ? <LazyPersonAutomation person={person} mark={history.automation ?? null} canWrite={can('automation.write')} onChanged={onMarked} /> : null;
+  // Export and erase (privacy requests): the owner's, behind its own `...`; no one else is offered it, and its code is its own chunk.
+  const privacy = me.role === 'owner' ? <LazyPersonPrivacy person={person} /> : null;
   return (
     <>
       {automation}
+      {privacy}
       <Panel title={t('hub.person.inForce.title')}>
         {standing.length === 0 ? (
           <Empty>{t('hub.person.inForce.none')}</Empty>
