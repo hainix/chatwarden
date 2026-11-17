@@ -59,7 +59,7 @@ export function FilterHits({ labelOf }: { labelOf: (key: string) => string | und
       {open && data !== null && rows.length === 0 && <p className="cw-hint">{t('hub.settings.filters.hits.none')}</p>}
       {open && rows.length > 0 && (
         <div className="cw-table-wrap">
-          <table className="cw-table" aria-label={t('hub.settings.filters.hits.title')}>
+          <table className="cw-table" aria-label={t('hub.settings.filters.hits.title')} aria-describedby={`${id}-flag`}>
             <thead>
               <tr>
                 <th scope="col">{t('hub.settings.filters.hits.rule')}</th>
@@ -84,6 +84,11 @@ export function FilterHits({ labelOf }: { labelOf: (key: string) => string | und
             </tbody>
           </table>
         </div>
+      )}
+      {open && rows.length > 0 && (
+        <p id={`${id}-flag`} className="cw-hint">
+          {t('hub.settings.filters.hits.flagHint')}
+        </p>
       )}
     </details>
   );

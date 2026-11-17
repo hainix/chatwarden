@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { createContext, useContext, useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { FilterAction } from '@chatwarden/core';
 import { useHub } from '../context.js';
@@ -115,10 +115,34 @@ export function NumField({
   );
 }
 
-/** The Community Rule a filter cites. */
+/** The Community Rules in force (active ones, in order), for the picker of a filter's rule; null while they are not known (not read yet, or the role cannot read them). */
+export type FilterRules = ReadonlyArray<{ number: number; title: string }>;
+export const FilterRulesContext = createContext<FilterRules | null>(null);
+
+/**
+ * The Community Rule a filter cites: a menu of the rules in force. A rule that is no longer in force stays shown as the form's value (named as not in use), so the owner sees
+ * what the kit will refuse; it is not offered to pick. Until the rules are known the field is a number, so a role that cannot read them can still read the value.
+ */
 export function RuleField({ value, onChange }: { value: number | undefined; onChange: (v: number | undefined) => void }) {
   const { t } = useHub();
-  return <NumField label={t('hub.settings.filters.rule')} value={value} onChange={onChange} min={1} />;
+  const id = useId();
+  const rules = useContext(FilterRulesContext);
+  if (rules === null) return <NumField label={t('hub.settings.filters.rule')} value={value} onChange={onChange} min={1} />;
+  const listed = value !== undefined && rules.some((r) => r.number === value);
+  return (
+    <div className="cw-field">
+      <label htmlFor={id}>{t('hub.settings.filters.rule')}</label>
+      <select id={id} value={value === undefined ? '' : String(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}>
+        {value === undefined && <option value="">{t('hub.decide.action.rule.choose')}</option>}
+        {value !== undefined && !listed && <option value={String(value)}>{t('hub.settings.filters.rule.inactive', { number: value })}</option>}
+        {rules.map((r) => (
+          <option key={r.number} value={String(r.number)}>
+            {t('hub.decide.action.rule.option', { number: r.number, title: r.title })}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 /** A list of short entries (domains) as chips with a remove button each, and an input to add one. */

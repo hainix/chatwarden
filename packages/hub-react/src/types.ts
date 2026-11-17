@@ -220,6 +220,8 @@ export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
   reporterHandleFlagged?: boolean;
   /** Present only while the report is held for legal reasons (`legal.hold`): the code and the time, never who. */
   hold?: HoldView;
+  /** For a report a chat filter filed, the name of its phrase rule as it is now (a link, personal-info or ratio report has none, nor does a retired rule). */
+  originLabel?: string;
   /**
    * `noticeText` is on each line some person wrote themselves: the text the player's notice shows for it (delivered, or starred where a term was
    * blocked, never raw). Absent from an older server and from a line nobody wrote.

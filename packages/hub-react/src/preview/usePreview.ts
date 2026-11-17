@@ -56,13 +56,18 @@ export function usePlanContext(): PlanContext & { ready: boolean } {
 /**
  * The plan for an op (null while nothing is chosen), with the context it was made in. The time is read when the form changes (and when the minute clock
  * ticks), so an end is worded against the moment the moderator looked, not up to a minute earlier; the plan and the words drawn from it share that one time.
+ * The callers build the op afresh in each render, so the hook holds on to the first of equal ops: what is in it, not which object it is, says the form changed.
  */
 export function usePlan(op: NoticeOp | null): { plan: NoticePlan | null; ctx: PlanContext; ready: boolean } {
   const { ready, ...base } = usePlanContext();
   const { now } = useHub();
-  const at = useMemo(() => now(), [op, base.now, now]);
+  const key = op === null ? '' : JSON.stringify(op);
+  const held = useRef<{ key: string; op: NoticeOp | null }>({ key, op });
+  if (held.current.key !== key) held.current = { key, op };
+  const stable = held.current.op;
+  const at = useMemo(() => now(), [stable, base.now, now]);
   const ctx = useMemo<PlanContext>(() => ({ ...base, now: () => at }), [base.now, base.ruleLabel, base.reporterFeedback, base.appeals, base.refCode, at]);
-  const plan = useMemo(() => (op === null ? null : planNotices(op, ctx)), [op, ctx]);
+  const plan = useMemo(() => (stable === null ? null : planNotices(stable, ctx)), [stable, ctx]);
   return { plan, ctx, ready };
 }
 

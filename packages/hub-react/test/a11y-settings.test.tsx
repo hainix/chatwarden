@@ -315,8 +315,11 @@ describe.each(['light', 'dark'] as const)('axe on names: the panel, the rename f
     expect(await violations(container)).toEqual([]);
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(await screen.findByText('Write a reason. Only staff see it.')).toBeInTheDocument();
+    // A rename always cites a numbered Community Rule: the first Apply says so too, and the second needs one picked.
+    expect(screen.getAllByText('Choose a rule').length).toBeGreaterThan(0);
     expect(await violations(container)).toEqual([]);
     await user.type(screen.getByLabelText('Reason'), 'A name against the rules.');
+    await user.selectOptions(screen.getByLabelText('Community Rule'), '1');
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     await screen.findByText('Asked to choose a new name');
     expect(await violations(container)).toEqual([]);

@@ -57,7 +57,7 @@ other tables are never purged. The dangerous failure is a partial erase that lea
 - Judging legality (section 12), reporting to anyone, verifying who a requester is, contacting a player, or telling a player about an erase.
 - Any URL fetch, resolve, preview or reputation lookup; any model or score in the filters. Filters are deterministic text rules.
 - Regular expressions supplied by an owner. The pattern vocabulary is fixed (section 4.5).
-- Reading spaced-out letters (`g o l d`), spoken digits ("five five five"), or text inside images (same ruling as audit E2).
+- Reading spoken digits ("five five five"), or text inside images (same ruling as audit E2).
 - A player-facing privacy route. Requests reach the adopter by the adopter's own means; the kit has no player endpoint for them.
 - Per-person filter counters or filter strikes. A filter never changes a person's record by itself.
 - Multi-room profiles (`contexts`) and room lock or emergency modes (other themes); this note only makes filters resolvable per room.
@@ -144,7 +144,7 @@ Packs are all-or-nothing per kind: `links`, `personalInfo` and `ratio` are on wh
 
 **Suggested values** (`FILTER_SUGGESTIONS`, `@experimental`, offered behind a hub button): `relaxed` is everything absent; `standard` is
 `links { action: 'flag' }`, `personalInfo { action: 'mask' }`; `strict` adds `ratio { action: 'mask' }` and `links` with
-`newAccountDays: 2`, `action: 'refuse'`. A fourth set, `rmt`, is an English phrase rule (`buy|sell|selling|buying|cheap ~ gold|gp|coins|accounts|
+`action: 'refuse'` (every link not on a list; an account age would never be asked with `unlisted: 'act'`, so none is set). A fourth set, `rmt`, is an English phrase rule (`buy|sell|selling|buying|cheap ~ gold|gp|coins|accounts|
 boost|boosting|powerleveling`, action `flag`) shown as a template the owner edits.
 
 ### 4.2 The result
@@ -238,8 +238,13 @@ patterns that share it. Limits: 20 rules, 100 patterns per rule, 500 in all.
 **Folding** (the same view for patterns and lines; core carries its own, because it cannot import the matcher): split on whitespace and on
 `- _ / \ | , ; : ! ? ( ) [ ] { } " ~ + = < >`; per chunk, NFKC, lowercase, strip accents and zero-width characters, drop `.` and `*`
 between letters (`g.o.l.d`), collapse a run of three or more of one letter to one, and, only in a chunk that holds a letter, map the
-look-alikes `0 1 3 4 5 7 @ $` to `o l e a s t a s` (so `g0ld` is `gold` and `500` is `500`). Spaced-out letters are not read (section 2). Offsets
-map back to the original line for masking.
+look-alikes `0 1 3 4 5 7 @ $ ! |` to `o l e a s t a s i l` (so `g0ld` is `gold` and `500` is `500`), and read a small table of Cyrillic and Greek
+letters as the Latin letter they look like (`g` + Cyrillic o + `ld` is `gold`). A line is read in up to four ways and a hit in any is a hit
+(a place found by more than one is one match): the view above; one that also splits at `.` and `*` (so `buy.gold` is two words, and
+`g.o.l.d` is still one in the first); one in which a `!` or `|` between two letters is a letter (`f!sh`); and one that joins a run of three or more
+single letters (`g o l d`, `g_o_l_d`; a lone `a` or `i` beside the run is kept apart). On both sides of a comparison `i` and `l` are one
+letter (`1`, `!` and `|` imitate both). A line spends at most 200 000 comparisons; a line that runs out keeps what it found. Offsets map back to
+the original line for masking.
 
 A pattern is rejected at save with the path when it breaks the grammar, starts with a wildcard, is shorter than 3 letters in its first word
 (a 2-letter first word would match half the language), or folds to nothing.

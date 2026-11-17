@@ -140,7 +140,7 @@ function Reporters({ people }: { people: ReportPerson[] }) {
     return (
       <Section title={t('hub.report.origin.title')}>
         <p>
-          <Tag>{filterOriginLabel(t, report.originKey, (report as { originLabel?: string }).originLabel)}</Tag>
+          <Tag>{filterOriginLabel(t, report.originKey, report.originLabel)}</Tag>
         </p>
       </Section>
     );

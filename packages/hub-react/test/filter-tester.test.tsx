@@ -56,6 +56,35 @@ describe('Test a message', () => {
     expect(await within(panel()).findByText('This message would not be sent.')).toBeInTheDocument();
   });
 
+  it('the result is about the form it was run for: change the form and it is gone; run it again and it answers for the form as it is now', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(within(panel()).getByRole('checkbox', { name: 'Links' }));
+    await user.click(within(panel()).getByRole('radio', { name: 'Hide the part' }));
+    await user.type(within(panel()).getByRole('textbox', { name: 'A message to try' }), LINK);
+    await user.click(within(panel()).getByRole('button', { name: 'Test' }));
+    const result = await within(panel()).findByRole('status', { name: 'Result of the test' });
+    expect(await within(result).findByText(/Link on no list/)).toBeInTheDocument();
+    expect(within(result).getByText(/Hide the part/)).toBeInTheDocument();
+    // the owner turns the rule into one that only counts: the old answer is not shown against the new form
+    await user.click(within(panel()).getByRole('radio', { name: 'Only count' }));
+    await waitFor(() => expect(within(result).queryByText(/Link on no list/)).toBeNull());
+    expect(within(result).queryByText(/blorf\.com/)).toBeNull();
+    await user.click(within(panel()).getByRole('button', { name: 'Test' }));
+    expect(await within(result).findByText(/Only count/)).toBeInTheDocument();
+    expect(posts(w, '/filters/test')).toHaveLength(2);
+  });
+
+  it('the marks follow the text as typed, even with a leading space', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(within(panel()).getByRole('checkbox', { name: 'Links' }));
+    await user.type(within(panel()).getByRole('textbox', { name: 'A message to try' }), `  ${LINK}`);
+    await user.click(within(panel()).getByRole('button', { name: 'Test' }));
+    const result = await within(panel()).findByRole('status', { name: 'Result of the test' });
+    expect(await within(result).findByText('blorf.com', { selector: 'mark' })).toBeInTheDocument();
+  });
+
   it('an invalid form is not sent: the problem is shown instead; an empty box asks for a message', async () => {
     const w = await owner({ overrides: { filters: { phrases: [{ id: 'gold', action: 'count', phrases: ['buy gold'] }] } } });
     const { user } = await open(w);
@@ -164,6 +193,9 @@ describe('Hits', () => {
     await user.click(within(panel()).getByText('What the filters did'));
     const table = await within(panel()).findByRole('table', { name: 'What the filters did' });
     expect(within(table).getByRole('columnheader', { name: 'Not filed (daily limit)' })).toBeInTheDocument();
+    // One line says what the "Sent to the queue" column counts: reports filed, not lines that matched.
+    expect(table).toHaveAccessibleDescription(/already has an open report/);
+    expect(within(panel()).getByText(/already has an open report/)).toBeInTheDocument();
     const gold = within(table).getByRole('row', { name: /Gold ads/ });
     expect(within(gold).getAllByRole('cell').map((c) => c.textContent)).toEqual(['Gold ads', '0', '2', '0', '0', '4']);
     const links = within(table).getByRole('row', { name: /Link on no list/ });

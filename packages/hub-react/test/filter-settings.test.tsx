@@ -215,17 +215,86 @@ describe('each card validates as the server does, in words', () => {
     expect(puts(w)).toHaveLength(0);
   });
 
-  it('a refusal from the server (a rule that is not on) is shown against its card, and the draft is kept', async () => {
-    const w = await owner({ retire: [9] });
+  it('a refusal from the server (a rule that is no longer on) is shown against its card, and the draft is kept', async () => {
+    const w = await owner({ retire: [4] });
     const { user } = await open(w);
     await user.click(within(card('Links')).getByRole('checkbox', { name: 'Links' }));
-    const rule = within(card('Links')).getByRole('spinbutton', { name: 'Community Rule' });
-    await user.clear(rule);
-    await user.type(rule, '99');
+    // The default rule of Links is the retired one: it stays what the form holds (and is named), so the owner sees what the server refuses.
+    expect(within(card('Links')).getByRole('combobox', { name: 'Community Rule' })).toHaveValue('4');
     await save(user);
     expect(await within(card('Links')).findByText(/Community Rule/i, { selector: '.cw-field-error' })).toBeInTheDocument();
     expect(within(card('Links')).getByRole('checkbox', { name: 'Links' })).toBeChecked();
     expect(w.cw.profile.filters.links).toBeNull();
+  });
+});
+
+describe('the Community Rule is picked from the active rules', () => {
+  const options = (rule: HTMLElement): string[] => within(rule).getAllByRole('option').map((o) => (o as HTMLOptionElement).value);
+
+  it('a select of the rules in force, with the retired ones left out, on each card', async () => {
+    const w = await owner({ retire: [9] });
+    const { user } = await open(w);
+    for (const name of ['Links', 'Personal info', 'Shouting and repeats']) await user.click(within(card(name)).getByRole('checkbox', { name }));
+    await user.click(within(card('Phrases')).getByRole('checkbox', { name: 'Phrases' }));
+    await user.click(within(card('Phrases')).getByRole('button', { name: 'Add a phrase rule' }));
+    for (const name of ['Links', 'Personal info', 'Shouting and repeats', 'Phrases']) {
+      const select = await within(card(name)).findByRole('combobox', { name: 'Community Rule' });
+      await waitFor(() => expect(options(select).length, name).toBeGreaterThan(3));
+      expect(options(select), name).toEqual(expect.arrayContaining(['1', '2', '3', '4']));
+      expect(options(select), name).not.toContain('9');
+      expect(within(card(name)).queryByRole('spinbutton', { name: 'Community Rule' }), name).toBeNull();
+    }
+  });
+
+  it('picking a rule changes what is saved', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(within(card('Links')).getByRole('checkbox', { name: 'Links' }));
+    const select = await within(card('Links')).findByRole('combobox', { name: 'Community Rule' });
+    await waitFor(() => expect(options(select).length).toBeGreaterThan(3));
+    await user.selectOptions(select, '5');
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect((puts(w)[0]!.body as { layer: { filters: { links: { rule: number } } } }).layer.filters.links.rule).toBe(5);
+    expect(w.cw.profile.filters.links?.rule).toBe(5);
+  });
+
+  it('a senior who can only read sees the chosen rule in a select that is disabled', async () => {
+    const w = await hubWorld({ role: 'senior', actor: 'sam@example.test', overrides: { filters: { links: { action: 'refuse', rule: 5 } } } });
+    await open(w);
+    const select = await within(card('Links')).findByRole('combobox', { name: 'Community Rule' });
+    await waitFor(() => expect(select).toHaveValue('5'));
+    expect(select).toBeDisabled();
+  });
+});
+
+describe('Ignore these phrases', () => {
+  const ignoreBox = async (user: User): Promise<HTMLElement> => {
+    await user.click(within(panel()).getByText('More settings'));
+    return within(panel()).getByRole('textbox', { name: 'Ignore these phrases (one per line)' });
+  };
+
+  it('a new line can be started: the box keeps a trailing new line and the form stays valid', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    const box = await ignoreBox(user);
+    await user.type(box, 'e.g.{enter}');
+    expect(box).toHaveValue('e.g.\n');
+    expect(panel().querySelector('.cw-field-error')).toBeNull();
+    await user.type(box, 'score:{enter}{enter}12 - 9');
+    expect(box).toHaveValue('e.g.\nscore:\n\n12 - 9');
+    expect(panel().querySelector('.cw-field-error')).toBeNull();
+  });
+
+  it('blank lines are skipped, not sent, and do not block the save', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    const box = await ignoreBox(user);
+    await user.type(box, '  e.g.  {enter}{enter}   {enter}score:{enter}');
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect((puts(w)[0]!.body as { layer: { filters: { ignore: string[] } } }).layer.filters.ignore).toEqual(['e.g.', 'score:']);
+    expect(w.cw.profile.filters.ignore).toEqual(['e.g.', 'score:']);
   });
 });
 

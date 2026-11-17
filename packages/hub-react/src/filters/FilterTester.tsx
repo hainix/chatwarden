@@ -32,10 +32,13 @@ export function FilterTester({ candidate, problem, labelOf }: Omit<FilterToolsPr
   const id = useId();
   const [text, setText] = useState('');
   const [attempted, setAttempted] = useState(false);
-  const [result, setResult] = useState<{ text: string; view: FilterTestView } | null>(null);
+  // The answer is about the form as it was when it was run (the text and the candidate): change either and it is no longer shown.
+  const [done, setDone] = useState<{ for: string; text: string; view: FilterTestView } | null>(null);
   const [error, setError] = useState<HubError | null>(null);
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
+  const current = JSON.stringify(candidate);
+  const result = done !== null && done.for === current ? done : null;
 
   const run = async (): Promise<void> => {
     if (sending.current) return;
@@ -45,9 +48,9 @@ export function FilterTester({ candidate, problem, labelOf }: Omit<FilterToolsPr
     setBusy(true);
     setError(null);
     try {
-      setResult({ text, view: await client.filterTest({ text, candidate }) });
+      setDone({ for: current, text, view: await client.filterTest({ text, candidate }) });
     } catch (e) {
-      setResult(null);
+      setDone(null);
       setError(toHubError(e));
     } finally {
       sending.current = false;
@@ -79,7 +82,7 @@ export function FilterTester({ candidate, problem, labelOf }: Omit<FilterToolsPr
             value={text}
             onChange={(e) => {
               setText(e.target.value);
-              setResult(null);
+              setDone(null);
               setError(null);
             }}
           />

@@ -242,6 +242,13 @@ describe('every staff route has a client method', () => {
         { method: 'POST', path: '/ai/acting/start', body: { confirm: 'ACT', reason: 'Shadow was fine' } },
       ],
       ['aiActingStep off', () => c.aiActingStep('off', { reason: 'Enough' }), { method: 'POST', path: '/ai/acting/off', body: { reason: 'Enough' } }],
+      // Privacy requests and legal hold (0.2.0): the owner's routes, the person's ref and the report id as given.
+      ['privacyFind', () => c.privacyFind('acct-none'), { method: 'POST', path: '/privacy/find', body: { accountId: 'acct-none' } }],
+      ['privacyExport', () => c.privacyExport(person), { method: 'GET', path: `/people/${person}/privacy/export` }],
+      ['privacyErase preview', () => c.privacyErase(renamed.person, { keep: 'safety', confirm: renamed.person, dryRun: true }), { method: 'POST', path: `/people/${renamed.person}/privacy/erase`, body: { keep: 'safety', confirm: renamed.person, dryRun: true } }],
+      ['privacyStatement', () => c.privacyStatement(), { method: 'GET', path: '/privacy/statement' }],
+      ['holdReport', () => c.holdReport(renamed.id, 'safety_review'), { method: 'PUT', path: `/reports/${renamed.id}/hold`, body: { code: 'safety_review' } }],
+      ['releaseHold', () => c.releaseHold(renamed.id), { method: 'DELETE', path: `/reports/${renamed.id}/hold` }],
     ];
     expect(aiRead).not.toBeNull();
     const results: unknown[] = [];
@@ -269,7 +276,12 @@ describe('every staff route has a client method', () => {
     await exercise(w);
     const keys = Object.keys(w.routes);
     expect(keys.length).toBeGreaterThanOrEqual(26);
+    // The one route the hub has no method for on purpose: the evidence bundle is a signed JSON attachment the owner downloads with the API (the
+    // runbook in docs/privacy-requests.md), not a screen of the hub. A route that is not on this list needs a method.
+    const NO_HUB_METHOD = ['GET /reports/:id/bundle'];
+    expect(keys.filter((key) => NO_HUB_METHOD.includes(key))).toEqual(NO_HUB_METHOD);
     const missing = keys.filter((key) => {
+      if (NO_HUB_METHOD.includes(key)) return false;
       const { method, re } = matcher(key.replace(/~ref/g, ''));
       return !w.sent.some((r) => r.method === method && re.test(r.path));
     });
