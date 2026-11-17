@@ -2,6 +2,10 @@
 
 Updated 2026-11-17. The full roadmap and the reasoning behind it: [design/2026-11-09-product-scope.md](design/2026-11-09-product-scope.md).
 
+## In progress: 0.2.0 (privacy requests and legal hold)
+
+On the `release-0.2.0` branch, not yet published: an owner can export and erase one person's data (a receipt, a stated safety remainder, a dry run, a finish that runs by itself), and a senior can hold one report so no purge and no erase reaches it, with a signed evidence bundle and a `report.escalated` event. The tools are `cw.privacy` and `cw.legal`, the owner's staff routes, and "Data requests", "Privacy requests" and "Legal hold" in the hub. The runbook is [privacy-requests.md](privacy-requests.md). It describes what the kit stores and does; it is not legal advice and makes no claim that any law is met, and the kit never contacts a requester, a player or an authority. Parked: see [plans/follow-ups.md](plans/follow-ups.md).
+
 ## Published state
 All ten packages are on npm at 0.1.14 (core, matcher, store-sqlite, store-memory, http, profanity, discord, hub-react, player-react, hub-element), published from tags v0.1.6 to v0.1.14 on 2026-11-17. That is the chat box (0.1.6), AI levels 1 and 2 (0.1.7), slow mode, flood control and signals (0.1.8), appeals and offensive names (0.1.9), the setup command, recipes and test kit (0.1.10), the shared community term list loader (0.1.11), the Discord bot, Coop and EOS integrations (0.1.12), and the AI gate dashboard and shadow mode (0.1.13 and 0.1.14). The AI still never acts: nothing in 0.1.14 writes a sanction, a notice or a decision. The site copy and `llms.txt` describe this state, and carry no timing claim: the timing record does not exist.
 

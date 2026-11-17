@@ -42,6 +42,7 @@
 //              GET  /chat/rooms/:room/stream           the stream (hello, line, hide, state, notices, bye frames)
 //              POST /chat/rooms/:room/lines { text }   -> { ok: true, line } | { ok: false, refused: { reason, until?, rule?, noticeId?, ... } }
 //              (CW_DEMO_FILTERS=1 turns on three chat filters: a link is refused `link`, a phone number is masked, "buy gold" files a report with no reporter)
+//              (CW_DEMO_PRIVACY=1 signs evidence bundles with a demo secret, so GET /admin/reports/:id/bundle verifies; the privacy and hold routes are the owner's either way)
 //              POST /chat/rooms/:room/mute { lineId | ref, on }       -> { ok, hiddenIds }
 //              POST /chat/rooms/:room/report { lineId, reason?, note? } -> { ok: true, remaining } | { ok: false, refused }
 //              DEMO ONLY identity, as for /api: the `x-chatwarden-key` header, or `?key=`. The name other players see is `Player N`, N a
@@ -150,6 +151,19 @@ export interface TinyChatOptions {
    * (Settings, Advanced, Chat filters).
    */
   demoFilters?: boolean;
+  /**
+   * DEMO ONLY: sign evidence bundles with a demo secret (`demoBundleSecret(secret)`, derived from the server secret), so the owner's `GET /admin/reports/:id/bundle` gives a bundle
+   * that verifies with `verifyBundle`, and the whole privacy and legal-hold flow can be tried over the staff routes: export a person, hold a report past a forced retention pass,
+   * erase with the safety remainder and read the receipt. Default: on when the `CW_DEMO_PRIVACY` environment variable is exactly `1`. An explicit `false` forces it off. Without it
+   * bundles are produced unsigned (`hmacSha256: null`). A real app passes its own `bundleSecret` (at least 32 characters) and keeps it out of the code. Not legal advice and no
+   * claim of compliance: this is a demonstration of what the kit stores and does.
+   */
+  demoPrivacy?: boolean;
+}
+
+/** The demo's bundle signing secret: 64 hex characters derived from the server secret (so a restart with the same secret signs the same way). A demo only: a real app keeps its own. */
+export function demoBundleSecret(secret: string): string {
+  return createHash('sha256').update(`${secret}:chatwarden-demo-bundle`).digest('hex');
 }
 
 /** The secret to run with, or a throw in production when none was configured. */
@@ -333,6 +347,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   // The demo chat filters: only when asked (the option, else CW_DEMO_FILTERS=1). Off, the profile has no filters at all.
   const demoFilters = opts.demoFilters !== undefined ? opts.demoFilters : process.env.CW_DEMO_FILTERS === '1';
   if (demoFilters) console.warn('tiny-chat: CW_DEMO_FILTERS is on: links are refused, phone numbers and emails are masked, and "buy gold" files a report for a moderator. They are demo settings; the owner can change them in the hub (Settings, Advanced).');
+  // The demo privacy flow: only when asked (the option, else CW_DEMO_PRIVACY=1). Off, bundles are unsigned.
+  const demoPrivacy = opts.demoPrivacy !== undefined ? opts.demoPrivacy : process.env.CW_DEMO_PRIVACY === '1';
+  if (demoPrivacy) console.warn('tiny-chat: CW_DEMO_PRIVACY is on: evidence bundles are signed with a demo secret derived from the server secret. A real app keeps its own bundleSecret out of the code.');
   const terms = new LiveTerms({ store, pack: opts.pack ?? syntheticTermPack(), clock });
   await terms.load();
 
@@ -367,6 +384,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       },
     },
     matcher: terms,
+    ...(demoPrivacy ? { bundleSecret: demoBundleSecret(secret) } : {}),
     // The one-line preset. Try 'standard' or 'strict'; `overrides` changes single fields (see the README).
     profile: 'relaxed',
     // The demo AI starts at level 2 so the pre-filled decision shows; a code override, so the owner can still lower it in Settings.

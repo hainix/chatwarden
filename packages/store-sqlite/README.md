@@ -121,7 +121,7 @@ How it behaves:
 - **What retention does not purge.** `cw.purge()` and the built-in timer delete old reports, sanctions, strikes, mutes, notices,
   audit rows, signal rows, decided appeals, appeal statements, kept blocked names and webhook keys. The subject tables (`kit_subjects`, `kit_subject_ids`), the Discord thread map
   (`kit_discord_threads`) and the claim table (`kit_claims`, one row per person ever claimed) are not purged, because the ladder and a returning player's record depend on knowing who is who. They
-  hold hashes and ids, not chat. If your privacy policy needs a person erased, that is a separate step you run on the database, and it must clear `kit_claims` too.
+  hold hashes and ids, not chat. To erase one person, use `cw.privacy.erase` (see `@chatwarden/core`, "Privacy requests and legal hold", and [docs/privacy-requests.md](https://github.com/hainix/chatwarden/blob/main/docs/privacy-requests.md)): it clears every table above in one transaction, `kit_claims` and the Discord thread map included, and keeps only what a stated safety remainder or a legal hold needs. Do not edit the database by hand for this.
 - **Encryption at rest is yours.** SQLite does not encrypt the file. Put it on an encrypted disk if the hashes and the moderators'
   excerpts need that.
 

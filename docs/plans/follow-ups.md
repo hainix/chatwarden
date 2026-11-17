@@ -2,6 +2,17 @@
 
 Things found while building, not yet done. Each one names where it came from.
 
+## Open: privacy requests and legal hold, parked (0.2.0)
+
+Found building `cw.privacy` and `cw.legal` (design: `docs/design/2026-11-17-filter-rules-and-privacy.md`, runbook: `docs/privacy-requests.md`). None of it is a claim about any law.
+
+- **A verifier command for bundles.** `verifyBundle` and `canonicalJson` are exported, but a requester or a court has no command to run. A small `chatwarden verify-bundle <file>` CLI (SHA-256 always, HMAC with a secret) is the next step.
+- **Trusted timestamps.** A bundle's signature proves it came from this kit and was not edited. It says when the kit signed it, by the kit's own clock; a timestamp authority or a notarisation is not built.
+- **Erase by a list of account ids.** One person at a time today. A batch from a file (with one receipt each and a dry run over the whole list) is parked.
+- **A batch names scan.** Finding every person whose handle matches a term, to review names in bulk, is parked.
+- **The audit's own retention of a person's actions.** The audit trail is kept (ids and codes only) and a person's references in it are rewritten to the receipt id; whether an adopter wants a shorter clock for those rows is a policy question.
+- **Hub: a real-browser pass.** The Data requests, the erase dialog, Privacy requests and Legal hold are checked under axe and in jsdom at both themes; a pass in a real browser at 360 px, light and dark, is still to do (the table scrolls in its own region).
+
 ## Done: `@chatwarden/matcher` shipped obscenity's English word list to browsers (issue #8)
 
 Found building the landing-page demo (K8b, 2026-11-10). Fixed in 0.1.3.

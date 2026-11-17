@@ -132,6 +132,8 @@ For the moderators' screens and the player's notices, mount the routes in
 | `cw.policy` | The editable profile: `get` (it also reports `limits`, read only: the chat rate in force and the signals retention), `save`, `preview`, `reset` and `refresh`. The lengths a moderator is offered, the ladder, the first offences, the repeat rule, the area and severe rules and the guideline outcome texts can be edited at runtime and are stored in your store. |
 | `cw.gaps`, `cw.audit` | Rule gaps for the periodic review, and the staff audit trail. |
 | `cw.on(type, listener)` | Events: `report.created`, `report.closed`, `sanction.applied`, `sanction.revoked`, `gap.created`, `auto.restricted`, and, new in 0.1.9, `appeal.created`, `appeal.decided` and `rename.required` (`@experimental`; ids, codes and times only, never a statement, a reason or a name). |
+| `cw.privacy` | `@experimental`. Privacy requests: `find`, `export`, `erase` (a receipt, a dry run, a stated safety remainder) and `statement`. The owner's, and on no player route. See "Privacy requests and legal hold". |
+| `cw.legal` | `@experimental`. Legal hold: `hold` a report for a closed code, `release`, `status` and a signed evidence `bundle`; `hold` emits `report.escalated`. See "Privacy requests and legal hold". |
 | `cw.purge`, `cw.ready`, `cw.flush`, `cw.close` | Housekeeping. |
 
 ## Deciding a report
@@ -605,6 +607,56 @@ A `flag` files one report with no reporter through `cw.reports.fileSystem({ orig
 `resolveFilters`, `checkFilters`, `mergeFilters`, `overlayFilters`, `FILTER_SUGGESTIONS`, `FILTER_ACTIONS`, `FILTER_LIMITS`, `SHARED_HOSTING_SUFFIXES`,
 `FilterVerdict`, `FilterHit`, `FilterRefusal`, `FilterStats`, `FilterTestResult`, `FilterCheckResult`, `FilterHitRow`, `ReportOrigin`, `SystemReportInput`, `SystemReportResult`, `cw.filters`, `cw.reports.fileSystem`, `ChatServiceDeps.filters` and the three new
 `RefuseReason` values `link`, `personal_info` and `filter` (an exhaustive `switch` over the reasons needs the new cases to compile).
+
+## Privacy requests and legal hold
+
+> Not legal advice, not a compliance claim. This describes what the kit stores and does. The adopter checks who is asking and decides what to answer; the kit never does either, never tells the player and never reports to anyone. The runbook is [docs/privacy-requests.md](https://github.com/hainix/chatwarden/blob/main/docs/privacy-requests.md).
+
+Optional, `@experimental` in 0.2.0, and used only when you or a staff owner call it. `cw.privacy` finds a person by an account id or a client key (`find`, read-only: it creates no one),
+exports what the kit holds about them (`export`: one JSON-safe object, no hash, no other player, no reporter or staff reference, each section cut at 5 000 rows), erases them (`erase(person,
+{ keep: 'safety' | 'none', actor, dryRun? })` in one store transaction, then in memory, with a receipt of counts and words) and says what the kit keeps (`statement()`, from the registry and the
+retention in force). With `keep: 'safety'` a person with a sanction in force keeps their subject, identifiers and that sanction until retention removes it, and `purge()` then finishes the erase
+by itself. Every table the kit has is in `PRIVACY_REGISTRY` or `NO_PERSON_TABLES`; a test fails when a migration adds one that is in neither. `cw.legal` holds one report (`hold` with one of five codes,
+no free text), releases it, and produces its evidence bundle (`bundle`), signed with `bundleSecret` when you give one. A hold keeps the report and what hangs on it out of every retention purge and
+every erase and emits `report.escalated` (ids and the code, never text). `canonicalJson`, `signBundle` and `verifyBundle` let anyone check a bundle.
+
+```ts
+import { createChatwarden, verifyBundle } from '@chatwarden/core';
+import { openStore } from '@chatwarden/store-sqlite';
+
+const cw = await createChatwarden({
+  store: openStore({ path: 'chatwarden.db' }),
+  secret: process.env.CHATWARDEN_SECRET as string,
+  platform: { identify: (ctx) => ctx as { clientKey: string } },
+  bundleSecret: process.env.BUNDLE_SECRET, // at least 32 characters; without one bundles are unsigned
+});
+
+const person = cw.privacy.find({ accountId: 'acct-123' });
+if (person !== null) {
+  const data = await cw.privacy.export(person);
+  const preview = await cw.privacy.erase(person, { keep: 'safety', actor: 'owner_ann', dryRun: true });
+  console.log(data, preview);
+}
+const held = await cw.legal.hold('report-id', { code: 'legal_proceeding', actor: 'senior_gus' });
+if (held.ok) {
+  const bundle = await cw.legal.bundle('report-id', { actor: 'owner_ann' });
+  if (!('ok' in bundle)) console.log(verifyBundle(bundle, process.env.BUNDLE_SECRET)); // { sha256: true, hmac: true }
+}
+```
+
+Retention: an erasure receipt lives on `retention.auditMs`; `purge()` also finishes pending erasures and drops stray rows (a strike, signal, notice or kept name whose subject does not exist and that is
+older than ten minutes): `PurgeResult.erasuresFinished` and `strayRows`. A held report, its decisions, its sanction groups (address rows too), their notices and appeals, its AI rows and its audit rows are
+skipped by every purge. Several processes on one database: an erase moves an epoch each process reads at most every 30 seconds.
+
+**Upgrading:** `Store` gains required methods (`exportSubjects`, `eraseSubjects`, `insertErasure`, `loadPendingErasures`, `finishErasure`, `erasureEpoch`, `purgeStrayRows`, `placeHold`, `releaseHold`,
+`loadHold`, `listHolds`, `heldSet`, `sanctionGroupsOfReport`) and `AuditListQuery` gains `targets`; a custom store implements them, and `saveIdentifier` for a subject that does not exist must write nothing and
+not throw. `AUDIT_ACTIONS` gains `privacy.find`, `privacy.export`, `privacy.erase`, `legal.hold`, `legal.release` and `legal.bundle`; `KIT_EVENT_TYPES` gains `report.escalated`; `PurgeResult` gains
+`erasuresFinished` and `strayRows`. SQLite migration 26 (shared by the whole release) adds `kit_legal_holds`, `kit_erasures`, the erasure epoch and four lookup indexes, and is one-way.
+
+**Experimental in 0.2.0:** `cw.privacy`, `cw.legal`, `PrivacyService`, `PrivacyStatement`, `PrivacyRefusal`, `PRIVACY_CATEGORIES`, `PRIVACY_REGISTRY`, `NO_PERSON_TABLES`, `PrivacyCategory`, `PrivacyRule`, `PrivacyClock`, `PrivacyExport`,
+`SubjectExport`, `EraseMode`, `ErasePlan`, `ErasePreview`, `ErasureCounts`, `ErasureReceipt`, `ErasureRemoved`, `ErasureRow`, `PRIVACY_DISCLAIMER`, `ERASED_LINE`, `EXPORT_SECTION_MAX`, `erasedReporter`, `isNonPersonReporter`,
+`isRestrictingKind`, `LegalService`, `HoldCode`, `HOLD_CODES`, `isHoldCode`, `HoldRow`, `HeldSet`, `HoldResult`, `EvidenceBundle`, `BundlePerson`, `BundleIntegrity`, `BUNDLE_DISCLAIMER`, `CANONICALIZATION`,
+`canonicalJson`, `signBundle`, `verifyBundle`, the `bundleSecret` option, `retention`'s receipt clock, `PurgeResult.erasuresFinished` and `.strayRows`, the `report.escalated` event and the new required `Store` methods above.
 
 ## Upgrading to 0.1.9
 
