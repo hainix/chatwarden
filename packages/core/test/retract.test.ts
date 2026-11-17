@@ -258,3 +258,44 @@ describe('EvidenceBuffer.retract', () => {
     expect(buffer.get('R', x)).toMatchObject({ retracted: true, raw: '[erased]' });
   });
 });
+
+describe('rooms.lineStates and audit.roomRef (what the staff routes read)', () => {
+  it('lineStates lists the room\'s buffered lines as id, time and whether each was taken back, and nothing else', async () => {
+    const { w, a } = await room();
+    const first = lineIdOf(w.cw.chat.accept('R1', a, 'SENTINEL-state-text'));
+    w.clock.t += 6 * SEC;
+    const second = lineIdOf(w.cw.chat.accept('R1', a, 'two'));
+    w.cw.rooms.retract('R1', first);
+    expect(w.cw.rooms.lineStates('R1')).toEqual([
+      { lineId: first, ts: w.clock.t - 6 * SEC, retracted: true },
+      { lineId: second, ts: w.clock.t, retracted: false },
+    ]);
+    const text = JSON.stringify(w.cw.rooms.lineStates('R1'));
+    for (const needle of ['SENTINEL', a, 'Alice']) expect(text, needle).not.toContain(needle);
+  });
+
+  it('lineStates is empty for an unknown room and for a bad argument, and drops lines that left the window', async () => {
+    const { w, a } = await room();
+    lineIdOf(w.cw.chat.accept('R1', a, 'old'));
+    expect(w.cw.rooms.lineStates('nope')).toEqual([]);
+    expect(w.cw.rooms.lineStates(undefined as never)).toEqual([]);
+    w.clock.t += 16 * MIN;
+    expect(w.cw.rooms.lineStates('R1')).toEqual([]);
+  });
+
+  it('roomRef is the id itself when it fits the ref alphabet and a stable keyed hash otherwise', async () => {
+    const { w } = await room();
+    expect(w.cw.audit.roomRef('lobby-1')).toBe('lobby-1');
+    expect(w.cw.audit.roomRef('match:42.eu')).toBe('match:42.eu');
+    const awkward = w.cw.audit.roomRef('Ranked lobby / EU #7');
+    expect(awkward).toMatch(/^h-[0-9a-f]{16}$/);
+    expect(w.cw.audit.roomRef('Ranked lobby / EU #7')).toBe(awkward);
+    expect(w.cw.audit.roomRef('Ranked lobby / EU #8')).not.toBe(awkward);
+    expect(awkward).not.toContain('Ranked');
+    // an id that itself looks like a hashed ref is hashed too, so a ref starting h- is always a hash
+    expect(w.cw.audit.roomRef('h-0123456789abcdef')).not.toBe('h-0123456789abcdef');
+    // the same secret gives the same ref in another kit (across a restart)
+    const other = await roomsWorld();
+    expect(other.cw.audit.roomRef('Ranked lobby / EU #7')).toBe(awkward);
+  });
+});

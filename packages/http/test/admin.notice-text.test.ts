@@ -143,8 +143,10 @@ describe('GET /reports/:id: noticeText on each own line', () => {
     const r = await reportOf(w, id);
     const stored = JSON.parse(JSON.stringify(w.cw.reports.get(id))) as { excerpt: Array<Record<string, unknown>> };
     for (const [i, l] of r.excerpt.entries()) {
-      const { noticeText, ...rest } = l as Record<string, unknown>;
+      // 0.2.0 adds `retracted` and `removable` to every excerpt line of the case read: staff's view of the room's evidence, not part of the stored line.
+      const { noticeText, retracted, removable, ...rest } = l as Record<string, unknown>;
       expect(typeof noticeText).toBe('string');
+      expect([typeof retracted, typeof removable]).toEqual(['boolean', 'boolean']);
       expect(rest).toEqual({ ...stored.excerpt[i] });
     }
   });

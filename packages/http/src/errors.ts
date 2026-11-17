@@ -25,6 +25,7 @@ const TABLE = {
   invalid_sanction: { status: 400, message: 'The sanction is not valid.' },
   invalid_rules: { status: 400, message: 'The rules are not valid.' },
   invalid_excerpt: { status: 400, message: 'The excerpt is not valid.' },
+  invalid_mode: { status: 400, message: 'The room mode is not valid.' },
   invalid_term: { status: 400, message: 'The term change was refused.' },
   invalid_gap_ref: { status: 400, message: 'The rule reference for this gap is not valid.' },
   confirm_mismatch: { status: 400, message: 'The confirmation does not match the person.' },

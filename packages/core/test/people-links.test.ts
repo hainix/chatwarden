@@ -18,6 +18,8 @@ const applier = (w: RoomsWorld): Apply => (subject, kind, durationMs) =>
 async function linked(w: RoomsWorld, beforeMerge?: (ids: { root: string; alias: string }) => Promise<void>) {
   w.cw.rooms.seat('L1', 'p1', { clientKey: 'links-key-aaaaaaaaaaaa', accountId: 'links-acct-1' }, 'One');
   const root = subjectOf(w, 'L1', 'p1');
+  // the older subject survives a merge (a tie goes to the smaller id): let the clock tick so the first one is the older
+  w.clock.t += 1000;
   w.cw.rooms.seat('L2', 'p1', { accountId: 'links-acct-2' }, 'Two');
   const alias = subjectOf(w, 'L2', 'p1');
   expect(alias).not.toBe(root);

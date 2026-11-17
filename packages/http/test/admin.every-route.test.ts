@@ -115,7 +115,7 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
   it('the route table has exactly the new routes plus the report and team routes', async () => {
     const { routes } = await world();
     // `:id~ref` is the audit-ref charset for a term id; the shape is the same.
-    expect(Object.keys(routes).map((k) => k.replace('~ref', '')).sort()).toEqual(
+    expect(Object.keys(routes).map((k) => k.replace('~ref', '').replace('~room', '')).sort()).toEqual(
       [
         'GET /me',
         // The appeal routes (their own checks are in admin.appeals.test.ts: they need a world with appeals on).
@@ -131,6 +131,11 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
         'POST /reports/:id/suggest',
         // Insights (0.2.0): checks in admin.insights.test.ts (it needs desk.insights on).
         'GET /insights',
+        // The room routes and the linked-accounts count (0.2.0): their own checks are in admin.rooms.test.ts and admin.links.test.ts.
+        'GET /rooms',
+        'POST /rooms/:room/mode',
+        'POST /rooms/:room/lines/:line/retract',
+        'GET /people/:ref/links',
         // The staff workflow routes (0.2.0): their own checks are in admin.workflow.test.ts (they need a world with desk.workflow on).
         'POST /reports/:id/comments',
         'DELETE /reports/:id/comments/:cid',

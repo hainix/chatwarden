@@ -115,6 +115,7 @@ describe('adminRoutes: shape', () => {
       'DELETE /reports/:id/escalate',
       'DELETE /reports/:id/hold',
       'GET /people/:ref/history',
+      'GET /people/:ref/links',
       'GET /people/:ref/privacy/export',
       'GET /reports',
       'GET /reports/:id',

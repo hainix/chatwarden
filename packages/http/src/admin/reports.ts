@@ -345,11 +345,20 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
           return {};
         }
       };
-      const excerpt = report.excerpt.map((l) => ({
-        ...l,
-        ...noticeTextOf(l),
-        ...(flagged(l.handle) ? { handleFlagged: true as const } : {}),
-      }));
+      // Which lines the room still holds, and which of those were taken back: retracted is true for a line taken back before or after the report was filed, removable for one a moderator can still take back
+      // (in the evidence buffer, delivered and not yet taken back). A line is the same line only when its time matches too (a reopened room restarts its numbers). No text, seat or handle comes from this.
+      const live = new Map(cw.rooms.lineStates(report.roomId).map((s) => [s.lineId, s]));
+      const excerpt = report.excerpt.map((l) => {
+        const now = live.get(l.lineId);
+        const same = now !== undefined && now.ts === l.ts;
+        return {
+          ...l,
+          retracted: l.retracted === true || (same && now.retracted),
+          removable: same && !now.retracted && !l.blocked,
+          ...noticeTextOf(l),
+          ...(flagged(l.handle) ? { handleFlagged: true as const } : {}),
+        };
+      });
       if (failed.length > 0) safeWarn(ctx.logger, 'chatwarden.http_notice_text_failed', { error: failed[0] instanceof Error ? failed[0].name : 'unknown', count: failed.length });
       // A player's report carries no `origin` keys (the body is as it was); a report nobody filed carries them, with `reporterPerson` null. The raw hand-off, escalation and evidence
       // columns are not the body's shape: `urgent` and `handoff: { at, by }` stand in for them (staff ids, never a player's).

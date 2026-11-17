@@ -323,3 +323,49 @@ export function bodyAutomation(body: Record<string, unknown>): AutomationBody {
   if (typeof code !== 'string' || !(AUTOMATION_CODES as readonly string[]).includes(code)) throw new ValidationError();
   return { allowed: false, code: code as AutomationCode };
 }
+
+/** The longest room id a staff route takes, in characters. */
+const ROOM_ID_MAX = 128;
+
+/**
+ * A `:room` param as the game's own id: 1 to 128 characters once decoded, and no control character (a NUL or a line break has no place in an id, in a log or in an audit ref). Anything else is 400
+ * `invalid_request`, never a silent 404 (the router only checks it is some text).
+ */
+export function roomParam(v: unknown): string {
+  // eslint-disable-next-line no-control-regex -- a control character is exactly what is refused
+  if (typeof v !== 'string' || v.length < 1 || v.length > ROOM_ID_MAX || /[\u0000-\u001f\u007f]/.test(v)) throw new ValidationError();
+  return v;
+}
+
+/** A `:line` param: the kit's own line number, as the router already checked it (a token), else 400. */
+export function lineParam(v: unknown): string {
+  return bodyId(v);
+}
+
+/** A room mode: `normal`, `locked` or `emergency`, else 400 `invalid_mode`. */
+export function bodyMode(v: unknown): 'normal' | 'locked' | 'emergency' {
+  if (v === 'normal' || v === 'locked' || v === 'emergency') return v;
+  throw new HttpError('invalid_mode');
+}
+
+/** How long a mode lasts, in ms: absent is the profile's default; otherwise a whole number from 60 000 to 86 400 000, else 400 `invalid_value`. */
+export function bodyForMs(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 60_000 || v > 86_400_000) throw new HttpError('invalid_value');
+  return v;
+}
+
+/** What `POST /rooms/:room/mode` takes: `{ mode, forMs? }` and nothing else (a bad mode is 400 `invalid_mode`, a bad length 400 `invalid_value`, any other key or shape 400 `invalid_request`). */
+export function bodyRoomMode(body: Record<string, unknown>): { mode: 'normal' | 'locked' | 'emergency'; forMs?: number } {
+  for (const key of Object.keys(body)) if (key !== 'mode' && key !== 'forMs') throw new ValidationError();
+  const mode = bodyMode(body.mode);
+  if (!has(body, 'forMs')) return { mode };
+  return { mode, forMs: bodyForMs(body.forMs) };
+}
+
+/** What `POST /rooms/:room/lines/:line/retract` takes: nothing, or only `{ allFromAuthor?: boolean }`, else 400 `invalid_request`. */
+export function bodyRetract(body: Record<string, unknown>): { allFromAuthor: boolean } {
+  for (const key of Object.keys(body)) if (key !== 'allFromAuthor') throw new ValidationError();
+  if (!has(body, 'allFromAuthor')) return { allFromAuthor: false };
+  if (typeof body.allFromAuthor !== 'boolean') throw new ValidationError();
+  return { allFromAuthor: body.allFromAuthor };
+}

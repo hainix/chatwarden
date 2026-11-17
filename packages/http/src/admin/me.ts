@@ -14,6 +14,12 @@ export interface MeFeatures {
   keepBlocked: boolean;
   /** The shared term list is wired (`community` was passed to `adminRoutes`). Present, as `true`, only then; the hub shows its section when it is. */
   community?: boolean;
+  /** The room tools (modes, the room list, taking a line back) are part of every kit: always `true`. What a caller may do with them is `can['rooms.read']` and `can['rooms.manage']`. @experimental */
+  rooms: boolean;
+  /** `desk.workflow` is on: staff comments and a second look. Read live. @experimental */
+  workflow: boolean;
+  /** `desk.insights` is on and the store can read the rows: the Insights page. Read live. @experimental */
+  insights: boolean;
 }
 
 /** What `GET /me` answers: who the caller is and, for each permission, whether their role holds it. */
@@ -21,16 +27,16 @@ export interface Me {
   actor: string;
   role: Role;
   can: Record<PermissionKey, boolean>;
-  /** Only when appeals, renames, keepBlocked or community is on. With all off the body is what 0.1.7 sent. */
+  /** The staff features that are on. This server always sends it (`rooms`, `workflow` and `insights` are booleans); the type leaves it optional for a client written before it. */
   features?: MeFeatures;
 }
 
 /**
  * `GET /me` (any signed-in staff member): `{ actor, role, can }`, where `can` has a boolean for every permission under the
  * effective table (the defaults with the `permissions` option applied), so a client can hide what the server would refuse.
- * `features: { appeals, renames, keepBlocked, community? }` is added only when any is on (`community`: the shared term list is wired) (appeals: the profile says so and the store can keep them; renames:
- * `names.renames` is on and the store can release one; keepBlocked: `names.keepBlocked`, so a hub learns it without reading the policy), read
- * live; with all three off the body is exactly what 0.1.7 sent.
+ * `features: { appeals, renames, keepBlocked, community?, rooms, workflow, insights }` is always there (`community`: the shared term list is wired, present only then) (appeals: the profile says so and the store
+ * can keep them; renames: `names.renames` is on and the store can release one; keepBlocked: `names.keepBlocked`, so a hub learns it without reading the policy; `rooms`: always true, the room tools are part of every kit;
+ * `workflow`: `desk.workflow`; `insights`: `desk.insights` and a store that can read the rows), read live.
  * It needs no permission beyond being authenticated (401 otherwise), holds no ids or text, and writes no audit row.
  */
 export function meRoutes(ctx: AdminContext, options: { community?: boolean } = {}): RouteTable {
@@ -46,8 +52,11 @@ export function meRoutes(ctx: AdminContext, options: { community?: boolean } = {
         renames: cw.names.renamesEnabled(),
         keepBlocked: cw.profile.names.keepBlocked === true,
         ...(community ? { community: true } : {}),
+        rooms: true,
+        workflow: cw.desk.workflowEnabled(),
+        insights: cw.insights.enabled(),
       };
-      if (features.appeals || features.renames || features.keepBlocked || community) body.features = features;
+      body.features = features;
       return { status: 200, body };
     }),
   };

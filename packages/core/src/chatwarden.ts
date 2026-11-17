@@ -2,6 +2,7 @@ import { createInertAi } from './ai/inert.js';
 import type { AiFacade, AiOptions, AiService } from './ai/service.js';
 import { AuditService } from './audit.js';
 import type { AuditPage, AuditQuery, AuditRecordInput, Role } from './audit.js';
+import { roomAuditRef } from './audit.js';
 import { ChatService } from './chat.js';
 import { ChatCounter, utcDay } from './chatCounter.js';
 import { AccountAges } from './accountAge.js';
@@ -348,6 +349,11 @@ export interface Chatwarden {
      * (the room, the line ids and a time: no text, no seat). Not a sanction: no notice, no strike, nothing said to the author. @experimental
      */
     retract(roomId: string, lineId: string, opts?: { allFromAuthor?: boolean }): { ok: true; lineIds: string[] } | { ok: false; refused: 'not_found' };
+    /**
+     * The lines the room's evidence buffer holds now, as id, send time and whether each was taken back: for staff to see which lines of a report can still be removed. No text, no seat, no handle.
+     * A pure read; empty for an unknown room. @experimental
+     */
+    lineStates(roomId: string): Array<{ lineId: string; ts: number; retracted: boolean }>;
   };
   /**
    * The chat filters (`profile.filters`): what they did, and a way to try them before they act. All off until an owner turns a block on.
@@ -972,6 +978,11 @@ export interface Chatwarden {
      * `action` throws `AuditQueryError`. Never carries the json the term editor kept.
      */
     list(q: AuditQuery): AuditPage;
+    /**
+     * The audit ref of a room, for the `room.mode` and `room.retract` rows: the room id itself when it fits the ref alphabet (1 to 64 of `A-Z a-z 0-9 _ . : -`), else `h-` and 16 hex characters of a keyed
+     * hash (the kit's own secret, so the same id gives the same ref across restarts and the id never reaches the trail). @experimental
+     */
+    roomRef(roomId: string): string;
   };
   /**
    * Idempotency keys for incoming webhooks (`@chatwarden/http`'s `webhookIn`), on the kit's clock. A key is remembered
@@ -1834,6 +1845,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         bus.emit({ type: 'line.retracted', roomId, lineIds, at: clock.now() });
         return { ok: true, lineIds: [...lineIds] };
       },
+      lineStates: (roomId) => (typeof roomId === 'string' ? buffer.snapshot(roomId).map((l) => ({ lineId: l.lineId, ts: l.ts, retracted: l.retracted === true })) : []),
       postingState: (roomId, seatId, o) => {
         const subject = roster.occupant(roomId, seatId)?.subject ?? null;
         return chat.modeRefusal(roomId, subject, o?.staff === true)?.reason ?? 'ok';
@@ -2121,6 +2133,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     audit: {
       record: (input) => audit.record(input),
       list: (q) => audit.list(q),
+      roomRef: (roomId) => roomAuditRef(roomId, hasher),
     },
     webhookKeys: {
       reserve: (key, fingerprint) => {

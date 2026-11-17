@@ -20,6 +20,7 @@ import { policyRoutes } from './policy.js';
 import { policyProfileRoutes } from './policyProfile.js';
 import type { PolicyOptions } from './policy.js';
 import { reportRoutes } from './reports.js';
+import { roomRoutes } from './rooms.js';
 import { sanctionRoutes } from './sanctions.js';
 import { teamRoutes } from './team.js';
 import { termRoutes } from './terms.js';
@@ -56,6 +57,7 @@ export type { Me, MeFeatures } from './me.js';
 export { DEFAULT_GAME_NAME, policyRoutes } from './policy.js';
 export type { PolicyOptions } from './policy.js';
 export { reportRoutes } from './reports.js';
+export { roomRoutes } from './rooms.js';
 export { workflowRoutes } from './workflow.js';
 export type { ReporterAccuracySummary, ReportSummary } from './reports.js';
 export { sanctionRoutes } from './sanctions.js';
@@ -106,6 +108,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
     ...legalRoutes(ctx),
     ...workflowRoutes(ctx),
     ...insightRoutes(ctx),
+    ...roomRoutes(ctx),
     ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),
     ...(terms === undefined
