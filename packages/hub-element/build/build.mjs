@@ -32,6 +32,8 @@ const options = {
   // The workspace packages come from their TypeScript source, so the build needs no earlier `tsc -b`.
   alias: {
     '@chatwarden/hub-react': join(packages, 'hub-react', 'src', 'index.ts'),
+    // The subpath comes before the root: esbuild takes the first alias that matches.
+    '@chatwarden/core/notice-copy': join(packages, 'core', 'src', 'noticeCopy.ts'),
     '@chatwarden/core': join(packages, 'core', 'src', 'index.ts'),
   },
   define: { 'process.env.NODE_ENV': '"production"' },

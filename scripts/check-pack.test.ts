@@ -721,3 +721,35 @@ describe('the http manifest in the repo and the K5 subpaths', () => {
     }
   });
 });
+
+describe('the core manifest in the repo and the notice-copy subpath (0.2.0)', () => {
+  const core = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/core/package.json', import.meta.url)), 'utf8')) as Pkg;
+  it('lists the subpath among the files a tarball must hold (types and ESM, from dist), and the root still has its own entry', () => {
+    const targets = exportTargets(core) as string[];
+    expect(targets).toContain('dist/src/noticeCopy.js');
+    expect(targets).toContain('dist/src/noticeCopy.d.ts');
+    expect((core.exports as Record<string, unknown>)['.']).toEqual({ types: './dist/src/index.d.ts', default: './dist/src/index.js' });
+    expect((core.exports as Record<string, unknown>)['./notice-copy']).toEqual({ types: './dist/src/noticeCopy.d.ts', default: './dist/src/noticeCopy.js' });
+  });
+  it('maps it for moduleResolution node too (typesVersions)', () => {
+    expect((core as unknown as { typesVersions: { '*': Record<string, string[]> } }).typesVersions['*']['notice-copy']).toEqual(['dist/src/noticeCopy.d.ts']);
+  });
+  it('the manifest still passes the publish checks (files, side effects, prepack)', () => {
+    expect(checkManifest(core, 'core')).toEqual([]);
+  });
+  it('a tarball that lacks the subpath is refused, and one that has it is not', () => {
+    const targets = exportTargets(core) as string[];
+    const sources = targets.filter((t) => t.endsWith('.js')).map((t) => t.replace(/^dist\//, '').replace(/\.js$/, '.ts'));
+    const files = ['package.json', 'README.md', 'LICENSE', ...targets, ...targets.map((t) => `${t}.map`), ...sources];
+    expect(checkFileList({ pkg: core, files })).toEqual([]);
+    for (const missing of ['dist/src/noticeCopy.js', 'dist/src/noticeCopy.d.ts']) {
+      expect(checkFileList({ pkg: core, files: files.filter((f) => f !== missing) }).join('\n'), missing).toContain(`export target is not in the tarball: ${missing}`);
+    }
+  });
+  it('core stays browser-safe, so the subpath may import no Node builtin', () => {
+    expect([...BROWSER_SAFE]).toContain('@chatwarden/core');
+    const source = readFileSync(fileURLToPath(new URL('../packages/core/src/noticeCopy.ts', import.meta.url)), 'utf8');
+    expect(nodeImportProblems({ pkg: core, files: [{ path: 'dist/src/noticeCopy.js', source }] })).toEqual([]);
+    expect(nodeImportProblems({ pkg: core, files: [{ path: 'dist/src/noticeCopy.js', source: `${source}\nimport fs from 'node:fs';\n` }] })).not.toEqual([]);
+  });
+});

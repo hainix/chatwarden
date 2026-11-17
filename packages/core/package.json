@@ -30,6 +30,17 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
+    },
+    "./notice-copy": {
+      "types": "./dist/src/noticeCopy.d.ts",
+      "default": "./dist/src/noticeCopy.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "notice-copy": [
+        "dist/src/noticeCopy.d.ts"
+      ]
     }
   },
   "sideEffects": false,

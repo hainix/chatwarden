@@ -559,6 +559,17 @@ cw.names.renamed(who);
   store without it cannot release a rename, `renamesEnabled()` is `false` and `requireRename` answers `off`. The SQLite store has all of them; the in-memory store
   has `withdrawNotice` built in and the blocked-name methods through `withMemoryNames(store)`.
 
+### The words of a notice: `@chatwarden/core/notice-copy`
+
+The text a player reads in a notice lives in one small module, so the game's notice card and a hub's preview of it cannot word a notice differently.
+Import it from the subpath (`import { noticeView, NOTICE_WORDS } from '@chatwarden/core/notice-copy'`); it is plain code with no Node module and no React,
+and a bundler that reads `sideEffects: false` takes only this file. It exports `NOTICE_WORDS` (the English words, keyed as `@chatwarden/player-react` keys
+them: `player.notice.title.warning`, `player.notice.gotIt`, `player.restricted.moderator.until`, and the rest) with `englishWords()` (a copy to spread under your
+own translation) and the types `NoticeWordKey` and `NoticeWords`; `titleKey`, `bodyKey`, `isSanction` and `WARNING_DAYS` (90); `dayText`, `untilText` and `timeLeft`;
+`noticeView(notice, { words, locale, timeZone?, now, record? })`, which returns a `NoticeView` (`kind`, `title`, `body`, `facts`, `refHint`, `linesLabel`, `lines`,
+`mustAcknowledge`, `todo`, `button`, `sanction`) as plain text, with the time passed in; and `communityRuleLabel(ref, title?)`, the one place "Community Rule 2: Title"
+is built (`CommunityRules.label` calls it).
+
 ## Upgrading to 0.1.9
 
 - **From 0.1.8.** SQLite migration 22 is one-way: a database it has run on cannot be opened by 0.1.8 or older. Back it up first.
