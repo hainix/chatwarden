@@ -9,10 +9,11 @@ import { useAiT } from './i18n.js';
 // The status line of acting (AI levels 3 and 4, release 2) with the one-click steps beside it: Pause (a senior's, no typed word: pausing is the safe direction), Resume and
 // "Switch acting off" (the owner's). Each sends one request with a fixed reason; the server decides and the line is read again. Shown only when acting is not off.
 
+// The reasons are one fixed English form, never a translated word: they are stored in the audit trail, and a trail read by an admin in another language must not mix them.
 const REASON = {
-  pause: 'hub.settings.ai.act.pause.reason',
-  resume: 'hub.settings.ai.act.resume.reason',
-  off: 'hub.settings.ai.act.off.reason',
+  pause: 'Paused in Settings',
+  resume: 'Resumed in Settings',
+  off: 'Switched off in Settings',
 } as const;
 
 export function ActingStatus({ state, onChanged }: { state: AiActingState; onChanged: () => void }) {
@@ -26,7 +27,7 @@ export function ActingStatus({ state, onChanged }: { state: AiActingState; onCha
     if (busy) return;
     setBusy(true);
     setError(null);
-    client.aiActingStep(step, { reason: t(REASON[step]) }).then(
+    client.aiActingStep(step, { reason: REASON[step] }).then(
       () => {
         setBusy(false);
         onChanged();

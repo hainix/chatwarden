@@ -2,6 +2,7 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { actWorld } from './aiActWorld.js';
 import type { ActWorldOptions } from './aiActWorld.js';
+import { createT, en } from '../src/index.js';
 import { renderHub } from './render.js';
 import type { HubWorld } from './world.js';
 
@@ -18,30 +19,66 @@ async function open(w: HubWorld) {
   await screen.findByRole('radio', { name: /^Act/ });
   return r;
 }
+/** Settings > AI where the Act option must be absent: waits until the acting state has been read, so "absent" is not "not loaded yet". */
+async function openWithoutAct(w: HubWorld) {
+  const r = renderHub(w, { path: '/settings/ai' });
+  await screen.findByRole('heading', { level: 2, name: 'AI' });
+  await screen.findByRole('radio', { name: /^Recommend/ });
+  await waitFor(() => expect(w.sent.some((q) => q.method === 'GET' && q.path === '/ai/acting')).toBe(true));
+  await waitFor(() => expect(w.sent.some((q) => q.method === 'GET' && q.path === '/ai/status')).toBe(true));
+  // one more turn so the answers have been rendered
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  return r;
+}
 const act = (): HTMLInputElement => screen.getByRole('radio', { name: /^Act/ }) as HTMLInputElement;
 const posts = (w: HubWorld, path: string) => w.sent.filter((r) => r.method === 'POST' && r.path === path);
 
 async function openDialog(user: User): Promise<HTMLElement> {
   await user.click(act());
-  return screen.findByRole('dialog', { name: 'Switch on acting' });
+  return screen.findByRole('dialog', { name: 'Start shadow mode' });
 }
 async function fill(user: User, word: string, why: string): Promise<void> {
-  const dialog = screen.getByRole('dialog', { name: 'Switch on acting' });
+  const dialog = screen.getByRole('dialog', { name: 'Start shadow mode' });
   const box = within(dialog).getByRole('textbox', { name: /Type ACT to confirm/ });
   if (word !== '') await user.type(box, word);
   const reason = within(dialog).getByRole('textbox', { name: /Why are you turning this on/ });
   if (why !== '') await user.type(reason, why);
 }
-const start = (): HTMLButtonElement => within(screen.getByRole('dialog', { name: 'Switch on acting' })).getByRole('button', { name: 'Start shadow mode' }) as HTMLButtonElement;
+const start = (): HTMLButtonElement => within(screen.getByRole('dialog', { name: 'Start shadow mode' })).getByRole('button', { name: 'Start shadow mode' }) as HTMLButtonElement;
 
 describe('the Act option', () => {
-  it.each(['senior', 'moderator'] as const)('is disabled for a %s with the reason in words', async (role) => {
+  it.each(['senior', 'moderator'] as const)('is not offered at all to a %s (no radio, no reason line)', async (role) => {
     const { w } = await actWorld({ role, actor: `${role}@example.test` });
-    await open(w);
-    expect(act()).toBeDisabled();
-    expect(screen.getByText('Only the owner can switch acting on.')).toBeInTheDocument();
-    // the reason is tied to the option for a screen reader
-    expect(act().getAttribute('aria-describedby')).toBeTruthy();
+    await openWithoutAct(w);
+    expect(screen.queryByRole('radio', { name: /^Act/ })).toBeNull();
+    expect(screen.queryByText('Only the owner can switch acting on.')).toBeNull();
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
+  });
+
+  it("is not offered at all when the server's code does not allow acting, even to the owner", async () => {
+    const { w } = await actWorld({ maxLevel: 2 });
+    await openWithoutAct(w);
+    expect(screen.queryByRole('radio', { name: /^Act/ })).toBeNull();
+    expect(screen.queryByText("Acting is off in this server's code.")).toBeNull();
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
+  });
+
+  it('is not offered when no AI adapter is set up in the code, even to the owner', async () => {
+    const { w } = await actWorld({ noAdapter: true });
+    const r = renderHub(w, { path: '/settings/ai' });
+    await screen.findByRole('heading', { level: 2, name: 'AI' });
+    await waitFor(() => expect(w.sent.some((q) => q.method === 'GET' && q.path === '/ai/status')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(r.container.querySelector('input[type=radio][aria-labelledby$="level-act-t"]')).toBeNull();
+    expect(screen.queryByRole('radio', { name: /^Act/ })).toBeNull();
+  });
+
+  it('is not offered, and Recommend stays chosen, for a senior while shadow is running', async () => {
+    const { w, startShadow } = await actWorld({ role: 'senior', actor: 'sam@example.test' });
+    startShadow();
+    await openWithoutAct(w);
+    expect(screen.queryByRole('radio', { name: /^Act/ })).toBeNull();
+    expect((screen.getByRole('radio', { name: /^Recommend/ }) as HTMLInputElement).checked).toBe(true);
   });
 
   it('for the owner it is enabled and opens the dialog', async () => {
@@ -56,10 +93,8 @@ describe('the Act option', () => {
 
   it.each([
     ['appeals are not on', { appeals: false }, 'Appeals must be on first: a player has to be able to ask a person to look again.'],
-    ['the code does not allow it', { maxLevel: 2 }, "Acting is off in this server's code."],
-    ['no adapter is set up', { noAdapter: true }, 'Acting needs an AI adapter, which is set in your server code.'],
     ['the level is below Recommend', { level: 1 }, 'Set the level to Recommend and save first.'],
-  ] as Array<[string, ActWorldOptions, string]>)('is disabled for the owner when %s, and says so in words', async (_name, options, reason) => {
+  ] as Array<[string, ActWorldOptions, string]>)('is disabled for the owner when %s, and says so in words (something the owner can fix)', async (_name, options, reason) => {
     const { w } = await actWorld(options);
     await open(w);
     expect(act()).toBeDisabled();
@@ -83,6 +118,20 @@ describe('the Act option', () => {
 });
 
 describe('the dialog', () => {
+  it('leads with what happens in this release: it records what it would have done, before any future-tense wording', async () => {
+    const { w } = await actWorld();
+    const { user } = await open(w);
+    const dialog = await openDialog(user);
+    const lead = within(dialog).getByText(/^In this version the AI only records what it would have done/);
+    expect(lead).toHaveTextContent('Nothing is sent to a player');
+    // it comes before the list that talks about what acting will do
+    const list = within(dialog).getAllByRole('list')[0] as HTMLElement;
+    expect(lead.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // and the dialog is not titled as if acting itself were being switched on
+    expect(within(dialog).queryByText('Switch on acting')).toBeNull();
+    expect(within(dialog).getByRole('heading', { name: 'Start shadow mode' })).toBeInTheDocument();
+  });
+
   it('lists, in order, what it will do, what it will not, what the player is told, what the team must do, and that the first days are shadow', async () => {
     const { w } = await actWorld();
     const { user } = await open(w);
@@ -133,7 +182,7 @@ describe('the dialog', () => {
     await fill(user, 'ACT', 'We want to see what it would do');
     expect(start()).toBeEnabled();
     await user.click(start());
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Switch on acting' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Start shadow mode' })).toBeNull());
     const sent = posts(w, '/ai/acting/shadow');
     expect(sent).toHaveLength(1);
     expect(sent[0]?.body).toEqual({ confirm: 'ACT', reason: 'We want to see what it would do' });
@@ -164,7 +213,7 @@ describe('the dialog', () => {
     await fill(user, 'ACT', 'We want to see what it would do');
     await user.click(start());
     expect(await screen.findByRole('alert')).toHaveTextContent('Appeals must be on first');
-    const dialog = screen.getByRole('dialog', { name: 'Switch on acting' });
+    const dialog = screen.getByRole('dialog', { name: 'Start shadow mode' });
     expect(within(dialog).getByRole('textbox', { name: /Why are you turning this on/ })).toHaveValue('We want to see what it would do');
     expect(w.cw.ai.acting.state().mode).toBe('off');
   });
@@ -230,7 +279,7 @@ describe('Pause and Resume', () => {
   it('Pause is not offered when acting is off or already paused', async () => {
     const { w, startShadow } = await actWorld({ role: 'senior', actor: 'sam@example.test' });
     renderHub(w, { path: '/settings/ai' });
-    await screen.findByRole('radio', { name: /^Act/ });
+    await screen.findByRole('radio', { name: /^Recommend/ });
     expect(screen.queryByRole('button', { name: 'Pause acting' })).toBeNull();
     cleanup();
     startShadow();
@@ -249,6 +298,23 @@ describe('Pause and Resume', () => {
     expect(posts(w, '/ai/acting/resume')).toHaveLength(1);
     await waitFor(() => expect(w.cw.ai.acting.state().paused).toBe(false));
     expect(await screen.findByText(/^Shadow since /)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['pause', 'Pause acting', 'Paused in Settings', { role: 'senior', actor: 'sam@example.test' }, false],
+    ['resume', 'Resume acting', 'Resumed in Settings', {}, true],
+    ['off', 'Switch acting off', 'Switched off in Settings', {}, false],
+  ] as const)('the audit reason of %s is one fixed form, whatever language the hub shows', async (step, button, reason, who, paused) => {
+    const { w, startShadow } = await actWorld(who as ActWorldOptions);
+    startShadow();
+    if (paused) w.cw.ai.acting.pause('sam@example.test', { reason: 'Looking' });
+    // an adopter's translation of every key, including the old reason keys: none of it may reach the audit row
+    const t = createT(en, 'de');
+    const translated = ((key, params) => (key.startsWith('hub.settings.ai.act.') && key.endsWith('.reason') ? 'Auf Deutsch' : t(key, params))) as typeof t;
+    const { user } = renderHub(w, { path: '/settings/ai', t: translated, locale: 'de' });
+    await user.click(await screen.findByRole('button', { name: new RegExp(button.split(' ')[0] as string) }));
+    await waitFor(() => expect(posts(w, `/ai/acting/${step}`)).toHaveLength(1));
+    expect((posts(w, `/ai/acting/${step}`)[0]?.body as { reason: string }).reason).toBe(reason);
   });
 
   it('a refused Pause says so in words and leaves the state', async () => {

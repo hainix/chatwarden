@@ -29,7 +29,11 @@ function Row({ item }: { item: AiActionView }) {
         <Card kind={item.kind} /> {t('hub.settings.ai.shadow.applied', { step: choiceLabel(hubT, locale, { kind: item.kind, durationMs: item.durationMs }) })}
       </td>
       <td>
-        <Link to={{ name: 'report', id: item.reportId }} className="cw-link">
+        <Link
+          to={{ name: 'report', id: item.reportId }}
+          className="cw-link"
+          aria-label={t('hub.settings.ai.shadow.open.named', { rule: ruleLabel(hubT, item.rule), time: absoluteTime(item.actedAt, locale) })}
+        >
           {t('hub.settings.ai.shadow.open')}
         </Link>
       </td>

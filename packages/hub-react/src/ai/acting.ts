@@ -29,6 +29,9 @@ export function blockedKey(f: ActFacts): 'owner' | 'adapter' | 'code' | 'level' 
   return null;
 }
 
+/** Whether the Act option is on the screen at all: only for the owner, and only when the server's code allows acting. For anyone else it is absent (no disabled radio, no line), because nothing on this screen would let them fix it. */
+export const actOffered = (f: Pick<ActFacts, 'owner' | 'maxLevel'>): boolean => f.owner && f.maxLevel >= 3;
+
 /** The Act option reads as chosen while acting is anywhere but off (and the level is Recommend, which it needs). */
 export const actingOn = (state: AiActingState | undefined): boolean => state !== undefined && state.mode !== 'off';
 

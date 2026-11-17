@@ -6,12 +6,18 @@ import {
   AI_ACTION_INSERT_SQL,
   AI_ACTION_NOTES_SQL,
   AI_ACTION_PURGE_SQL,
+  AI_ACTING_UPDATE_SQL,
   AI_GATE_ROWS_SQL,
+  AI_READ_INSERT_SQL,
+  AI_READ_TAKE_SQL,
   AI_UNREVIEWED_SQL,
   aiActionInsertArgs,
   aiActionListSql,
   aiActionsOnSubjectsSql,
+  aiActingUpdateArgs,
   aiActionTransitionSql,
+  aiReadInsertArgs,
+  aiReadTakeArgs,
   aiGateRowsArgs,
 } from '../src/sqliteStore.js';
 import type { AiActionRow } from '@chatwarden/core';
@@ -94,5 +100,33 @@ describe('the action statements (migration 25) bind exactly as many values as th
       expect(sql).not.toMatch(/\?\d/);
       expect(sql).not.toMatch(/\s[:@$][a-z]\w*/i);
     }
+  });
+});
+
+describe('the read reservation and the acting state bind exactly as many values as they have placeholders', () => {
+  const pending = { reportId: 'r', inputHash: 'h', adapter: 'fake', promptVersion: 5, purpose: 'confirm' } as never;
+
+  it('the reserve INSERT: eight ?, eight values, the purpose last (and "read" when none is given)', () => {
+    expect(placeholders(AI_READ_INSERT_SQL)).toBe(8);
+    expect(aiReadInsertArgs('id', pending, 100, 50)).toEqual(['id', 'r', 'h', 100, 'fake', 5, 50, 'confirm']);
+    expect(aiReadInsertArgs('id', { ...(pending as object), purpose: undefined } as never, 100, 50)).toHaveLength(8);
+    expect(aiReadInsertArgs('id', { ...(pending as object), purpose: undefined } as never, 100, 50)[7]).toBe('read');
+    expect(AI_READ_INSERT_SQL).not.toMatch(/\?\d/);
+  });
+
+  it('the reserve take-over UPDATE: seven ?, seven values, in SQL order', () => {
+    for (const retake of [0, 1] as const) {
+      expect(placeholders(AI_READ_TAKE_SQL)).toBe(7);
+      expect(aiReadTakeArgs(pending, 100, 50, retake)).toEqual([100, retake, 'r', 'h', 50, 50, retake]);
+    }
+    expect(AI_READ_TAKE_SQL).not.toMatch(/\?\d/);
+  });
+
+  it('the acting UPDATE: eight ?, eight values, the new row first and then what it expects', () => {
+    const next = { mode: 'shadow', modeSince: 5, modeBy: 'owen', paused: false, pausedSince: null, pausedBy: null } as const;
+    expect(placeholders(AI_ACTING_UPDATE_SQL)).toBe(8);
+    expect(aiActingUpdateArgs({ mode: 'off', paused: true }, next)).toEqual(['shadow', 5, 'owen', 0, null, null, 'off', 1]);
+    expect(aiActingUpdateArgs({ mode: 'shadow', paused: false }, { ...next, paused: true, pausedSince: 9, pausedBy: 'sam' })).toHaveLength(placeholders(AI_ACTING_UPDATE_SQL));
+    expect(AI_ACTING_UPDATE_SQL).not.toMatch(/\?\d/);
   });
 });

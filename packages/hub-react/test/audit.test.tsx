@@ -1,3 +1,4 @@
+import { AUDIT_ACTIONS } from '@chatwarden/core';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { personTag } from '../src/format.js';
@@ -338,7 +339,9 @@ describe('filters', () => {
     const { w, user } = await setup();
     const labels = [...action().options].map((o) => o.textContent);
     expect(labels[0]).toBe('Any action');
-    expect(labels).toHaveLength(1 + 33);
+    // One option for every action the kit records (the list itself, so a new action cannot slip in unlabelled), each with its own words, never the raw name.
+    expect(labels).toHaveLength(1 + AUDIT_ACTIONS.length);
+    for (const label of labels) expect(AUDIT_ACTIONS as readonly string[]).not.toContain(label);
     expect(new Set(labels).size).toBe(labels.length);
     // The two bulk dismissals (triage speed) are labelled in plain words, not shown as raw action names.
     expect(labels).toContain('Dismissed all open reports about a person');
@@ -347,6 +350,10 @@ describe('filters', () => {
     expect(labels).toContain('The AI read a report');
     expect(labels).toContain('Asked the AI to read a report again');
     expect(labels).toContain('Recorded a decision against the AI read');
+    // And the three of acting (shadow mode).
+    expect(labels).toContain('The AI recorded an action on a report');
+    expect(labels).toContain('Changed what the AI may do on its own');
+    expect(labels).toContain('Undid the AI actions since a time');
     // And the three of appeals and names.
     expect(labels).toContain('Viewed appeals');
     expect(labels).toContain('Decided an appeal');

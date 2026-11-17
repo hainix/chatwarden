@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import axe from 'axe-core';
@@ -113,10 +113,12 @@ describe.each(['light', 'dark'] as const)('axe on the gate table and the Person 
 
 // Acting, release 2 (Settings > AI): the Act option and its reason, the owner's dialog, the status line with Pause, and the "Would have acted" table, under axe in both themes.
 describe.each(['light', 'dark'] as const)('axe on the Act option, the dialog and the shadow list, %s theme', (theme) => {
-  it('the option disabled for a senior, with its reason', async () => {
+  it('the level list for a senior, with no Act option', async () => {
     const { w } = await actWorld({ role: 'senior', actor: 'sam@example.test' });
     const { container } = renderHub(w, { path: '/settings/ai', theme });
-    await screen.findByText('Only the owner can switch acting on.');
+    await screen.findByRole('radio', { name: /^Recommend/ });
+    await waitFor(() => expect(w.sent.some((q) => q.method === 'GET' && q.path === '/ai/acting')).toBe(true));
+    expect(screen.queryByRole('radio', { name: /^Act/ })).toBeNull();
     expect(await violations(container)).toEqual([]);
   });
 
@@ -124,7 +126,7 @@ describe.each(['light', 'dark'] as const)('axe on the Act option, the dialog and
     const { w } = await actWorld();
     const { container, user } = renderHub(w, { path: '/settings/ai', theme });
     await user.click(await screen.findByRole('radio', { name: /^Act/ }));
-    const dialog = await screen.findByRole('dialog', { name: 'Switch on acting' });
+    const dialog = await screen.findByRole('dialog', { name: 'Start shadow mode' });
     expect(await violations(container)).toEqual([]);
     await user.type(within(dialog).getByRole('textbox', { name: /Type ACT to confirm/ }), 'ACT');
     await user.type(within(dialog).getByRole('textbox', { name: /Why are you turning this on/ }), 'A reason');

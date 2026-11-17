@@ -53,6 +53,20 @@ describe('"would have acted"', () => {
     expect(within(first).getByRole('link', { name: /Open the case/ })).toBeInTheDocument();
   });
 
+  it('names each case in its link, so a list of links is not forty identical "Open the case"', async () => {
+    const { w } = await seeded(4);
+    await openAdvanced(w);
+    const table = await list();
+    const links = within(table).getAllByRole('link');
+    expect(links).toHaveLength(4);
+    const names = links.map((l) => l.getAttribute('aria-label') ?? l.textContent ?? '');
+    for (const name of names) expect(name).toMatch(/^Open the case, Rule [23] .+\d/);
+    // all four are different (the rule or the time differs), and the visible words still begin the name
+    expect(new Set(names).size).toBe(4);
+    for (const l of links) expect(l).toHaveTextContent(/^Open the case/);
+    for (const l of links) expect(within(table).getByRole('link', { name: l.getAttribute('aria-label') ?? '' })).toBe(l);
+  });
+
   it('says in words that nothing was sent to the player', async () => {
     const { w } = await seeded(1);
     await openAdvanced(w);

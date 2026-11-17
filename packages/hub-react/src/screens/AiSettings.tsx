@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ActDialog } from '../ai/ActDialog.js';
 import { ActingStatus } from '../ai/ActingStatus.js';
-import { actingOn, blockedKey } from '../ai/acting.js';
+import { actOffered, actingOn, blockedKey } from '../ai/acting.js';
 import { GateTable } from '../ai/GateTable.js';
 import { ShadowList } from '../ai/ShadowList.js';
 import { useAiT } from '../ai/i18n.js';
@@ -168,11 +168,14 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
   const readStatus = status.data ?? undefined;
   const editable = policy.canEdit && !notSetUp;
   const maxLevel = readStatus?.available === true ? Math.min(readStatus.maxLevel, 2) : 2;
-  // The Act option shows when the server knows acting (not a 404) and the status has been read, so a reason is never shown for a question not yet asked.
+  // The Act option shows when the server knows acting (not a 404), the status has been read (so a reason is never shown for a question not yet asked), the viewer is the
+  // owner and the server's code allows acting. For anyone else it is not there at all: no disabled radio and no line. For the owner it can still be disabled, with the one
+  // thing in the way (an adapter, appeals or the level), because those are theirs to fix.
   const actState = acting.data;
   const statusKnown = status.data !== undefined || status.error !== null;
   const actBlocked = actState === undefined ? null : blockedKey({ owner: me.role === 'owner', adapter: !notSetUp, maxLevel: actState.maxLevel, level: draftOf(state).level, appeals: me.features?.appeals === true });
-  const onAct = actingOn(actState) && draft.level === 2;
+  const actShown = actState !== undefined && statusKnown && actOffered({ owner: me.role === 'owner', maxLevel: actState.maxLevel });
+  const onAct = actShown && actingOn(actState) && draft.level === 2;
 
   const layer = useMemo(() => layerOf(state, draft), [state, draft]);
   const saved = draftOf(state);
@@ -238,7 +241,7 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
                 </span>
               </label>
             ))}
-            {actState !== undefined && statusKnown && (
+            {actShown && (
               <label className="cw-choice cw-flowopt">
                 <input
                   type="radio"

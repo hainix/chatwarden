@@ -7,7 +7,7 @@ import { Notice } from '../ui.js';
 import { actingErrorText } from './acting.js';
 import { useAiT } from './i18n.js';
 
-// "Switch on acting" (AI levels 3 and 4, release 2, design 9.2): the owner's one dialog. Plain words, in order, then the word ACT and a reason. The button stays
+// "Start shadow mode" (AI levels 3 and 4, release 2, design 9.2): the owner's one dialog. Plain words, in order, then the word ACT and a reason. The button stays
 // off until both are right; the server checks the word and the role again, so a forced click gets the same refusal. In this release the first step is shadow: the AI
 // records what it would have done and nothing is sent to a player.
 
@@ -46,6 +46,7 @@ export function ActDialog({ onClose, onDone }: { onClose: () => void; onDone: ()
     <Dialog label={t('hub.settings.ai.act.dialog.title')} onClose={onClose} initialFocus={word}>
       <form className="cw-form cw-act-dialog" onSubmit={submit}>
         <h3>{t('hub.settings.ai.act.dialog.title')}</h3>
+        <p>{t('hub.settings.ai.act.dialog.lead')}</p>
         <ol className="cw-act-parts">
           {PARTS.map((part) => (
             <li key={part}>

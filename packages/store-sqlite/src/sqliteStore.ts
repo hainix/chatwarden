@@ -484,6 +484,32 @@ const AI_ACTION_COLUMNS = {
 } as const satisfies Record<keyof AiActionRow, string>;
 const AI_ACTION_FIELDS = Object.keys(AI_ACTION_COLUMNS) as Array<keyof AiActionRow>;
 
+/** The read reservation's INSERT: one plain `?` for each value `aiReadInsertArgs` gives (the literals are not placeholders). */
+export const AI_READ_INSERT_SQL = `INSERT INTO kit_ai_reads (id, report_id, input_hash, status, attempts, lease_until, adapter, prompt_version, created_at, purpose)
+           VALUES (?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?)
+           ON CONFLICT (report_id, input_hash) DO NOTHING
+           RETURNING id, attempts`;
+/** The values `AI_READ_INSERT_SQL` binds, in order. */
+export const aiReadInsertArgs = (id: string, row: AiReadPending, leaseUntil: number, now: number): Array<string | number> => [id, row.reportId, row.inputHash, leaseUntil, row.adapter, row.promptVersion, now, row.purpose ?? 'read'];
+/** The read reservation's take-over UPDATE (a lapsed lease, a retry time, or an owner's retake). */
+export const AI_READ_TAKE_SQL = `UPDATE kit_ai_reads
+           SET status = 'pending', attempts = attempts + 1, retry_at = NULL, lease_until = ?, error_kind = NULL,
+               retaken = CASE WHEN ? = 1 AND retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed') THEN 1 ELSE retaken END
+           WHERE report_id = ? AND input_hash = ?
+             AND ((status = 'pending' AND lease_until <= ?)
+               OR (status IN ('failed', 'skipped') AND retry_at IS NOT NULL AND retry_at <= ?)
+               OR (? = 1 AND ((retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed')) OR status = 'skipped')))
+           RETURNING id, attempts`;
+/** The values `AI_READ_TAKE_SQL` binds, in order (`retake` is 0 or 1). */
+export const aiReadTakeArgs = (row: AiReadPending, leaseUntil: number, now: number, retake: 0 | 1): Array<string | number> => [leaseUntil, retake, row.reportId, row.inputHash, now, now, retake];
+/** The acting state's conditional UPDATE: the new row, then the mode and pause it expects. */
+export const AI_ACTING_UPDATE_SQL = `UPDATE kit_ai_acting SET mode = ?, mode_since = ?, mode_by = ?, paused = ?, paused_since = ?, paused_by = ?
+               WHERE id = 1 AND mode = ? AND paused = ?`;
+/** The values `AI_ACTING_UPDATE_SQL` binds, in order. */
+export const aiActingUpdateArgs = (expect: { mode: AiActingMode; paused: boolean }, next: AiActingRow): Array<string | number | null> => [
+  next.mode, next.modeSince, next.modeBy, next.paused ? 1 : 0, next.pausedSince, next.pausedBy, expect.mode, expect.paused ? 1 : 0,
+];
+
 /** One action row, as the insert writes it: every column, in `AI_ACTION_FIELDS` order, one plain `?` each. Only a clash on the report is swallowed (`UNIQUE (report_id)`: someone queued or acted on it first); a state or a code the table does not know is an error, not a silent no. */
 export const AI_ACTION_INSERT_SQL = `INSERT INTO kit_ai_actions (${AI_ACTION_FIELDS.map((f) => AI_ACTION_COLUMNS[f]).join(', ')}) VALUES (${AI_ACTION_FIELDS.map(() => '?').join(', ')}) ON CONFLICT (report_id) DO NOTHING`;
 /** The values `AI_ACTION_INSERT_SQL` binds, one for each `?`, in order. */
@@ -916,32 +942,18 @@ export class SqliteStore implements Store, TermStore {
   // AI reads and the casebook (AI levels 1 and 2, migration 20). SYNCHRONOUS on purpose (like claims); they run inside `transaction`.
 
   reserveAiRead(row: AiReadPending, leaseUntil: number, now: number, opts?: { retake?: boolean }): AiReserveResult {
-    const retake = opts?.retake === true ? 1 : 0;
+    const retake: 0 | 1 = opts?.retake === true ? 1 : 0;
     return this.transaction((): AiReserveResult => {
       // The UNIQUE (report_id, input_hash) index decides who inserts: of two connections, one gets a row back, the other none.
       const fresh = this.db
-        .prepare(
-          `INSERT INTO kit_ai_reads (id, report_id, input_hash, status, attempts, lease_until, adapter, prompt_version, created_at, purpose)
-           VALUES (?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?)
-           ON CONFLICT (report_id, input_hash) DO NOTHING
-           RETURNING id, attempts`,
-        )
-        .get(randomBytes(16).toString('base64url'), row.reportId, row.inputHash, leaseUntil, row.adapter, row.promptVersion, now, row.purpose ?? 'read');
+        .prepare(AI_READ_INSERT_SQL)
+        .get(...aiReadInsertArgs(randomBytes(16).toString('base64url'), row, leaseUntil, now));
       if (fresh !== undefined) return this.openAttempt(String(fresh.id), Number(fresh.attempts), now);
       // The row exists. Take it over only when its lease has lapsed or its retry time has come: one conditional write, so of two
       // callers racing for it exactly one changes it and the other's WHERE is false. `attempts` is the fence the winner holds.
       const taken = this.db
-        .prepare(
-          `UPDATE kit_ai_reads
-           SET status = 'pending', attempts = attempts + 1, retry_at = NULL, lease_until = ?, error_kind = NULL,
-               retaken = CASE WHEN ? = 1 AND retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed') THEN 1 ELSE retaken END
-           WHERE report_id = ? AND input_hash = ?
-             AND ((status = 'pending' AND lease_until <= ?)
-               OR (status IN ('failed', 'skipped') AND retry_at IS NOT NULL AND retry_at <= ?)
-               OR (? = 1 AND ((retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed')) OR status = 'skipped')))
-           RETURNING id, attempts`,
-        )
-        .get(leaseUntil, retake, row.reportId, row.inputHash, now, now, retake);
+        .prepare(AI_READ_TAKE_SQL)
+        .get(...aiReadTakeArgs(row, leaseUntil, now, retake));
       if (taken !== undefined) return this.openAttempt(String(taken.id), Number(taken.attempts), now);
       const existing = this.db.prepare('SELECT * FROM kit_ai_reads WHERE report_id = ? AND input_hash = ?').get(row.reportId, row.inputHash);
       const mapped = existing === undefined ? null : aiReadFromRow(existing, true);
@@ -1428,11 +1440,8 @@ export class SqliteStore implements Store, TermStore {
       return (
         Number(
           this.db
-            .prepare(
-              `UPDATE kit_ai_acting SET mode = ?, mode_since = ?, mode_by = ?, paused = ?, paused_since = ?, paused_by = ?
-               WHERE id = 1 AND mode = ? AND paused = ?`,
-            )
-            .run(next.mode, next.modeSince, next.modeBy, next.paused ? 1 : 0, next.pausedSince, next.pausedBy, expect.mode, expect.paused ? 1 : 0).changes,
+            .prepare(AI_ACTING_UPDATE_SQL)
+            .run(...aiActingUpdateArgs(expect, next)).changes,
         ) > 0
       );
     });

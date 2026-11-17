@@ -159,7 +159,7 @@ describe.each([
         const { page: p, problems } = await open('#/settings/ai', { width, scheme });
         await p.getByRole('heading', { name: 'AI', exact: true, level: 2 }).waitFor({ timeout: 15_000 });
         await p.getByRole('radio', { name: /^Act/ }).click({ timeout: 15_000 });
-        const dialog = p.getByRole('dialog', { name: 'Switch on acting' });
+        const dialog = p.getByRole('dialog', { name: 'Start shadow mode' });
         await dialog.waitFor({ timeout: 15_000 });
         expect(await dialog.getByRole('listitem').count()).toBe(5);
         const start = dialog.getByRole('button', { name: 'Start shadow mode' });
