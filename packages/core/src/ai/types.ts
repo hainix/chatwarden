@@ -1,4 +1,5 @@
 import type { ConductLevel } from '../types.js';
+import type { AiGateName } from './gates.js';
 
 // The provider-free AI contract (design 2026-11-11, section 3). Core defines the shapes, the prompt, the redaction, the validation
 // and the ceilings; an adapter only sends the rendered prompt to a model and returns what came back. Nothing here imports a
@@ -7,10 +8,17 @@ import type { ConductLevel } from '../types.js';
 /**
  * The prompt version. Bumped when the prompt or the output schema changes; part of the input hash, so a bump makes every stored
  * read stale. 2 added the full-stop spacing line; 3 added the stable paragraph about signal counts; 4 added the stable paragraph about
- * appeal cautions and corrective examples.
+ * appeal cautions and corrective examples; 5 added the confirming read's prompt (`purpose: 'confirm'`) beside it, so every stored read is stale once.
  * @experimental
  */
-export const AI_PROMPT_VERSION = 4;
+export const AI_PROMPT_VERSION = 5;
+
+/**
+ * The version of the confirming read's own prompt (`purpose: 'confirm'`): a counter apart from {@link AI_PROMPT_VERSION}, so a confirming read is never mistaken for a read
+ * of the same version. Bumped when the confirming prompt changes.
+ * @experimental
+ */
+export const AI_CONFIRM_PROMPT_VERSION = 1;
 
 /**
  * One signal count about the reported person (P1), as the model is shown it: the adopter's own short label, whether it counts for or
@@ -67,6 +75,11 @@ export type AIExampleInput = AIExample & { id: string };
 export interface AIReadInput {
   /** Bumped when the prompt or schema changes; part of the cache key and of the invalidation hash. */
   promptVersion: number;
+  /**
+   * `'confirm'` for the confirming read (design 3 ruling 8): the same lines asked a different way (look for the innocent reading), with no signal counts, no casebook examples and no
+   * cautions. Absent for the case's own read (`'read'`). Part of the input hash, so a confirming read is a row of its own and is never the case's read.
+   */
+  purpose?: 'read' | 'confirm';
   /** The structured facts, for an adapter that wants to render its own prompt. */
   report: { reason: { id: string; label: string } | null; note: string | null };
   /** `P1` reported, `P2` reporter, `P3...` the rest. */
@@ -192,3 +205,55 @@ export interface AIRead {
     evidence: string[];
   };
 }
+
+/**
+ * Why an AI action was refused: a closed code, never text (design 4.2). `gate_failed:<name>` names the gate that does not hold.
+ * @experimental
+ */
+export type AiActRefusal =
+  | 'acting_off'
+  | 'paused'
+  | 'no_appeals'
+  | 'not_open'
+  | 'too_old'
+  | 'too_new'
+  | 'claimed'
+  | 'read_not_usable'
+  | 'confirm_disagrees'
+  | 'cell_not_allowed'
+  | 'ceiling_kind'
+  | 'ceiling_duration'
+  | 'ceiling_evidence'
+  | 'evidence_missing'
+  | 'do_not_automate'
+  | 'person_protected'
+  | 'reporter_habitual'
+  | 'system_report'
+  | 'cap_hour'
+  | 'cap_day'
+  | 'review_debt'
+  | 'held_back'
+  | `gate_failed:${AiGateName}`;
+
+/**
+ * What the AI module hands the actor: ids, never a step (design 6.1). The actor recomputes everything from the store; a proposal that disagrees with what it computes is refused,
+ * never corrected.
+ * @experimental
+ */
+export interface AiActionProposal {
+  reportId: string;
+  readId: string;
+  confirmReadId: string;
+}
+
+/**
+ * What the actor answers. `mode` is `shadow` when it only recorded "would have acted"; `acted` belongs to the acting release. `replay` is true when the action was already recorded.
+ * @experimental
+ */
+export type AiActResult = { ok: true; actionId: string; mode: 'shadow' | 'acted'; replay: boolean } | { ok: false; refused: AiActRefusal };
+
+/**
+ * Injected by the kit: the AI module calls it with ids and never learns what it does.
+ * @experimental
+ */
+export type ActionProposer = (p: AiActionProposal) => Promise<AiActResult>;

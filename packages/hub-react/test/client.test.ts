@@ -123,7 +123,7 @@ describe('every staff route has a client method', () => {
   };
 
   /** The world every route is exercised in: appeals and renames are on, so their routes answer instead of 404. */
-  const world = () => appealsHub({ role: 'owner', ai: { level: 2 }, names: { renames: true } });
+  const world = () => appealsHub({ role: 'owner', ai: { level: 2, options: { maxLevel: 3, act: {} } }, names: { renames: true } });
 
   async function exercise(w: AppealsHub) {
     const { id, person } = await w.file({ target: 'Mallory', reporter: 'Rita' });
@@ -224,6 +224,21 @@ describe('every staff route has a client method', () => {
       ['aiGates', () => c.aiGates(), { method: 'GET', path: '/ai/gates' }],
       ['setAutomation mark', () => c.setAutomation(renamed.person, { allowed: false, code: 'vulnerable' }), { method: 'PUT', path: `/people/${renamed.person}/automation`, body: { allowed: false, code: 'vulnerable' } }],
       ['setAutomation clear', () => c.setAutomation(renamed.person, { allowed: true }), { method: 'PUT', path: `/people/${renamed.person}/automation`, body: { allowed: true } }],
+      // AI levels 3 and 4, release 2, last because they move the clock: where acting stands, each step (the body as given), and the shadow list (the query as given).
+      ['aiActing', () => c.aiActing(), { method: 'GET', path: '/ai/acting' }],
+      ['aiActingStep shadow', () => c.aiActingStep('shadow', { confirm: 'ACT', reason: 'Trying' }), { method: 'POST', path: '/ai/acting/shadow', body: { confirm: 'ACT', reason: 'Trying' } }],
+      ['aiActions', () => c.aiActions({ state: 'shadow', limit: 5 }), { method: 'GET', path: '/ai/actions', query: { state: 'shadow', limit: 5 } }],
+      ['aiActingStep pause', () => c.aiActingStep('pause', { reason: 'Looking' }), { method: 'POST', path: '/ai/acting/pause', body: { reason: 'Looking' } }],
+      ['aiActingStep resume', () => c.aiActingStep('resume', { reason: 'Looked' }), { method: 'POST', path: '/ai/acting/resume', body: { reason: 'Looked' } }],
+      [
+        'aiActingStep start',
+        () => {
+          w.clock.t += 15 * 24 * 60 * 60 * 1000;
+          return c.aiActingStep('start', { confirm: 'ACT', reason: 'Shadow was fine' });
+        },
+        { method: 'POST', path: '/ai/acting/start', body: { confirm: 'ACT', reason: 'Shadow was fine' } },
+      ],
+      ['aiActingStep off', () => c.aiActingStep('off', { reason: 'Enough' }), { method: 'POST', path: '/ai/acting/off', body: { reason: 'Enough' } }],
     ];
     expect(aiRead).not.toBeNull();
     const results: unknown[] = [];

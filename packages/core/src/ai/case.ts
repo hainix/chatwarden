@@ -35,6 +35,11 @@ export interface Prepared {
   ownLineIds: ReadonlySet<string>;
   /** The same input with casebook examples and the signal counts about P1 in it (at most two examples are used). The hash does not change. */
   build(examples: readonly AIExampleInput[], signals?: readonly AISignal[], cautions?: BuildAIInputArgs['cautions']): AIReadInput;
+  /**
+   * The confirming read's input for the same case (`purpose: 'confirm'`: the same lines, a different prompt, no examples, signals or cautions) and its hash for `adapterId`. Rendered on
+   * first use and kept: the queue prepares hundreds of cases and almost none is ever confirmed.
+   */
+  confirm(adapterId: string): { input: AIReadInput; hash: string };
 }
 
 export interface PrepareArgs {
@@ -54,6 +59,8 @@ export function prepareCase(args: PrepareArgs): Prepared {
   const build = (examples: readonly AIExampleInput[], signals?: readonly AISignal[], cautions?: BuildAIInputArgs['cautions']): AIReadInput =>
     buildAIInput({ policy, reason, chosen, examples, ...(signals === undefined ? {} : { signals }), ...(cautions === undefined ? {} : { cautions }) });
   const input = build([]);
+  let confirmInput: AIReadInput | undefined;
+  const confirmHashes = new Map<string, string>();
 
   // The tripwire reads what the players typed (the raw text), whatever is sent.
   const rawOf = new Map(report.excerpt.map((l) => [l.lineId, l.raw]));
@@ -72,5 +79,14 @@ export function prepareCase(args: PrepareArgs): Prepared {
     idOf: new Map(chosen.lines.map((l) => [l.ref, l.lineId])),
     ownLineIds: new Set(chosen.lines.filter((l) => l.byReported).map((l) => l.lineId)),
     build,
+    confirm: (adapterId) => {
+      confirmInput ??= buildAIInput({ policy, reason, chosen, purpose: 'confirm' });
+      let hash = confirmHashes.get(adapterId);
+      if (hash === undefined) {
+        hash = inputHash(confirmInput, adapterId);
+        confirmHashes.set(adapterId, hash);
+      }
+      return { input: confirmInput, hash };
+    },
   };
 }

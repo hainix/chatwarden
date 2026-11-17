@@ -169,8 +169,8 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
     expect(columnInfo(db, 'kit_notices')).toEqual(noticeCols);
     expect(indexSql(db, 'kit_notices')).toEqual(noticeIdx);
     expect(names(db, 'index').filter((i) => i.startsWith('kit_notices'))).toEqual(NOTICE_INDEXES);
-    // (kit_links and kit_ai_noauto come from later migrations)
-    expect(names(db, 'table').filter((x) => !tables.includes(x) && x !== 'kit_links' && x !== 'kit_ai_noauto')).toEqual(['kit_appeals', 'kit_blocked_names']);
+    // (kit_links, kit_ai_noauto, kit_ai_acting and kit_ai_actions come from later migrations)
+    expect(names(db, 'table').filter((x) => !tables.includes(x) && !['kit_links', 'kit_ai_noauto', 'kit_ai_acting', 'kit_ai_actions'].includes(x))).toEqual(['kit_appeals', 'kit_blocked_names']);
     // the same rows through the store, in the same order
     expect(store.loadNotices(['s_0', 's_1', 's_2', 's_3']).map((r) => r.id)).toEqual(
       (before as { notices: Array<{ id: string; created_at: number }> }).notices

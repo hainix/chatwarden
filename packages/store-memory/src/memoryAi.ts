@@ -1,5 +1,10 @@
 import type {
   AISignal,
+  AiActingMode,
+  AiActingRow,
+  AiActionPatch,
+  AiActionRow,
+  AiActionState,
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
@@ -47,7 +52,19 @@ export type MemoryAiMethods = Required<
     | 'aiGateRows'
     | 'setNoAutomation'
     | 'loadNoAutomation'
+    | 'aiActingState'
+    | 'setAiActingState'
+    | 'insertAiAction'
+    | 'loadAiAction'
+    | 'transitionAiAction'
+    | 'dueAiActions'
+    | 'listAiActions'
+    | 'aiActionCounts'
+    | 'aiActedCount'
+    | 'aiActionsOnSubjects'
+    | 'aiUnreviewed'
     | 'purgeAi'
+    | 'purgeAiActions'
   >
 >;
 
@@ -57,6 +74,8 @@ export type MemoryAiStore = MemoryStore & MemoryAiMethods;
 /** The methods, on a class only so they can reach the store's own state. Never constructed: `withMemoryAi` copies them onto a store. */
 class MemoryAi extends MemoryStore {
   private noAutomation?: Map<string, NoAutomationRow>;
+  private actingRow?: AiActingRow;
+  private actionRows?: AiActionRow[];
 
   // AI reads and the casebook (AI levels 1 and 2). Synchronous like claims; each write is journaled, so an undone transaction
   // undoes it. Rows go in and come out as copies.
@@ -68,6 +87,7 @@ class MemoryAi extends MemoryStore {
         id: newId(),
         reportId: row.reportId,
         inputHash: row.inputHash,
+        purpose: row.purpose ?? 'read',
         status: 'pending',
         attempts: 1,
         retryAt: null,
@@ -211,7 +231,7 @@ class MemoryAi extends MemoryStore {
   }
 
   loadAiRead(reportId: string): AiReadRow | null {
-    return newestOk(this.aiReads.filter((r) => r.reportId === reportId));
+    return newestOk(this.aiReads.filter((r) => r.reportId === reportId && r.purpose === 'read'));
   }
 
   loadAiReadFor(reportId: string, inputHash: string): AiReadRow | null {
@@ -240,6 +260,7 @@ class MemoryAi extends MemoryStore {
     return this.aiReads
       .filter(
         (r) =>
+          r.purpose === 'read' &&
           !decided.has(r.reportId) &&
           (((r.status === 'failed' || r.status === 'skipped') && r.retryAt !== null && r.retryAt <= now) ||
             (r.status === 'pending' && r.leaseUntil !== null && r.leaseUntil <= now)),
@@ -396,6 +417,130 @@ class MemoryAi extends MemoryStore {
     return row === undefined ? null : { ...row };
   }
 
+  // The acting state (AI levels 3 and 4, release 2): one row, off until something sets it. A conditional write, journaled like every write.
+
+  aiActingState(): AiActingRow {
+    return { ...(this.actingRow ?? OFF) };
+  }
+
+  setAiActingState(expect: { mode: AiActingMode; paused: boolean }, next: AiActingRow): boolean {
+    const now = this.actingRow ?? OFF;
+    if (now.mode !== expect.mode || now.paused !== expect.paused) return false;
+    const before = this.actingRow;
+    this.actingRow = { ...next };
+    this.undoWith(() => {
+      this.actingRow = before;
+    });
+    return true;
+  }
+
+  // The action rows (AI levels 3 and 4, release 2): one per report, ever. They record what the AI module and the actor did; none of these writes a sanction.
+
+  private actions(): AiActionRow[] {
+    return (this.actionRows ??= []);
+  }
+
+  insertAiAction(row: AiActionRow): boolean {
+    const rows = this.actions();
+    if (rows.some((r) => r.reportId === row.reportId || r.id === row.id)) return false;
+    const copy = structuredClone(row);
+    rows.push(copy);
+    this.undoWith(() => {
+      const i = rows.indexOf(copy);
+      if (i >= 0) rows.splice(i, 1);
+    });
+    return true;
+  }
+
+  loadAiAction(reportId: string): AiActionRow | null {
+    const row = this.actions().find((r) => r.reportId === reportId);
+    return row === undefined ? null : structuredClone(row);
+  }
+
+  transitionAiAction(id: string, from: readonly AiActionState[], patch: AiActionPatch): boolean {
+    const row = this.actions().find((r) => r.id === id);
+    if (row === undefined || !from.includes(row.state)) return false;
+    // The same as the SQL store: a state outside the closed set throws (its CHECK), a key that is no column of the row is ignored, the row's id, report and creation time never
+    // move, a field the patch leaves undefined is left alone, and a patch with nothing left to change says so (false).
+    if (patch.state !== undefined && !AI_ACTION_STATES.includes(patch.state)) throw new Error('transitionAiAction: not an action state');
+    const changes = Object.entries(patch).filter(([key, value]) => value !== undefined && key !== 'id' && key !== 'reportId' && key !== 'createdAt' && Object.hasOwn(row, key));
+    if (changes.length === 0) return false;
+    const before = { ...row };
+    for (const [key, value] of changes) (row as unknown as Record<string, unknown>)[key] = value;
+    this.undoWith(() => Object.assign(row, before));
+    return true;
+  }
+
+  dueAiActions(now: number, limit: number | undefined): AiActionRow[] {
+    return this.actions()
+      .filter((r) => r.state === 'queued' && r.notBefore <= now)
+      .sort((a, b) => a.notBefore - b.notBefore || compare(a.id, b.id))
+      .slice(0, pageSize(limit, ACTIONS_DEFAULT_LIMIT))
+      .map((r) => structuredClone(r));
+  }
+
+  listAiActions(q: { state?: AiActionState | readonly AiActionState[]; limit: number | undefined; after?: { at: number; id: string } }): AiActionRow[] {
+    const states = q.state === undefined ? null : typeof q.state === 'string' ? [q.state] : q.state;
+    const after = q.after;
+    return this.actions()
+      .filter((r) => states === null || states.includes(r.state))
+      .filter((r) => after === undefined || r.createdAt < after.at || (r.createdAt === after.at && compare(r.id, after.id) < 0))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, pageSize(q.limit, ACTIONS_DEFAULT_LIMIT))
+      .map((r) => structuredClone(r));
+  }
+
+  aiActionCounts(since: number): { byState: Partial<Record<AiActionState, number>>; refused: Record<string, number> } {
+    const byState: Partial<Record<AiActionState, number>> = {};
+    const refused: Record<string, number> = {};
+    for (const r of this.actions()) {
+      if (r.createdAt < since) continue;
+      byState[r.state] = (byState[r.state] ?? 0) + 1;
+      if (r.state === 'refused' && r.refusedCode !== null) refused[r.refusedCode] = (refused[r.refusedCode] ?? 0) + 1;
+    }
+    return { byState, refused };
+  }
+
+  aiActedCount(since: number): number {
+    return this.actions().filter((r) => actedState(r) && (r.actedAt ?? -1) >= since && r.actedAt !== null).length;
+  }
+
+  aiActionsOnSubjects(subjects: readonly string[], since: number, undoneSince: number): { acted: number; undone: number } {
+    if (subjects.length === 0) return { acted: 0, undone: 0 };
+    const wanted = new Set(subjects);
+    const targets = new Map(this.reports.map((p) => [p.id, p.targetSubject]));
+    let acted = 0;
+    let undone = 0;
+    for (const r of this.actions()) {
+      const target = targets.get(r.reportId);
+      if (target === undefined || !wanted.has(target)) continue;
+      if (actedState(r) && r.actedAt !== null && r.actedAt >= since) acted += 1;
+      if (r.state === 'undone' && r.undoCode === 'not_a_violation' && r.reviewedAt !== null && r.reviewedAt >= undoneSince) undone += 1;
+    }
+    return { acted, undone };
+  }
+
+  aiUnreviewed(): { n: number; oldestActedAt: number | null } {
+    const active = this.actions().filter((r) => r.state === 'active');
+    const times = active.flatMap((r) => (r.actedAt === null ? [] : [r.actedAt]));
+    return { n: active.length, oldestActedAt: times.length === 0 ? null : Math.min(...times) };
+  }
+
+  purgeAiActions(before: number, undoNotesBefore: number): number {
+    // In place, so the journal of an earlier write in the same transaction still points at this list.
+    const rows = this.actions();
+    const snapshot = [...rows];
+    const kept = snapshot.filter((r) => r.createdAt >= before);
+    const noted = kept.filter((r) => r.createdAt < undoNotesBefore && r.undoNote !== null).map((r) => [r, r.undoNote] as const);
+    for (const [r] of noted) r.undoNote = null;
+    rows.splice(0, rows.length, ...kept);
+    this.undoWith(() => {
+      rows.splice(0, rows.length, ...snapshot);
+      for (const [r, note] of noted) r.undoNote = note;
+    });
+    return snapshot.length - kept.length;
+  }
+
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
     const reads = this.aiReads;
     const outcomes = new Map(this.aiOutcomes);
@@ -424,12 +569,21 @@ class MemoryAi extends MemoryStore {
   }
 }
 
+/** The acting state of a store nobody has set: off, not paused. */
+const OFF: AiActingRow = { mode: 'off', modeSince: null, modeBy: null, paused: false, pausedSince: null, pausedBy: null };
+
 /** The conduct levels, mildest first: the order of `aiGateRows` within a rule. A local copy of core's: this package links no runtime core code. */
 const SEVERITY_ORDER: readonly string[] = ['banter', 'rude', 'hostile', 'severe'];
 
 /** The page sizes used when a limit is omitted, not finite or below 1. Local copies of core's: this package links no runtime core code. */
+/** The closed set of action states (the SQL store's CHECK). */
+const AI_ACTION_STATES: readonly AiActionState[] = ['queued', 'shadow', 'active', 'confirmed', 'undone', 'refused', 'held_back'];
+const ACTIONS_DEFAULT_LIMIT = 200;
 const EXAMPLES_DEFAULT_LIMIT = 2;
 const RETRIES_DEFAULT_LIMIT = 20;
+
+/** The states in which an action acted (or, in shadow, would have): the caps count these. */
+const actedState = (r: AiActionRow): boolean => r.state === 'shadow' || r.state === 'active' || r.state === 'confirmed' || r.state === 'undone';
 
 /** A page size: the limit floored and capped at 200, or `fallback` when it is omitted, not finite or below 1. */
 function pageSize(limit: number | undefined, fallback: number): number {

@@ -1,6 +1,10 @@
 import { useId, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { ActDialog } from '../ai/ActDialog.js';
+import { ActingStatus } from '../ai/ActingStatus.js';
+import { actOffered, actingOn, blockedKey } from '../ai/acting.js';
 import { GateTable } from '../ai/GateTable.js';
+import { ShadowList } from '../ai/ShadowList.js';
 import { useAiT } from '../ai/i18n.js';
 import type { AiT } from '../ai/i18n.js';
 import { useHub } from '../context.js';
@@ -13,13 +17,14 @@ import { useUnsavedGuard } from '../policy/useUnsavedGuard.js';
 import { usePolicy } from '../policyHooks.js';
 import type { UsePolicy } from '../policyHooks.js';
 import { useToasts } from '../toasts.js';
-import type { AiStatusView, PolicyLayer, PolicyState } from '../types.js';
+import type { AiActingState, AiStatusView, PolicyLayer, PolicyState } from '../types.js';
 import { ErrorBlock, Fetched, Notice, Panel, Scroll } from '../ui.js';
 
 // Settings > AI. The level (Off, Read, Recommend), a status line, and one Advanced disclosure with the numbers. The level lives in the
 // policy layer beside the steps and the reporting section, so it is saved, versioned and audited the same way: a reason is asked for, a
 // conflict offers a reload, and only the owner can save. The daily spending limit and the adapter are set in the server's code and are read-only
-// here (the ceiling on calls a day is the owner's). Levels 3 and 4 do not exist yet and are not shown.
+// here (the ceiling on calls a day is the owner's). The Act option (release 2) is not a level in the layer: it opens the owner's dialog, and acting is its own state on the server
+// (`GET /ai/acting`). In this release acting only records what the AI would have done. Level 4 does not exist yet and is not shown.
 
 type Level = 0 | 1 | 2;
 
@@ -142,12 +147,14 @@ function Numbers({ status, draft, editable, onLearn, signalsSent, t }: { status:
 
 function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
   const t = useAiT();
-  const { client, t: hubT } = useHub();
+  const { client, me, t: hubT } = useHub();
   const toasts = useToasts();
   const base = useId();
   const status = useHubData<AiStatusView | null>('ai:status', () => client.aiStatus());
   const [draft, setDraftState] = useState<AiDraft>(() => draftOf(state));
   const [advanced, setAdvanced] = useState(false);
+  const acting = useHubData<AiActingState>('ai:acting', () => client.aiActing());
+  const [dialog, setDialog] = useState(false);
 
   const pending = useDraftSync(state, policy, {
     all: (next) => setDraftState(draftOf(next)),
@@ -160,7 +167,15 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
   const notSetUp = (status.data !== undefined && status.data !== null && !status.data.available) || status.error?.status === 404;
   const readStatus = status.data ?? undefined;
   const editable = policy.canEdit && !notSetUp;
-  const maxLevel = readStatus?.available === true ? readStatus.maxLevel : 2;
+  const maxLevel = readStatus?.available === true ? Math.min(readStatus.maxLevel, 2) : 2;
+  // The Act option shows when the server knows acting (not a 404), the status has been read (so a reason is never shown for a question not yet asked), the viewer is the
+  // owner and the server's code allows acting. For anyone else it is not there at all: no disabled radio and no line. For the owner it can still be disabled, with the one
+  // thing in the way (an adapter, appeals or the level), because those are theirs to fix.
+  const actState = acting.data;
+  const statusKnown = status.data !== undefined || status.error !== null;
+  const actBlocked = actState === undefined ? null : blockedKey({ owner: me.role === 'owner', adapter: !notSetUp, maxLevel: actState.maxLevel, level: draftOf(state).level, appeals: me.features?.appeals === true });
+  const actShown = actState !== undefined && statusKnown && actOffered({ owner: me.role === 'owner', maxLevel: actState.maxLevel });
+  const onAct = actShown && actingOn(actState) && draft.level === 2;
 
   const layer = useMemo(() => layerOf(state, draft), [state, draft]);
   const saved = draftOf(state);
@@ -201,6 +216,7 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
       {state.layerError !== undefined && <Notice tone="warn">{hubT('hub.settings.layerError')}</Notice>}
       {!state.canSave ? <Notice role="status">{t('hub.settings.ai.unsupported')}</Notice> : !policy.canEdit && <Notice role="status">{hubT('hub.settings.readOnly')}</Notice>}
       {statusBody}
+      {actState !== undefined && <ActingStatus state={actState} onChanged={acting.reload} />}
       <Panel title={t('hub.settings.ai.level.legend')}>
         <div className="cw-form cw-panel-pad">
           <fieldset className="cw-flowopts" role="radiogroup" disabled={!editable}>
@@ -210,7 +226,7 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
                 <input
                   type="radio"
                   name={`${base}-level`}
-                  checked={draft.level === level}
+                  checked={draft.level === level && !(level === 2 && onAct)}
                   disabled={level > maxLevel}
                   aria-labelledby={`${base}-level-${level}-t`}
                   aria-describedby={`${base}-level-${level}-hint`}
@@ -225,6 +241,32 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
                 </span>
               </label>
             ))}
+            {actShown && (
+              <label className="cw-choice cw-flowopt">
+                <input
+                  type="radio"
+                  name={`${base}-level`}
+                  checked={onAct}
+                  disabled={actBlocked !== null}
+                  aria-labelledby={`${base}-level-act-t`}
+                  aria-describedby={`${base}-level-act-hint${actBlocked === null ? '' : ` ${base}-level-act-why`}`}
+                  onChange={() => {
+                    if (!onAct) setDialog(true);
+                  }}
+                />
+                <span>
+                  <strong id={`${base}-level-act-t`}>{t('hub.settings.ai.level.act')}</strong>
+                  <span id={`${base}-level-act-hint`} className="cw-hint cw-flowopt-line">
+                    {t('hub.settings.ai.level.act.hint')}
+                  </span>
+                  {actBlocked !== null && (
+                    <span id={`${base}-level-act-why`} className="cw-hint cw-flowopt-line">
+                      {t(`hub.settings.ai.act.blocked.${actBlocked}`)}
+                    </span>
+                  )}
+                </span>
+              </label>
+            )}
           </fieldset>
         </div>
       </Panel>
@@ -235,12 +277,22 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
         {advanced && (
           <div id={`${base}-advanced`}>
             <GateTable />
+            {actState !== undefined && (actState.mode !== 'off' || actState.maxLevel >= 3) && <ShadowList />}
             <Numbers status={readStatus} draft={draft} editable={editable} onLearn={(learn) => setDraftState((d) => ({ ...d, learn }))} signalsSent={state.effective.signals?.feeds?.ai !== undefined} t={t} />
           </div>
         )}
       </div>
       {editable && <SaveBar policy={policy} save={save} isDirty={isDirty} dirtyCount={1} refusedField={false} idBase={base} onDiscard={discard} onReload={reload} />}
       {guard}
+      {dialog && (
+        <ActDialog
+          onClose={() => setDialog(false)}
+          onDone={() => {
+            setDialog(false);
+            acting.reload();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-export const VERSION = '0.1.13';
+export const VERSION = '0.1.14';
 
 export type {
   Clock,
@@ -17,6 +17,9 @@ export type {
   DecisionRow,
   DiscordThreadRow,
   NoAutomationRow,
+  AiActionPatch,
+  AiActionRow,
+  AiActionState,
   ReportCategory,
   ReportExcerptLine,
   ReportListQuery,
@@ -402,7 +405,11 @@ export type {
 } from './profile.js';
 
 // AI levels 1 and 2: the provider-free contract (@experimental). Kept apart from the rest so a bundler can drop it.
-export { AI_PROMPT_VERSION, AIError } from './ai/types.js';
+export { AI_CONFIRM_PROMPT_VERSION, AI_PROMPT_VERSION, AIError } from './ai/types.js';
+export { confirmAgrees } from './ai/confirm.js';
+export { AI_ACT_MAX_AGE_MS, capsOk, dueAt, isHeldBack, preFilter } from './ai/actPlan.js';
+export type { ActFacts, ActStep, CapUse, HoldbackHasher } from './ai/actPlan.js';
+export type { ActionProposer, AiActionProposal, AiActRefusal, AiActResult } from './ai/types.js';
 export type { AbortSignalLike, AIExample, AIExampleInput, AIPerson, AIRead, AIReadInput, AIReadResult, AISignal, AIStoredRead, AIUsage, ModerationAI } from './ai/types.js';
 export { AI_OUTPUT_SCHEMA } from './ai/schema.js';
 export { validateAIOutput } from './ai/validate.js';
@@ -417,11 +424,18 @@ export { inputHash } from './ai/hash.js';
 export { looksLikeInjection } from './ai/injection.js';
 export { aiActorOf, AiService, READ_AGAIN_PER_MINUTE, SWEEP_BATCH, SWEEP_EVERY_MS } from './ai/service.js';
 export { createInertAi } from './ai/inert.js';
+export { ACT_WORD, AI_SHADOW_DAYS_BAND, AI_SHADOW_DAYS_DEFAULT } from './ai/acting.js';
+export type { AiActingError, AiActingFacade, AiActingMode, AiActingResult, AiActingRow, AiActingState } from './ai/acting.js';
+export { AI_ACT_CAPS_BANDS, AI_ACT_CAPS_DEFAULTS, checkActCaps } from './ai/caps.js';
+export type { AiActCaps } from './ai/caps.js';
 export { AI_ACT_CAP_DEFAULTS, AI_GATE_BANDS, AI_GATE_DEFAULTS, AI_RECENT_DAYS, checkGateConfig, evaluateCell, wilsonLower, wilsonUpper } from './ai/gates.js';
 export type { AiAppealFacts, AiCellCounts, AiCellGate, AiCellVerdict, AiGateCheck, AiGateConfig, AiGateName } from './ai/gates.js';
 export { reachOf } from './ai/reach.js';
 export type { AiReach, ReachSuggest } from './ai/reach.js';
 export type {
+  AiActionsFacade,
+  AiActionView,
+  AiActOptions,
   AiBrief,
   AiFacade,
   AiGateCell,
@@ -432,6 +446,7 @@ export type {
   AiStatsRuleView,
   AiStatsView,
   AiStatus,
+  ConfirmEnd,
   SuggestionStep,
 } from './ai/service.js';
 export { createFakeModerationAI, fakeRead, FAKE_USAGE } from './ai/fake.js';

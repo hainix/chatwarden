@@ -85,7 +85,7 @@ describe('the policy audit actions', () => {
 
   it('refuses a detail on any other action: no other row may carry free text', async () => {
     const { cw } = await setup();
-    for (const action of AUDIT_ACTIONS.filter((a) => !a.startsWith('policy.u') && a !== 'policy.reset')) {
+    for (const action of AUDIT_ACTIONS.filter((a) => !a.startsWith('policy.u') && a !== 'policy.reset' && a !== 'ai.acting' && a !== 'ai.undo_all')) {
       expect(rec(cw, { action, detail: { sections: [], reason: 'smuggled' } }), action).toBe(false);
     }
     expect(cw.audit.list({ limit: 5 }).items).toEqual([]);

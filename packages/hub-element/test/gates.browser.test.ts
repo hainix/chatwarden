@@ -129,7 +129,7 @@ describe.each([
       await p.getByRole('button', { name: 'Advanced' }).click();
       const table = p.getByRole('table', { name: 'Gates for each rule and conduct level' });
       await table.waitFor({ timeout: 15_000 });
-      await p.getByText('Acting is not available in this version.').waitFor();
+      await p.getByText(/In this version the AI applies nothing to a player/).first().waitFor();
       expect(await table.locator('input, select, textarea').count()).toBe(0);
       // the seeded cell: volume and breadth are met; without appeals nothing opens
       const row = table.getByRole('row', { name: /^Rule 2, Hostile/ });

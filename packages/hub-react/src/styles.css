@@ -3743,6 +3743,30 @@
   gap: var(--cw-space-3, var(--cwd-space-3));
   min-width: 0;
 }
+/* Settings > AI > Acting (release 2): the one-click steps beside the status line, the owner's dialog, the "would have acted" table. Neutral tokens only. */
+.cw-hub .cw-act-steps {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-act-dialog {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-act-dialog h3,
+.cw-hub .cw-act-parts {
+  margin: 0;
+}
+.cw-hub .cw-act-parts {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+}
+.cw-hub .cw-shadow-table th,
+.cw-hub .cw-shadow-table td {
+  vertical-align: top;
+}
 /* Settings > Advanced: a panel's forms (slow mode and flooding, signals). Each form is a switch with its fields indented under it; no colour of its own. */
 .cw-hub .cw-pace-row,
 .cw-hub .cw-signal-form {

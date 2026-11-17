@@ -246,6 +246,7 @@ export function aiContract(name: string, make: () => Store): void {
             latencyMs: null,
             createdAt: NOW,
             retaken: false,
+            purpose: 'read',
           } satisfies AiReadRow,
         });
       });
@@ -505,6 +506,7 @@ export function aiContract(name: string, make: () => Store): void {
           latencyMs: 640,
           createdAt: NOW,
           retaken: false,
+          purpose: 'read',
         } satisfies AiReadRow);
       });
 

@@ -14,6 +14,11 @@ import type {
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
+  AiActingMode,
+  AiActingRow,
+  AiActionPatch,
+  AiActionRow,
+  AiActionState,
   AiGateRow,
   AiOutcomeInsert,
   AiOutcomeRow,
@@ -319,6 +324,7 @@ function aiReadFromRow(r: Record<string, unknown>, lenient = false): AiReadRow |
     id: String(r.id),
     reportId: String(r.report_id),
     inputHash: String(r.input_hash),
+    purpose: String(r.purpose) === 'confirm' ? 'confirm' : 'read',
     status: status as AiReadStatus,
     attempts: Number(r.attempts),
     retryAt: nullableNumber(r.retry_at),
@@ -377,6 +383,7 @@ function detailFromRow(json: unknown): AiOutcomeRow['detail'] {
 /** The page sizes used when a limit is omitted, not finite or below 1 (the memory store keeps the same two numbers). */
 const EXAMPLES_DEFAULT_LIMIT = 2;
 const RETRIES_DEFAULT_LIMIT = 20;
+const ACTIONS_DEFAULT_LIMIT = 200;
 
 /** Order two strings by code unit, the way the signal listing sorts (the memory store sorts the same way). */
 const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -449,6 +456,118 @@ FROM q GROUP BY ai_rule, ai_severity`;
 /** The values `AI_GATE_ROWS_SQL` binds, one for each `?`, in the order they appear. */
 export function aiGateRowsArgs(since: number, recentSince: number): [number, number, number] {
   return [since, recentSince, recentSince];
+}
+
+/** The action columns, by field: the one list the insert, the transition and the row mapping read, so a field cannot be in one and not the others. */
+const AI_ACTION_COLUMNS = {
+  id: 'id',
+  reportId: 'report_id',
+  readId: 'read_id',
+  confirmReadId: 'confirm_read_id',
+  rule: 'rule',
+  severity: 'severity',
+  state: 'state',
+  refusedCode: 'refused_code',
+  notBefore: 'not_before',
+  createdAt: 'created_at',
+  groupId: 'group_id',
+  kind: 'kind',
+  durationMs: 'duration_ms',
+  actedAt: 'acted_at',
+  reviewDueAt: 'review_due_at',
+  reviewedAt: 'reviewed_at',
+  reviewedBy: 'reviewed_by',
+  undoCode: 'undo_code',
+  undoNote: 'undo_note',
+  adapter: 'adapter',
+  promptVersion: 'prompt_version',
+} as const satisfies Record<keyof AiActionRow, string>;
+const AI_ACTION_FIELDS = Object.keys(AI_ACTION_COLUMNS) as Array<keyof AiActionRow>;
+
+/** The read reservation's INSERT: one plain `?` for each value `aiReadInsertArgs` gives (the literals are not placeholders). */
+export const AI_READ_INSERT_SQL = `INSERT INTO kit_ai_reads (id, report_id, input_hash, status, attempts, lease_until, adapter, prompt_version, created_at, purpose)
+           VALUES (?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?)
+           ON CONFLICT (report_id, input_hash) DO NOTHING
+           RETURNING id, attempts`;
+/** The values `AI_READ_INSERT_SQL` binds, in order. */
+export const aiReadInsertArgs = (id: string, row: AiReadPending, leaseUntil: number, now: number): Array<string | number> => [id, row.reportId, row.inputHash, leaseUntil, row.adapter, row.promptVersion, now, row.purpose ?? 'read'];
+/** The read reservation's take-over UPDATE (a lapsed lease, a retry time, or an owner's retake). */
+export const AI_READ_TAKE_SQL = `UPDATE kit_ai_reads
+           SET status = 'pending', attempts = attempts + 1, retry_at = NULL, lease_until = ?, error_kind = NULL,
+               retaken = CASE WHEN ? = 1 AND retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed') THEN 1 ELSE retaken END
+           WHERE report_id = ? AND input_hash = ?
+             AND ((status = 'pending' AND lease_until <= ?)
+               OR (status IN ('failed', 'skipped') AND retry_at IS NOT NULL AND retry_at <= ?)
+               OR (? = 1 AND ((retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed')) OR status = 'skipped')))
+           RETURNING id, attempts`;
+/** The values `AI_READ_TAKE_SQL` binds, in order (`retake` is 0 or 1). */
+export const aiReadTakeArgs = (row: AiReadPending, leaseUntil: number, now: number, retake: 0 | 1): Array<string | number> => [leaseUntil, retake, row.reportId, row.inputHash, now, now, retake];
+/** The acting state's conditional UPDATE: the new row, then the mode and pause it expects. */
+export const AI_ACTING_UPDATE_SQL = `UPDATE kit_ai_acting SET mode = ?, mode_since = ?, mode_by = ?, paused = ?, paused_since = ?, paused_by = ?
+               WHERE id = 1 AND mode = ? AND paused = ?`;
+/** The values `AI_ACTING_UPDATE_SQL` binds, in order. */
+export const aiActingUpdateArgs = (expect: { mode: AiActingMode; paused: boolean }, next: AiActingRow): Array<string | number | null> => [
+  next.mode, next.modeSince, next.modeBy, next.paused ? 1 : 0, next.pausedSince, next.pausedBy, expect.mode, expect.paused ? 1 : 0,
+];
+
+/** One action row, as the insert writes it: every column, in `AI_ACTION_FIELDS` order, one plain `?` each. Only a clash on the report is swallowed (`UNIQUE (report_id)`: someone queued or acted on it first); a state or a code the table does not know is an error, not a silent no. */
+export const AI_ACTION_INSERT_SQL = `INSERT INTO kit_ai_actions (${AI_ACTION_FIELDS.map((f) => AI_ACTION_COLUMNS[f]).join(', ')}) VALUES (${AI_ACTION_FIELDS.map(() => '?').join(', ')}) ON CONFLICT (report_id) DO NOTHING`;
+/** The values `AI_ACTION_INSERT_SQL` binds, one for each `?`, in order. */
+export const aiActionInsertArgs = (row: AiActionRow): Array<string | number | null> => AI_ACTION_FIELDS.map((f) => row[f] as string | number | null);
+/** The statement a transition runs for the columns in `columns` and `from` states: the new values first, then the id, then the states. */
+export const aiActionTransitionSql = (columns: readonly string[], from: number): string =>
+  `UPDATE kit_ai_actions SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ? AND state IN (${Array.from({ length: from }, () => '?').join(', ')})`;
+/** The queued rows that are due, oldest first: the time, then the limit. */
+export const AI_ACTION_DUE_SQL = "SELECT * FROM kit_ai_actions WHERE state = 'queued' AND not_before <= ? ORDER BY not_before, id LIMIT ?";
+/** The listing: the states (`states` of them, or none), an optional keyset cursor (the time twice, then the id), then the limit. */
+export const aiActionListSql = (states: number, cursor: boolean): string =>
+  `SELECT * FROM kit_ai_actions WHERE 1 = 1${states === 0 ? '' : ` AND state IN (${Array.from({ length: states }, () => '?').join(', ')})`}${
+    cursor ? ' AND (created_at < ? OR (created_at = ? AND id < ?))' : ''
+  } ORDER BY created_at DESC, id DESC LIMIT ?`;
+/** Rows created at or after a time, counted by state and refusal code. */
+/** Retention of the action rows (`retention.aiActionsMs`): by age through `kit_ai_actions_by_created`; a reviewer's private note goes with the report window. */
+export const AI_ACTION_PURGE_SQL = 'DELETE FROM kit_ai_actions WHERE created_at < ?';
+export const AI_ACTION_NOTES_SQL = 'UPDATE kit_ai_actions SET undo_note = NULL WHERE created_at < ? AND undo_note IS NOT NULL';
+export const AI_ACTION_COUNTS_SQL = 'SELECT state, refused_code, COUNT(*) AS n FROM kit_ai_actions WHERE created_at >= ? GROUP BY state, refused_code';
+/** The states in which an action acted (or, in shadow, would have). */
+const AI_ACTED_STATES = "('shadow', 'active', 'confirmed', 'undone')";
+/** Rows that acted at or after a time. */
+export const AI_ACTED_COUNT_SQL = `SELECT COUNT(*) AS n FROM kit_ai_actions WHERE acted_at >= ? AND state IN ${AI_ACTED_STATES}`;
+/** The actions on `n` subjects (through their reports' targets): the time they acted from, the time the undos count from, then the subjects. */
+export const aiActionsOnSubjectsSql = (n: number): string =>
+  `SELECT COALESCE(SUM(CASE WHEN a.acted_at >= ? AND a.state IN ${AI_ACTED_STATES} THEN 1 ELSE 0 END), 0) AS acted,
+          COALESCE(SUM(CASE WHEN a.state = 'undone' AND a.undo_code = 'not_a_violation' AND a.reviewed_at >= ? THEN 1 ELSE 0 END), 0) AS undone
+   FROM kit_ai_actions a JOIN kit_reports r ON r.id = a.report_id
+   WHERE r.target_subject IN (${Array.from({ length: n }, () => '?').join(', ')})`;
+/** The acted-but-unreviewed rows. */
+export const AI_UNREVIEWED_SQL = "SELECT COUNT(*) AS n, MIN(acted_at) AS oldest FROM kit_ai_actions WHERE state = 'active'";
+/** The most subjects one `aiActionsOnSubjects` call reads (a person and their aliases are a handful). */
+const AI_ACTION_SUBJECTS_MAX = 200;
+
+function aiActionFromRow(r: Record<string, unknown>): AiActionRow {
+  return {
+    id: String(r.id),
+    reportId: String(r.report_id),
+    readId: String(r.read_id),
+    confirmReadId: nullableText(r.confirm_read_id),
+    rule: String(r.rule),
+    severity: String(r.severity) as AiActionRow['severity'],
+    state: String(r.state) as AiActionState,
+    refusedCode: nullableText(r.refused_code),
+    notBefore: Number(r.not_before),
+    createdAt: Number(r.created_at),
+    groupId: nullableText(r.group_id),
+    kind: nullableText(r.kind) as AiActionRow['kind'],
+    durationMs: nullableNumber(r.duration_ms),
+    actedAt: nullableNumber(r.acted_at),
+    reviewDueAt: nullableNumber(r.review_due_at),
+    reviewedAt: nullableNumber(r.reviewed_at),
+    reviewedBy: nullableText(r.reviewed_by),
+    undoCode: nullableText(r.undo_code) as AiActionRow['undoCode'],
+    undoNote: nullableText(r.undo_note),
+    adapter: nullableText(r.adapter),
+    promptVersion: nullableNumber(r.prompt_version),
+  };
 }
 
 /** What makes an outcome a teachable example (everything but the rule, severity and time). One text, used by two queries. */
@@ -823,32 +942,18 @@ export class SqliteStore implements Store, TermStore {
   // AI reads and the casebook (AI levels 1 and 2, migration 20). SYNCHRONOUS on purpose (like claims); they run inside `transaction`.
 
   reserveAiRead(row: AiReadPending, leaseUntil: number, now: number, opts?: { retake?: boolean }): AiReserveResult {
-    const retake = opts?.retake === true ? 1 : 0;
+    const retake: 0 | 1 = opts?.retake === true ? 1 : 0;
     return this.transaction((): AiReserveResult => {
       // The UNIQUE (report_id, input_hash) index decides who inserts: of two connections, one gets a row back, the other none.
       const fresh = this.db
-        .prepare(
-          `INSERT INTO kit_ai_reads (id, report_id, input_hash, status, attempts, lease_until, adapter, prompt_version, created_at)
-           VALUES (?, ?, ?, 'pending', 1, ?, ?, ?, ?)
-           ON CONFLICT (report_id, input_hash) DO NOTHING
-           RETURNING id, attempts`,
-        )
-        .get(randomBytes(16).toString('base64url'), row.reportId, row.inputHash, leaseUntil, row.adapter, row.promptVersion, now);
+        .prepare(AI_READ_INSERT_SQL)
+        .get(...aiReadInsertArgs(randomBytes(16).toString('base64url'), row, leaseUntil, now));
       if (fresh !== undefined) return this.openAttempt(String(fresh.id), Number(fresh.attempts), now);
       // The row exists. Take it over only when its lease has lapsed or its retry time has come: one conditional write, so of two
       // callers racing for it exactly one changes it and the other's WHERE is false. `attempts` is the fence the winner holds.
       const taken = this.db
-        .prepare(
-          `UPDATE kit_ai_reads
-           SET status = 'pending', attempts = attempts + 1, retry_at = NULL, lease_until = ?, error_kind = NULL,
-               retaken = CASE WHEN ? = 1 AND retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed') THEN 1 ELSE retaken END
-           WHERE report_id = ? AND input_hash = ?
-             AND ((status = 'pending' AND lease_until <= ?)
-               OR (status IN ('failed', 'skipped') AND retry_at IS NOT NULL AND retry_at <= ?)
-               OR (? = 1 AND ((retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed')) OR status = 'skipped')))
-           RETURNING id, attempts`,
-        )
-        .get(leaseUntil, retake, row.reportId, row.inputHash, now, now, retake);
+        .prepare(AI_READ_TAKE_SQL)
+        .get(...aiReadTakeArgs(row, leaseUntil, now, retake));
       if (taken !== undefined) return this.openAttempt(String(taken.id), Number(taken.attempts), now);
       const existing = this.db.prepare('SELECT * FROM kit_ai_reads WHERE report_id = ? AND input_hash = ?').get(row.reportId, row.inputHash);
       const mapped = existing === undefined ? null : aiReadFromRow(existing, true);
@@ -977,7 +1082,7 @@ export class SqliteStore implements Store, TermStore {
       const rows = this.db
         .prepare(
           `SELECT * FROM kit_ai_reads INDEXED BY kit_ai_reads_by_report
-           WHERE report_id = ? AND status = 'ok' ORDER BY created_at DESC, id DESC LIMIT 20`,
+           WHERE report_id = ? AND status = 'ok' AND purpose = 'read' ORDER BY created_at DESC, id DESC LIMIT 20`,
         )
         .all(reportId);
       for (const r of rows) {
@@ -1009,7 +1114,7 @@ export class SqliteStore implements Store, TermStore {
       const rows = this.db
         .prepare(
           `SELECT * FROM kit_ai_reads INDEXED BY kit_ai_reads_by_report
-           WHERE status = 'ok' AND report_id IN (${wanted.map(() => '?').join(', ')})
+           WHERE status = 'ok' AND purpose = 'read' AND report_id IN (${wanted.map(() => '?').join(', ')})
            ORDER BY report_id, created_at DESC, id DESC`,
         )
         .all(...wanted);
@@ -1029,9 +1134,9 @@ export class SqliteStore implements Store, TermStore {
       this.db
         .prepare(
           `SELECT * FROM (
-             SELECT * FROM kit_ai_reads WHERE status IN ('failed', 'skipped') AND retry_at <= ?
+             SELECT * FROM kit_ai_reads WHERE status IN ('failed', 'skipped') AND retry_at <= ? AND purpose = 'read'
              UNION ALL
-             SELECT * FROM kit_ai_reads WHERE status = 'pending' AND lease_until <= ?
+             SELECT * FROM kit_ai_reads WHERE status = 'pending' AND lease_until <= ? AND purpose = 'read'
            ) WHERE NOT EXISTS (SELECT 1 FROM kit_reports p WHERE p.id = report_id AND p.status <> 'open')
            ORDER BY created_at, id LIMIT ?`,
         )
@@ -1214,6 +1319,79 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  // The action rows (AI levels 3 and 4, migration 25): one per report, ever. They record what the AI module and the actor did; none of these writes a sanction.
+
+  insertAiAction(row: AiActionRow): boolean {
+    return this.transaction(() => Number(this.db.prepare(AI_ACTION_INSERT_SQL).run(...aiActionInsertArgs(row)).changes) > 0);
+  }
+
+  loadAiAction(reportId: string): AiActionRow | null {
+    const r = this.transaction(() => this.db.prepare('SELECT * FROM kit_ai_actions WHERE report_id = ?').get(reportId));
+    return r === undefined ? null : aiActionFromRow(r);
+  }
+
+  transitionAiAction(id: string, from: readonly AiActionState[], patch: AiActionPatch): boolean {
+    // The row's id, report and creation time never move; a field the patch leaves undefined is left alone.
+    const fields = (Object.keys(patch) as Array<keyof AiActionRow>).filter(
+      (f) => f !== 'id' && f !== 'reportId' && f !== 'createdAt' && Object.hasOwn(AI_ACTION_COLUMNS, f) && (patch as Record<string, unknown>)[f] !== undefined,
+    );
+    if (fields.length === 0 || from.length === 0) return false;
+    return this.transaction(
+      () =>
+        Number(
+          this.db
+            .prepare(aiActionTransitionSql(fields.map((f) => AI_ACTION_COLUMNS[f]), from.length))
+            .run(...fields.map((f) => (patch as Record<string, unknown>)[f] as string | number | null), id, ...from).changes,
+        ) > 0,
+    );
+  }
+
+  purgeAiActions(before: number, undoNotesBefore: number): number {
+    return this.transaction(() => {
+      const gone = Number(this.db.prepare(AI_ACTION_PURGE_SQL).run(before).changes);
+      this.db.prepare(AI_ACTION_NOTES_SQL).run(undoNotesBefore);
+      return gone;
+    });
+  }
+
+  dueAiActions(now: number, limit: number | undefined): AiActionRow[] {
+    return this.transaction(() => this.db.prepare(AI_ACTION_DUE_SQL).all(now, pageSize(limit, ACTIONS_DEFAULT_LIMIT)).map(aiActionFromRow));
+  }
+
+  listAiActions(q: { state?: AiActionState | readonly AiActionState[]; limit: number | undefined; after?: { at: number; id: string } }): AiActionRow[] {
+    const states = q.state === undefined ? [] : typeof q.state === 'string' ? [q.state] : [...q.state];
+    const after = q.after;
+    const args: Array<string | number> = [...states, ...(after === undefined ? [] : [after.at, after.at, after.id]), pageSize(q.limit, ACTIONS_DEFAULT_LIMIT)];
+    return this.transaction(() => this.db.prepare(aiActionListSql(states.length, after !== undefined)).all(...args).map(aiActionFromRow));
+  }
+
+  aiActionCounts(since: number): { byState: Partial<Record<AiActionState, number>>; refused: Record<string, number> } {
+    const byState: Partial<Record<AiActionState, number>> = {};
+    const refused: Record<string, number> = {};
+    for (const r of this.transaction(() => this.db.prepare(AI_ACTION_COUNTS_SQL).all(since))) {
+      const state = String(r.state) as AiActionState;
+      byState[state] = (byState[state] ?? 0) + Number(r.n);
+      if (state === 'refused' && r.refused_code !== null) refused[String(r.refused_code)] = (refused[String(r.refused_code)] ?? 0) + Number(r.n);
+    }
+    return { byState, refused };
+  }
+
+  aiActedCount(since: number): number {
+    return Number(this.transaction(() => this.db.prepare(AI_ACTED_COUNT_SQL).get(since))?.n ?? 0);
+  }
+
+  aiActionsOnSubjects(subjects: readonly string[], since: number, undoneSince: number): { acted: number; undone: number } {
+    const unique = [...new Set(subjects)].slice(0, AI_ACTION_SUBJECTS_MAX);
+    if (unique.length === 0) return { acted: 0, undone: 0 };
+    const r = this.transaction(() => this.db.prepare(aiActionsOnSubjectsSql(unique.length)).get(since, undoneSince, ...unique));
+    return { acted: Number(r?.acted ?? 0), undone: Number(r?.undone ?? 0) };
+  }
+
+  aiUnreviewed(): { n: number; oldestActedAt: number | null } {
+    const r = this.transaction(() => this.db.prepare(AI_UNREVIEWED_SQL).get());
+    return { n: Number(r?.n ?? 0), oldestActedAt: nullableNumber(r?.oldest) };
+  }
+
   // "Do not automate" (AI levels 3 and 4, migration 24). One row per person; no retention of its own.
 
   setNoAutomation(subject: string, mark: { code: string; setBy: string; setAt: number } | null): void {
@@ -1235,6 +1413,37 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() => {
       const r = this.db.prepare('SELECT subject_id, code, set_by, set_at FROM kit_ai_noauto WHERE subject_id = ?').get(subject);
       return r === undefined ? null : { subject: String(r.subject_id), code: String(r.code), setBy: String(r.set_by), setAt: Number(r.set_at) };
+    });
+  }
+
+  // The acting state (AI levels 3 and 4, migration 25): one row, `off` when none was ever written. The write is conditional on what the caller read.
+
+  aiActingState(): AiActingRow {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT mode, mode_since, mode_by, paused, paused_since, paused_by FROM kit_ai_acting WHERE id = 1').get();
+      if (r === undefined) return { mode: 'off', modeSince: null, modeBy: null, paused: false, pausedSince: null, pausedBy: null };
+      return {
+        mode: String(r.mode) as AiActingMode,
+        modeSince: r.mode_since === null ? null : Number(r.mode_since),
+        modeBy: r.mode_by === null ? null : String(r.mode_by),
+        paused: Number(r.paused) === 1,
+        pausedSince: r.paused_since === null ? null : Number(r.paused_since),
+        pausedBy: r.paused_by === null ? null : String(r.paused_by),
+      };
+    });
+  }
+
+  setAiActingState(expect: { mode: AiActingMode; paused: boolean }, next: AiActingRow): boolean {
+    return this.transaction(() => {
+      // The row is created off on the first move, so "expected off" works on a store nobody has touched; the UPDATE is the conditional.
+      if (expect.mode === 'off' && !expect.paused) this.db.prepare("INSERT OR IGNORE INTO kit_ai_acting (id, mode) VALUES (1, 'off')").run();
+      return (
+        Number(
+          this.db
+            .prepare(AI_ACTING_UPDATE_SQL)
+            .run(...aiActingUpdateArgs(expect, next)).changes,
+        ) > 0
+      );
     });
   }
 

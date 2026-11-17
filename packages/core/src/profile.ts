@@ -194,7 +194,7 @@ export interface ModerationProfile extends ModerationProfileBase {
  * @experimental
  */
 export interface AISettings {
-  /** 0 off, 1 read, 2 recommend. 3 and 4 are not available yet. */
+  /** 0 off, 1 read, 2 recommend. Levels 3 and 4 are not set here: the owner takes them through the acting switch (`cw.ai.acting`), apart from the settings. */
   level: 0 | 1 | 2;
   /** Whether decided cases may be kept as pseudonymised examples for later reads. Default true. */
   learn: boolean;
@@ -203,6 +203,12 @@ export interface AISettings {
    * cannot run unbounded). A whole number from 1 to 100 000; default 5 000.
    */
   dailyCalls: number;
+  /**
+   * Rule numbers the AI may never act on (level 3), a restrict-only list: it can only take cells away from `aiAutoAct`, never add one. Whole numbers from 1, each once, at most
+   * 100. Absent (the default) excludes none. Owner-editable in the hub like the rest of this section.
+   * @experimental
+   */
+  actExcludeRules?: number[];
 }
 
 /** The default and the largest value of {@link AISettings.dailyCalls}. */
@@ -284,7 +290,7 @@ const TOP_KEYS = [
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
 const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names'];
-const AI_KEYS = ['level', 'learn', 'dailyCalls'] as const;
+const AI_KEYS = ['level', 'learn', 'dailyCalls', 'actExcludeRules'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
 const REPEAT_KEYS = ['windowDays', 'notes', 'distinctGames', 'outcome'] as const;
@@ -464,12 +470,12 @@ function lineOf(v: unknown, path: string, min: 0 | 1, max: number): void {
   }
 }
 
-/** The `ai` section, in input shape (both fields optional). Levels 3 and 4 are designed but not built, so they are refused by name. */
+/** The `ai` section, in input shape (every field optional). Levels 3 and 4 are not set here: they are refused by name and point at the acting switch. */
 function validateAI(v: unknown, path: string): void {
   const ai = obj(v, path, AI_KEYS, AI_KEYS);
   if (Object.hasOwn(ai, 'level')) {
     const level = ai['level'];
-    if (level === 3 || level === 4) fail(`${path}.level`, 'AI levels 3 and 4 are not available yet');
+    if (level === 3 || level === 4) fail(`${path}.level`, 'use the acting switch: AI levels 3 and 4 are not set in the settings');
     if (level !== 0 && level !== 1 && level !== 2) fail(`${path}.level`, 'must be 0 (off), 1 (read) or 2 (recommend)');
   }
   if (Object.hasOwn(ai, 'learn') && typeof ai['learn'] !== 'boolean') fail(`${path}.learn`, 'must be true or false');
@@ -478,6 +484,15 @@ function validateAI(v: unknown, path: string): void {
     if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > AI_DAILY_CALLS_MAX) {
       fail(`${path}.dailyCalls`, `must be a whole number of calls from 1 to ${AI_DAILY_CALLS_MAX}`);
     }
+  }
+  if (Object.hasOwn(ai, 'actExcludeRules')) {
+    const rp = `${path}.actExcludeRules`;
+    const list = stringList(ai['actExcludeRules'], rp);
+    if (list.length > MAX_RULE_LIST) fail(rp, `must list at most ${MAX_RULE_LIST} rule numbers`);
+    list.forEach((n, i) => {
+      if (!positiveInt(n)) fail(`${rp}[${i}]`, 'must be a rule number: a whole number from 1');
+      if (list.indexOf(n) !== i) fail(`${rp}[${i}]`, 'is listed twice');
+    });
   }
 }
 

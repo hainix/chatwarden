@@ -51,7 +51,7 @@ describe('the AI Store methods are optional', () => {
 describe('purge and the AI rows', () => {
   it('a store without AI methods purges as before, with 0 AI rows', async () => {
     const res: PurgeResult = await purge(withoutAi(), NOW);
-    expect(res).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(res).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
   });
 
   it('passes the three cutoffs: reads with the report window, outcomes and examples with their own', async () => {
@@ -64,6 +64,26 @@ describe('purge and the AI rows', () => {
     const res = await purge(store, NOW);
     expect(seen).toEqual([[NOW - RETENTION_DEFAULTS.reportsMs, NOW - 365 * DAY, NOW - 180 * DAY]]);
     expect(res).toMatchObject({ aiReads: 4, aiOutcomes: 2 });
+  });
+
+  it('passes the action rows two cutoffs: the rows by their own clock, the note of a reviewer with the report window', async () => {
+    const store = withMemoryAi(new MemoryStore());
+    const seen: number[][] = [];
+    store.purgeAiActions = (before, notesBefore) => {
+      seen.push([before, notesBefore]);
+      return 3;
+    };
+    const res = await purge(store, NOW);
+    expect(seen).toEqual([[NOW - 365 * DAY, NOW - RETENTION_DEFAULTS.reportsMs]]);
+    expect(res.aiActions).toBe(3);
+    // a custom window moves the first cutoff only
+    await purge(store, NOW, { aiActionsMs: 100 * DAY });
+    expect(seen[1]).toEqual([NOW - 100 * DAY, NOW - RETENTION_DEFAULTS.reportsMs]);
+  });
+
+  it('a store without the action rows counts none', async () => {
+    const res: PurgeResult = await purge(withoutAi(), NOW);
+    expect(res.aiActions).toBe(0);
   });
 
   it('honours a custom policy field by field', async () => {

@@ -63,12 +63,13 @@ describe('the level', () => {
     expect(screen.getByText('It proposes the whole decision, pre-filled and marked as an AI suggestion. A moderator confirms or edits it in one click.')).toBeInTheDocument();
   });
 
-  it('levels 3 and 4 are absent', async () => {
+  it('Watch (level 4) is absent, and Act is absent too when the code does not allow it (ruling 29)', async () => {
     const w = await owner();
     await open(w);
     expect(screen.getAllByRole('radio')).toHaveLength(3);
-    expect(screen.queryByText(/act on clear cases|watch/i)).toBeNull();
-    expect(screen.queryByRole('radio', { name: /level 3|level 4|Act|Watch/i })).toBeNull();
+    expect(screen.queryByText(/watch/i)).toBeNull();
+    expect(screen.queryByRole('radio', { name: /^Act/ })).toBeNull();
+    expect(screen.queryByText("Acting is off in this server's code.")).toBeNull();
   });
 
   it('a level above what the server allows is disabled, and says so', async () => {

@@ -273,3 +273,25 @@ Found building R1 (the seams and the read-only gate dashboard), 2026-11. Design:
   for a store that cannot keep the mark. (b) R3's act path must refuse to enable acting on a store without both `setNoAutomation` and `loadNoAutomation` (Task 14's `do_not_automate` check pins "an unsupported store
   means no acting", not "allowed"). (c) `automationAllowed(person)` with no `lookup` returns `true` (kept for the old signature), so every act call site, in the planner and in the actor, must pass a lookup; pin it in
   Task 11 and Task 14 tests.
+
+## AI levels 3 and 4, release 2 (0.1.14), parked
+
+Found building R2 (shadow mode), 2026-11. Design: [design/2026-11-12-ai-levels-3-4.md](../design/2026-11-12-ai-levels-3-4.md); plan: [2026-11-12-ai-levels-3-4.md](2026-11-12-ai-levels-3-4.md).
+
+- **R3's start gate is the owner's, not a task.** R3 (acting) does not start until all three are true: (1) shadow has run for at least 14 days in a real game (Moxgate starts in shadow and moves on the dashboard's evidence);
+  (2) the owner has read the "would have acted" list in Settings > AI > Advanced and is content with it; (3) appeals are in use, so the appeals numbers the gates read are real and a player can ask a person to look again.
+  Nothing in the code starts R3 for the owner: in 0.1.14 `on` records what shadow records and the hub has no button for it.
+- **For R3: the `ai.acting` audit row must be written in required mode, before the state moves.** In R2 it is best-effort after the write (the repo's pattern), so an audit-store failure leaves a switch change with no row. That is acceptable
+  while acting only records. When `on` writes sanctions, write the row first (or undo the state when the row cannot be written) and say so in the route doc.
+- **For R3: the caps and the per-person checks must be atomic with the write, across processes.** They are read, then written, in R2: two reports at 9 of 10 in the hour, on two processes, both pass. Harmless in shadow. The actor's sanction write
+  must count and insert in one transaction (Review Focus 4 of the plan expects it), and `advance()` must not reuse one `gates()` view for several rows (it does so for up to five rows in R2; the actor recomputes fresh).
+- **For R3: transient refusals are terminal in R2.** A row refused for `cap_hour`, `cap_day`, `review_debt`, a claim or a closed gate stays refused for that report (one row per report, ever), so a capped hour hands those reports to people for good,
+  and shadow's "would have acted" count is lower than what an uncapped AI would have done. R3 may want those to wait and retry. Until then the dashboard copy should say that the count is what the caps allowed.
+- **A hard stop is also permanent.** A report recorded as refused for `do_not_automate` stays refused if the person is cleared later. Same rule: one row per report.
+- **`ceiling_evidence` cannot be reached on the full path.** The second reader must share a cited line by the reported person (check 4), and that line also satisfies the ceiling (check 7), so the code is dead in the chain by design. It stays as defence in depth, pinned in `act-plan.test.ts`. Do not reorder the checks to reach it.
+- **A recomputed ban is refused two ways.** With a queued row whose stored step differs from the recomputed one the actor answers `read_not_usable` (the case moved); with no queued row (a direct proposal) it answers `ceiling_kind`. Both are pinned.
+- **Done in the final R2 round: the Act option is absent, not disabled, for anyone who cannot use it** (a senior, a moderator, or an adopter whose code does not allow acting). It shows only to the owner when the code allows acting, and then still off with one reason while appeals or the Recommend level are missing.
+- **Open: Pause, Resume and "Switch acting off" send a fixed reason** ("Paused in Settings"), so the audit row says where it came from but not why. The server accepts a reason of up to 2000 characters; a typed one is a small addition if the team wants it. The reason is now one fixed English form (never a translated string), so audit rows read the same in every locale. R3: ask for a typed reason on Resume, and on Switch off once `on` is real.
+- **Done in the final R2 round: the reserve INSERT and take-over UPDATE and the acting UPDATE are exported as constants and counted in `sql-placeholders.test.ts`.**
+- **Done in R2: retention of the action rows, `kit_ai_reads.purpose`, the store parity on a transition's edge input** (an empty patch is false, a state outside the closed set throws, an unknown key is ignored, in both stores).
+- **Migration 25 is open until 0.1.14 ships.** Anything that needs another index or column before then goes into migration 25; after the tag it is migration 26.

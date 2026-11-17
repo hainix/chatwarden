@@ -5,6 +5,7 @@
 import type { Store } from '@chatwarden/core';
 import { aiContract } from './ai.contract.js';
 import { aiActContract } from './ai-act.contract.js';
+import { aiShadowContract } from './ai-shadow.contract.js';
 import { appealsContract } from './appeals.contract.js';
 import { auditContract } from './audit.contract.js';
 import { discordThreadsContract } from './discordThreads.contract.js';
@@ -28,6 +29,7 @@ import { webhookKeysContract } from './webhookKeys.contract.js';
 export {
   aiActContract,
   aiContract,
+  aiShadowContract,
   appealsContract,
   auditContract,
   discordThreadsContract,
@@ -68,6 +70,7 @@ export const CONTRACT_AREAS = [
   'report reasons',
   'ai',
   'ai act',
+  'ai shadow',
   'signals',
   'appeals',
   'names',
@@ -93,6 +96,7 @@ export function storeContract(name: string, make: () => Store): void {
   reportReasonsContract(name, make);
   aiContract(name, make);
   aiActContract(name, make);
+  aiShadowContract(name, make);
   signalsContract(name, make);
   appealsContract(name, make);
   namesContract(name, make);

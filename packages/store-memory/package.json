@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/store-memory",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": false,
   "description": "In-memory store for Chatwarden chat moderation, for tests, demos and single-process prototypes. Journaled and transactional; runs in a browser.",
   "license": "Apache-2.0",
@@ -55,10 +55,10 @@
     "prepack": "tsc -b"
   },
   "peerDependencies": {
-    "@chatwarden/core": "^0.1.13"
+    "@chatwarden/core": "^0.1.14"
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.13"
+    "@chatwarden/core": "0.1.14"
   },
   "publishConfig": {
     "access": "public"

@@ -78,7 +78,13 @@ function openAt20(db: DatabaseSync): SqliteStore {
   expect(store.schemaVersion()).toBe(20);
   for (let i = 0; i < 15; i++) {
     store.insertReport(report(i));
-    store.reserveAiRead(pending(i), NOW + 60_000, NOW + i);
+    // Written the way version 20 wrote it (the store of today would also fill `purpose`, a column that exists only from version 25).
+    const p = pending(i);
+    const id = `read-${i}`;
+    db.prepare(
+      `INSERT INTO kit_ai_reads (id, report_id, input_hash, status, attempts, lease_until, adapter, prompt_version, created_at) VALUES (?, ?, ?, 'pending', 1, ?, ?, ?, ?)`,
+    ).run(id, p.reportId, p.inputHash, NOW + 60_000, p.adapter, p.promptVersion, NOW + i);
+    db.prepare('INSERT INTO kit_ai_spend (read_id, attempt, at, micros) VALUES (?, 1, ?, 0)').run(id, NOW + i);
   }
   store.insertReason({ id: 'rs1', label: 'L', text: 'T', active: true });
   store.claimCase('s_tgt1', 'mod', NOW, NOW + DAY, 'free');
@@ -141,15 +147,25 @@ describe('migration 21: signal rows', () => {
   it('the ALTER leaves existing kit_ai_reads rows readable and signals_json null', () => {
     const db = memDb();
     const old = openAt20(db);
-    const readsBefore = Array.from({ length: 15 }, (_, i) => old.loadAiRead(`m${String(i).padStart(4, '0')}`));
-    expect(db.prepare('SELECT COUNT(*) AS n FROM kit_ai_reads').get()).toEqual({ n: 15 });
+    // Two of the rows are finished reads (status ok, with a stored answer), so a lost or altered column would show; read with raw SQL, as version 20 wrote them.
+    db.prepare("UPDATE kit_ai_reads SET status = 'ok', severity = 'rude', rule = '2', summary = 's', evidence_json = '[\"L1\"]', confidence = 'high', rec_json = NULL WHERE id IN ('read-0', 'read-1')").run();
+    const before = db.prepare('SELECT * FROM kit_ai_reads ORDER BY id').all();
+    expect(before).toHaveLength(15);
+    expect(before.filter((r) => r.status === 'ok')).toHaveLength(2);
+    expect(before.every((r) => !('signals_json' in r))).toBe(true);
     old.close();
+    // Opened through migration 21 only (the store of today also has version 25's `purpose`, which the rows must not need yet).
     const store = openStore({ db, migrations: UP_TO_21 });
-    const readsAfter = Array.from({ length: 15 }, (_, i) => store.loadAiRead(`m${String(i).padStart(4, '0')}`));
-    expect(readsAfter).toEqual(readsBefore);
+    expect(store.schemaVersion()).toBe(21);
+    const after = db.prepare('SELECT * FROM kit_ai_reads ORDER BY id').all();
+    // every old column is exactly as it was, and the one new column is null on every row
+    expect(after.map(({ signals_json, ...rest }) => ({ signals_json, ...rest }))).toEqual(before.map((r) => ({ signals_json: null, ...r })));
     expect(db.prepare('SELECT COUNT(*) AS n, COUNT(signals_json) AS set_n FROM kit_ai_reads').get()).toEqual({ n: 15, set_n: 0 });
-    // A new read after the upgrade works as before.
-    expect(store.reserveAiRead(pending(99), NOW + 60_000, NOW)).toMatchObject({ reserved: true });
+    // The database goes on to today's version, and a new read works there as before.
+    store.close();
+    const latest = openStore({ db });
+    expect(latest.reserveAiRead(pending(99), NOW + 60_000, NOW)).toMatchObject({ reserved: true });
+    expect(db.prepare('SELECT COUNT(*) AS n, COUNT(signals_json) AS set_n FROM kit_ai_reads WHERE id LIKE ?').get('read-%')).toEqual({ n: 15, set_n: 0 });
   });
 
   it('a version 18 database with rows upgrades through 19, 20 and 21 without changing data', () => {

@@ -17,7 +17,7 @@
 //
 // The AI module (core/src/ai, the fake adapter, the hub's ranking) is SERVER-ONLY: a page that shows the hub or runs the kit with no AI does not
 // carry it. So the size build leaves it out the way an adopter's bundler would: the kit loads the AI service with a dynamic `import()` only when
-// it is given an adapter, and the hub loads its ranking the same way; the plugin below keeps those as dynamic imports outside the bundle, and
+// it is given an adapter, and the hub loads its ranking the same way; the plugin below keeps those (and the actor, `aiActor/service`, which the kit loads only when the code asks for acting) as dynamic imports outside the bundle, and
 // leaves the AI module's names out of `export * as core`. The same entry is built a second time WITH the AI module in it (no plugin), to prove
 // that module is still browser-safe: no Node import, and it runs in the bare context. The size budget is measured on the first build only.
 import { existsSync, readFileSync } from 'node:fs';
@@ -71,7 +71,7 @@ const withoutServerOnlyAi: Plugin = {
     }));
     // The two places that load AI code on demand are left out: the import() resolves to an empty stub (a bundler that splits would make it a
     // chunk nobody asks for; a stub keeps this one a single script that runs in the vm, with no `require` shim).
-    b.onResolve({ filter: /^\.\/(?:ai\/(?:service|rank)|signalService)\.js$/ }, (args) => (args.kind === 'dynamic-import' ? { path: args.path, namespace: LEFT_OUT } : undefined));
+    b.onResolve({ filter: /^\.\/(?:ai\/(?:service|rank)|aiActor\/service|signalService)\.js$/ }, (args) => (args.kind === 'dynamic-import' ? { path: args.path, namespace: LEFT_OUT } : undefined));
     b.onLoad({ filter: /.*/, namespace: LEFT_OUT }, () => ({ contents: 'export const leftOut = true;', loader: 'js' }));
   },
 };

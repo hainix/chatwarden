@@ -24,12 +24,32 @@ const RACE_RETRY_MS = 60_000;
 const DEFAULT_ESTIMATE_MICROS = 1000;
 
 /**
- * The store as the AI module sees it: the AI methods (present, checked once at creation) and the two report reads it needs and the optional gate query, and nothing else.
+ * The store as the AI module sees it: the AI methods (present, checked once at creation) and the two report reads it needs the claims (to see a person's hold), and the optional gate query, acting state and action rows (which record what the AI module and the actor did; none writes a sanction), and nothing else.
  * It has none of the writers of a sanction, a decision, a notice, a strike or a mute (design 6.1; `store-narrow.test.ts` pins it), so the module
  * cannot reach one even before the lint rule looks. Narrower than `Store` on purpose: a method the module needs is added here, in view.
  */
-export type AiStore = Pick<Store, 'loadReport' | 'listReports' | 'aiGateRows'> &
-  Required<
+export type AiStore = Pick<
+  Store,
+  | 'loadReport'
+  | 'listReports'
+  | 'loadClaims'
+  | 'aiGateRows'
+  | 'aiActingState'
+  | 'insertAiAction'
+  | 'loadAiAction'
+  | 'dueAiActions'
+  | 'listAiActions'
+  | 'aiActionCounts'
+  | 'aiActedCount'
+  | 'aiActionsOnSubjects'
+  | 'aiUnreviewed'
+> & {
+    /**
+     * The only two moves the AI module may make on an action row: refuse a queued row (with a closed code), or record the confirming read it asked for. Not the state that records an act,
+     * not a step, not a review field: those are the actor's (`transitionAiAction` on the full store), and the write of the owner's acting state is the acting facade's alone.
+     */
+    transitionAiAction?(id: string, from: readonly ['queued'], patch: AiPathPatch): boolean;
+  } & Required<
     Pick<
       Store,
       | 'reserveAiRead'
@@ -49,6 +69,9 @@ export type AiStore = Pick<Store, 'loadReport' | 'listReports' | 'aiGateRows'> &
       | 'aiStats'
     >
   >;
+
+/** What the AI module may change on an action row (see {@link AiStore}). */
+export type AiPathPatch = { state: 'refused'; refusedCode: string } | { confirmReadId: string };
 
 /** The counters of this process: calls in flight, the last cost, tokens for the cache hit rate, invalid answers by code. */
 export class Meter {
@@ -96,6 +119,8 @@ export interface WorkerEnv {
   dailyCalls(): number;
   closed(): boolean;
   prepare(report: ReportRecord): Prepared;
+  /** The adapter the confirming read goes to (`ai.act.confirmAdapter`, else the same adapter). */
+  confirmAdapter(): ModerationAI;
   /** Casebook examples for this case, newest first; empty when there are none, learning is off or something fails. */
   examplesFor(report: ReportRecord, prepared: Prepared): AIExampleInput[];
   /** The signal counts about the reported person (`feeds.ai`): a snapshot for this read; empty when the feed is off or nothing qualifies. Fenced by the caller. */
@@ -196,9 +221,15 @@ export function isFinalRow(row: AiReadRow): boolean {
   return row.status === 'declined' || row.status === 'invalid' || (row.status === 'failed' && row.retryAt === null);
 }
 
-/** How a job ended. `park` is the time (epoch ms, possibly Infinity) before which the sweeper should not queue the report again, or null when there is nothing to wait for. */
+/**
+ * How a job ended. `park` is the time (epoch ms, possibly Infinity) before which the sweeper should not queue the report again, or null when there is nothing to wait for.
+ * For a confirming read, `ended` says what came of it: `ok` with the row's `readId` (a finished read, possibly one an earlier call made), `none` (it ended without a usable answer and
+ * will not be tried again by itself) or nothing (no call was made, or it is waiting for its lease or its retry: ask again later).
+ */
 export interface ReadEnd {
   park: number | null;
+  ended?: 'ok' | 'none';
+  readId?: string;
 }
 
 const NOTHING: ReadEnd = { park: null };
@@ -207,25 +238,36 @@ const NOTHING: ReadEnd = { park: null };
  * Read one report. `opts.retake` is a moderator's explicit ask: a FINAL row (see {@link isFinalRow}) that has not been retaken is taken over once
  * more (and the call is charged and audited like any other). Throws only on a store failure; the caller fences it.
  */
-export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?: boolean }): Promise<ReadEnd> {
-  if (env.level() === 0 || env.closed()) return NOTHING;
+export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?: boolean; purpose?: 'read' | 'confirm' }): Promise<ReadEnd> {
+  const confirm = opts?.purpose === 'confirm';
+  const adapter = confirm ? env.confirmAdapter() : env.adapter;
+  // A confirming read is its own row (its prompt, version, hash and adapter differ) and ends in the same ways. Only the case's read is audited and retried by the sweeper.
+  const wait: ReadEnd = confirm ? { park: null } : NOTHING;
+  const gone: ReadEnd = confirm ? { park: null, ended: 'none' } : NOTHING;
+  if (env.level() === 0 || env.closed()) return gone;
   const report = env.store.loadReport(reportId);
-  if (report === null || report.status !== 'open') return NOTHING;
+  if (report === null || report.status !== 'open') return gone;
 
   // Cheap refusals first, before anything is written: an unavailable breaker (open, or half-open with its probe out) or a full
   // minute leaves no row behind.
   const now = env.clock.now();
-  if (!env.breaker.available() || !env.window.peek(now)) return NOTHING;
+  if (!env.breaker.available() || !env.window.peek(now)) return wait;
 
   const prepared = env.prepare(report);
+  // The input and hash of this read: the case's own, or the confirming read's (a different prompt and no examples, signals or cautions).
+  const sent = confirm ? prepared.confirm(adapter.id) : { input: prepared.input, hash: prepared.hash };
   const reserved = env.store.reserveAiRead(
-    { reportId, inputHash: prepared.hash, promptVersion: prepared.input.promptVersion, adapter: env.adapter.id },
+    { reportId, inputHash: sent.hash, promptVersion: sent.input.promptVersion, adapter: adapter.id, ...(confirm ? { purpose: 'confirm' as const } : {}) },
     now + env.timeoutMs + LEASE_SLACK_MS,
     now,
     opts?.retake === true ? { retake: true } : undefined,
   );
   if (!reserved.reserved) {
-    return { park: parkOf(reserved.existing, now) };
+    const existing = reserved.existing;
+    if (!confirm) return { park: parkOf(existing, now) };
+    // The confirming read is asked for once: a finished one is used as it stands, an ended one is no confirmation, a leased or waiting one is asked about again later.
+    if (existing.status === 'ok' && existing.read !== null) return { park: null, ended: 'ok', readId: existing.id };
+    return isFinalRow(existing) ? { park: null, ended: 'none' } : { park: parkOf(existing, now) };
   }
   const { id, lease } = reserved;
 
@@ -246,25 +288,26 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
     return { park: again };
   }
 
+  // The confirming read sends nothing but the lines: no casebook example, no signal counts and no cautions are even asked for.
   let examples: AIExampleInput[] = [];
   try {
-    examples = env.examplesFor(report, prepared);
+    if (!confirm) examples = env.examplesFor(report, prepared);
   } catch (err) {
     env.warn('ai.examples_failed', { error: errName(err) });
   }
   let signals: AISignal[] = [];
   try {
-    signals = env.signalsFor(report);
+    if (!confirm) signals = env.signalsFor(report);
   } catch (err) {
     env.warn('ai.signals_failed', { error: errName(err) });
   }
   let cautions: Array<{ rule: number; band: 'elevated' | 'high' }> = [];
   try {
-    cautions = env.cautionsFor();
+    if (!confirm) cautions = env.cautionsFor();
   } catch (err) {
     env.warn('ai.cautions_failed', { error: errName(err) });
   }
-  let input: AIReadInput = prepared.input;
+  let input: AIReadInput = sent.input;
   let exampleIds: string[] = [];
   try {
     if (examples.length > 0 || signals.length > 0 || cautions.length > 0) {
@@ -290,7 +333,7 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
   let thrown: unknown;
   let failed = false;
   try {
-    result = await raceAbort(Promise.resolve(env.adapter.read(input, { signal: controller.signal })), controller.signal);
+    result = await raceAbort(Promise.resolve(adapter.read(input, { signal: controller.signal })), controller.signal);
   } catch (err) {
     failed = true;
     thrown = err;
@@ -300,10 +343,10 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
     env.meter.inflight -= 1;
   }
   // The service is closing: the store may already be going away. The lease runs out and the read is taken up later.
-  if (env.closed()) return NOTHING;
+  if (env.closed()) return wait;
   const latency = env.clock.now() - startedAt;
 
-  if (failed) return settleFailure(env, { id, lease, reportId, hash: prepared.hash, kind: kindOf(thrown, timedOut) });
+  if (failed) return settleFailure(env, { id, lease, reportId, hash: sent.hash, kind: kindOf(thrown, timedOut), confirm });
 
   const usage = safeUsage((result as { usage?: Partial<AIUsage> } | null)?.usage, latency);
   env.meter.usage(usage);
@@ -328,8 +371,8 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
       env.store.failAiRead(id, lease, 'failed', 'invalid', retryAt, usage);
       return { park: retryAt };
     }
-    if (env.store.failAiRead(id, lease, 'invalid', 'invalid', null, usage)) env.auditRead(reportId);
-    return { park: Number.POSITIVE_INFINITY };
+    if (env.store.failAiRead(id, lease, 'invalid', 'invalid', null, usage) && !confirm) env.auditRead(reportId);
+    return confirm ? { park: Number.POSITIVE_INFINITY, ended: 'none' } : { park: Number.POSITIVE_INFINITY };
   }
 
   const toIds = (refs: readonly string[]): string[] => refs.flatMap((ref) => {
@@ -350,32 +393,37 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
   const stored = env.store.completeAiRead(id, lease, { ...usage, read, exampleIds, signals: input.signals ?? [] });
   if (!stored) {
     env.warn('ai.read_superseded');
-    return NOTHING;
+    return wait;
   }
+  if (confirm) return { park: null, ended: 'ok', readId: id };
   env.auditRead(reportId);
   return NOTHING;
 }
 
 /** An adapter failure: retry on the schedule, or give up (and say so once). */
-function settleFailure(env: WorkerEnv, f: { id: string; lease: number; reportId: string; hash: string; kind: CallKind }): ReadEnd {
+function settleFailure(env: WorkerEnv, f: { id: string; lease: number; reportId: string; hash: string; kind: CallKind; confirm: boolean }): ReadEnd {
   const { id, lease, reportId, kind } = f;
-  const final: ReadEnd = { park: Number.POSITIVE_INFINITY };
+  const final: ReadEnd = f.confirm ? { park: Number.POSITIVE_INFINITY, ended: 'none' } : { park: Number.POSITIVE_INFINITY };
+  // Only the case's own read leaves an `ai.read` row; a confirming read is paid for and counted, and the action it leads to is what the trail records.
+  const audit = (): void => {
+    if (!f.confirm) env.auditRead(reportId);
+  };
   if (kind === 'declined') {
     // A refusal is an answer: stored, not retried, and the provider is up.
     env.breaker.success();
-    if (env.store.failAiRead(id, lease, 'declined', 'declined', null)) env.auditRead(reportId);
+    if (env.store.failAiRead(id, lease, 'declined', 'declined', null)) audit();
     return final;
   }
   const errorKind: AiErrorKind = kind;
   if (kind === 'fatal') {
     env.breaker.failure(true);
-    if (env.store.failAiRead(id, lease, 'failed', errorKind, null)) env.auditRead(reportId);
+    if (env.store.failAiRead(id, lease, 'failed', errorKind, null)) audit();
     return final;
   }
   env.breaker.failure();
   if (lease >= MAX_ATTEMPTS) {
     // Three calls in all: given up.
-    if (env.store.failAiRead(id, lease, 'failed', errorKind, null)) env.auditRead(reportId);
+    if (env.store.failAiRead(id, lease, 'failed', errorKind, null)) audit();
     return final;
   }
   const retryAt = env.clock.now() + (RETRY_AFTER_MS[lease - 1] ?? RETRY_AFTER_MS[RETRY_AFTER_MS.length - 1] ?? RACE_RETRY_MS);

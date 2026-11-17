@@ -57,12 +57,12 @@ describe('the AI audit actions', () => {
     expect(cw.audit.list({ limit: 5 }).items).toEqual([]);
   });
 
-  it('a role is refused for an ai: actor, and an ai: actor may record ai.read only', async () => {
+  it('a role is refused for an ai: actor, and an ai: actor may record ai.read and ai.act only', async () => {
     const { cw } = await world();
     expect(rec(cw, { actor: ADAPTER_ACTOR, role: 'owner', action: 'ai.read' })).toBe(false);
     expect(rec(cw, { actor: ADAPTER_ACTOR, role: 'moderator', action: 'ai.read' })).toBe(false);
-    for (const action of AUDIT_ACTIONS.filter((a) => a !== 'ai.read')) {
-      const base = action === 'policy.update' || action === 'policy.reset' ? { detail: { sections: [] } } : {};
+    for (const action of AUDIT_ACTIONS.filter((a) => a !== 'ai.read' && a !== 'ai.act')) {
+      const base = action === 'policy.update' || action === 'policy.reset' || action === 'ai.acting' || action === 'ai.undo_all' ? { detail: { sections: ['ai' as const], reason: 'x' } } : {};
       expect(rec(cw, { actor: ADAPTER_ACTOR, role: null, action, ...base }), action).toBe(false);
     }
     expect(cw.audit.list({ limit: 5 }).items).toEqual([]);

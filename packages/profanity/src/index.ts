@@ -1,3 +1,3 @@
-export const VERSION = '0.1.13';
+export const VERSION = '0.1.14';
 
 export { createProfanityFilter, ProfanityConfigError, SUPPORTED_LANGUAGES } from './filter.js';

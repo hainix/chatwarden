@@ -7,6 +7,10 @@ import type {
   AppealRow,
   AppealStats,
   AutomationInput,
+  AiActingInput,
+  AiActingState,
+  AiActingStep,
+  AiActionsPage,
   AiGatesView,
   AiStatusView,
   BlockedDays,
@@ -175,6 +179,16 @@ export interface HubClient {
    * before 0.1.13. Nothing in the answer lets the AI act: acting does not exist in this release. @experimental
    */
   aiGates(): Promise<AiGatesView>;
+  /** `GET /ai/acting` (needs `policy.read`, audited like the settings): where acting stands (the mode, paused, the days of shadow and what it would have done). 404 from a server before 0.1.14. @experimental */
+  aiActing(): Promise<AiActingState>;
+  /**
+   * `POST /ai/acting/shadow|start|pause|resume|off`: one step. `shadow`, `start`, `resume` and `off` are the owner's and fixed in the server's code; `pause` needs `ai.pause`. `shadow` from `off` and `start` take
+   * `{ confirm: 'ACT', reason }`, the others `{ reason }`. The server checks the word and the role again. 409 `wrong_state`, `no_appeals`, `ai_level`, `acting_unavailable`; 400 `invalid_request`. In this
+   * release no step applies anything to a player. @experimental
+   */
+  aiActingStep(step: AiActingStep, input: AiActingInput): Promise<AiActingState>;
+  /** `GET /ai/actions` (needs `ai.review`): what the AI did or, in shadow, would have done, newest first. Pass `next` back as `cursor` for the following page. @experimental */
+  aiActions(query?: { state?: 'shadow' | 'all'; limit?: number; cursor?: string }): Promise<AiActionsPage>;
   /** `POST /reports/:id/ai/dont-teach` (needs `reasons.write`): the decided case's example text is never used to teach the AI again. 404 when it has none. @experimental */
   dontTeach(id: string): Promise<{ ok: true }>;
 
@@ -329,6 +343,9 @@ export function createHubClient(transport: Transport): HubClient {
     readAgain: (id) => post<AiReadAgainResult>(`/reports/${enc(id)}/ai/read`, undefined),
     aiStatus: () => get<AiStatusView>('/ai/status'),
     aiGates: () => get<AiGatesView>('/ai/gates'),
+    aiActing: () => get<AiActingState>('/ai/acting'),
+    aiActingStep: (step, input) => post<AiActingState>(`/ai/acting/${step}`, input),
+    aiActions: (query = {}) => get<AiActionsPage>('/ai/actions', q({ state: query.state, limit: query.limit, cursor: query.cursor })),
     dontTeach: (id) => post<{ ok: true }>(`/reports/${enc(id)}/ai/dont-teach`, undefined),
 
     appeals: (query = {}) => get<Page<AppealRow>>('/appeals', q({ status: query.status, cursor: query.cursor, limit: query.limit })),
