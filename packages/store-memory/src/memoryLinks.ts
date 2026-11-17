@@ -58,6 +58,22 @@ class MemoryLinks extends MemoryStore {
     }
     return gone.length;
   }
+
+  // Privacy (0.2.0): `MemoryStore.eraseSubjects` calls this when the wrapper is present. Not part of the Store interface.
+
+  /** Delete the Coop links that name one of these (deleted) reports. Returns how many. */
+  privacyEraseLinks(reportIds: ReadonlySet<string>): number {
+    const rows = this.links;
+    if (rows === undefined) return 0;
+    const keep = [...rows].filter(([, r]) => !(r.system === 'coop-report' && reportIds.has(r.ref)));
+    const n = rows.size - keep.length;
+    if (n === 0) return 0;
+    this.links = new Map(keep);
+    this.undoWith(() => {
+      this.links = rows;
+    });
+    return n;
+  }
 }
 
 /**

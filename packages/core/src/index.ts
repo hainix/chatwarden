@@ -240,6 +240,30 @@ export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 export { WEBHOOK_KEY_TTL_MS } from './types.js';
+export {
+  ERASED_LINE,
+  EXPORT_SECTION_MAX,
+  NO_PERSON_TABLES,
+  PRIVACY_CATEGORIES,
+  PRIVACY_REGISTRY,
+  erasedReporter,
+  isNonPersonReporter,
+  isRestrictingKind,
+} from './privacy.js';
+export type {
+  EraseMode,
+  ErasePlan,
+  ErasePreview,
+  ErasureCounts,
+  ErasureReceipt,
+  ErasureRemoved,
+  ErasureRow,
+  PrivacyCategory,
+  PrivacyClock,
+  PrivacyExport,
+  PrivacyRule,
+  SubjectExport,
+} from './privacy.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
 export {
   ExcerptError,

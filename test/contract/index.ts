@@ -15,6 +15,7 @@ import { mutesContract } from './mutes.contract.js';
 import { namesContract } from './names.contract.js';
 import { noticesContract } from './notices.contract.js';
 import { policyContract } from './policy.contract.js';
+import { privacyContract } from './privacy.contract.js';
 import { reportReasonsContract } from './reportReasons.contract.js';
 import { reportsContract } from './reports.contract.js';
 import { retentionContract } from './retention.contract.js';
@@ -40,6 +41,7 @@ export {
   namesContract,
   noticesContract,
   policyContract,
+  privacyContract,
   reportReasonsContract,
   reportsContract,
   retentionContract,
@@ -78,10 +80,14 @@ export const CONTRACT_AREAS = [
   'names',
   'links',
   'filters',
+  'privacy',
 ] as const;
 
-/** Registers every area suite against the stores `make` builds (a fresh, empty store on each call). */
-export function storeContract(name: string, make: () => Store): void {
+/**
+ * Registers every area suite against the stores `make` builds (a fresh, empty store on each call). `dump` (optional) turns a whole store into one string; the
+ * privacy suite uses it to prove no id of an erased person survives in any table.
+ */
+export function storeContract(name: string, make: () => Store, dump?: (s: Store) => string): void {
   transactionsContract(name, make);
   subjectsContract(name, make);
   sanctionsContract(name, make);
@@ -105,4 +111,5 @@ export function storeContract(name: string, make: () => Store): void {
   namesContract(name, make);
   linksContract(name, make);
   filtersContract(name, make);
+  privacyContract(name, make, dump);
 }

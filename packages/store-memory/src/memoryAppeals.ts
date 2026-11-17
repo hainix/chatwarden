@@ -241,6 +241,43 @@ class MemoryAppeals extends MemoryStore {
     }
     return gone.length;
   }
+
+  // Privacy (0.2.0): `MemoryStore.eraseSubjects` and `exportSubjects` call these when the wrapper is present. Not part of the Store interface.
+
+  /** Delete the appeals of the set, except those on a sanction group in `keepGroups` (a hold protects it). Returns how many. */
+  privacyEraseAppeals(set: ReadonlySet<string>, keepGroups: ReadonlySet<string>): number {
+    const s = this.appealState();
+    const keep = [...s.rows.values()].filter((r) => !set.has(r.subject) || keepGroups.has(r.groupId));
+    const n = s.rows.size - keep.length;
+    if (n === 0) return 0;
+    const next: AppealState = { rows: new Map(keep.map((r) => [r.id, r])), byGroup: new Map(keep.map((r) => [r.groupId, r.id])) };
+    const before = this.ap;
+    this.ap = next;
+    this.undoWith(() => {
+      this.ap = before;
+    });
+    return n;
+  }
+
+  /** An appeal that cited a deleted report no longer does. */
+  privacyUnlinkAppealReports(reportIds: ReadonlySet<string>): void {
+    for (const row of this.appealState().rows.values()) {
+      if (row.reportId === null || !reportIds.has(row.reportId)) continue;
+      const before = row.reportId;
+      row.reportId = null;
+      this.undoWith(() => {
+        row.reportId = before;
+      });
+    }
+  }
+
+  /** The appeals of the set, newest first (time, then id, descending): the export's appeals. */
+  privacyExportAppeals(set: ReadonlySet<string>): AppealRow[] {
+    return [...this.appealState().rows.values()]
+      .filter((r) => set.has(r.subject))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .map((r) => structuredClone(r));
+  }
 }
 
 /**

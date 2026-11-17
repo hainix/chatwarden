@@ -8,6 +8,7 @@ import type { AppealStatus } from './appeals.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
 import type { LinkRow, LinkSystem } from './links.js';
 import type { NameReason } from './names.js';
+import type { ErasePlan, ErasureCounts, ErasureRow, SubjectExport } from './privacy.js';
 import type { PolicyLayer } from './profile.js';
 import type { RuleRef } from './rules.js';
 
@@ -975,8 +976,9 @@ export interface Store {
 
   /**
    * Upsert one identifier row (keyed by subject, kind and value): `firstSeen`
-   * is kept from the first write, `lastSeen` only moves forward. The subject
-   * must already exist.
+   * is kept from the first write, `lastSeen` only moves forward. A subject that
+   * does not exist (erased, perhaps by another process) writes nothing and does not
+   * throw, so a stale writer can never recreate an identifier.
    */
   saveIdentifier(record: SubjectIdRecord): Promise<void>;
 
@@ -1787,6 +1789,41 @@ export interface Store {
   findNoticeForGroup(
     groupId: string,
   ): { id: string; subject: SubjectId; ackedAt: number | null; withdrawnAt: number | null } | null;
+
+  // Privacy requests (0.2.0). REQUIRED: a custom store implements them too. `cw.privacy` and `cw.legal` are the only callers.
+
+  /**
+   * One person's data, read for an export: `subjects` is the canonical subject and every alias merged into it. Reads only; returns copies. Never a hash, a
+   * raw key, an address, another player's id, handle or line, a reporter identity or a staff ref (see {@link SubjectExport}); each section is capped at
+   * 5 000 rows and the cut sections are named in `truncated`. `found` is false when none of the subjects exists.
+   */
+  exportSubjects(subjects: readonly SubjectId[]): SubjectExport;
+
+  /**
+   * Erase one person as ONE transaction (see the registry in `privacy.ts` for what each category does in each mode). Synchronous. `plan.subjects` is expanded to every
+   * subject merged into any of them. It never touches a row of a held report (`plan.heldReportIds`) or anything a hold protects, sets `sanction.report_id` NULL where its
+   * report was deleted, replaces an erased reporter by `erased:<report id>` and the person's lines in other players' reports by a marker, rewrites the person's audit
+   * refs to `plan.receiptId` when nothing keeps the subject, and moves the erasure epoch (only when something was erased and not on a dry run). With `mode: 'safety'` and a
+   * restricting sanction in force it keeps exactly the subject, identifier and in-force sanction rows (and that notice, its lines cleared). `dryRun` returns the counts a
+   * real run would and writes nothing. An unknown subject erases nothing (`found: false`).
+   */
+  eraseSubjects(plan: ErasePlan): ErasureCounts;
+
+  /** Write a receipt row. `pendingSubject` is set only while a remainder is kept. A duplicate id throws. */
+  insertErasure(row: ErasureRow): void;
+
+  /** Every receipt whose `pendingSubject` is set (the erases waiting for their sanctions to go), oldest first. */
+  loadPendingErasures(): ErasureRow[];
+
+  /**
+   * Finish a pending erase when the person has no sanction row left (any state): delete the subject and identifier rows, rewrite the audit refs to the receipt
+   * id, clear `pendingSubject` and move the erasure epoch. Returns true when this call finished it; false (nothing changed) for an unknown or already finished
+   * receipt or while a sanction row remains.
+   */
+  finishErasure(id: string): boolean;
+
+  /** A counter that moves on every erase and on nothing else; persists with the store and is shared by every process on the database. Starts at 0. */
+  erasureEpoch(): number;
 }
 
 // ---------------------------------------------------------------------------

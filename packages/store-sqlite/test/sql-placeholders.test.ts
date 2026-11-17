@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import {
   AI_ACTED_COUNT_SQL,
@@ -28,6 +29,10 @@ import {
   aiGateRowsArgs,
 } from '../src/sqliteStore.js';
 import type { AiActionRow, StoredReport } from '@chatwarden/core';
+import { IDENTIFIER_UPSERT_SQL } from '../src/sqliteStore.js';
+import * as PRIV from '../src/privacy.js';
+import { openStore } from '../src/index.js';
+import { seedWorld } from '../../../test/contract/privacy.contract.js';
 
 // node:sqlite on Node 22.13 throws "column index out of range" when more values are bound than a statement has placeholders (newer Node tolerates it), and numbered
 // parameters (`?1`) count differently there. So every new statement uses plain `?` and binds exactly as many values as it has, in order. This counts them.
@@ -170,5 +175,90 @@ describe('the filter statements (migration 26) bind exactly as many values as th
 
   it('the hit upsert adds to the stored count instead of replacing it', () => {
     expect(FILTER_HITS_ADD_SQL).toMatch(/ON CONFLICT \(day, key, action\) DO UPDATE SET hits = hits \+ excluded\.hits/);
+  });
+});
+
+// Privacy statements (0.2.0): each takes its lists as ONE JSON value bound to json_each(?), so the number of placeholders is fixed whatever the size of the set.
+describe('the privacy statements bind exactly as many values as they have placeholders', () => {
+  const texts = new Map<string, string>([
+    ...Object.entries(PRIV)
+      .filter(([k, v]) => k.endsWith('_SQL') && typeof v === 'string')
+      .map(([k, v]) => [k, v as string] as [string, string]),
+    ['IDENTIFIER_UPSERT_SQL', IDENTIFIER_UPSERT_SQL],
+  ]);
+  const EXPECTED: Record<string, number> = {
+    ERASE_CLOSURE_SQL: 1,
+    GROUPS_OF_SET_SQL: 1,
+    GROUPS_IN_FORCE_SQL: 2,
+    GROUPS_OF_HELD_SQL: 1,
+    COUNT_GROUP_ROWS_SQL: 1,
+    HELD_NAMING_SQL: 4,
+    REPORTS_ABOUT_IDS_SQL: 2,
+    REPORTS_NAMING_SQL: 3,
+    REPORT_SCRUB_SQL: 7,
+    NOTICES_DELETE_SQL: 2,
+    NOTICES_CLEAR_SQL: 2,
+    MUTES_DELETE_SQL: 2,
+    APPEALS_DELETE_SQL: 2,
+    SIGNALS_DELETE_SQL: 2,
+    AUDIT_REWRITE_SQL: 2,
+    EPOCH_BUMP_SQL: 1,
+    EPOCH_READ_SQL: 1,
+    ERASURE_INSERT_SQL: 6,
+    ERASURES_PENDING_SQL: 0,
+    ERASURES_PURGE_SQL: 1,
+    EXPORT_MUTES_SQL: 4,
+    EXPORT_SANCTIONS_SQL: 2,
+    IDENTIFIER_UPSERT_SQL: 6,
+  };
+
+  it('every statement uses plain ? placeholders (no numbered, named or spliced values)', () => {
+    expect(texts.size).toBeGreaterThan(40);
+    for (const [k, sql] of texts) {
+      expect(sql, k).not.toMatch(/\?\d/);
+      expect(sql, k).not.toMatch(/\s[:@$][a-z]\w*/i);
+    }
+  });
+
+  it('the counts of the statements that are not one-list-one-value are pinned', () => {
+    for (const [k, n] of Object.entries(EXPECTED)) expect(placeholders(texts.get(k) ?? ''), k).toBe(n);
+  });
+
+  it('a whole erase, finish and export bind exactly as many values as each statement has placeholders (a spy on every prepared privacy statement)', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    await seedWorld(store, { ban: true, held: true });
+    const known = new Set(texts.values());
+    const seen = new Set<string>();
+    const real = db.prepare.bind(db);
+    db.prepare = ((text: string) => {
+      const st = real(text);
+      if (!known.has(text)) return st;
+      const n = placeholders(text);
+      return new Proxy(st, {
+        get(target, prop) {
+          const v = (target as unknown as Record<string | symbol, unknown>)[prop];
+          if (typeof v !== 'function') return v;
+          if (prop === 'run' || prop === 'all' || prop === 'get') {
+            return (...args: unknown[]) => {
+              expect(args.length, text.slice(0, 60)).toBe(n);
+              seen.add(text);
+              return (v as (...a: unknown[]) => unknown).apply(target, args);
+            };
+          }
+          return v.bind(target);
+        },
+      });
+    }) as typeof db.prepare;
+    store.exportSubjects(['s_pp']);
+    store.eraseSubjects({ subjects: ['s_pp'], mode: 'safety', heldReportIds: new Set(['rHeld']), receiptId: 'e_spy', at: 1_800_000_000_000 });
+    store.insertErasure({ id: 'e_spy', at: 1, mode: 'safety', actor: 'o', removed: {}, kept: { identifiers: true, sanctions: 0, heldReports: 0 }, pendingSubject: 's_pp' });
+    store.loadPendingErasures();
+    store.finishErasure('e_spy');
+    store.purgeAudit(2);
+    await store.saveIdentifier({ subjectId: 's_qq', kind: 'key', value: 'k2', firstSeen: 1, lastSeen: 2 });
+    store.erasureEpoch();
+    expect(seen.size).toBeGreaterThan(20);
+    expect(seen.has(IDENTIFIER_UPSERT_SQL)).toBe(true);
   });
 });

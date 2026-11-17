@@ -30,6 +30,15 @@ import type {
   SubjectRecord,
   WebhookKeyReservation,
   DiscordThreadRow,
+  AppealRow,
+  BlockedNameRow,
+  ErasePlan,
+  ErasureCounts,
+  ErasureRemoved,
+  ErasureRow,
+  PrivacyCategory,
+  ReportExcerptLine,
+  SubjectExport,
 } from '@chatwarden/core';
 
 /** Local on purpose: core's randomId is internal, and this package must still link against core 0.1.0 (peer ^0.1.0).
@@ -110,6 +119,10 @@ export class MemoryStore implements Store {
   protected aiSpend: Array<{ readId: string; attempt: number; at: number; micros: number }> = [];
   /** AI casebook outcomes by report. */
   protected aiOutcomes = new Map<string, AiOutcomeRow>();
+  /** Erasure receipts in insertion order. */
+  protected erasures: ErasureRow[] = [];
+  /** The erasure epoch (see `erasureEpoch`). */
+  private epoch = 0;
   /** The change token's counter (see `changeToken`). */
   private changes = 0;
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -167,9 +180,8 @@ export class MemoryStore implements Store {
   }
 
   saveIdentifier(record: SubjectIdRecord): Promise<void> {
-    if (!this.subjects.has(record.subjectId)) {
-      return Promise.reject(new Error('unknown subject'));
-    }
+    // A subject that does not exist (erased, perhaps by another process) writes nothing: a stale writer can never recreate an identifier.
+    if (!this.subjects.has(record.subjectId)) return Promise.resolve();
     const key = `${record.subjectId}\u0000${record.kind}\u0000${record.value}`;
     const existing = this.subjectIds.get(key);
     if (existing === undefined) {
@@ -480,6 +492,14 @@ export class MemoryStore implements Store {
   }
 
   purgeAudit(before: number): number {
+    // An erasure receipt lives as long as an audit row; one that still keeps a subject (a pending remainder) is never dropped.
+    const receipts = this.erasures;
+    if (receipts.some((r) => r.at < before && r.pendingSubject === null)) {
+      this.erasures = receipts.filter((r) => !(r.at < before && r.pendingSubject === null));
+      this.undoWith(() => {
+        this.erasures = receipts;
+      });
+    }
     const snapshot = [...this.auditRows];
     const kept = snapshot.filter((r) => r.at >= before);
     const n = snapshot.length - kept.length;
@@ -1087,6 +1107,407 @@ export class MemoryStore implements Store {
     return n;
   }
 
+  // Privacy requests (0.2.0, design section 5). The same rules, in the same order, as the SQLite store (privacy.ts there), with the same counts. Every collection
+  // the erase changes is REPLACED, and an undo step puts the old one back, so a failing transaction (or a dry run) leaves the store as it was.
+
+  /** Replace a collection and journal the way back. */
+  private swap<T>(current: T, next: T, assign: (v: T) => void): void {
+    assign(next);
+    this.undoWith(() => assign(current));
+  }
+
+  /** The subjects of the request that exist, and every subject merged into one of them. */
+  private closure(subjects: readonly SubjectId[]): Set<SubjectId> {
+    const out = new Set<SubjectId>();
+    for (const id of subjects) if (this.subjects.has(id)) out.add(id);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const s of this.subjects.values()) {
+        if (!out.has(s.id) && s.mergedInto !== null && out.has(s.mergedInto)) {
+          out.add(s.id);
+          grew = true;
+        }
+      }
+    }
+    return out;
+  }
+
+  eraseSubjects(plan: ErasePlan): ErasureCounts {
+    const set = this.closure(plan.subjects);
+    if (set.size === 0) return { found: false, removed: {}, kept: { identifiers: false, sanctions: 0, heldReports: 0 }, pending: null };
+    if (plan.dryRun !== true) return this.transaction(() => this.eraseNow(plan, set));
+    let counts: ErasureCounts | null = null;
+    try {
+      this.transaction(() => {
+        counts = this.eraseNow(plan, set);
+        throw new DryRunRollback();
+      });
+    } catch (err) {
+      if (!(err instanceof DryRunRollback)) throw err;
+    }
+    if (counts === null) throw new Error('eraseSubjects: dry run produced no counts');
+    return counts;
+  }
+
+  private eraseNow(plan: ErasePlan, set: ReadonlySet<SubjectId>): ErasureCounts {
+    const hooks = this as unknown as Partial<PrivacyHooks>;
+    const removed: ErasureRemoved = {};
+    const add = (category: PrivacyCategory, n: number): void => {
+      if (n > 0) removed[category] = (removed[category] ?? 0) + n;
+    };
+    const held = plan.heldReportIds;
+
+    // Which sanction groups stay: a held report's groups always; in `safety`, the groups in force on the person.
+    const personGroups = new Set(this.sanctions.filter((r) => r.targetType === 'subject' && set.has(r.value)).map((r) => r.groupId));
+    const heldGroups = new Set(this.sanctions.filter((r) => r.reportId != null && held.has(r.reportId)).map((r) => r.groupId));
+    const inForce = new Set(
+      plan.mode === 'safety'
+        ? this.sanctions
+            .filter(
+              (r) =>
+                r.targetType === 'subject' &&
+                set.has(r.value) &&
+                r.revokedAt === null &&
+                (r.endsAt === null || r.endsAt > plan.at) &&
+                (r.kind === 'chat' || r.kind === 'area' || r.kind === 'ban'),
+            )
+            .map((r) => r.groupId)
+        : [],
+    );
+    const keepIdentifiers = inForce.size > 0;
+    const keepGroups = new Set([...personGroups].filter((g) => inForce.has(g) || heldGroups.has(g)));
+    const goneGroups = new Set([...personGroups].filter((g) => !keepGroups.has(g)));
+    const clearGroups = new Set([...keepGroups].filter((g) => inForce.has(g) && !heldGroups.has(g)));
+    const keptSanctionRows = this.sanctions.filter((r) => keepGroups.has(r.groupId)).length;
+    const heldNaming = this.reports.filter((r) => held.has(r.id) && (set.has(r.targetSubject) || set.has(r.reporterSubject) || r.people.some((p) => set.has(p)))).length;
+
+    // Reports about the person go, with everything that hangs on them.
+    const about = new Set(this.reports.filter((r) => set.has(r.targetSubject) && !held.has(r.id)).map((r) => r.id));
+    if (about.size > 0) {
+      const decisions = new Map(this.decisions);
+      for (const d of decisions.values()) if (about.has(d.reportId)) this.decisions.delete(d.key);
+      this.undoWith(() => {
+        this.decisions = decisions;
+      });
+      const reads = this.aiReads;
+      const keptReads = reads.filter((r) => !about.has(r.reportId));
+      add('ai', reads.length - keptReads.length);
+      this.swap(reads, keptReads, (v) => (this.aiReads = v));
+      const outcomes = this.aiOutcomes;
+      const keptOutcomes = new Map([...outcomes].filter(([id]) => !about.has(id)));
+      add('ai', outcomes.size - keptOutcomes.size);
+      this.swap(outcomes, keptOutcomes, (v) => (this.aiOutcomes = v));
+      add('ai', hooks.privacyEraseAiActions?.(about) ?? 0);
+      add('workflow', hooks.privacyEraseLinks?.(about) ?? 0);
+      for (const r of this.sanctions) {
+        if (r.reportId == null || !about.has(r.reportId)) continue;
+        const before = r.reportId;
+        r.reportId = null;
+        this.undoWith(() => {
+          r.reportId = before;
+        });
+      }
+      hooks.privacyUnlinkAppealReports?.(about);
+      const kept = this.reports.filter((r) => !about.has(r.id));
+      add('reports_about', this.reports.length - kept.length);
+      this.swap(this.reports, kept, (v) => (this.reports = v));
+    }
+
+    // The person's name inside the other reports that stay: a reporter becomes `erased:<id>`, a line becomes a marker.
+    const scrubbed = new Set<string>();
+    const reports = this.reports.map((r) => {
+      if (held.has(r.id)) return r;
+      const asReporter = set.has(r.reporterSubject);
+      const lines = scrubExcerpt(r.people, r.excerpt, set);
+      if (!asReporter && lines === null) return r;
+      if (asReporter) add('reports_filed', 1);
+      else add('report_lines', 1);
+      if (lines !== null) scrubbed.add(r.id);
+      return {
+        ...r,
+        ...(asReporter ? { reporterSubject: `erased:${r.id}`, reporterSeat: '', reporterHandle: '', note: null } : {}),
+        ...(lines === null ? {} : { people: lines.people, excerpt: lines.excerpt }),
+      };
+    });
+    if (reports.some((r, i) => r !== this.reports[i])) this.swap(this.reports, reports, (v) => (this.reports = v));
+    if (scrubbed.size > 0) {
+      // The AI's summary of a report can quote a line, and a stored example holds the text: both go with the line.
+      const reads = this.aiReads;
+      const keptReads = reads.filter((r) => !scrubbed.has(r.reportId));
+      add('ai', reads.length - keptReads.length);
+      this.swap(reads, keptReads, (v) => (this.aiReads = v));
+      const outcomes = this.aiOutcomes;
+      const next = new Map(outcomes);
+      for (const [id, o] of outcomes) {
+        if (!scrubbed.has(id) || o.example === null) continue;
+        next.set(id, { ...o, example: null });
+        add('ai', 1);
+      }
+      this.swap(outcomes, next, (v) => (this.aiOutcomes = v));
+    }
+
+    if (goneGroups.size > 0) {
+      const rows = this.sanctions;
+      const kept = rows.filter((r) => !goneGroups.has(r.groupId));
+      add('sanctions', rows.length - kept.length);
+      const owners = this.refOwners;
+      const holders = new Set(kept.map((r) => r.refCode));
+      this.swap(rows, kept, (v) => (this.sanctions = v));
+      this.swap(owners, new Map([...owners].filter(([code]) => holders.has(code))), (v) => (this.refOwners = v));
+    }
+
+    const notices = this.notices;
+    let cleared = 0;
+    const nextNotices: NoticeRow[] = [];
+    for (const n of notices) {
+      if (!set.has(n.subject)) nextNotices.push(n);
+      else if (n.groupId !== null && keepGroups.has(n.groupId)) {
+        if (clearGroups.has(n.groupId) && n.excerpt.length > 0) {
+          cleared++;
+          nextNotices.push({ ...n, excerpt: [] });
+        } else nextNotices.push(n);
+      }
+    }
+    add('notices', notices.length - nextNotices.length + cleared);
+    if (nextNotices.length !== notices.length || cleared > 0) this.swap(notices, nextNotices, (v) => (this.notices = v));
+
+    const strikes = this.strikes;
+    const keptStrikes = strikes.filter((r) => !set.has(r.subject));
+    add('strikes', strikes.length - keptStrikes.length);
+    if (keptStrikes.length !== strikes.length) this.swap(strikes, keptStrikes, (v) => (this.strikes = v));
+
+    const mutes = this.mutes;
+    const keptMutes = new Map([...mutes].filter(([, m]) => !set.has(m.row.viewer) && !set.has(m.row.target)));
+    add('mutes', mutes.size - keptMutes.size);
+    if (keptMutes.size !== mutes.size) this.swap(mutes, keptMutes, (v) => (this.mutes = v));
+
+    add('blocked_names', hooks.privacyEraseBlockedNames?.(set) ?? 0);
+    add('appeals', hooks.privacyEraseAppeals?.(set, heldGroups) ?? 0);
+    add('signals', hooks.privacyEraseSignals?.(set) ?? 0);
+    add('ai', hooks.privacyEraseNoAutomation?.(set) ?? 0);
+
+    const claims = this.claims;
+    const keptClaims = new Map([...claims].filter(([person]) => !set.has(person)));
+    add('workflow', claims.size - keptClaims.size);
+    if (keptClaims.size !== claims.size) this.swap(claims, keptClaims, (v) => (this.claims = v));
+    const threads = this.discordThreads;
+    const keptThreads = new Map([...threads].filter(([subject]) => !set.has(subject)));
+    add('workflow', threads.size - keptThreads.size);
+    if (keptThreads.size !== threads.size) this.swap(threads, keptThreads, (v) => (this.discordThreads = v));
+
+    let pending: SubjectId | null = null;
+    if (keepIdentifiers) {
+      pending = plan.subjects.find((s) => set.has(s)) ?? [...set][0] ?? null;
+    } else {
+      add('audit', this.rewriteAudit(set, plan.receiptId));
+      const subjectRows = this.subjects.size;
+      const identifierRows = this.dropSubjects(set);
+      add('identifiers', identifierRows);
+      add('subjects', subjectRows - this.subjects.size);
+    }
+    this.bumpEpoch();
+    return { found: true, removed, kept: { identifiers: keepIdentifiers, sanctions: keptSanctionRows, heldReports: heldNaming }, pending };
+  }
+
+  /** Point the audit rows that name the set at the receipt. Returns how many rows changed. */
+  private rewriteAudit(set: ReadonlySet<SubjectId>, receiptId: string): number {
+    let n = 0;
+    const next = this.auditRows.map((r) => {
+      if (r.target === null || r.target.type !== 'person' || !set.has(r.target.ref)) return r;
+      n++;
+      return { ...r, target: { type: r.target.type, ref: receiptId } };
+    });
+    if (n > 0) this.swap(this.auditRows, next, (v) => (this.auditRows = v));
+    return n;
+  }
+
+  /** Delete the subject and identifier rows of the set. Returns how many identifier rows went. */
+  private dropSubjects(set: ReadonlySet<SubjectId>): number {
+    const ids = this.subjectIds;
+    const keptIds = new Map([...ids].filter(([, r]) => !set.has(r.subjectId)));
+    this.swap(ids, keptIds, (v) => (this.subjectIds = v));
+    const subjects = this.subjects;
+    this.swap(subjects, new Map([...subjects].filter(([id]) => !set.has(id))), (v) => (this.subjects = v));
+    return ids.size - keptIds.size;
+  }
+
+  private bumpEpoch(): void {
+    this.epoch += 1;
+    this.undoWith(() => {
+      this.epoch -= 1;
+    });
+  }
+
+  insertErasure(row: ErasureRow): void {
+    if (this.erasures.some((r) => r.id === row.id)) throw new Error('UNIQUE constraint failed: kit_erasures.id');
+    this.erasures.push(structuredClone(row));
+    this.undoWith(() => {
+      this.erasures.length -= 1;
+    });
+  }
+
+  loadPendingErasures(): ErasureRow[] {
+    return this.erasures
+      .filter((r) => r.pendingSubject !== null)
+      .sort((a, b) => a.at - b.at || compare(a.id, b.id))
+      .map((r) => structuredClone(r));
+  }
+
+  finishErasure(id: string): boolean {
+    const row = this.erasures.find((r) => r.id === id);
+    if (row === undefined || row.pendingSubject === null) return false;
+    const set = this.closure([row.pendingSubject]);
+    if (set.size > 0 && this.sanctions.some((r) => r.targetType === 'subject' && set.has(r.value))) return false;
+    this.transaction(() => {
+      // The remainder ends the way a `none` erase does: whatever still names the person (a kept notice, a row written since) goes with the subject, and the audit
+      // refs read the receipt. That erase moves the epoch; with nothing left to erase the finish moves it itself.
+      if (set.size > 0) this.eraseNow({ subjects: [row.pendingSubject!], mode: 'none', heldReportIds: new Set(), receiptId: id, at: 0 }, set);
+      else this.bumpEpoch();
+      const before = row.pendingSubject;
+      row.pendingSubject = null;
+      this.undoWith(() => {
+        row.pendingSubject = before;
+      });
+    });
+    return true;
+  }
+
+  erasureEpoch(): number {
+    return this.epoch;
+  }
+
+  exportSubjects(subjects: readonly SubjectId[]): SubjectExport {
+    const set = this.closure(subjects);
+    const hooks = this as unknown as Partial<PrivacyHooks>;
+    const truncated: string[] = [];
+    const cap = <T>(name: string, rows: T[]): T[] => {
+      if (rows.length > EXPORT_CAP) truncated.push(name);
+      return rows.slice(0, EXPORT_CAP);
+    };
+    if (set.size === 0) {
+      return {
+        found: false,
+        createdAt: null,
+        aliases: 0,
+        accounts: [],
+        identifiers: { keys: 0, addresses: 0, firstSeen: null, lastSeen: null },
+        sanctions: [],
+        notices: [],
+        reportsFiled: [],
+        reportsAbout: [],
+        strikes: [],
+        blockedNames: [],
+        appeals: [],
+        signals: [],
+        mutes: { placed: 0, received: 0 },
+        ai: { noAutomation: null, reads: 0, outcomes: [] },
+        audit: [],
+        holds: [],
+        truncated,
+      };
+    }
+    const ids = [...this.subjectIds.values()].filter((r) => set.has(r.subjectId));
+    const desc = <T>(rows: T[], at: (r: T) => number, tie: (r: T) => string): T[] => rows.sort((a, b) => at(b) - at(a) || compare(tie(b), tie(a)));
+    const about = this.reports.filter((r) => set.has(r.targetSubject));
+    const aboutIds = new Set(about.map((r) => r.id));
+    const outcomes = [...this.aiOutcomes.values()].filter((o) => aboutIds.has(o.reportId)).sort((a, b) => a.decidedAt - b.decidedAt || compare(a.reportId, b.reportId));
+    const mutes = [...this.mutes.values()];
+    return {
+      found: true,
+      createdAt: Math.min(...[...set].map((id) => this.subjects.get(id)!.createdAt)),
+      aliases: set.size,
+      accounts: [...new Set(ids.filter((r) => r.kind === 'account').map((r) => r.value))].sort(compare),
+      identifiers: {
+        keys: ids.filter((r) => r.kind === 'key').length,
+        addresses: ids.filter((r) => r.kind === 'ip').length,
+        firstSeen: ids.length === 0 ? null : Math.min(...ids.map((r) => r.firstSeen)),
+        lastSeen: ids.length === 0 ? null : Math.max(...ids.map((r) => r.lastSeen)),
+      },
+      sanctions: cap(
+        'sanctions',
+        this.sanctions
+          .map((r, i) => ({ r, i }))
+          .filter(({ r }) => r.targetType === 'subject' && set.has(r.value))
+          .sort((a, b) => b.r.startsAt - a.r.startsAt || b.i - a.i)
+          .map(({ r }) => ({
+            kind: r.kind,
+            rule: r.rule,
+            reason: r.reason,
+            startsAt: r.startsAt,
+            endsAt: r.endsAt,
+            refCode: r.refCode,
+            source: r.source,
+            revoked: r.revokedAt !== null,
+            byStaff: true as const,
+          })),
+      ),
+      notices: cap(
+        'notices',
+        this.notices
+          .map((n, i) => ({ n, i }))
+          .filter(({ n }) => set.has(n.subject))
+          .sort((a, b) => a.n.createdAt - b.n.createdAt || a.i - b.i)
+          .map(({ n }) => ({ kind: n.kind, rule: n.rule, until: n.until, createdAt: n.createdAt, excerpt: structuredClone(n.excerpt) })),
+      ),
+      reportsFiled: cap(
+        'reportsFiled',
+        desc(
+          this.reports.filter((r) => set.has(r.reporterSubject)),
+          (r) => r.createdAt,
+          (r) => r.id,
+        ).map((r) => ({ createdAt: r.createdAt, reason: r.reportedReason ?? null, category: r.category, note: r.note, tags: { ...r.tags } })),
+      ),
+      reportsAbout: cap(
+        'reportsAbout',
+        desc(
+          about,
+          (r) => r.createdAt,
+          (r) => r.id,
+        ).map((r) => ({
+          createdAt: r.createdAt,
+          category: r.category,
+          reason: r.reportedReason ?? null,
+          status: r.status,
+          outcome: r.status === 'open' ? null : r.status,
+          origin: r.origin,
+          lines: r.excerpt.filter((l) => l.p !== null && set.has(r.people[l.p] ?? '')).map((l) => ({ ts: l.ts, text: l.raw })),
+        })),
+      ),
+      strikes: cap(
+        'strikes',
+        desc(
+          this.strikes.filter((r) => set.has(r.subject)),
+          (r) => r.at,
+          (r) => r.id,
+        ).map((r) => ({ at: r.at, roomId: r.roomId, line: r.rawLine })),
+      ),
+      blockedNames: cap('blockedNames', (hooks.privacyExportBlockedNames?.(set) ?? []).map((r) => ({ at: r.at, name: r.name, reason: r.reason }))),
+      appeals: cap(
+        'appeals',
+        (hooks.privacyExportAppeals?.(set) ?? []).map((r) => ({ createdAt: r.createdAt, kind: r.kind, rule: r.rule, status: r.status, statement: r.statement, decidedAt: r.decidedAt })),
+      ),
+      signals: cap('signals', hooks.privacyExportSignals?.(set) ?? []),
+      mutes: { placed: mutes.filter((m) => set.has(m.row.viewer)).length, received: mutes.filter((m) => set.has(m.row.target)).length },
+      ai: {
+        noAutomation: hooks.privacyExportNoAutomation?.(set) ?? null,
+        reads: this.aiReads.filter((r) => aboutIds.has(r.reportId)).length,
+        outcomes: cap(
+          'ai',
+          outcomes.map((o) => ({ verdict: o.verdict, agreement: o.agreement })),
+        ),
+      },
+      audit: cap(
+        'audit',
+        this.auditRows
+          .filter((r) => r.target !== null && r.target.type === 'person' && set.has(r.target.ref))
+          .sort((a, b) => a.at - b.at || compare(a.id, b.id))
+          .map((r) => ({ at: r.at, action: r.action })),
+      ),
+      holds: [],
+      truncated,
+    };
+  }
+
   /** Inspection helper: every stored notice. */
   rawNotices(): NoticeRow[] {
     return this.notices.map((n) => structuredClone(n));
@@ -1116,6 +1537,60 @@ export class MemoryStore implements Store {
   rawSanctions(): StoredSanction[] {
     return this.sanctions.map((r) => ({ ...r }));
   }
+}
+
+/** What a store wrapper (signals, appeals, names, links, AI) adds so the erase and the export reach the state it keeps. Not part of the Store interface. */
+interface PrivacyHooks {
+  privacyEraseSignals(set: ReadonlySet<string>): number;
+  privacyExportSignals(set: ReadonlySet<string>): Array<{ at: number; kind: string }>;
+  privacyEraseAppeals(set: ReadonlySet<string>, keepGroups: ReadonlySet<string>): number;
+  privacyUnlinkAppealReports(reportIds: ReadonlySet<string>): void;
+  privacyExportAppeals(set: ReadonlySet<string>): AppealRow[];
+  privacyEraseBlockedNames(set: ReadonlySet<string>): number;
+  privacyExportBlockedNames(set: ReadonlySet<string>): BlockedNameRow[];
+  privacyEraseLinks(reportIds: ReadonlySet<string>): number;
+  privacyEraseNoAutomation(set: ReadonlySet<string>): number;
+  privacyEraseAiActions(reportIds: ReadonlySet<string>): number;
+  privacyExportNoAutomation(set: ReadonlySet<string>): string | null;
+}
+
+/** Thrown inside a dry run to undo it. */
+class DryRunRollback extends Error {}
+
+/** An export section holds at most this many rows (core's `EXPORT_SECTION_MAX`, spelled out here: this package links no runtime core code). */
+const EXPORT_CAP = 5000;
+/** What stands in for an erased person's line in another player's report (core's `ERASED_LINE`). */
+const ERASED_LINE = '[erased]';
+
+/** The lines the set wrote in a report's excerpt, by the report's `people` list; null when nobody of the set is in it. The SQLite store has the same function. */
+function scrubExcerpt(
+  people: readonly string[],
+  excerpt: readonly ReportExcerptLine[],
+  set: ReadonlySet<string>,
+): { people: string[]; excerpt: ReportExcerptLine[] } | null {
+  const gone = new Set<number>();
+  people.forEach((p, i) => {
+    if (set.has(p)) gone.add(i);
+  });
+  if (gone.size === 0) return null;
+  const remap = new Map<number, number>();
+  const kept: string[] = [];
+  people.forEach((p, i) => {
+    if (!gone.has(i)) {
+      remap.set(i, kept.length);
+      kept.push(p);
+    }
+  });
+  return {
+    people: kept,
+    excerpt: excerpt.map((l) =>
+      l.p !== null && gone.has(l.p)
+        ? { ...l, seatId: '', handle: '', raw: ERASED_LINE, delivered: l.delivered === null ? null : ERASED_LINE, p: null }
+        : l.p === null
+          ? { ...l }
+          : { ...l, p: remap.get(l.p) ?? null },
+    ),
+  };
 }
 
 const muteKey = (viewer: SubjectId, target: SubjectId): string => `${viewer}\u0000${target}`;

@@ -567,6 +567,42 @@ class MemoryAi extends MemoryStore {
     });
     return { reads: reads.length - keptReads.length, outcomes: gone };
   }
+
+  // Privacy (0.2.0): `MemoryStore.eraseSubjects` and `exportSubjects` call these when the wrapper is present. Not part of the Store interface.
+
+  /** Delete the "do not automate" marks of the set. Returns how many. */
+  privacyEraseNoAutomation(set: ReadonlySet<string>): number {
+    const rows = this.noAutomation;
+    if (rows === undefined) return 0;
+    const keep = [...rows].filter(([subject]) => !set.has(subject));
+    const n = rows.size - keep.length;
+    if (n === 0) return 0;
+    this.noAutomation = new Map(keep);
+    this.undoWith(() => {
+      this.noAutomation = rows;
+    });
+    return n;
+  }
+
+  /** Delete the action rows of these reports. Returns how many. */
+  privacyEraseAiActions(reportIds: ReadonlySet<string>): number {
+    const snapshot = this.actions();
+    const kept = snapshot.filter((r) => !reportIds.has(r.reportId));
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.actionRows = kept;
+      this.undoWith(() => {
+        this.actionRows = snapshot;
+      });
+    }
+    return n;
+  }
+
+  /** The mark's closed code for the first of the set that has one (newest mark first), or null. */
+  privacyExportNoAutomation(set: ReadonlySet<string>): string | null {
+    const marks = [...(this.noAutomation?.values() ?? [])].filter((r) => set.has(r.subject)).sort((a, b) => b.setAt - a.setAt);
+    return marks[0]?.code ?? null;
+  }
 }
 
 /** The acting state of a store nobody has set: off, not paused. */

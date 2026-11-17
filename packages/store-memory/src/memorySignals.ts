@@ -97,6 +97,36 @@ class MemorySignals extends MemoryStore {
     }
     return n;
   }
+
+  // Privacy (0.2.0): `MemoryStore.eraseSubjects` and `exportSubjects` call these when the wrapper is present. Not part of the Store interface.
+
+  /** Delete every row about the set or caused by it (`subject` or `bySubject` in the set). Returns how many. */
+  privacyEraseSignals(set: ReadonlySet<string>): number {
+    const s = this.signalState();
+    const keep = [...s.rows].filter(([, row]) => !set.has(row.subject) && !(row.bySubject !== null && set.has(row.bySubject)));
+    const n = s.rows.size - keep.length;
+    if (n === 0) return 0;
+    const next: SignalState = { rows: new Map(keep), ids: new Set(keep.map(([, r]) => r.id)), bySubject: new Map() };
+    for (const [key, row] of keep) {
+      let mine = next.bySubject.get(row.subject);
+      if (mine === undefined) next.bySubject.set(row.subject, (mine = new Set()));
+      mine.add(key);
+    }
+    const before = this.sig;
+    this.sig = next;
+    this.undoWith(() => {
+      this.sig = before;
+    });
+    return n;
+  }
+
+  /** The rows ABOUT the set, newest first (time, then id, descending): the export's signals. */
+  privacyExportSignals(set: ReadonlySet<string>): Array<{ at: number; kind: string }> {
+    return [...this.signalState().rows.values()]
+      .filter((r) => set.has(r.subject))
+      .sort((a, b) => b.at - a.at || compare(b.id, a.id))
+      .map((r) => ({ at: r.at, kind: r.kind }));
+  }
 }
 
 /**

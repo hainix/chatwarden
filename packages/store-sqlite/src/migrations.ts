@@ -781,6 +781,11 @@ CREATE INDEX kit_ai_actions_by_created ON kit_ai_actions (created_at);
     //   the insert's second ON CONFLICT clause names; `kit_reports_by_origin` serves the daily cap (`origin = ? AND created_at >= ?`).
     // Block 2 (chat filters): `kit_filter_hits`, one row per UTC day, counter key and applied action. No person, no room, no text; counts for tuning a rule.
     //   `action` is what was applied: count, flag, mask, refuse, or flag_capped (the daily cap turned a flag into a count).
+    // Block 4 (privacy requests): `kit_erasures`, one receipt row per erase (counts as JSON, no subject, no text); `pending_subject` is set only while an erase keeps
+    //   a remainder (a sanction in force) and is cleared when it finishes, and its partial index serves `purge()`'s finish pass. One `kit_meta` row, `erasure_epoch`,
+    //   a counter every erase moves, which another process re-reads to learn that a person it has in memory is gone.
+    // Block 5 (privacy requests): the lookup indexes the erase paths need, so no erase scans a table by a person: `kit_mutes_by_target`, `kit_blocked_names_by_subject`,
+    //   `kit_signals_by_source` (rows the person caused) and `kit_sanctions_by_report` (the NULL-out when a report is deleted).
     version: 26,
     sql: `
 ALTER TABLE kit_reports ADD COLUMN origin TEXT CHECK (origin IS NULL OR origin IN ('filter', 'watch'));
@@ -795,6 +800,22 @@ CREATE TABLE kit_filter_hits (
   hits   INTEGER NOT NULL,
   PRIMARY KEY (day, key, action)
 ) WITHOUT ROWID;
+
+CREATE TABLE kit_erasures (
+  id              TEXT PRIMARY KEY,
+  at              INTEGER NOT NULL,
+  mode            TEXT NOT NULL CHECK (mode IN ('safety', 'none')),
+  actor           TEXT NOT NULL,
+  counts_json     TEXT NOT NULL,
+  pending_subject TEXT
+);
+CREATE INDEX kit_erasures_pending ON kit_erasures (pending_subject) WHERE pending_subject IS NOT NULL;
+INSERT OR IGNORE INTO kit_meta (key, value) VALUES ('erasure_epoch', '0');
+
+CREATE INDEX kit_mutes_by_target ON kit_mutes (target_id);
+CREATE INDEX kit_blocked_names_by_subject ON kit_blocked_names (subject_id);
+CREATE INDEX kit_signals_by_source ON kit_signals (by_subject) WHERE by_subject IS NOT NULL;
+CREATE INDEX kit_sanctions_by_report ON kit_sanctions (report_id) WHERE report_id IS NOT NULL;
 `,
   },
 ];

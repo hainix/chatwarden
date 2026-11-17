@@ -67,6 +67,10 @@ import type {
   SubjectIdKind,
   SubjectIdRecord,
   SubjectRecord,
+  ErasePlan,
+  ErasureCounts,
+  ErasureRow,
+  SubjectExport,
 } from '@chatwarden/core';
 import type {
   AuditEntry,
@@ -76,6 +80,15 @@ import type {
   TermRecord,
   TermStore,
 } from '@chatwarden/matcher';
+import {
+  ERASURES_PURGE_SQL,
+  eraseSubjects as eraseSubjectsSql,
+  erasureEpoch as erasureEpochSql,
+  exportSubjects as exportSubjectsSql,
+  finishErasure as finishErasureSql,
+  insertErasure as insertErasureSql,
+  loadPendingErasures as loadPendingErasuresSql,
+} from './privacy.js';
 
 /** A term-editor action name (`LiveTerms`) mapped to the audit union; the prefix is the row's subject type. */
 const LEGACY_ACTIONS: ReadonlyArray<readonly [string, string]> = [
@@ -157,6 +170,11 @@ export const FILTER_HITS_PURGE_SQL = 'DELETE FROM kit_filter_hits WHERE day < ?'
 
 /** A reporter value that can be a person. A filter's report names `filter:<report id>`, which no tally or outcome is ever kept under. */
 const isPersonReporter = (reporter: string): boolean => !reporter.startsWith('filter:');
+
+/** Upsert one identifier row, only for a subject that exists. Binds: subject, kind, value, first seen, last seen, subject (the existence check). */
+export const IDENTIFIER_UPSERT_SQL = `INSERT INTO kit_subject_ids (subject_id, kind, value, first_seen, last_seen)
+  SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM kit_subjects WHERE id = ?)
+  ON CONFLICT (subject_id, kind, value) DO UPDATE SET last_seen = max(last_seen, excluded.last_seen)`;
 
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
 function reportFromRow(r: Record<string, unknown>): ReportRecord {
@@ -697,13 +715,8 @@ export class SqliteStore implements Store, TermStore {
 
   async saveIdentifier(record: SubjectIdRecord): Promise<void> {
     this.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO kit_subject_ids (subject_id, kind, value, first_seen, last_seen)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT (subject_id, kind, value) DO UPDATE SET last_seen = max(last_seen, excluded.last_seen)`,
-        )
-        .run(record.subjectId, record.kind, record.value, record.firstSeen, record.lastSeen);
+      // Conditional on the subject row: a subject erased by another process (or by this one a moment ago) is never recreated by a stale write.
+      this.db.prepare(IDENTIFIER_UPSERT_SQL).run(record.subjectId, record.kind, record.value, record.firstSeen, record.lastSeen, record.subjectId);
     });
   }
 
@@ -1965,7 +1978,37 @@ export class SqliteStore implements Store, TermStore {
   }
 
   purgeAudit(before: number): number {
-    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_audit WHERE at < ?').run(before).changes));
+    return this.transaction(() => {
+      // An erasure receipt lives as long as an audit row; one that still keeps a subject (a pending remainder) is never dropped.
+      this.db.prepare(ERASURES_PURGE_SQL).run(before);
+      return Number(this.db.prepare('DELETE FROM kit_audit WHERE at < ?').run(before).changes);
+    });
+  }
+
+  // Privacy requests (0.2.0). The SQL lives in ./privacy.ts.
+
+  exportSubjects(subjects: readonly SubjectId[]): SubjectExport {
+    return exportSubjectsSql(this.db, (fn) => this.transaction(fn), subjects);
+  }
+
+  eraseSubjects(plan: ErasePlan): ErasureCounts {
+    return eraseSubjectsSql(this.db, (fn) => this.transaction(fn), plan);
+  }
+
+  insertErasure(row: ErasureRow): void {
+    this.transaction(() => insertErasureSql(this.db, row));
+  }
+
+  loadPendingErasures(): ErasureRow[] {
+    return this.transaction(() => loadPendingErasuresSql(this.db));
+  }
+
+  finishErasure(id: string): boolean {
+    return finishErasureSql(this.db, (fn) => this.transaction(fn), id);
+  }
+
+  erasureEpoch(): number {
+    return this.transaction(() => erasureEpochSql(this.db));
   }
 
   // Webhook keys. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.

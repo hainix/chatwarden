@@ -50,6 +50,31 @@ class MemoryNames extends MemoryStore {
     }
     return n;
   }
+
+  // Privacy (0.2.0): `MemoryStore.eraseSubjects` and `exportSubjects` call these when the wrapper is present. Not part of the Store interface.
+
+  /** Delete the kept names of the set. Returns how many. */
+  privacyEraseBlockedNames(set: ReadonlySet<string>): number {
+    const snapshot = this.blocked ?? [];
+    const kept = snapshot.filter((r) => r.subject === null || !set.has(r.subject));
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.blocked = kept;
+      this.undoWith(() => {
+        this.blocked = snapshot;
+      });
+    }
+    return n;
+  }
+
+  /** The kept names of the set, newest first (time, then write order, descending): the export's names. */
+  privacyExportBlockedNames(set: ReadonlySet<string>): BlockedNameRow[] {
+    return (this.blocked ?? [])
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.subject !== null && set.has(r.subject))
+      .sort((a, b) => b.r.at - a.r.at || b.i - a.i)
+      .map(({ r }) => structuredClone(r));
+  }
 }
 
 /**

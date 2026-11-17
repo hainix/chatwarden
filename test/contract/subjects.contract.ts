@@ -87,10 +87,14 @@ export function subjectsContract(name: string, make: () => Store): void {
       expect((await s.loadSubjects()).ids.map((r) => r.subjectId).sort()).toEqual(['s_a', 's_b']);
     });
 
-    it('saveIdentifier for an unknown subject rejects and writes nothing', async () => {
+    it('saveIdentifier for a subject that does not exist writes nothing and does not throw (an erased person cannot be recreated by a stale writer)', async () => {
       const s = make();
-      await expect(s.saveIdentifier(ident('s_ghost', 'key', 'h'))).rejects.toThrow();
+      await expect(s.saveIdentifier(ident('s_ghost', 'key', 'h'))).resolves.toBeUndefined();
       expect((await s.loadSubjects()).ids).toEqual([]);
+      await s.saveSubject(subject('s_a'));
+      await s.saveIdentifier(ident('s_a', 'key', 'h'));
+      await s.saveIdentifier(ident('s_ghost', 'key', 'h'));
+      expect((await s.loadSubjects()).ids.map((r) => r.subjectId)).toEqual(['s_a']);
     });
 
     it('markMerged sets mergedInto; marking an unknown subject is a no-op', async () => {
