@@ -107,6 +107,17 @@ Everything runs, nothing is written to a player. **Nothing in this release write
 - **The hub.** Settings > AI: an Act option (shown only to the owner, and only when the server's code allows acting; absent for everyone else, shown off with the one reason when the owner is missing appeals or the level), one dialog that begins with what this release does (it only records what it would have done) and then lists what it will do, will not do, what the player is told, what the team must do, that the first days are shadow, then `ACT` and a reason), a status line with Pause (a senior, one click), Resume and switch off (the owner), and under Advanced "Would have acted": a plain list with no buttons and no export. Nothing is added to Simple mode, the case card or the queue. Checked in Chromium at 1280 and 360 px, light and dark.
 - **The owner's gate before R3.** R3 starts only after 14 days of shadow in a real game, after the owner has read the "would have acted" list, and with appeals in use. That is the owner's call, not a task: see [plans/follow-ups.md](plans/follow-ups.md).
 
+## Names in reports and "What the player sees" (0.2.0 theme; built on branch `release-0.2.0`; not released)
+
+Design: [design/2026-11-17-names-in-reports-and-player-preview.md](design/2026-11-17-names-in-reports-and-player-preview.md); plan: [plans/2026-11-17-names-and-preview.md](plans/2026-11-17-names-and-preview.md). Part of the 0.2.0 release; the release prep does the version, changeset and peer floors.
+
+- **A player can report a name.** The default reason `name` ("Inappropriate name", CR 7, group Chat) is the 11th default.
+- **A rename always cites a numbered rule.** `cw.names.requireRename` and `POST /people/:ref/rename` require `rule`; the slur filter's rule is no longer a fallback. Both hub forms require it.
+- **A decision can ask for a new name.** `POST /reports/:id/decide` takes `rename: { rule }` and answers `rename: { status: 'asked' | 'already' | 'failed' }`; the decision is written first, the rename asked after it, in one request. A replay never asks twice, even after the player has renamed. In the hub: a quiet row in the decision bar ("Ask for a new name"), at once on a `name` report, behind the editor for any other, with a one-line hint when renames are off.
+- **One source of words.** `@chatwarden/core/notice-copy` holds the notice words, `noticeView`, the date formatters, `communityRuleLabel`, `planNotices` and `appealReplacementEnd`. player-react renders from it and spreads `NOTICE_WORDS` into `en` (no visible change); a parity suite runs the real services against `planNotices`.
+- **"What the player sees".** A lazy panel in every action that sends or withholds a notice: the decision bar and Simple's card, the Person forms, revoke and the appeal card (now a choice plus "Send decision"). No moderator-only field is ever an input to it.
+- **Not done here:** a real-browser pass at desktop and 360 px, light and dark (the tests hold the structure, the wrapping rules and axe), and everything in follow-ups under "Names and the preview (0.2.0), parked".
+
 ## Next
 - **K3c: AI levels 1-2** (read and recommend), **done**: merged as 0.1.7 (PR #26; tag and publish are the owner's). The AI reads a report after the
   player's ack, shows a strip in the hub and, at level 2, pre-fills a mild decision the moderator accepts or edits; it never writes a sanction. Off by

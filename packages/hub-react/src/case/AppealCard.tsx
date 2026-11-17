@@ -5,6 +5,7 @@ import { REASON_MAX } from '../decision.js';
 import type { Problem } from '../decision.js';
 import { appealErrorText, groupName, kindLabel, lengthPhrase, ruleLabel, sanctionWhat } from '../labels.js';
 import { useHubAction, useHubData } from '../hooks.js';
+import { LazyPlayerPreview } from '../lazyParts.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import { useMode } from '../mode.js';
 import { LocalReveal, NameRevealContext, NameToggle, NameValue } from '../names.js';
@@ -14,6 +15,7 @@ import { recordLine } from '../simple.js';
 import { useToasts } from '../toasts.js';
 import { lighterKinds, lighterLengths } from '../appeals/lighter.js';
 import type { LighterKind } from '../appeals/lighter.js';
+import type { NoticeOp } from '@chatwarden/core/notice-copy';
 import type { AppealDecisionInput, AppealDetail, PersonHistory, PolicyDocs, Reason } from '../types.js';
 import { Card, Fetched, Link, Masked, Notice, PersonChip, Tag, Time } from '../ui.js';
 import { Field } from './ActionEditor.js';
@@ -204,7 +206,17 @@ const reasonProblem = (reason: string): Problem | undefined => {
   return trimmed.length > REASON_MAX ? { key: 'hub.decide.error.reasonLong', params: { max: REASON_MAX } } : undefined;
 };
 
-/** The three ways to rule, with the one private reason they share. Each is sent at once: there is no hold. */
+type Outcome = 'uphold' | 'reduce' | 'revoke';
+const OUTCOMES: ReadonlyArray<{ outcome: Outcome; label: 'hub.appeals.decide.keep' | 'hub.appeals.decide.lighter' | 'hub.appeals.decide.remove' }> = [
+  { outcome: 'uphold', label: 'hub.appeals.decide.keep' },
+  { outcome: 'reduce', label: 'hub.appeals.decide.lighter' },
+  { outcome: 'revoke', label: 'hub.appeals.decide.remove' },
+];
+
+/**
+ * The three ways to rule are a choice (keep it, make it lighter, remove it) with the one private reason they share and one "Send decision" button: nothing is sent
+ * until it is pressed, and "What the player sees" above it follows the choice and the lighter picker. There is no hold: an appeal is decided by one write.
+ */
 function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons: readonly Reason[]; offered: readonly number[] }) {
   const { t, locale, client, go } = useHub();
   const toasts = useToasts();
@@ -212,12 +224,13 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
   const base = useId();
   const [reason, setReason] = useState('');
   const [attempted, setAttempted] = useState(false);
-  const [picking, setPicking] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [kind, setKind] = useState<LighterKind | null>(null);
   const [length, setLength] = useState<string | null>(null);
   // The appeal is closed (someone else decided it, or the sanction is gone): nothing is left to send, so the controls go and the words stay with a way back.
   const [settled, setSettled] = useState(false);
   const reasonBox = useRef<HTMLTextAreaElement>(null);
+  const firstRadio = useRef<HTMLInputElement>(null);
   const sending = useRef(false);
   const action = useHubAction((input: AppealDecisionInput) => client.decideAppeal(appeal.id, input));
 
@@ -231,22 +244,36 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
   const lengths = chosenKind === null ? [] : lighterLengths(chosenKind, given, offered);
   const chosenLength = lengths.some((ms) => lengthValue(ms) === length) ? length : lengths.length === 0 ? null : lengthValue(lengths[lengths.length - 1] ?? null);
   const problem = attempted ? reasonProblem(reason) : undefined;
+  const choiceProblem = attempted && outcome === null;
 
-  const send = async (input: Omit<AppealDecisionInput, 'reason'>): Promise<void> => {
+  /** The lighter sanction the picker stands for, or null. */
+  const lighterTo = (): { kind: LighterKind; durationMs: number | null } | null => {
+    if (chosenKind === null) return null;
+    const ms = chosenKind === 'warning' ? null : (lengths.find((l) => lengthValue(l) === chosenLength) ?? null);
+    return { kind: chosenKind, durationMs: ms };
+  };
+
+  const sendDecision = async (): Promise<void> => {
     if (sending.current) return;
     setAttempted(true);
+    if (outcome === null) {
+      firstRadio.current?.focus();
+      return;
+    }
     if (reasonProblem(reason) !== undefined) {
       reasonBox.current?.focus();
       return;
     }
+    const lighter = outcome === 'reduce' ? lighterTo() : null;
+    if (outcome === 'reduce' && lighter === null) return;
     sending.current = true;
-    const result = await action.run({ ...input, reason: reason.trim() }).finally(() => {
+    const input: AppealDecisionInput = { outcome, ...(lighter === null ? {} : { to: lighter }), reason: reason.trim() };
+    const result = await action.run(input).finally(() => {
       sending.current = false;
     });
     if (!result.ok) {
       if (result.error.code === 'already_decided' || result.error.code === 'gone') {
         setSettled(true);
-        setPicking(false);
         if (queue !== null) void queue.reload();
       }
       return;
@@ -257,15 +284,78 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
     go({ name: 'appeals' });
   };
 
-  const confirmLighter = (): void => {
-    if (chosenKind === null) return;
-    const ms = chosenKind === 'warning' ? null : (lengths.find((l) => lengthValue(l) === chosenLength) ?? null);
-    void send({ outcome: 'reduce', to: { kind: chosenKind, durationMs: ms } });
-  };
+  // What the player is sent for this choice: nothing until one is chosen. Only what the sanction, the choice and the picker say: never the statement or the reason.
+  const picked = outcome === 'reduce' ? lighterTo() : null;
+  const previewOp: NoticeOp | null =
+    outcome === null || (outcome === 'reduce' && picked === null)
+      ? null
+      : {
+          op: 'appeal',
+          outcome,
+          original: { kind: appeal.sanction.kind, startsAt: appeal.sanction.startsAt, endsAt: appeal.sanction.endsAt, rule: appeal.sanction.rule, refCode: appeal.sanction.refCode },
+          ...(picked === null ? {} : { to: picked }),
+        };
 
   const failed = action.error;
   return (
     <section className="cw-appeal-decision" aria-label={t('hub.appeals.decide.title')}>
+      {!settled && (
+        <fieldset className="cw-appeal-outcomes">
+          <legend>{t('hub.appeals.decide.legend')}</legend>
+          {OUTCOMES.map(({ outcome: o, label }, i) => {
+            const unavailable = o === 'reduce' && kinds.length === 0;
+            return (
+              <div key={o} className="cw-radio">
+                <input
+                  ref={i === 0 ? firstRadio : undefined}
+                  type="radio"
+                  id={`${base}-${o}`}
+                  name={`${base}-outcome`}
+                  value={o}
+                  checked={outcome === o}
+                  disabled={unavailable}
+                  aria-describedby={unavailable ? `${base}-warning` : undefined}
+                  onChange={() => setOutcome(o)}
+                />
+                <label htmlFor={`${base}-${o}`}>{t(label)}</label>
+              </div>
+            );
+          })}
+          {choiceProblem && <p className="cw-field-error">{t('hub.appeals.decide.choose')}</p>}
+          {appeal.sanction.kind === 'warning' && (
+            <p id={`${base}-warning`} className="cw-hint">
+              {t('hub.appeals.decide.warning')}
+            </p>
+          )}
+          {outcome === 'reduce' && chosenKind !== null && (
+            <fieldset id={`${base}-pick`} className="cw-appeal-pick">
+              <legend>{t('hub.appeals.pick.title')}</legend>
+              <div className="cw-field">
+                <label htmlFor={`${base}-kind`}>{t('hub.appeals.pick.kind')}</label>
+                <select id={`${base}-kind`} value={chosenKind} onChange={(e) => setKind(e.target.value as LighterKind)}>
+                  {kinds.map((k) => (
+                    <option key={k} value={k}>
+                      {kindLabel(t, k)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {chosenKind !== 'warning' && (
+                <div className="cw-field">
+                  <label htmlFor={`${base}-length`}>{t('hub.appeals.pick.length')}</label>
+                  <select id={`${base}-length`} value={chosenLength ?? ''} onChange={(e) => setLength(e.target.value)}>
+                    {lengths.map((ms) => (
+                      <option key={lengthValue(ms)} value={lengthValue(ms)}>
+                        {ms === null ? t('hub.decide.length.permanent') : lengthPhrase(t, locale, ms)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </fieldset>
+          )}
+        </fieldset>
+      )}
       {!settled && <ReasonChips reasons={reasons} onPick={(r) => setReason((v) => (v.trim() === '' ? r.text : `${v.trimEnd()} ${r.text}`))} />}
       <Field
         id={`${base}-reason`}
@@ -276,6 +366,7 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
       >
         {(a) => <textarea {...a} ref={reasonBox} rows={3} value={reason} readOnly={settled} onChange={(e) => setReason(e.target.value)} />}
       </Field>
+      {!settled && <LazyPlayerPreview op={previewOp} nameOf={() => ''} />}
       {failed !== null && (
         <div className="cw-error" role="alert">
           <p>{appealErrorText(t, failed)}</p>
@@ -289,47 +380,10 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
         </div>
       ) : (
         <div className="cw-appeal-controls">
-          <button type="button" className="cw-btn cw-btn--primary" aria-disabled={action.busy} onClick={() => void send({ outcome: 'uphold' })}>
-            {t('hub.appeals.decide.keep')}
-          </button>
-          <button type="button" className="cw-btn" aria-expanded={picking} aria-controls={`${base}-pick`} disabled={kinds.length === 0} onClick={() => setPicking((v) => !v)}>
-            {t('hub.appeals.decide.lighter')}
-          </button>
-          <button type="button" className="cw-btn" aria-disabled={action.busy} onClick={() => void send({ outcome: 'revoke' })}>
-            {t('hub.appeals.decide.remove')}
+          <button type="button" className="cw-btn cw-btn--primary" aria-disabled={action.busy} aria-busy={action.busy} onClick={() => void sendDecision()}>
+            {t('hub.appeals.decide.send')}
           </button>
         </div>
-      )}
-      {!settled && appeal.sanction.kind === 'warning' && <p className="cw-hint">{t('hub.appeals.decide.warning')}</p>}
-      {!settled && picking && chosenKind !== null && (
-        <fieldset id={`${base}-pick`} className="cw-appeal-pick">
-          <legend>{t('hub.appeals.pick.title')}</legend>
-          <div className="cw-field">
-            <label htmlFor={`${base}-kind`}>{t('hub.appeals.pick.kind')}</label>
-            <select id={`${base}-kind`} value={chosenKind} onChange={(e) => setKind(e.target.value as LighterKind)}>
-              {kinds.map((k) => (
-                <option key={k} value={k}>
-                  {kindLabel(t, k)}
-                </option>
-              ))}
-            </select>
-          </div>
-          {chosenKind !== 'warning' && (
-            <div className="cw-field">
-              <label htmlFor={`${base}-length`}>{t('hub.appeals.pick.length')}</label>
-              <select id={`${base}-length`} value={chosenLength ?? ''} onChange={(e) => setLength(e.target.value)}>
-                {lengths.map((ms) => (
-                  <option key={lengthValue(ms)} value={lengthValue(ms)}>
-                    {ms === null ? t('hub.decide.length.permanent') : lengthPhrase(t, locale, ms)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <button type="button" className="cw-btn cw-btn--primary" aria-disabled={action.busy} onClick={confirmLighter}>
-            {t('hub.appeals.pick.confirm')}
-          </button>
-        </fieldset>
       )}
     </section>
   );

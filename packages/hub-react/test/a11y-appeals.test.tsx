@@ -65,11 +65,12 @@ describe.each(['light', 'dark'] as const)('axe on the appeals pages, %s theme', 
     const a = await w.appeal({ actor: 'bea@example.test', kind: 'area', durationMs: 24 * HOUR });
     const { container, user } = renderHub(w, { theme, path: `/appeals/${a.appealId}` });
     await screen.findByRole('region', { name: 'What the player said' });
-    await user.click(screen.getByRole('button', { name: 'Make it lighter...' }));
-    await user.click(screen.getByRole('button', { name: 'Keep the decision' }));
+    await user.click(screen.getByRole('radio', { name: 'Make it lighter' }));
+    await user.click(screen.getByRole('button', { name: 'Send decision' }));
     expect(await violations(container)).toEqual([]);
     await user.type(screen.getByLabelText('Why (private)'), 'my own decision');
-    await user.click(screen.getByRole('button', { name: 'Keep the decision' }));
+    await user.click(screen.getByRole('radio', { name: 'Keep the decision' }));
+    await user.click(screen.getByRole('button', { name: 'Send decision' }));
     await screen.findByRole('alert');
     expect(await violations(container)).toEqual([]);
   });

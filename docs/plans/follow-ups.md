@@ -295,3 +295,18 @@ Found building R2 (shadow mode), 2026-11. Design: [design/2026-11-12-ai-levels-3
 - **Done in the final R2 round: the reserve INSERT and take-over UPDATE and the acting UPDATE are exported as constants and counted in `sql-placeholders.test.ts`.**
 - **Done in R2: retention of the action rows, `kit_ai_reads.purpose`, the store parity on a transition's edge input** (an empty patch is false, a state outside the closed set throws, an unknown key is ignored, in both stores).
 - **Migration 25 is open until 0.1.14 ships.** Anything that needs another index or column before then goes into migration 25; after the tag it is migration 26.
+
+## Names and the preview (0.2.0), parked
+
+Found building the names-and-preview theme, 2026-11. Design: [design/2026-11-17-names-in-reports-and-player-preview.md](../design/2026-11-17-names-in-reports-and-player-preview.md); plan: [2026-11-17-names-and-preview.md](2026-11-17-names-and-preview.md).
+
+- A `previewWords` prop for the hub, so an adopter can preview its own translations (the panel is English and says so).
+- Hover or focus-driven previews of each one-tap button on Simple's card (each states its own effect in one line instead).
+- Telling the reporter when a decision only asks for a new name (the thank-you needs a non-note action).
+- Skipping the AI read for `name` reports, and showing the name itself to the AI.
+- A server-rendered preview route; previews in the Discord bot, Coop and EOS paths.
+- Exporting the panel as a piece for adopters' own pages.
+- Site copy: it flips a promise only after the release is on npm and has run in Moxgate.
+- A replay of a decision with `rename` answers `already` (not the first call's `asked`) once the rename was asked at or after the decision, whether or not the player has renamed since.
+- `PolicyDocs.notices` and `FlaggedReport.excerpt[].noticeText` are typed optional in hub-react and read as "thanked" and "no masked text" when absent; the release prep may make them required.
+- A real-browser check of the panel, the rename row and the appeal choice at desktop and 360 px, light and dark.
