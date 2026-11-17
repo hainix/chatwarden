@@ -1,5 +1,6 @@
 import { isValidAuditActor, AUDIT_REASON_MAX } from './audit.js';
 import { sampleRecords, suggest } from './ladder.js';
+import { checkFilterRules } from './filters.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
 import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
 import { playerReporting } from './reporting.js';
@@ -132,8 +133,11 @@ export class PolicyService {
   /** Whether the store has the appeal methods. Without them a layer cannot turn appeals on: it is refused when saved, and kept off when read. */
   private readonly appealsKept: boolean;
   private readonly appealsWarn: ThrottledWarn;
+  /** Whether a Community Rule number is an active rule of the registry: the filters may cite only those, checked when a layer is saved or previewed. */
+  private readonly isActiveRule: (rule: number) => boolean;
 
-  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean }) {
+  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean; isActiveRule?: (rule: number) => boolean }) {
+    this.isActiveRule = deps.isActiveRule ?? (() => true);
     this.appealsKept = deps.appealsKept ?? true;
     this.appealsWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.signalsMs = deps.signalsMs ?? (() => RETENTION_DEFAULTS.signalsMs);
@@ -316,6 +320,8 @@ export class PolicyService {
       checkSignalFeeds(effective.signals.feeds, effective.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
       // A switch that would do nothing is refused, so the owner is not shown "on" over a store that cannot keep appeals.
       if (!this.appealsKept && effective.appeals.enabled && !this.base.appeals.enabled) return { ok: false, error: 'invalid', path: 'layer.appeals.enabled' };
+      // A filter may cite only an active Community Rule. Checked here, not when a stored layer is read: a rule switched off later fails the next save, never the chat path.
+      checkFilterRules(effective.filters, this.isActiveRule, 'layer.filters');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;
@@ -369,6 +375,7 @@ export class PolicyService {
       candidate = applyPolicyLayer(this.base, layer);
       // As save: a window longer than the retention could never be met, so the candidate is refused here too, not only when it is saved.
       checkSignalFeeds(candidate.signals.feeds, candidate.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
+      checkFilterRules(candidate.filters, this.isActiveRule, 'layer.filters');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;

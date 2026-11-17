@@ -26,6 +26,7 @@ import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
+import { checkFilterRules } from './filters.js';
 import { checkPace, mergePace } from './pace.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
@@ -951,6 +952,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (autoRule === undefined || autoRule.retired === true) {
     throw new RangeError('autoRestrictRule must be the number of an active rule in the registry');
   }
+  const isActiveRule = (n: number): boolean => {
+    const r = rules.get(n);
+    return r !== undefined && r.retired !== true;
+  };
+  // The filters may cite only an active Community Rule (a code profile fails here, a layer when it is saved).
+  checkFilterRules(baseProfile.filters, isActiveRule, 'profile.filters');
   if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
   const profanity = buildProfanityFilter(opts, baseProfile.profanity);
   if (profanity === undefined && baseProfile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
@@ -968,7 +975,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await mutes.load();
   await strikes.load();
   // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
-  const policy = new PolicyService({ store, clock, logger, base: baseProfile, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store) });
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile, isActiveRule: isActiveRule, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store) });
   policy.load();
 
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and

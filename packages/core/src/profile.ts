@@ -19,6 +19,8 @@ import {
 } from './reporting.js';
 import type { ReportingSettings, ResolvedReporting } from './reporting.js';
 import { deepFreeze } from './freeze.js';
+import { mergeFilters, resolveFilters } from './filters.js';
+import type { FilterSettings, ResolvedFilters } from './filters.js';
 import { mergePace, resolvePace } from './pace.js';
 import type { PaceSettings, ResolvedPace } from './pace.js';
 import { resolveAppeals } from './appeals.js';
@@ -186,6 +188,12 @@ export interface ModerationProfile extends ModerationProfileBase {
    * @experimental
    */
   names?: NameSettings;
+  /**
+   * Chat filters: links, personal info, phrases and caps or repeats, each with an action and the Community Rule it cites. Every block is
+   * off until set, so a profile without `filters` changes nothing. See {@link FilterSettings}.
+   * @experimental
+   */
+  filters?: FilterSettings;
 }
 
 /**
@@ -243,6 +251,8 @@ export interface ResolvedProfile extends ModerationProfileBase {
   appeals: ResolvedAppeals;
   /** The name settings in force, every field filled in. @experimental */
   names: ResolvedNames;
+  /** The filter settings in force, every field filled in (`null` is off). @experimental */
+  filters: ResolvedFilters;
 }
 
 /** @deprecated The same as {@link ModerationProfile}, which now has the two fields optional. */
@@ -284,12 +294,13 @@ const TOP_KEYS = [
   'signals',
   'appeals',
   'names',
+  'filters',
   'levels',
   'guidelines',
 ] as const;
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
-const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names'];
+const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters'];
 const AI_KEYS = ['level', 'learn', 'dailyCalls', 'actExcludeRules'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
@@ -582,6 +593,7 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   if (Object.hasOwn(p, 'signals')) resolveSignals(p['signals'] as SignalSettings, 'profile.signals');
   if (Object.hasOwn(p, 'appeals')) resolveAppeals(p['appeals'] as AppealSettings, 'profile.appeals');
   if (Object.hasOwn(p, 'names')) resolveNames(p['names'] as NameSettings, 'profile.names');
+  if (Object.hasOwn(p, 'filters')) resolveFilters(p['filters'] as FilterSettings, 'profile.filters');
 
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
   oneOf(prof['mode'], 'profile.profanity.mode', PROFANITY_MODES, "must be 'allow', 'star' or 'refuse'");
@@ -698,6 +710,7 @@ function finalize(value: unknown): ResolvedProfile {
     setOwn(copy, 'signals', resolveSignals(copy['signals'] as SignalSettings | undefined, 'profile.signals'));
     setOwn(copy, 'appeals', resolveAppeals(copy['appeals'] as AppealSettings | undefined, 'profile.appeals'));
     setOwn(copy, 'names', resolveNames(copy['names'] as NameSettings | undefined, 'profile.names'));
+    setOwn(copy, 'filters', resolveFilters(copy['filters'] as FilterSettings | undefined, 'profile.filters'));
   }
   return deepFreeze(copy as ResolvedProfile);
 }
@@ -717,6 +730,7 @@ export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
     signals: resolveSignals(p.signals),
     appeals: resolveAppeals(p.appeals),
     names: resolveNames(p.names),
+    filters: resolveFilters(p.filters),
   };
 }
 
@@ -1037,7 +1051,7 @@ export function defineProfile(p: ModerationProfile): ResolvedProfile {
  * The parts of a profile the hub may edit, and the order they are listed in. Everything else (identity, the written
  * levels, the AI context, profanity handling) stays in code: changing profanity means rebuilding the filter.
  */
-export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names'] as const;
+export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters'] as const;
 export type PolicySection = (typeof POLICY_SECTIONS)[number];
 
 /** One ladder cell as the editor sends it: the label may be left out and is then generated ("Restrict chat 6 hours"). */
@@ -1087,6 +1101,11 @@ export interface PolicyLayer {
   appeals?: AppealSettings;
   /** The name settings: `profanity`, `keepBlocked`, `renames` and `maskInHub`. Each is optional and merges onto the profile's. @experimental */
   names?: NameSettings;
+  /**
+   * The chat filters: each block (`links`, `personalInfo`, `ratio`) is replaced whole when given, `null` turns it off, `phrases` and
+   * `ignore` replace whole, and a field left out inherits the profile's. @experimental
+   */
+  filters?: FilterSettings;
 }
 
 /** The longest outcome text a layer may set on a guideline tier. */
@@ -1177,6 +1196,10 @@ function layerToOverrides(base: ModerationProfile, layer: unknown): Record<strin
       // Checked on its own so the error names layer.pace..., then merged here so `burst` replaces whole instead of merging by member.
       resolvePace(value as PaceSettings, 'profile.pace');
       setOwn(out, key, mergePace(resolvePace(base.pace, 'profile.pace'), value as PaceSettings));
+    } else if (key === 'filters') {
+      // Checked on its own so the error names layer.filters..., then merged here so a block replaces whole instead of merging by member.
+      resolveFilters(value as FilterSettings, 'profile.filters');
+      setOwn(out, key, mergeFilters(resolveFilters(base.filters, 'profile.filters'), value as FilterSettings, 'profile.filters'));
     } else if (key === 'ladder') setOwn(out, key, ladderOverride(value));
     else if (key === 'guidelines') setOwn(out, key, guidelinesOverride(base, value));
     else setOwn(out, key, value);

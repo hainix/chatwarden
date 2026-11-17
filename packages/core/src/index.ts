@@ -335,6 +335,38 @@ export {
 // Pace settings (@experimental): slow mode, burst limit and repeat refusal, all off until set.
 export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
 export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
+// Chat filter settings (@experimental): links, personal info, phrases and caps or repeats, each with an action and a Community Rule, all off until set.
+export {
+  checkFilterRules,
+  checkFilters,
+  FILTER_ACTIONS,
+  FILTER_LIMITS,
+  FILTER_RULE_DEFAULTS,
+  FILTER_SUGGESTIONS,
+  filterRulePaths,
+  filtersActive,
+  mergeFilters,
+  overlayFilters,
+  PERSONAL_KINDS,
+  RATIO_DEFAULTS,
+  resolveFilters,
+  SHARED_HOSTING_SUFFIXES,
+} from './filters.js';
+export type {
+  FilterAction,
+  FilterPatch,
+  FilterSettings,
+  LinkSettings,
+  PersonalInfoSettings,
+  PersonalKind,
+  PhraseRuleSettings,
+  RatioSettings,
+  ResolvedFilters,
+  ResolvedLinks,
+  ResolvedPersonalInfo,
+  ResolvedPhraseRule,
+  ResolvedRatio,
+} from './filters.js';
 // Appeals and names settings (@experimental): off until set (names masking in the hub is the one default-on setting).
 export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_STATEMENT_MAX, APPEAL_STATS_MIN_SANCTIONS, normalizeStatement, resolveAppeals, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
 export type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';

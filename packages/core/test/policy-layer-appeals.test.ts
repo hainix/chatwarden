@@ -32,7 +32,7 @@ const bad = (layer: unknown): ProfileError => failure(() => applyPolicyLayer(bas
 
 describe('appeals and names in the layer', () => {
   it('POLICY_SECTIONS appends appeals then names, after the 0.1.8 sections', () => {
-    expect([...POLICY_SECTIONS].slice(-4)).toEqual(['pace', 'signals', 'appeals', 'names']);
+    expect([...POLICY_SECTIONS].slice(10, 14)).toEqual(['pace', 'signals', 'appeals', 'names']);
   });
 
   it('a layer beats the code profile, which beats the defaults', () => {
