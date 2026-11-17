@@ -145,6 +145,12 @@ describe('imports', () => {
     for (const f of chatFiles) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react-dom$|react\/jsx-runtime$|@chatwarden\/core$)/);
   });
 
+  it('the chat entry exports the version 2 wire types and the placeholder line, as types only', () => {
+    const entry = read(join(chatDir, 'index.ts'));
+    const typeExports = entry.split('\n').filter((l) => l.startsWith('export type {'));
+    for (const name of ['WireMode', 'WireReadOnly', 'StateLine']) expect(typeExports.some((l) => new RegExp(String.raw`[{ ,]${name}[ ,}]`).test(l)), name).toBe(true);
+  });
+
   it('the chat entry does not export the test-only transport factory', () => {
     expect(read(join(chatDir, 'index.ts'))).not.toMatch(/createSseTransport/);
   });

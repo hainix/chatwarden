@@ -482,6 +482,25 @@
   background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
 }
 
+/* The owner's help resources after a report: a short list under the thank-you. */
+.cw-player .cw-resources {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin-top: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-player .cw-resources-title {
+  font-weight: 600;
+}
+.cw-player .cw-resource-list {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin: 0;
+  padding-left: var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-player .cw-resource-detail {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+
 /* ---- Motion and forced colours ----------------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   .cw-player .cw-dialog {

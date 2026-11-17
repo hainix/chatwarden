@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest';
 // kit stay outside, as for the main entry. The numbers were set after measuring (design 13.5 records them).
 
 const pkg = fileURLToPath(new URL('..', import.meta.url));
-const MARGINAL_BUDGET = 9 * 1024; // measured 8.2 KB
+// Raised 9 to 12 KB for 0.2.0 (room modes, retraction, the v2 frame readers: measured 9.8 KB).
+const MARGINAL_BUDGET = 12 * 1024; // measured 9.8 KB
 const ENTRY_BUDGET = 17 * 1024; // measured 15.0 KB
 const CSS_BUDGET = 2.5 * 1024; // measured 2.1 KB
 

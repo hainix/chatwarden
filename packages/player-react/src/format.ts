@@ -15,6 +15,19 @@ function safeLocale(locale: string): string {
   }
 }
 
+/** A time of day with no date (`2:30 PM`), in the locale. Pass a time zone for a fixed one; the default is the viewer's. An unknown zone is ignored. */
+export function clockText(at: number, locale: string, timeZone?: string): string {
+  const options: Intl.DateTimeFormatOptions = { timeStyle: 'short' };
+  let out: string;
+  try {
+    out = new Intl.DateTimeFormat(safeLocale(locale), { ...options, ...(timeZone === undefined ? {} : { timeZone }) }).format(at);
+  } catch {
+    out = new Intl.DateTimeFormat(safeLocale(locale), options).format(at);
+  }
+  // ICU puts a narrow no-break space before "PM": a plain space reads the same and compares.
+  return out.replace(/[\u202f\u00a0]/g, ' ');
+}
+
 /** A date with no time (`Jan 15, 2027`). Pass a time zone for a fixed one; the default is the viewer's. An unknown zone is ignored. */
 export function dateText(at: number, locale: string, timeZone?: string): string {
   const options: Intl.DateTimeFormatOptions = { dateStyle: 'medium' };

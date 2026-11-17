@@ -44,6 +44,17 @@ export const enChat = {
   'player.chat.refused.slow_mode.soon': 'Slow mode is on. Please wait a moment before sending another message.',
   'player.chat.refused.flood.soon': 'You are sending messages too fast. Try again in a moment.',
   'player.chat.refused.duplicate.soon': 'You already sent that. Say something different, or try again in a moment.',
+  // A room's mode (a lock or an emergency) and a new account's pause. The status line above the input and the refusal of a line say the same words.
+  'player.chat.locked': 'Chat is locked until {time}.',
+  'player.chat.lockedNoEnd': 'Chat is locked right now.',
+  'player.chat.modeEmergency': 'Slow mode is on.',
+  'player.chat.readOnlyNew': 'New accounts can only read right now.',
+  'player.chat.probation': 'New accounts chat a little slower. You can send another message in {left}.',
+  'player.chat.probationSoon': 'New accounts chat a little slower. Please wait a moment before sending another message.',
+  // A line a moderator took back: the placeholder, and the one polite announcement of a retraction (one line or several).
+  'player.chat.removed': 'Message removed by a moderator.',
+  'player.chat.removedLive.one': 'A message was removed by a moderator.',
+  'player.chat.removedLive.other': '{count} messages were removed by a moderator.',
   'player.chat.refused.unknown': 'That message was not sent.',
   'player.chat.refused.rule': 'Community Rule {rule}.',
   'player.chat.refused.notice': 'We sent you a notice with details.',

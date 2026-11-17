@@ -141,6 +141,8 @@ export const en = {
   'player.report.close': 'Close',
   'player.report.failed': 'Your report was not sent.',
   'player.report.thanks': 'Thanks. We got your report.',
+  // The heading over the owner's help resources, shown after the thank-you for a reason that offers them.
+  'player.report.resources': 'Where to get help',
   'player.report.remaining.zero': 'You have no more reports left today.',
   'player.report.remaining.one': 'You can send {count} more report today.',
   'player.report.remaining.other': 'You can send {count} more reports today.',

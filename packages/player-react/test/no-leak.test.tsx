@@ -302,3 +302,38 @@ describe('appeals: no identifier appears in any answer', () => {
     expect(d.innerHTML).not.toMatch(/\b[0-9a-f]{24,}\b/i);
   });
 });
+
+describe('the chat box under a mode and a retraction leaks no identifier and no staff field', () => {
+  it('a staff viewer, a new account and a retraction: the page holds words only (no seat, subject, key, staff flag, evidence id or moderator)', async () => {
+    const { chatWorld } = await import('./chat-world.js');
+    const { ChatBox } = await import('../src/chat/ChatBox.js');
+    const w = await chatWorld({ signals: { accountAgeDays: (ids) => (ids[0]?.startsWith('new-') === true ? 1 : 90) } });
+    try {
+      const staff = w.transportFor('modmo', {}, { who: { accountId: 'old-modmo' }, member: { staff: true, evidenceRef: 'match_EVIDENCE_REF_1' } });
+      const young = w.transportFor('newbie', {}, { who: { accountId: 'new-newbie' } });
+      const { container } = renderUi(
+        <>
+          <ChatBox transport={staff} room="lobby" {...FIXED} now={w.clock.now} title="Staff" />
+          <ChatBox transport={young} room="lobby" {...FIXED} now={w.clock.now} title="Young" />
+        </>,
+      );
+      await screen.findAllByRole('textbox', { name: 'Message' });
+      w.clock.t += 2000;
+      const said = w.say('lobby', 'tarvo', 'a line to take back', 'old-tarvo-identity');
+      if (!said.ok) throw new Error('refused');
+      await within(screen.getByRole('log', { name: 'Young' })).findByText('a line to take back');
+      const subject = w.subjectOf('lobby', 'tarvo');
+      await waitFor(() => expect(w.real.rooms.lineStates('lobby').length).toBeGreaterThan(0));
+      w.real.rooms.setMode('lobby', 'emergency', { forMs: 30 * 60_000 });
+      w.real.rooms.retract('lobby', said.line.id);
+      await screen.findByText(/New accounts can only read right now/);
+      await screen.findAllByText('Message removed by a moderator.');
+      const html = container.innerHTML;
+      for (const s of ['EVIDENCE_REF', 'evidenceRef', 'staff', 'readOnly', subject, 'old-modmo', 'new-newbie', 'raw-client-key', 'a line to take back']) expect(html, s).not.toContain(s);
+      expect(html).not.toMatch(/\bs_[A-Za-z0-9_-]{22}\b/);
+      expect(html).not.toMatch(/\bs[0-9a-f]{20,}\b/i);
+    } finally {
+      w.close();
+    }
+  });
+});

@@ -117,6 +117,18 @@
 .cw-player .cw-chat-refusal p {
   color: var(--cw-red, var(--cwd-red));
 }
+/* A lock or an emergency: a line in the status above the input, in the ink of the box (it is the reason the input is quiet, not a footnote). */
+.cw-player .cw-chat-mode {
+  color: var(--cw-ink, var(--cwd-ink));
+}
+/* A line a moderator took back: a quiet placeholder in the line's place. */
+.cw-player .cw-chat-line--removed {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-style: italic;
+}
+.cw-player .cw-chat-line--removed:not([data-mine]) {
+  padding-right: 0;
+}
 
 /* ---- The input --------------------------------------------------------------------------------------------------- */
 .cw-player .cw-chat-foot {
@@ -148,6 +160,14 @@
 }
 .cw-player .cw-chat-send {
   flex: none;
+}
+/* The room's mode keeps this viewer from posting: the input and Send stay in the tab order and look quiet. */
+.cw-player .cw-chat-input[aria-disabled='true'],
+.cw-player .cw-chat-send[aria-disabled='true'] {
+  cursor: default;
+  border-color: var(--cw-border-strong, var(--cwd-border-strong));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
 }
 .cw-player .cw-chat-send:disabled {
   cursor: default;

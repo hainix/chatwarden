@@ -275,6 +275,18 @@ function readHello(o: Bag): ChatFrame | null {
 }
 
 /**
+ * Is this a `hello` of another wire version (an older or a newer server, or one with no version at all)? The box refuses such a server as unsupported instead of waiting for a hello it can read. Never throws.
+ */
+export function isForeignHello(raw: unknown): boolean {
+  try {
+    const o = bagOf(raw);
+    return o !== null && own(o, 'type') === 'hello' && own(o, 'v') !== CHAT_WIRE_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * A frame from parsed JSON, or null when it is not one of the eight frames or a field has the wrong type. Never throws. It builds a fresh
  * object field by field from own properties, so `__proto__` and `constructor` keys never land on the result, and unknown fields
  * are left behind. A name is cut at 64 and a text at 1 000. `jsonLength` is the length of the JSON text the value came from, in bytes;

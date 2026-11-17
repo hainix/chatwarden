@@ -5,7 +5,7 @@ import { NOTE_MAX } from './constants.js';
 import { PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
 import type { PlayerText } from './i18n.js';
-import { groupReasons, readReporting } from './reporting.js';
+import { groupReasons, isResourceHref, readReporting } from './reporting.js';
 import { errorText, Portal, Root, useUi } from './ui.js';
 import type { DialogHostProps, PlayerUiProps } from './ui.js';
 
@@ -122,6 +122,8 @@ export function ReportDialog(props: ReportDialogProps) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<PlayerError | null>(null);
   const [result, setResult] = useState<ReportResult | null>(null);
+  // The reason the report was sent under: the thank-you and the help resources are chosen by it.
+  const [sentReason, setSentReason] = useState<string | null>(null);
 
   // No `reporting` (or something that is not the payload): no reasons to offer, as when `GET /rules` cannot be loaded.
   const read = readReporting(props.reporting) ?? { flow: 'one_tap' as const, reasons: [], thanks: '' };
@@ -155,6 +157,7 @@ export function ReportDialog(props: ReportDialogProps) {
     sending.current = true;
     setBusy(true);
     setFailure(null);
+    setSentReason(draft.reason ?? null);
     try {
       setResult(resultOf<ReportResult>(await onSubmit(draft), { ok: false, refused: 'unknown' } as unknown as ReportResult));
     } catch (error) {
@@ -186,6 +189,11 @@ export function ReportDialog(props: ReportDialogProps) {
   const refusal = result !== null && !taken ? result : null;
   // After an answer the heading says what happened (a question would be stale), and focus is on it.
   const shownTitle = result === null ? title : taken ? t('player.report.titleSent') : t('player.report.titleRefused');
+  // The reason's own thank-you when it has one, else the global one; the resources only for a reason that offers them.
+  const sentItem = read.reasons.find((r) => r.id === sentReason);
+  const ownThanks = (sentItem?.thanks ?? '').trim();
+  const shownThanks = ownThanks !== '' ? ownThanks : thanks;
+  const resources = taken && sentItem?.showResources === true ? (read.resources ?? []) : [];
   const remaining = taken && typeof result.remaining === 'number' && Number.isFinite(result.remaining) && result.remaining >= 0 ? result.remaining : null;
   const refusedKey = (r: unknown): PlayerText => {
     const refused = (r as { refused?: unknown }).refused;
@@ -209,9 +217,28 @@ export function ReportDialog(props: ReportDialogProps) {
         <div role="status" className="cw-live">
           {taken && (
             <p className="cw-result">
-              {thanks === '' ? t('player.report.thanks') : thanks}
+              {shownThanks === '' ? t('player.report.thanks') : shownThanks}
               {remaining !== null && ` ${t('player.report.remaining', { count: remaining })}`}
             </p>
+          )}
+          {resources.length > 0 && (
+            <div className="cw-resources">
+              <p className="cw-resources-title">{t('player.report.resources')}</p>
+              <ul className="cw-resource-list">
+                {resources.map((r, i) => (
+                  <li key={i} className="cw-resource">
+                    {r.url !== null && isResourceHref(r.url) ? (
+                      <a className="cw-link" href={r.url.trim()} target="_blank" rel="noopener noreferrer">
+                        {r.label}
+                      </a>
+                    ) : (
+                      <strong>{r.label}</strong>
+                    )}
+                    {r.detail !== '' && <span className="cw-resource-detail"> {r.detail}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
         {result === null ? (

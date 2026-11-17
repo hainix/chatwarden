@@ -1,5 +1,5 @@
 import { createChatwarden } from '@chatwarden/core';
-import type { Chatwarden, ChatResult, PaceSettings, ProfanityFilter, RawWho, SubjectId } from '@chatwarden/core';
+import type { Chatwarden, ChatResult, ChatwardenOptions, PaceSettings, ProfanityFilter, RawWho, RoomsSettings, SubjectId } from '@chatwarden/core';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { createRoomBroadcaster } from '@chatwarden/http';
 import type { ChatMember, ChatSession, RoomBroadcaster, RoomBroadcasterOptions } from '@chatwarden/http';
@@ -36,6 +36,10 @@ export interface ChatWorldOptions {
   pace?: PaceSettings;
   wrap?: (cw: Chatwarden) => Chatwarden;
   broadcaster?: RoomBroadcasterOptions;
+  /** The `rooms` settings in force from the start (emergency, probation, unknown age). */
+  rooms?: RoomsSettings;
+  /** The kit's `signals` options (the `accountAgeDays` hook). */
+  signals?: ChatwardenOptions['signals'];
 }
 
 export async function chatWorld(over: ChatWorldOptions = {}) {
@@ -55,19 +59,27 @@ export async function chatWorld(over: ChatWorldOptions = {}) {
     },
     profanity: filter,
     gate: () => gate.open,
-    ...(over.profanity === 'refuse' || over.pace !== undefined
-      ? { overrides: { ...(over.profanity === 'refuse' ? { profanity: { mode: 'refuse' as const } } : {}), ...(over.pace === undefined ? {} : { pace: over.pace }) } }
+    ...(over.signals === undefined ? {} : { signals: over.signals }),
+    ...(over.profanity === 'refuse' || over.pace !== undefined || over.rooms !== undefined
+      ? {
+          overrides: {
+            ...(over.profanity === 'refuse' ? { profanity: { mode: 'refuse' as const } } : {}),
+            ...(over.pace === undefined ? {} : { pace: over.pace }),
+            ...(over.rooms === undefined ? {} : { rooms: over.rooms }),
+          },
+        }
       : {}),
     retention: false,
   });
   const cw = over.wrap === undefined ? real : over.wrap(real);
   const chat: RoomBroadcaster = createRoomBroadcaster(cw, { now: clock.now, ...over.broadcaster });
 
-  const who = (name: string): RawWho => ({ clientKey: `raw-client-key-${name}-0001` });
-  const member = (name: string): ChatMember => ({ name });
+  const who = (name: string, extra: RawWho = {}): RawWho => ({ clientKey: `raw-client-key-${name}-0001`, ...extra });
+  const member = (name: string, extra: Partial<ChatMember> = {}): ChatMember => ({ name, ...extra });
 
-  /** A transport for player `name`. */
-  const transportFor = (name: string, options: LocalOptions = {}) => localChatTransport(chat, who(name), member(name), options);
+  /** A transport for player `name`; `extra` adds to who they are (an account id) and to what the game's `join` says of them (`staff`, `evidenceRef`). */
+  const transportFor = (name: string, options: LocalOptions = {}, extra: { who?: RawWho; member?: Partial<ChatMember> } = {}) =>
+    localChatTransport(chat, who(name, extra.who), member(name, extra.member), options);
 
   /** `name` says something in `room` without a box (a bot at the other end). `as` is the identity behind the name: two players may share a name. */
   const say = (room: string, name: string, text: string, as: string = name): SendResult => {
