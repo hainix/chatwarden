@@ -425,8 +425,8 @@ function compareRules(a: string | null, b: string | null): number {
 }
 
 /**
- * The gate query (design 5.1): one aggregate over the casebook, grouped by the AI's own cell, over the by-cell index. `?1` is the start of the
- * window and `?2` the start of the recent window. The counting rules are the contract's (`Store.aiGateRows`); the in-memory store repeats them.
+ * The gate query (design 5.1): one aggregate over the casebook, grouped by the AI's own cell, over the by-cell index. Plain `?` placeholders, bound in order by
+ * `aiGateRowsArgs`: the start of the window, then the start of the recent window twice (Node 22.13's `node:sqlite` refuses a surplus or a reused number). The counting rules are the contract's (`Store.aiGateRows`); the in-memory store repeats them.
  */
 export const AI_GATE_ROWS_SQL = `
 WITH q AS (
@@ -436,15 +436,20 @@ WITH q AS (
          CASE WHEN (agreement = 'override' AND verdict = 'no_action') OR (reversed = 1 AND corrective = 1) THEN 1 ELSE 0 END AS hard,
          CASE WHEN reversed = 1 AND corrective = 0 THEN 1 ELSE 0 END AS reduced
   FROM kit_ai_outcomes
-  WHERE ai_rule IS NOT NULL AND decided_at >= ?1 AND ai_severity IS NOT NULL AND ai_verdict = 'upheld' AND ai_confidence = 'high'
+  WHERE ai_rule IS NOT NULL AND decided_at >= ? AND ai_severity IS NOT NULL AND ai_verdict = 'upheld' AND ai_confidence = 'high'
     AND agreement <> 'none' AND source IN ('human', 'holdback') AND bad_faith = 0
 )
 SELECT ai_rule AS rule, ai_severity AS severity, COUNT(*) AS qualifying, SUM(clean) AS clean, SUM(hard) AS hard,
        SUM(CASE WHEN reduced = 1 AND hard = 0 THEN 1 ELSE 0 END) AS reduced,
        COUNT(DISTINCT decided_by) AS deciders, MIN(decided_at) AS first_at, MAX(decided_at) AS last_at,
-       SUM(CASE WHEN decided_at >= ?2 THEN 1 ELSE 0 END) AS recent_n,
-       SUM(CASE WHEN decided_at >= ?2 AND clean = 1 THEN 1 ELSE 0 END) AS recent_clean
+       SUM(CASE WHEN decided_at >= ? THEN 1 ELSE 0 END) AS recent_n,
+       SUM(CASE WHEN decided_at >= ? AND clean = 1 THEN 1 ELSE 0 END) AS recent_clean
 FROM q GROUP BY ai_rule, ai_severity`;
+
+/** The values `AI_GATE_ROWS_SQL` binds, one for each `?`, in the order they appear. */
+export function aiGateRowsArgs(since: number, recentSince: number): [number, number, number] {
+  return [since, recentSince, recentSince];
+}
 
 /** What makes an outcome a teachable example (everything but the rule, severity and time). One text, used by two queries. */
 const AI_TEACHABLE_SQL = "example_json IS NOT NULL AND agreement <> 'none' AND reversed = 0 AND dont_teach = 0 AND bad_faith = 0";
@@ -1176,7 +1181,7 @@ export class SqliteStore implements Store, TermStore {
   }
 
   aiGateRows(since: number, recentSince: number): AiGateRow[] {
-    const rows = this.transaction(() => this.db.prepare(AI_GATE_ROWS_SQL).all(since, recentSince));
+    const rows = this.transaction(() => this.db.prepare(AI_GATE_ROWS_SQL).all(...aiGateRowsArgs(since, recentSince)));
     return rows
       .map(
         (r): AiGateRow => ({

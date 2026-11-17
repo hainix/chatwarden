@@ -14,11 +14,11 @@ import { Time } from '../ui.js';
 // Nothing here makes the AI act, and the AI still reads and drafts for a marked person.
 
 const CODES: ReadonlyArray<{ code: AutomationCode; label: AiText }> = [
-  { code: 'vulnerable', label: 'hub.person.automation.code.vulnerable' },
-  { code: 'under_review', label: 'hub.person.automation.code.under_review' },
-  { code: 'staff', label: 'hub.person.automation.code.staff' },
-  { code: 'sensitive_case', label: 'hub.person.automation.code.sensitive_case' },
-  { code: 'other', label: 'hub.person.automation.code.else' },
+  { code: 'vulnerable', label: 'hub.ai.person.automation.code.vulnerable' },
+  { code: 'under_review', label: 'hub.ai.person.automation.code.under_review' },
+  { code: 'staff', label: 'hub.ai.person.automation.code.staff' },
+  { code: 'sensitive_case', label: 'hub.ai.person.automation.code.sensitive_case' },
+  { code: 'other', label: 'hub.ai.person.automation.code.else' },
 ];
 
 /** What the part is given. @experimental */
@@ -33,7 +33,7 @@ export interface PersonAutomationProps {
 }
 
 /** The words of a reason code (an unknown code from a newer server reads as "another reason"). */
-const labelOf = (code: string): AiText => CODES.find((c) => c.code === code)?.label ?? 'hub.person.automation.code.else';
+const labelOf = (code: string): AiText => CODES.find((c) => c.code === code)?.label ?? 'hub.ai.person.automation.code.else';
 
 export function PersonAutomation({ person, mark, canWrite, onChanged }: PersonAutomationProps) {
   const t = useAiT();
@@ -48,7 +48,7 @@ export function PersonAutomation({ person, mark, canWrite, onChanged }: PersonAu
   const send = async (input: AutomationInput): Promise<void> => {
     const result = await action.run(input);
     if (!result.ok) return;
-    toasts.push({ text: t(input.allowed ? 'hub.person.automation.cleared' : 'hub.person.automation.set') });
+    toasts.push({ text: t(input.allowed ? 'hub.ai.person.automation.cleared' : 'hub.ai.person.automation.set') });
     setOpen(false);
     onChanged();
   };
@@ -59,7 +59,7 @@ export function PersonAutomation({ person, mark, canWrite, onChanged }: PersonAu
     <div className="cw-person-automation">
       {mark !== null && mark !== undefined && (
         <p className="cw-hint cw-person-automation-line">
-          {t('hub.person.automation.marked', { reason: t(labelOf(mark.code)).toLowerCase() })}
+          {t('hub.ai.person.automation.marked', { reason: t(labelOf(mark.code)).toLowerCase() })}
           {mark.at !== null && (
             <>
               {' '}
@@ -70,17 +70,17 @@ export function PersonAutomation({ person, mark, canWrite, onChanged }: PersonAu
       )}
       {canWrite && (
         <>
-          <button type="button" className="cw-btn cw-person-more" aria-label={t('hub.person.automation.more')} aria-expanded={open} aria-controls={`${id}-group`} onClick={() => setOpen(!open)}>
+          <button type="button" className="cw-btn cw-person-more" aria-label={t('hub.ai.person.automation.more')} aria-expanded={open} aria-controls={`${id}-group`} onClick={() => setOpen(!open)}>
             <span aria-hidden="true">{'\u2026'}</span>
           </button>
           {open && (
             <fieldset className="cw-form cw-person-automation-group" id={`${id}-group`}>
-              <legend>{t('hub.person.automation.title')}</legend>
-              <p className="cw-hint">{t('hub.person.automation.hint')}</p>
+              <legend>{t('hub.ai.person.automation.title')}</legend>
+              <p className="cw-hint">{t('hub.ai.person.automation.hint')}</p>
               {mark === null || mark === undefined ? (
                 <>
                   <label>
-                    {t('hub.person.automation.reason')}
+                    {t('hub.ai.person.automation.reason')}
                     <select value={code} onChange={(e) => setCode(e.target.value as AutomationCode)}>
                       {CODES.map((c) => (
                         <option key={c.code} value={c.code}>
@@ -90,17 +90,17 @@ export function PersonAutomation({ person, mark, canWrite, onChanged }: PersonAu
                     </select>
                   </label>
                   <button type="button" className="cw-btn" aria-disabled={busy} onClick={() => void send({ allowed: false, code })}>
-                    {t('hub.person.automation.mark')}
+                    {t('hub.ai.person.automation.mark')}
                   </button>
                 </>
               ) : (
                 <button type="button" className="cw-btn" aria-disabled={busy} onClick={() => void send({ allowed: true })}>
-                  {t('hub.person.automation.allow')}
+                  {t('hub.ai.person.automation.allow')}
                 </button>
               )}
               {failed !== null && (
                 <div className="cw-error" role="alert">
-                  <strong>{t('hub.person.automation.failed')}</strong> {failed}
+                  <strong>{t('hub.ai.person.automation.failed')}</strong> {failed}
                 </div>
               )}
             </fieldset>

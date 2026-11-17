@@ -365,11 +365,21 @@ describe('decideAs source', () => {
     expect(row).toMatchObject({ source: 'coop', automated: false, actor: 'coop' });
   });
 
-  it.each(['api', 'ai', 'auto_filter'] as const)('passes source %s through to the sanction row', async (source) => {
+  it.each(['api', 'auto_filter'] as const)('passes source %s through to the sanction row', async (source) => {
     const w = await world();
     const f = await w.file();
     await viaDecideAs(w, f.id, decisionOf(f.target, 'upheld'), { source, claims: 'ignore' });
     expect(w.cw.sanctions.forPerson(f.target)[0]?.source).toBe(source);
+  });
+
+  // `ai` is the kit's own AI actor's (design 6.1): decideAs cannot be handed it, and nothing is written, not the decision and not a sanction.
+  it.each(['ai', 'AI', ' ai', 'ai '])('refuses the internal source %j: a plain bad request, with the report still open and no sanction', async (source) => {
+    const w = await world();
+    const f = await w.file();
+    const out = await viaDecideAs(w, f.id, decisionOf(f.target, 'upheld'), { source: source as never, claims: 'ignore' });
+    expect(out).toMatchObject({ status: 400 });
+    expect(w.cw.sanctions.forPerson(f.target)).toEqual([]);
+    expect(w.cw.reports.get(f.id)?.status).toBe('open');
   });
 
   it('the actor, role and source are the caller\'s: a body cannot change them', async () => {

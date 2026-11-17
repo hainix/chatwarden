@@ -13,8 +13,8 @@ describe('the hub PermissionKey list matches the http list', () => {
     expectTypeOf<'appeals.write'>().not.toExtend<PermissionKey>();
   });
 
-  it('the runtime list ends with the two appeals keys', () => {
-    expect(PERMISSION_KEYS.slice(-2)).toEqual(['appeals.read', 'appeals.decide']);
+  it('the runtime list ends with the appeals keys, then the three AI keys (review, pause and automation)', () => {
+    expect(PERMISSION_KEYS.slice(-5)).toEqual(['appeals.read', 'appeals.decide', 'ai.review', 'ai.pause', 'automation.write']);
     expect(new Set(PERMISSION_KEYS).size).toBe(PERMISSION_KEYS.length);
   });
 });

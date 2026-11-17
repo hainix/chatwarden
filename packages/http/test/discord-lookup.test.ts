@@ -12,10 +12,39 @@ const GAP_NOTE = 'PRIVATE-GAP-NOTE-drakkuun';
 
 type Apply = { kind?: 'chat' | 'ban' | 'warning' | 'note' | 'area'; durationMs?: number | null; rule?: number | 'uncovered'; source?: 'moderator' | 'auto_filter' | 'coop' | 'api' | 'ai'; actor?: string };
 
+let aiRows = 0;
 async function give(b: BotWorld, over: Apply = {}) {
   const subject = b.w.person();
   const kind = over.kind ?? 'chat';
   const durationMs = over.durationMs === undefined ? (kind === 'warning' || kind === 'note' ? null : DAY) : over.durationMs;
+  // The source `ai` is the kit's own actor's and every public writer refuses it, so the row goes into the store directly, the way the actor will write it.
+  if (over.source === 'ai') {
+    const groupId = `ai-group-${++aiRows}`;
+    const refCode = `M-AAAA${'BCDEFGHJKM'[aiRows % 10]}`;
+    const startsAt = b.w.clock.now();
+    b.w.store.insertSanctionGroup([
+      {
+        id: `ai-row-${aiRows}`,
+        groupId,
+        refCode,
+        kind,
+        targetType: 'subject',
+        value: subject,
+        startsAt,
+        endsAt: durationMs === null ? null : startsAt + durationMs,
+        reason: REASON,
+        rule: String(over.rule ?? 2),
+        gapNote: null,
+        gapStatus: null,
+        roomId: null,
+        actor: 'ai:fake',
+        source: 'ai',
+        automated: true,
+        pending: false,
+      },
+    ]);
+    return { subject, groupId, refCode };
+  }
   const res = await b.cw.sanctions.apply({
     kind,
     subject,
