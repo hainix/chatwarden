@@ -171,6 +171,32 @@ export function parseAction(raw: unknown): DecisionAction {
   return action;
 }
 
+/** A query `state` of the "Acted by AI" list: absent is `all`; otherwise `shadow`, `active`, `confirmed`, `undone` or `all`, else 400 `invalid_query`. */
+export function queryActionState(raw: string | undefined): 'shadow' | 'active' | 'confirmed' | 'undone' | 'all' {
+  if (raw === undefined) return 'all';
+  if (raw !== 'shadow' && raw !== 'active' && raw !== 'confirmed' && raw !== 'undone' && raw !== 'all') throw new HttpError('invalid_query');
+  return raw;
+}
+
+/** The cursor of the list of AI actions for the last row of a page: base64url of `time:id` (the id is made of base64url characters, so the text is plain ASCII). */
+export const actionCursorOf = (at: number, id: string): string => btoa(`${at}:${id}`).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+
+/** The cursor of the list: base64url of the creation time and the id of the last row of a page, `time:id`. Anything else is 400 `invalid_query`. */
+export function queryActionCursor(raw: string | undefined): { at: number; id: string } | undefined {
+  if (raw === undefined) return undefined;
+  const text = ((): string => {
+    try {
+      return typeof raw === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(raw) ? atob(raw.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(raw.length / 4) * 4, '=')) : '';
+    } catch {
+      return '';
+    }
+  })();
+  const sep = text.indexOf(':');
+  const at = Number(text.slice(0, sep));
+  if (sep < 1 || sep === text.length - 1 || !/^\d{1,16}$/.test(text.slice(0, sep)) || !Number.isSafeInteger(at)) throw new HttpError('invalid_query');
+  return { at, id: text.slice(sep + 1) };
+}
+
 /** A query `status` of the appeals inbox: absent is `undefined` (the core's default, open); otherwise `open`, `decided` or `all`, else 400 `invalid_query`. */
 export function queryAppealStatus(raw: string | undefined): 'open' | 'decided' | 'all' | undefined {
   if (raw === undefined) return undefined;

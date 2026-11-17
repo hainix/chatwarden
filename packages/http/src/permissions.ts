@@ -42,7 +42,7 @@ export type Permissions = Readonly<Record<PermissionKey, Role>>;
  * `appeals.read` (the inbox, one appeal and the numbers) is `moderator`; `appeals.decide` (uphold, reduce or revoke) is `senior`. A small
  * team whose people are all moderators lowers it: `permissions: { 'appeals.decide': 'moderator' }`.
  * AI levels 3 and 4 (0.1.13, `@experimental`): `automation.write` (mark a person "do not automate", or clear the mark) is `senior`. `ai.review` (confirm or undo what
- * the AI did) is `moderator` and `ai.pause` (pause the AI's acting) is `senior`: `ai.pause` is used from 0.1.14 by `POST /ai/acting/pause`, `ai.review` is unused until the acting release and is listed now so the set changes once.
+ * the AI did) is `moderator` and `ai.pause` (pause the AI's acting) is `senior`: `ai.pause` is used from 0.1.14 by `POST /ai/acting/pause`, `ai.review` is used from 0.1.14 by `GET /ai/actions` and, in the acting release, by confirming or undoing what the AI did.
  * Starting, stopping and undoing the AI's acting are not permissions at all: they are the owner's, fixed in code.
  */
 export const PERMISSIONS: Permissions = Object.freeze({

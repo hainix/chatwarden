@@ -2,6 +2,9 @@ import type {
   AISignal,
   AiActingMode,
   AiActingRow,
+  AiActionPatch,
+  AiActionRow,
+  AiActionState,
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
@@ -51,6 +54,15 @@ export type MemoryAiMethods = Required<
     | 'loadNoAutomation'
     | 'aiActingState'
     | 'setAiActingState'
+    | 'insertAiAction'
+    | 'loadAiAction'
+    | 'transitionAiAction'
+    | 'dueAiActions'
+    | 'listAiActions'
+    | 'aiActionCounts'
+    | 'aiActedCount'
+    | 'aiActionsOnSubjects'
+    | 'aiUnreviewed'
     | 'purgeAi'
   >
 >;
@@ -62,6 +74,7 @@ export type MemoryAiStore = MemoryStore & MemoryAiMethods;
 class MemoryAi extends MemoryStore {
   private noAutomation?: Map<string, NoAutomationRow>;
   private actingRow?: AiActingRow;
+  private actionRows?: AiActionRow[];
 
   // AI reads and the casebook (AI levels 1 and 2). Synchronous like claims; each write is journaled, so an undone transaction
   // undoes it. Rows go in and come out as copies.
@@ -420,6 +433,96 @@ class MemoryAi extends MemoryStore {
     return true;
   }
 
+  // The action rows (AI levels 3 and 4, release 2): one per report, ever. They record what the AI module and the actor did; none of these writes a sanction.
+
+  private actions(): AiActionRow[] {
+    return (this.actionRows ??= []);
+  }
+
+  insertAiAction(row: AiActionRow): boolean {
+    const rows = this.actions();
+    if (rows.some((r) => r.reportId === row.reportId || r.id === row.id)) return false;
+    const copy = structuredClone(row);
+    rows.push(copy);
+    this.undoWith(() => {
+      const i = rows.indexOf(copy);
+      if (i >= 0) rows.splice(i, 1);
+    });
+    return true;
+  }
+
+  loadAiAction(reportId: string): AiActionRow | null {
+    const row = this.actions().find((r) => r.reportId === reportId);
+    return row === undefined ? null : structuredClone(row);
+  }
+
+  transitionAiAction(id: string, from: readonly AiActionState[], patch: AiActionPatch): boolean {
+    const row = this.actions().find((r) => r.id === id);
+    if (row === undefined || !from.includes(row.state)) return false;
+    const before = { ...row };
+    for (const [key, value] of Object.entries(patch)) {
+      // The row's id, report and creation time never move; a field the patch leaves undefined is left alone.
+      if (value !== undefined && key !== 'id' && key !== 'reportId' && key !== 'createdAt') (row as unknown as Record<string, unknown>)[key] = value;
+    }
+    this.undoWith(() => Object.assign(row, before));
+    return true;
+  }
+
+  dueAiActions(now: number, limit: number | undefined): AiActionRow[] {
+    return this.actions()
+      .filter((r) => r.state === 'queued' && r.notBefore <= now)
+      .sort((a, b) => a.notBefore - b.notBefore || compare(a.id, b.id))
+      .slice(0, pageSize(limit, ACTIONS_DEFAULT_LIMIT))
+      .map((r) => structuredClone(r));
+  }
+
+  listAiActions(q: { state?: AiActionState | readonly AiActionState[]; limit: number | undefined; after?: { at: number; id: string } }): AiActionRow[] {
+    const states = q.state === undefined ? null : typeof q.state === 'string' ? [q.state] : q.state;
+    const after = q.after;
+    return this.actions()
+      .filter((r) => states === null || states.includes(r.state))
+      .filter((r) => after === undefined || r.createdAt < after.at || (r.createdAt === after.at && compare(r.id, after.id) < 0))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, pageSize(q.limit, ACTIONS_DEFAULT_LIMIT))
+      .map((r) => structuredClone(r));
+  }
+
+  aiActionCounts(since: number): { byState: Partial<Record<AiActionState, number>>; refused: Record<string, number> } {
+    const byState: Partial<Record<AiActionState, number>> = {};
+    const refused: Record<string, number> = {};
+    for (const r of this.actions()) {
+      if (r.createdAt < since) continue;
+      byState[r.state] = (byState[r.state] ?? 0) + 1;
+      if (r.state === 'refused' && r.refusedCode !== null) refused[r.refusedCode] = (refused[r.refusedCode] ?? 0) + 1;
+    }
+    return { byState, refused };
+  }
+
+  aiActedCount(since: number): number {
+    return this.actions().filter((r) => actedState(r) && (r.actedAt ?? -1) >= since && r.actedAt !== null).length;
+  }
+
+  aiActionsOnSubjects(subjects: readonly string[], since: number, undoneSince: number): { acted: number; undone: number } {
+    if (subjects.length === 0) return { acted: 0, undone: 0 };
+    const wanted = new Set(subjects);
+    const targets = new Map(this.reports.map((p) => [p.id, p.targetSubject]));
+    let acted = 0;
+    let undone = 0;
+    for (const r of this.actions()) {
+      const target = targets.get(r.reportId);
+      if (target === undefined || !wanted.has(target)) continue;
+      if (actedState(r) && r.actedAt !== null && r.actedAt >= since) acted += 1;
+      if (r.state === 'undone' && r.undoCode === 'not_a_violation' && r.reviewedAt !== null && r.reviewedAt >= undoneSince) undone += 1;
+    }
+    return { acted, undone };
+  }
+
+  aiUnreviewed(): { n: number; oldestActedAt: number | null } {
+    const active = this.actions().filter((r) => r.state === 'active');
+    const times = active.flatMap((r) => (r.actedAt === null ? [] : [r.actedAt]));
+    return { n: active.length, oldestActedAt: times.length === 0 ? null : Math.min(...times) };
+  }
+
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
     const reads = this.aiReads;
     const outcomes = new Map(this.aiOutcomes);
@@ -455,8 +558,12 @@ const OFF: AiActingRow = { mode: 'off', modeSince: null, modeBy: null, paused: f
 const SEVERITY_ORDER: readonly string[] = ['banter', 'rude', 'hostile', 'severe'];
 
 /** The page sizes used when a limit is omitted, not finite or below 1. Local copies of core's: this package links no runtime core code. */
+const ACTIONS_DEFAULT_LIMIT = 200;
 const EXAMPLES_DEFAULT_LIMIT = 2;
 const RETRIES_DEFAULT_LIMIT = 20;
+
+/** The states in which an action acted (or, in shadow, would have): the caps count these. */
+const actedState = (r: AiActionRow): boolean => r.state === 'shadow' || r.state === 'active' || r.state === 'confirmed' || r.state === 'undone';
 
 /** A page size: the limit floored and capped at 200, or `fallback` when it is omitted, not finite or below 1. */
 function pageSize(limit: number | undefined, fallback: number): number {

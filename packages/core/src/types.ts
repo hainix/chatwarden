@@ -504,6 +504,52 @@ export interface AiOutcomeRow extends AiOutcomeInsert {
  * One cell of the gate query: the AI's own rule (`'3'`; never a number the client sent) and conduct level, with the counts of the qualifying
  * decisions (see {@link Store.aiGateRows}). No identifier and no text.
  */
+/**
+ * Where an AI action stands (AI levels 3 and 4, design 6.5). `queued` waits for its hold and its confirming read; `shadow` is "would have acted" (nothing was written to a player);
+ * `held_back` is a case the 20% holdback left to a person; `refused` carries a closed code; `active`, `confirmed` and `undone` belong to the acting release.
+ * @experimental
+ */
+export type AiActionState = 'queued' | 'shadow' | 'active' | 'confirmed' | 'undone' | 'refused' | 'held_back';
+
+/**
+ * One row of `kit_ai_actions`: one per report, ever. Ids, a cell (the AI's rule and conduct level), a state, a closed code and times; no text but a reviewer's private undo note (at most
+ * 500 characters, cleared with the report). Staff only: it names a report, so it never reaches a player.
+ * @experimental
+ */
+export interface AiActionRow {
+  id: string;
+  reportId: string;
+  /** The case's read the action is about. */
+  readId: string;
+  /** The confirming read, once there is one. */
+  confirmReadId: string | null;
+  /** The AI's rule (`'3'`) and conduct level: the cell the gates read. */
+  rule: string;
+  severity: ConductLevel;
+  state: AiActionState;
+  /** A code of `AiActRefusal` (never text) for a `refused` row. */
+  refusedCode: string | null;
+  /** The earliest time the AI may act (the report's creation plus the hold). */
+  notBefore: number;
+  createdAt: number;
+  groupId: string | null;
+  /** The step the AI would apply (shadow) or applied. */
+  kind: SanctionKind | null;
+  durationMs: number | null;
+  /** When it acted, or in shadow when it would have. The caps count by this. */
+  actedAt: number | null;
+  reviewDueAt: number | null;
+  reviewedAt: number | null;
+  reviewedBy: string | null;
+  undoCode: 'not_a_violation' | 'wrong_rule' | 'too_heavy' | 'already_handled' | null;
+  undoNote: string | null;
+  adapter: string | null;
+  promptVersion: number | null;
+}
+
+/** What `transitionAiAction` may change: every field but the row's id, report and creation time. */
+export type AiActionPatch = Partial<Omit<AiActionRow, 'id' | 'reportId' | 'createdAt'>>;
+
 export interface AiGateRow {
   rule: string;
   severity: ConductLevel;
@@ -1350,6 +1396,45 @@ export interface Store {
 
   /** OPTIONAL. The "do not automate" mark of this subject (a copy), or null. A store reads only the subject it is given; the service asks for each alias. */
   loadNoAutomation?(subject: string): NoAutomationRow | null;
+
+  /**
+   * OPTIONAL. Insert one action row as ONE conditional write (`UNIQUE (report_id)`): true when written, false, nothing changed, when the report already has one (someone acted or queued
+   * it first). Does not write a sanction, a notice or a decision; it records what the AI module or the actor did. Does not move the change token.
+   */
+  insertAiAction?(row: AiActionRow): boolean;
+
+  /** OPTIONAL. The report's action row (a copy), or null. */
+  loadAiAction?(reportId: string): AiActionRow | null;
+
+  /**
+   * OPTIONAL. Move an action row, but only from a state the caller names: `from` is the states it may be in now. True when this call changed the row; false (nothing changed) for an unknown
+   * id or a row already somewhere else, so of two processes moving the same row exactly one does. `patch` changes only the fields it names; the row's id, report and creation time never move.
+   */
+  transitionAiAction?(id: string, from: readonly AiActionState[], patch: AiActionPatch): boolean;
+
+  /** OPTIONAL. The `queued` rows whose `notBefore` has come (`notBefore <= now`), oldest first (`notBefore`, then `id`), at most `limit` (clamped to 1..200; omitted, not finite or below 1 is 200). Copies. */
+  dueAiActions?(now: number, limit: number | undefined): AiActionRow[];
+
+  /**
+   * OPTIONAL. Action rows newest first (`createdAt` descending, then `id` descending), filtered by `state` (one or several; none is every state), at most `limit` (clamped to 1..200; omitted,
+   * not finite or below 1 is 200). `after` is the keyset cursor: the `createdAt` (as `at`) and `id` of the last row of the previous page; that row is not repeated. Copies.
+   */
+  listAiActions?(q: { state?: AiActionState | readonly AiActionState[]; limit: number | undefined; after?: { at: number; id: string } }): AiActionRow[];
+
+  /** OPTIONAL. How many rows were created at or after `since`, by state, and how many of the `refused` ones by code. A state or code with none is absent. */
+  aiActionCounts?(since: number): { byState: Partial<Record<AiActionState, number>>; refused: Record<string, number> };
+
+  /** OPTIONAL. How many rows acted (or, in shadow, would have) at or after `since`: `actedAt >= since` and the state `shadow`, `active`, `confirmed` or `undone`. The hourly and daily caps read this. */
+  aiActedCount?(since: number): number;
+
+  /**
+   * OPTIONAL. The actions on a person, as their report's target (the person's canonical id and aliases): `acted` is the rows that acted (as `aiActedCount`) at or after `since`, `undone` the rows
+   * undone as `not_a_violation` and reviewed at or after `undoneSince`. No subjects: both 0.
+   */
+  aiActionsOnSubjects?(subjects: readonly string[], since: number, undoneSince: number): { acted: number; undone: number };
+
+  /** OPTIONAL. The `active` rows (acted, not yet reviewed): how many, and the oldest `actedAt` (null with none). The review-debt cap reads this. */
+  aiUnreviewed?(): { n: number; oldestActedAt: number | null };
 
   /**
    * OPTIONAL. The acting state (AI levels 3 and 4, design 6.5): one row, `off` and not paused until something sets it. A copy. Read at every act (it is

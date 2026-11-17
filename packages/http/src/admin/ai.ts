@@ -3,7 +3,7 @@ import { AiUnavailableError, HttpError, NotFoundError } from '../errors.js';
 import type { ErrorCode } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import type { AdminCall, AdminContext } from './context.js';
-import { bodyActing, bodyObject } from './validate.js';
+import { actionCursorOf, bodyActing, bodyObject, queryActionCursor, queryActionState, queryLimit } from './validate.js';
 
 /** Each refusal of an acting step, as the fixed error code it is answered with. */
 const ACTING_ERROR: Readonly<Record<AiActingError, ErrorCode>> = {
@@ -44,6 +44,9 @@ export interface AiUnavailableBody {
  *   `ai_level` (the hub's level is below 2), `acting_unavailable` (no AI, `maxLevel` below 3, `ai.act.enabled: false`, or a store that cannot keep the state), 400 `invalid_request` (a
  *   wrong word, a missing reason). Each transition leaves one `ai.acting` audit row (the sections `['ai']` and the reason; best-effort, after the write); a refusal leaves none. In this
  *   release nothing that acting leads to writes a sanction.
+ * - `GET /ai/actions?state&limit&cursor` (`ai.review`, a moderator's by default, not audited on read, `@experimental`): what the AI did or, in shadow, would have done, newest first, `{ items, next }`. Each item is
+ *   the core's `AiActionView` (the step, the times, the person's ref: staff only). `state` is `shadow`, `active`, `confirmed`, `undone` or `all` (the default); `limit` 1..100 (default 50); `cursor` is the
+ *   previous `next`. A bad state, limit or cursor is 400 `invalid_query`. In this release every row is `shadow`: nothing was written to a player.
  * - `POST /reports/:id/ai/read` (`reports.decide`, audited `ai.rerun`): "read again". 200 `{ status: 'ready', ai }` when the input has not
  *   changed (no call is made), 202 `{ status: 'pending' }` when a read is queued (a read that ended without an answer is retaken once by an
  *   explicit ask, charged to the spend; a read still waiting for its own retry is not retaken, it keeps its time), 409 `ai_off` (level 0, no adapter, or the report is decided; no audit row), 409 `ai_final` (the
@@ -106,6 +109,21 @@ export function aiRoutes(ctx: AdminContext): RouteTable {
       const stats = cw.ai.stats();
       c.audit('policy.view');
       return { status: 200, body: { ...status, learn: cw.profile.ai.learn, stats } };
+    }),
+
+    'GET /ai/actions': ctx.secure('ai.review', (c) => {
+      const q = c.req.query;
+      const state = queryActionState(q.state);
+      const asked = queryLimit(q.limit);
+      if (asked !== undefined && asked < 1) throw new HttpError('invalid_query');
+      const limit = Math.min(100, asked ?? 50);
+      const after = queryActionCursor(q.cursor);
+      // One more than a page, to know whether there is another; a queue, like the reports list, so reading it is not audited.
+      const rows = cw.ai.actions.list({ state, limit: limit + 1, ...(after === undefined ? {} : { after }) });
+      const items = rows.slice(0, limit);
+      const last = items.at(-1);
+      const next = rows.length > limit && last !== undefined ? actionCursorOf(last.createdAt, last.actionId) : null;
+      return { status: 200, body: { items, next } };
     }),
 
     'GET /ai/gates': ctx.secure('policy.read', (c) => {

@@ -318,6 +318,7 @@ route changes a setting (the level moves through `PUT /policy/profile` with `lay
 | --- | --- | --- |
 | `GET /ai/status` | `policy.read` | Where the AI stands, and the casebook's counts and rates. |
 | `GET /ai/gates` | `policy.read` | `@experimental`, new in 0.1.13. The gate dashboard's data, `cw.ai.gates()`: a cell for each rule and conduct level the profile could act on, each gate's number against its need, the reach and any cooling date. Read-only, computed on the server, no id and no text; `actingAvailable` is false. Audited `policy.view`. |
+| `GET /ai/actions` | `ai.review` | `@experimental`, new in 0.1.14. What the AI did or, in shadow, would have done, newest first, `{ items, next }`: each item has the rule, the conduct level, the step, the times and the person's ref (staff only). Query `state` (`shadow`, `active`, `confirmed`, `undone` or `all`), `limit` (1 to 100, default 50) and `cursor` (the previous `next`); a bad one is 400 `invalid_query`. Not audited on read. In this release every row is a shadow row. |
 | `GET /ai/acting` | `policy.read` | `@experimental`, new in 0.1.14. Where acting stands, `cw.ai.acting.state()`: `{ mode, paused, modeSince, shadowDaysDone, shadowWouldHaveActed, maxLevel }`, no staff ref. Audited `policy.view`. |
 | `POST /ai/acting/shadow`, `/start`, `/resume`, `/off` | the owner (fixed) | `@experimental`, new in 0.1.14. The owner's two audited steps and the way back: `shadow` and `start` take `{ confirm: 'ACT', reason }` (`shadow` from acting needs no word; `start` needs shadow to have run `shadowDays`, 14 by default), `resume` and `off` take `{ reason }`. The role is compared in code, so `permissions` cannot lower them. 200 with the new state, 409 `wrong_state`, `too_early`, `no_appeals`, `ai_level` or `acting_unavailable`, 400 for a wrong word, a missing reason or another key. Each step leaves one `ai.acting` audit row. **Nothing in this release writes a sanction: acting only records what the AI would have done.** |
 | `POST /ai/acting/pause` | `ai.pause` | `@experimental`, new in 0.1.14. `{ reason }`: a senior pauses acting; it takes effect before the next act. Same answers as above. Audited `ai.acting`. |
@@ -445,7 +446,7 @@ The minimum role for each action. These are defaults; override any of them with 
 | `settings` | owner | Reserved. No route uses it yet. |
 | `appeals.read` | moderator | `GET /appeals`, `GET /appeals/stats`, `GET /appeals/:id` (appeals are off until turned on). |
 | `appeals.decide` | senior | `POST /appeals/:id/decide`: uphold, reduce or revoke. A team of moderators lowers it with `permissions`. |
-| `ai.review` | moderator | `@experimental`, new in 0.1.13. Unused until the acting releases (confirming or undoing what the AI did). Listed now so the set changes once. |
+| `ai.review` | moderator | `@experimental`, new in 0.1.13, used from 0.1.14 by `GET /ai/actions`. Confirming or undoing what the AI did arrives with the acting release. |
 | `ai.pause` | senior | `@experimental`, new in 0.1.13, used from 0.1.14. `POST /ai/acting/pause`: pausing the AI's acting. The owner's steps (`shadow`, `start`, `resume`, `off`) are not a permission: they are fixed in code. |
 | `automation.write` | senior | `@experimental`, new in 0.1.13. `PUT /people/:id/automation`: mark a person "do not automate", or clear the mark. A small team lowers it with `permissions`. |
 

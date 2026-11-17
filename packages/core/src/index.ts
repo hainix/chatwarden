@@ -17,6 +17,9 @@ export type {
   DecisionRow,
   DiscordThreadRow,
   NoAutomationRow,
+  AiActionPatch,
+  AiActionRow,
+  AiActionState,
   ReportCategory,
   ReportExcerptLine,
   ReportListQuery,
@@ -404,6 +407,9 @@ export type {
 // AI levels 1 and 2: the provider-free contract (@experimental). Kept apart from the rest so a bundler can drop it.
 export { AI_CONFIRM_PROMPT_VERSION, AI_PROMPT_VERSION, AIError } from './ai/types.js';
 export { confirmAgrees } from './ai/confirm.js';
+export { AI_ACT_MAX_AGE_MS, capsOk, dueAt, isHeldBack, preFilter } from './ai/actPlan.js';
+export type { ActFacts, ActStep, CapUse, HoldbackHasher } from './ai/actPlan.js';
+export type { ActionProposer, AiActionProposal, AiActRefusal, AiActResult } from './ai/types.js';
 export type { AbortSignalLike, AIExample, AIExampleInput, AIPerson, AIRead, AIReadInput, AIReadResult, AISignal, AIStoredRead, AIUsage, ModerationAI } from './ai/types.js';
 export { AI_OUTPUT_SCHEMA } from './ai/schema.js';
 export { validateAIOutput } from './ai/validate.js';
@@ -427,6 +433,9 @@ export type { AiAppealFacts, AiCellCounts, AiCellGate, AiCellVerdict, AiGateChec
 export { reachOf } from './ai/reach.js';
 export type { AiReach, ReachSuggest } from './ai/reach.js';
 export type {
+  AiActionsFacade,
+  AiActionView,
+  AiActOptions,
   AiBrief,
   AiFacade,
   AiGateCell,

@@ -20,6 +20,7 @@ import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
 import { resolveLimits } from './limits.js';
 import type { Limits, LimitsInput } from './limits.js';
 import { createAutomation } from './automation.js';
+import { hmacSha256Hex } from './crypto.js';
 import type { AutomationFacade } from './automation.js';
 import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
@@ -930,6 +931,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   }
   // The AI service is loaded only when an adapter is given, so a bundler can leave it (about 40 KB minified) out of a build that never passes one.
   const aiModule = opts.ai === undefined ? undefined : await import('./ai/service.js');
+  // The actor (design 6.1) is loaded only when the code asks for acting (`ai.act`): the only module that may ever write what the AI does to a person. In this release it only records.
+  const actorModule = opts.ai?.act === undefined ? undefined : await import('./aiActor/service.js');
   // A bad option throws here. A store without the AI methods (the in-memory store has them only through `withMemoryAi`) does not: the AI stays
   // inert and the kit says so once, like any optional Store method it cannot use.
   const aiMissing = opts.ai !== undefined && aiModule !== undefined ? aiModule.checkAiSetup(store, opts.ai) : [];
@@ -1049,6 +1052,49 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices });
   // The AI service is built after the audit trail it writes to; a decision reaches it through this late binding.
   const aiRef: { service?: AiService } = {};
+  // The "do not automate" mark (design 6.4): kept under the canonical person; `cw.people.automation` is this same facade.
+  const automation = createAutomation({ store, subjects, clock, logger });
+  const aiSuggest = (subject: SubjectId, level: ConductLevel | null, rule: RuleRef, context: { roomId: string | null }): Suggestion =>
+    suggest(policy.profileNow(), historyOf(store, subjects, subject, clock.now()), level, rule, clock.now(), context);
+  // Whether the store can keep the mark at all: a store that cannot is a store that cannot say, and the AI never acts on a person it could not check.
+  const automationKept = typeof store.loadNoAutomation === 'function' && typeof store.setNoAutomation === 'function';
+  const actionRowsKept =
+    typeof store.insertAiAction === 'function' &&
+    typeof store.loadAiAction === 'function' &&
+    typeof store.transitionAiAction === 'function' &&
+    typeof store.dueAiActions === 'function' &&
+    typeof store.aiActedCount === 'function' &&
+    typeof store.aiActionsOnSubjects === 'function' &&
+    typeof store.aiUnreviewed === 'function' &&
+    typeof store.aiActingState === 'function' &&
+    typeof store.setAiActingState === 'function';
+  const actor =
+    opts.ai === undefined || opts.ai.act === undefined || actorModule === undefined || aiMissing.length > 0 || !actionRowsKept
+      ? undefined
+      : new actorModule.AiActionService({
+          store,
+          clock,
+          logger,
+          profile: () => policy.profileNow(),
+          rules,
+          suggest: aiSuggest,
+          acting: () => aiRef.service?.acting.state() ?? { mode: 'off', paused: false },
+          appealsEnabled: () => appealService.enabled(),
+          // Computed from the store at the moment of use, never cached (design 3 ruling 5).
+          gates: () => aiRef.service?.gates() ?? createInertAi().gates(),
+          automationAllowed: (person) => automationKept && automation.get(person).allowed,
+          reporter: (subject) => {
+            const accuracy = reporterAccuracyFor(store, subjects, [subject], clock.now()).get(subjects.canonical(subject));
+            return { habitual: accuracy?.habitual === true, badFaith: (accuracy?.badFaith ?? 0) > 0 };
+          },
+          aliases: (subject) => subjects.aliasesOf(subject),
+          adapterId: opts.ai.adapter.id,
+          confirmAdapterId: (opts.ai.act.confirmAdapter ?? opts.ai.adapter).id,
+          mask: opts.ai.blockedLines === 'mask',
+          caps: actorModule.checkActCaps(opts.ai.act.caps),
+          holdback: (input) => hmacSha256Hex(opts.secret, input),
+          audit: (input) => audit.record(input),
+        });
   const decisions = new DecisionService({
     store,
     subjects,
@@ -1203,7 +1249,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           logger,
           profile: () => policy.profileNow(),
           rules,
-          suggest: (subject, level, rule, context) => suggest(policy.profileNow(), historyOf(store, subjects, subject, clock.now()), level, rule, clock.now(), context),
+          suggest: aiSuggest,
           subscribe: bus.on,
           audit: (input) => audit.record(input),
           exampleRetentionMs: () => retentionPolicy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
@@ -1212,6 +1258,15 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           cautions: () => appealService.cautions(),
           // Acting cannot start without in-kit appeals (design 3, ruling 16): read live, never kept.
           appealsEnabled: () => appealService.enabled(),
+          // The actor and what the AI module's own cheap checks need (design 6.1): ids go to `propose`, and the lookups below are the ones every act call site passes.
+          ...(actor === undefined ? {} : { propose: actor.propose }),
+          automationAllowed: (person) => automationKept && automation.get(person).allowed,
+          reporter: (subject) => {
+            const accuracy = reporterAccuracyFor(store, subjects, [subject], clock.now()).get(subjects.canonical(subject));
+            return { habitual: accuracy?.habitual === true, badFaith: (accuracy?.badFaith ?? 0) > 0 };
+          },
+          aliases: (subject) => subjects.aliasesOf(subject),
+          holdbackHash: (input) => hmacSha256Hex(opts.secret, input),
           // The appeals side of the gate dashboard (revokes only; a reduce is carried apart and never counts). Read live from the appeals service, never from
           // the AI: with appeals absent or disabled every cell reads "not available". Nothing yet records an AI action, so no revoke of one is known.
           appealFacts: (cells) => {
@@ -1573,7 +1628,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       canonical: (subject) => subjects.canonical(subject),
       aliases: (subject) => subjects.aliasesOf(subject),
       accountIds: (subject) => (typeof subject === 'string' ? subjects.identifiersOf(subject).accounts : []),
-      automation: createAutomation({ store, subjects, clock, logger }),
+      automation,
     },
     discordThreads: {
       get: (subject) => store.transaction(() => store.getDiscordThread(subject)),

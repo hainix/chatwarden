@@ -100,16 +100,40 @@ describe('AiStore', () => {
     expect(() => requireAiStore(new MemoryStore())).toThrow(/AI methods/);
   });
 
-  it('the runtime object holds exactly the AI store methods, loadReport, listReports, aiGateRows and the two acting-state methods (enumerated, not sampled)', () => {
+  it('the runtime object holds exactly the AI store methods, loadReport, listReports, loadClaims, aiGateRows, the acting state and the action rows (enumerated, not sampled)', () => {
     const narrow = requireAiStore(withMemoryAi(new MemoryStore())) as unknown as Record<string, unknown>;
     expect(Object.keys(narrow).sort()).toEqual(
       [
         'reserveAiRead', 'completeAiRead', 'failAiRead', 'loadAiRead', 'loadAiReads', 'loadAiReadById', 'loadAiReadFor', 'listAiRetries',
         'aiSpendSince', 'insertAiOutcome', 'loadAiOutcome', 'markAiOutcome', 'aiExamples', 'aiTeachableCount', 'aiStats',
-        'loadReport', 'listReports', 'aiGateRows', 'aiActingState', 'setAiActingState',
+        'loadReport', 'listReports', 'loadClaims', 'aiGateRows', 'aiActingState', 'setAiActingState',
+        'insertAiAction', 'loadAiAction', 'transitionAiAction', 'dueAiActions', 'listAiActions', 'aiActionCounts', 'aiActedCount', 'aiActionsOnSubjects', 'aiUnreviewed',
       ].sort(),
     );
     for (const v of Object.values(narrow)) expect(typeof v).toBe('function');
+  });
+
+  it('the action methods write action rows and nothing else: every other list and map of the store keeps its size', () => {
+    const store = withMemoryAi(new MemoryStore());
+    const narrow = requireAiStore(store);
+    const sizes = (): string =>
+      JSON.stringify(
+        Object.entries(store as unknown as Record<string, unknown>)
+          .filter(([k, v]) => k !== 'actionRows' && (Array.isArray(v) || v instanceof Map || v instanceof Set))
+          .map(([k, v]) => [k, Array.isArray(v) ? v.length : (v as Map<unknown, unknown>).size]),
+      );
+    const before = sizes();
+    expect(before.length).toBeGreaterThan(20);
+    const row = {
+      id: 'a1', reportId: 'r1', readId: 'x', confirmReadId: null, rule: '2', severity: 'hostile' as const, state: 'queued' as const, refusedCode: null, notBefore: 1, createdAt: 1, groupId: null,
+      kind: null, durationMs: null, actedAt: null, reviewDueAt: null, reviewedAt: null, reviewedBy: null, undoCode: null, undoNote: null, adapter: null, promptVersion: null,
+    };
+    expect(narrow.insertAiAction?.(row)).toBe(true);
+    expect(narrow.transitionAiAction?.('a1', ['queued'], { state: 'shadow', kind: 'chat', durationMs: 3_600_000, actedAt: 2 })).toBe(true);
+    expect(narrow.setAiActingState?.({ mode: 'off', paused: false }, { mode: 'shadow', modeSince: 1, modeBy: 'o', paused: false, pausedSince: null, pausedBy: null })).toBe(true);
+    expect(narrow.dueAiActions?.(10, 5)).toEqual([]);
+    expect(narrow.listAiActions?.({ limit: 5 })).toHaveLength(1);
+    expect(sizes()).toBe(before);
   });
 
   it('no writer is reachable: not by name, not by a cast and a computed key, not by Reflect, a spread or the prototype chain', () => {

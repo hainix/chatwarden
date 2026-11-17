@@ -1,4 +1,5 @@
 import type { ConductLevel } from '../types.js';
+import type { AiGateName } from './gates.js';
 
 // The provider-free AI contract (design 2026-11-11, section 3). Core defines the shapes, the prompt, the redaction, the validation
 // and the ceilings; an adapter only sends the rendered prompt to a model and returns what came back. Nothing here imports a
@@ -204,3 +205,55 @@ export interface AIRead {
     evidence: string[];
   };
 }
+
+/**
+ * Why an AI action was refused: a closed code, never text (design 4.2). `gate_failed:<name>` names the gate that does not hold.
+ * @experimental
+ */
+export type AiActRefusal =
+  | 'acting_off'
+  | 'paused'
+  | 'no_appeals'
+  | 'not_open'
+  | 'too_old'
+  | 'too_new'
+  | 'claimed'
+  | 'read_not_usable'
+  | 'confirm_disagrees'
+  | 'cell_not_allowed'
+  | 'ceiling_kind'
+  | 'ceiling_duration'
+  | 'ceiling_evidence'
+  | 'evidence_missing'
+  | 'do_not_automate'
+  | 'person_protected'
+  | 'reporter_habitual'
+  | 'system_report'
+  | 'cap_hour'
+  | 'cap_day'
+  | 'review_debt'
+  | 'held_back'
+  | `gate_failed:${AiGateName}`;
+
+/**
+ * What the AI module hands the actor: ids, never a step (design 6.1). The actor recomputes everything from the store; a proposal that disagrees with what it computes is refused,
+ * never corrected.
+ * @experimental
+ */
+export interface AiActionProposal {
+  reportId: string;
+  readId: string;
+  confirmReadId: string;
+}
+
+/**
+ * What the actor answers. `mode` is `shadow` when it only recorded "would have acted"; `acted` belongs to the acting release. `replay` is true when the action was already recorded.
+ * @experimental
+ */
+export type AiActResult = { ok: true; actionId: string; mode: 'shadow' | 'acted'; replay: boolean } | { ok: false; refused: AiActRefusal };
+
+/**
+ * Injected by the kit: the AI module calls it with ids and never learns what it does.
+ * @experimental
+ */
+export type ActionProposer = (p: AiActionProposal) => Promise<AiActResult>;

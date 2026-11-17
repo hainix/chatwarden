@@ -159,6 +159,11 @@ export interface AiActingFacade {
 export interface ActingStore {
   aiActingState?(): AiActingRow;
   setAiActingState?(expect: { mode: AiActingMode; paused: boolean }, next: AiActingRow): boolean;
+  /** The action rows: acting that could not record what the AI would do is not offered. */
+  insertAiAction?(...args: never[]): unknown;
+  loadAiAction?(...args: never[]): unknown;
+  transitionAiAction?(...args: never[]): unknown;
+  dueAiActions?(...args: never[]): unknown;
 }
 
 /** What the acting facade needs of the kit. */
@@ -181,7 +186,13 @@ const OFF_ROW: Readonly<AiActingRow> = Object.freeze({ mode: 'off', modeSince: n
 
 /** @internal */
 export function createActing(deps: ActingDeps): AiActingFacade {
-  const supported = (): boolean => typeof deps.store.aiActingState === 'function' && typeof deps.store.setAiActingState === 'function';
+  const supported = (): boolean =>
+    typeof deps.store.aiActingState === 'function' &&
+    typeof deps.store.setAiActingState === 'function' &&
+    typeof deps.store.insertAiAction === 'function' &&
+    typeof deps.store.loadAiAction === 'function' &&
+    typeof deps.store.transitionAiAction === 'function' &&
+    typeof deps.store.dueAiActions === 'function';
   // The code pins acting off (`ai.act.enabled: false`, or no `ai.act`): whatever the store says, nothing acts.
   const row = (): AiActingRow => (!deps.actEnabled || deps.maxLevel < 3 || !supported() ? { ...OFF_ROW } : { ...(deps.store.aiActingState as () => AiActingRow)() });
   const view = (r: AiActingRow): AiActingState => {
