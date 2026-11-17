@@ -54,6 +54,7 @@ describe('PERMISSIONS defaults', () => {
       'ai.review': 'moderator',
       'ai.pause': 'senior',
       'automation.write': 'senior',
+      'filters.read': 'moderator',
     });
   });
 
@@ -63,8 +64,10 @@ describe('PERMISSIONS defaults', () => {
     expect(PERMISSIONS['ai.review']).toBe('moderator');
     expect(PERMISSIONS['ai.pause']).toBe('senior');
     expect(PERMISSIONS['automation.write']).toBe('senior');
-    expect(PERMISSION_KEYS.slice(-3)).toEqual(['ai.review', 'ai.pause', 'automation.write']);
-    expect(PERMISSION_KEYS.slice(0, -3).at(-1)).toBe('appeals.decide');
+    // Later releases append after these (0.2.0: filters.read), so the three are pinned by position from the one before them.
+    const at = PERMISSION_KEYS.indexOf('ai.review');
+    expect(PERMISSION_KEYS.slice(at, at + 3)).toEqual(['ai.review', 'ai.pause', 'automation.write']);
+    expect(PERMISSION_KEYS[at - 1]).toBe('appeals.decide');
     expect(roleAtLeast('moderator', PERMISSIONS['automation.write'])).toBe(false);
     expect(roleAtLeast('senior', PERMISSIONS['automation.write'])).toBe(true);
     expect(roleAtLeast('moderator', PERMISSIONS['ai.review'])).toBe(true);
@@ -89,7 +92,7 @@ describe('PERMISSIONS defaults', () => {
     expect(roleAtLeast('moderator', PERMISSIONS['appeals.read'])).toBe(true);
     expect(roleAtLeast('moderator', PERMISSIONS['appeals.decide'])).toBe(false);
     expect(roleAtLeast('senior', PERMISSIONS['appeals.decide'])).toBe(true);
-    expect(PERMISSION_KEYS.slice(-5, -3)).toEqual(['appeals.read', 'appeals.decide']);
+    expect(PERMISSION_KEYS.slice(PERMISSION_KEYS.indexOf('appeals.read'), PERMISSION_KEYS.indexOf('appeals.read') + 2)).toEqual(['appeals.read', 'appeals.decide']);
   });
 
   it('is frozen', () => {

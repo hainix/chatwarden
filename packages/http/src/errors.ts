@@ -21,6 +21,7 @@ const TABLE = {
   invalid_query: { status: 400, message: 'The query is not valid.' },
   invalid_value: { status: 400, message: 'A value is out of range.' },
   invalid_profile: { status: 400, message: 'The moderation profile is not valid.' },
+  invalid_filters: { status: 400, message: 'The chat filter settings are not valid.' },
   invalid_sanction: { status: 400, message: 'The sanction is not valid.' },
   invalid_rules: { status: 400, message: 'The rules are not valid.' },
   invalid_excerpt: { status: 400, message: 'The excerpt is not valid.' },
@@ -96,6 +97,19 @@ export class LayerInvalidError extends HttpError {
   constructor(path: string) {
     super('invalid_profile');
     this.name = 'LayerInvalidError';
+    this.path = path;
+  }
+}
+
+/**
+ * Chat filter settings the kit refuses (a `candidate` of `POST /filters/test` or `/filters/check`). 400 `invalid_filters`, and the body also carries
+ * `path`, the field in the candidate that is not acceptable (`candidate.links.action`): a path in what the client sent, never a value.
+ */
+export class FiltersInvalidError extends HttpError {
+  readonly path: string;
+  constructor(path: string) {
+    super('invalid_filters');
+    this.name = 'FiltersInvalidError';
     this.path = path;
   }
 }
@@ -179,6 +193,7 @@ export function withErrors<A extends unknown[]>(
       const code = codeFor(err);
       if (err instanceof ClaimedError) return errorResponse('claimed', undefined, { by: err.by, until: err.until });
       if (err instanceof LayerInvalidError) return errorResponse('invalid_profile', undefined, { path: err.path });
+      if (err instanceof FiltersInvalidError) return errorResponse('invalid_filters', undefined, { path: err.path });
       if (err instanceof AiUnavailableError) {
         return errorResponse('ai_unavailable', { 'retry-after': String(Math.max(1, Math.ceil(err.retryAfterMs / 1000))) }, { retryAfterMs: err.retryAfterMs });
       }

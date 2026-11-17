@@ -8,6 +8,7 @@ import { communityRoutes } from './community.js';
 import type { CommunityAdmin } from './community.js';
 import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
+import { filterRoutes } from './filters.js';
 import { gapRoutes } from './gaps.js';
 import { meRoutes } from './me.js';
 import { nameRoutes } from './names.js';
@@ -104,6 +105,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
       ...(options.contactUrl === undefined ? {} : { contactUrl: options.contactUrl }),
     }),
     ...policyProfileRoutes(ctx),
+    ...filterRoutes(ctx, options.recentLines ?? (() => [])),
     ...aiRoutes(ctx),
     ...auditRoutes(ctx),
   };

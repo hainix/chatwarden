@@ -46,6 +46,8 @@ export interface PolicyLimits {
   chatRate: { count: number; windowMs: number };
   /** How long signal rows are kept, ms: the longest window a signal feed may look back (default 90 days, never less than 14). */
   signalsMs: number;
+  /** What the chat filters can use: `accountAge` is true only when the kit was given `signals.accountAgeDays`, so a "new account" link rule can act. */
+  filters: { accountAge: boolean };
 }
 
 /** What {@link PolicyService.get} answers. */
@@ -130,17 +132,20 @@ export class PolicyService {
   private readonly signalsMs: () => number;
   /** The chat rate in force (`limits.chatRate`), for `get().limits`. */
   private readonly chatRate: { count: number; windowMs: number };
+  /** What the chat filters can use, for `get().limits`. */
+  private readonly filtersLimits: Readonly<{ accountAge: boolean }>;
   /** Whether the store has the appeal methods. Without them a layer cannot turn appeals on: it is refused when saved, and kept off when read. */
   private readonly appealsKept: boolean;
   private readonly appealsWarn: ThrottledWarn;
   /** Whether a Community Rule number is an active rule of the registry: the filters may cite only those, checked when a layer is saved or previewed. */
   private readonly isActiveRule: (rule: number) => boolean;
 
-  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean; isActiveRule?: (rule: number) => boolean }) {
+  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean; isActiveRule?: (rule: number) => boolean; accountAge?: boolean }) {
     this.isActiveRule = deps.isActiveRule ?? (() => true);
     this.appealsKept = deps.appealsKept ?? true;
     this.appealsWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.signalsMs = deps.signalsMs ?? (() => RETENTION_DEFAULTS.signalsMs);
+    this.filtersLimits = Object.freeze({ accountAge: deps.accountAge === true });
     this.chatRate = Object.freeze({ count: deps.chatRate?.count ?? RATE_LIMIT, windowMs: deps.chatRate?.windowMs ?? RATE_WINDOW_MS });
     this.store = deps.store;
     this.clock = deps.clock;
@@ -264,7 +269,7 @@ export class PolicyService {
       canSave: this.supported,
       ...(layerError === undefined ? {} : { layerError: { ...layerError } }),
       ...(dropped === undefined ? {} : { dropped }),
-      limits: Object.freeze({ chatRate: this.chatRate, signalsMs: this.signalsMs() }),
+      limits: Object.freeze({ chatRate: this.chatRate, signalsMs: this.signalsMs(), filters: this.filtersLimits }),
     };
   }
 

@@ -636,14 +636,14 @@ describe('limits on /policy/profile', () => {
     const { call } = await world();
     for (const role of ['moderator', 'senior', 'owner'] as const) {
       const res = await call('GET', '/policy/profile', { role });
-      expect((res.body as { limits: unknown }).limits, role).toEqual({ chatRate: { count: 3, windowMs: 5000 }, signalsMs: DAYS(90) });
+      expect((res.body as { limits: unknown }).limits, role).toEqual({ chatRate: { count: 3, windowMs: 5000 }, signalsMs: DAYS(90), filters: { accountAge: false } });
     }
   });
 
   it('follows the kit: a configured chat rate and retention show as they are', async () => {
     const { call } = await world({ limits: { chatRate: { count: 10, windowMs: 8000 } }, retention: { signalsMs: DAYS(30) } });
     const res = await call('GET', '/policy/profile');
-    expect((res.body as { limits: unknown }).limits).toEqual({ chatRate: { count: 10, windowMs: 8000 }, signalsMs: DAYS(30) });
+    expect((res.body as { limits: unknown }).limits).toEqual({ chatRate: { count: 10, windowMs: 8000 }, signalsMs: DAYS(30), filters: { accountAge: false } });
   });
 
   it('PUT and DELETE answer with the same limits, so a screen that takes the answer loses nothing', async () => {

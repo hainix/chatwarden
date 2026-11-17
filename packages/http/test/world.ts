@@ -44,6 +44,8 @@ export interface WorldOptions {
   profanity?: ProfanityFilter;
   /** The Community Rules (default: the kit's starter rules). */
   rules?: CommunityRules;
+  /** The kit's signals options (for `accountAgeDays`). */
+  signals?: ChatwardenOptions['signals'];
   /** The shared term list's admin (K7): built from the world's `LiveTerms`. Default none: no community routes. */
   community?: (live: LiveTerms) => Parameters<typeof adminRoutes>[1]['community'];
 }
@@ -63,6 +65,7 @@ export async function world(over: WorldOptions = {}) {
     logger,
     retention: over.retention ?? false,
     ...(over.rules === undefined ? {} : { rules: over.rules }),
+    ...(over.signals === undefined ? {} : { signals: over.signals }),
     ...(over.matcher === undefined ? {} : { matcher: over.matcher }),
     ...(over.profanity === undefined ? {} : { profanity: over.profanity }),
     ...(over.limits === undefined ? {} : { limits: over.limits }),

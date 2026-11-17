@@ -38,7 +38,10 @@ const newLabel = (): string => `Case ${Array.from(randomBytes(5), (b) => CROCKFO
 export interface FeedKit {
   on: Chatwarden['on'];
   reports: Pick<Chatwarden['reports'], 'get'>;
-  profile: Pick<ModerationProfile, 'severeRules'>;
+  profile: Pick<ModerationProfile, 'severeRules'> & {
+    /** The chat filters in force: only the phrase rules' labels are read, to word a phrase report ("Filter: <label>"). Optional. */
+    filters?: { phrases?: ReadonlyArray<{ id: string; label: string }> };
+  };
   rules: { all(): ReadonlyArray<{ number: number; title: string }> };
   limits: { strikes: Pick<Limits['strikes'], 'firstMs' | 'repeatMs'> };
   people: Chatwarden['people'];
@@ -103,6 +106,8 @@ const isString = (v: unknown): v is string => typeof v === 'string' && v !== '';
 
 /** The staff report, as far as the feed reads it. `conductLevel` arrives with the AI read (K3c). */
 interface ReportView {
+  origin?: unknown;
+  originKey?: unknown;
   category?: unknown;
   targetPerson?: unknown;
   conductLevel?: unknown;
@@ -490,10 +495,26 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
 
   // ---- the events ----
 
+  /** "Links", "Personal info", "Shouting and repeats", a phrase rule's own label, or the plain word "Phrase"/"Filter": from the counter key, never the key itself. */
+  const filterLabel = (key: unknown): string => {
+    if (!isString(key)) return 'Filter';
+    const family = key.split('.', 1)[0];
+    if (family === 'link') return 'Links';
+    if (family === 'personal_info') return 'Personal info';
+    if (family === 'ratio') return 'Shouting and repeats';
+    if (family === 'phrase') {
+      const label = cw.profile.filters?.phrases?.find((p) => `phrase.${p.id}` === key)?.label;
+      return isString(label) && label !== '' ? safeText(label, 40) : 'Phrase';
+    }
+    return 'Filter';
+  };
+
   const onCreated = (e: KitEventOf<'report.created'>): void => {
     const severe = isSevereCategory(e.category);
     if (onlySevere && !severe) return;
     const report = readReport(e.type, e.reportId);
+    // A report a chat filter filed has no reporter: the post says which filter made it, and nothing about who reported.
+    const filter = e.origin === 'filter' ? `Filter: ${filterLabel(report?.originKey)}` : undefined;
     const person = report === null ? null : personOf(report.targetPerson);
     const rule = ruleOfCategory(e.category);
     const level = CONDUCT_LEVELS.find((l) => l === report?.conductLevel);
@@ -501,6 +522,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     const message = compose(
       severe ? '**Severe report**' : '**New report**',
       [
+        filter,
         category === undefined ? undefined : `Category: ${category}`,
         rule === undefined || rule === 'uncovered' ? undefined : `Rule: ${ruleText(rule)}`,
         level === undefined ? undefined : `Conduct level: ${level}`,

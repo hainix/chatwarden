@@ -80,6 +80,13 @@ export interface ReportSummary {
    * sort adds a capped amount): never a reason to hide a report, and it names no signal. Staff only. @experimental
    */
   boosted?: true;
+  /**
+   * Present only on a report nobody filed: `'filter'` for a chat filter's flag (`'watch'` later). Such a report has `reporterPerson` and `reporterHandle`
+   * null, no note and no reporter accuracy. Absent on a player's report, so those bodies are as they were. Staff only.
+   */
+  origin?: 'filter' | 'watch';
+  /** With `origin`: the filter counter key that made the report (`link.unlisted`, `phrase.<id>` ...): a closed shape, never text from a line. The hub words it ("Filter: Links"). */
+  originKey?: string;
   /** Present (true) only when the reported person's handle is one the matcher flags and `names.maskInHub` is on: the hub masks it until shown. Staff only. */
   targetHandleFlagged?: true;
   /** The same for the reporter's handle. */
@@ -107,6 +114,10 @@ const counts = (res: Extract<Awaited<ReturnType<Chatwarden['reports']['dismissMa
 
 /** The claim as the API shows it: exactly `{ by, since, until }`. */
 const claimView = (c: CaseClaim | undefined): ReportSummary['claim'] => (c === undefined ? null : { by: c.by, since: c.since, until: c.until });
+
+/** The origin of a report nobody filed, as the body carries it: nothing at all for a player's report. */
+const originOf = (r: Pick<StaffReport, 'origin' | 'originKey'>): { origin?: 'filter' | 'watch'; originKey?: string } =>
+  r.origin === null || r.origin === undefined ? {} : { origin: r.origin, ...(r.originKey === null || r.originKey === undefined ? {} : { originKey: r.originKey }) };
 
 /** Project a report to its queue summary. Lists each field by name, so a field added to the record never leaks in. */
 const summarize = (
@@ -139,6 +150,7 @@ const summarize = (
     accuracy === undefined ? null : { decided: accuracy.decided, unfounded: accuracy.unfounded, falseRate: accuracy.falseRate, habitual: accuracy.habitual },
   ai: ai === undefined ? null : { ...ai },
   ...(boosted ? { boosted: true as const } : {}),
+  ...originOf(r),
 });
 
 /**
@@ -299,8 +311,13 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         ...(flagged(l.handle) ? { handleFlagged: true as const } : {}),
       }));
       if (failed.length > 0) safeWarn(ctx.logger, 'chatwarden.http_notice_text_failed', { error: failed[0] instanceof Error ? failed[0].name : 'unknown', count: failed.length });
+      // A player's report carries no `origin` keys (the body is as it was); a report nobody filed carries them, with `reporterPerson` null.
+      const { origin: _origin, originKey: _originKey, ...plain } = report;
+      void _origin;
+      void _originKey;
       const shown = {
-        ...report,
+        ...plain,
+        ...originOf(report),
         reportedReasonLabel: labelOf(report),
         ...flagKey(flagged, 'targetHandleFlagged', report.targetHandle),
         ...flagKey(flagged, 'reporterHandleFlagged', report.reporterHandle),

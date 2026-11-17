@@ -27,6 +27,7 @@ export const PERMISSION_KEYS = [
   'ai.review',
   'ai.pause',
   'automation.write',
+  'filters.read',
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -44,6 +45,7 @@ export type Permissions = Readonly<Record<PermissionKey, Role>>;
  * AI levels 3 and 4 (0.1.13, `@experimental`): `automation.write` (mark a person "do not automate", or clear the mark) is `senior`. `ai.review` (confirm or undo what
  * the AI did) is `moderator` and `ai.pause` (pause the AI's acting) is `senior`: `ai.pause` is used from 0.1.14 by `POST /ai/acting/pause`, `ai.review` is used from 0.1.14 by `GET /ai/actions` and, in the acting release, by confirming or undoing what the AI did.
  * Starting, stopping and undoing the AI's acting are not permissions at all: they are the owner's, fixed in code.
+ * Chat filters (0.2.0): `filters.read` (the counts, the test box and the dry run over recent lines: reads and tries, never writes) is `moderator`. Editing the filters is the profile's `policy.write`, the owner's.
  */
 export const PERMISSIONS: Permissions = Object.freeze({
   'reports.read': 'moderator',
@@ -70,6 +72,7 @@ export const PERMISSIONS: Permissions = Object.freeze({
   'ai.review': 'moderator',
   'ai.pause': 'senior',
   'automation.write': 'senior',
+  'filters.read': 'moderator',
 });
 
 const isRole = (v: unknown): v is Role => typeof v === 'string' && (ROLES as readonly string[]).includes(v);

@@ -22,6 +22,8 @@ interface Spec {
   method: string;
   path: (i: Ids) => string;
   body?: unknown;
+  /** The query the route needs to answer 200. */
+  query?: Record<string, string>;
   /** Permissions that put the route out of the moderator's and senior's reach. */
   lock: Record<string, 'owner'>;
   /** The lowest role that may call it with the default permissions. */
@@ -62,6 +64,10 @@ const SPECS: Spec[] = [
   // AI levels 3 and 4 (0.1.13): the gate dashboard's data and the "do not automate" mark. Their own checks are in admin.ai-gates.test.ts and admin.automation.test.ts.
   { name: 'GET /ai/gates', method: 'GET', path: () => '/ai/gates', lock: { 'policy.read': 'owner' }, min: 'moderator' },
   { name: 'PUT /people/:id/automation', method: 'PUT', path: (i) => `/people/${i.person}/automation`, body: { allowed: false, code: 'other' }, lock: { 'automation.write': 'owner' }, min: 'senior' },
+  // Chat filters (0.2.0): counts, the test box and the dry run. All three are `filters.read`, a moderator's.
+  { name: 'GET /filters/stats', method: 'GET', path: () => '/filters/stats', query: { days: '7' }, lock: { 'filters.read': 'owner' }, min: 'moderator' },
+  { name: 'POST /filters/test', method: 'POST', path: () => '/filters/test', body: { text: 'a harmless line' }, lock: { 'filters.read': 'owner' }, min: 'moderator' },
+  { name: 'POST /filters/check', method: 'POST', path: () => '/filters/check', body: { candidate: {} }, lock: { 'filters.read': 'owner' }, min: 'moderator' },
   { name: 'GET /audit', method: 'GET', path: () => '/audit', lock: { 'audit.read': 'owner' }, min: 'senior' },
 ];
 
@@ -130,7 +136,7 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
       const before = w.audit().length;
       const termsBefore = JSON.stringify(w.live.rows);
       const body = bodyOf(spec, i);
-      const res = await w.call(spec.method, spec.path(i), { role: null, ...(body === undefined ? {} : { body }) });
+      const res = await w.call(spec.method, spec.path(i), { role: null, ...(spec.query === undefined ? {} : { query: spec.query }), ...(body === undefined ? {} : { body }) });
       expect(res.status).toBe(401);
       expect(res.body).toEqual({ error: 'unauthorized', message: 'Authentication is required.' });
       expect(w.audit()).toHaveLength(before);
@@ -144,12 +150,12 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
       const before = w.audit().length;
       const body = bodyOf(spec, i);
       for (const role of ['moderator', 'senior'] as const) {
-        const res = await w.call(spec.method, spec.path(i), { role, ...(body === undefined ? {} : { body }) });
+        const res = await w.call(spec.method, spec.path(i), { role, ...(spec.query === undefined ? {} : { query: spec.query }), ...(body === undefined ? {} : { body }) });
         expect(res.status, role).toBe(403);
         expect(errorOf(res)).toBe('forbidden');
       }
       expect(w.audit()).toHaveLength(before);
-      const ok = await w.call(spec.method, spec.path(i), { role: 'owner', ...(body === undefined ? {} : { body }) });
+      const ok = await w.call(spec.method, spec.path(i), { role: 'owner', ...(spec.query === undefined ? {} : { query: spec.query }), ...(body === undefined ? {} : { body }) });
       expect(ok.status).toBe(200);
     });
 
@@ -160,7 +166,7 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
         const w = await world();
         const i = await ids(w);
         const body = bodyOf(spec, i);
-        const res = await w.call(spec.method, spec.path(i), { role, ...(body === undefined ? {} : { body }) });
+        const res = await w.call(spec.method, spec.path(i), { role, ...(spec.query === undefined ? {} : { query: spec.query }), ...(body === undefined ? {} : { body }) });
         if (roles.indexOf(role) >= roles.indexOf(spec.min)) expect(res.status, role).toBe(200);
         else expect(res.status, role).toBe(403);
       }
