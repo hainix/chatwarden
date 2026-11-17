@@ -145,6 +145,13 @@ describe('every staff route has a client method', () => {
       ['me', () => c.me(), { method: 'GET', path: '/me' }],
       ['listReports', () => c.listReports({ status: 'open', limit: 5 }), { method: 'GET', path: '/reports', query: { status: 'open', limit: 5 } }],
       ['listReports no filter', () => c.listReports(), { method: 'GET', path: '/reports' }],
+      ['listReports urgent', () => c.listReports({ status: 'open', urgent: true }), { method: 'GET', path: '/reports', query: { status: 'open', urgent: '1' } }],
+      ['listReports urgent false sends none', () => c.listReports({ urgent: false }), { method: 'GET', path: '/reports' }],
+      ['setUrgent on', () => c.setUrgent(id, true), { method: 'POST', path: `/reports/${id}/urgent`, body: { on: true } }],
+      ['setUrgent off', () => c.setUrgent(id, false), { method: 'POST', path: `/reports/${id}/urgent`, body: { on: false } }],
+      ['handoff', () => c.handoff(id), { method: 'POST', path: `/reports/${id}/handoff` }],
+      ['handoff takeOver', () => c.handoff(id, { takeOver: true }), { method: 'POST', path: `/reports/${id}/handoff`, body: { takeOver: true } }],
+      ['handoff takeOver false sends none', () => c.handoff(id, { takeOver: false }), { method: 'POST', path: `/reports/${id}/handoff` }],
       ['getReport', () => c.getReport(id, { level: 'rude' }), { method: 'GET', path: `/reports/${id}`, query: { level: 'rude' } }],
       ['suggest', () => c.suggest(id, { level: 'hostile', rule: 1 }), { method: 'POST', path: `/reports/${id}/suggest`, body: { level: 'hostile', rule: 1 } }],
       ['personHistory', () => c.personHistory(person, { limit: 3 }), { method: 'GET', path: `/people/${person}/history`, query: { limit: 3 } }],
@@ -358,7 +365,7 @@ describe('the team methods', () => {
     const w = await hubWorld({ role: 'moderator' });
     const first = await w.client.changes();
     expect(first.changed).toBe(true);
-    expect(await w.client.changes(first.token)).toEqual({ token: first.token, changed: false });
+    expect(await w.client.changes(first.token)).toEqual({ token: first.token, changed: false, urgent: 0 });
     await w.file({ target: 'Mallory' });
     const after = await w.client.changes(first.token);
     expect(after.changed).toBe(true);

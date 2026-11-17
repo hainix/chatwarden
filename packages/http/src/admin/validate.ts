@@ -31,6 +31,19 @@ export function bodyTakeOver(body: Record<string, unknown>): boolean {
   return body.takeOver;
 }
 
+/** What `POST /reports/:id/urgent` takes: exactly `{ on: boolean }`, else 400 `invalid_request`. */
+export function bodyUrgentOn(body: Record<string, unknown>): boolean {
+  const keys = Object.keys(body);
+  if (keys.length !== 1 || keys[0] !== 'on' || typeof body.on !== 'boolean') throw new ValidationError();
+  return body.on;
+}
+
+/** What `POST /reports/:id/handoff` takes: nothing, or only `{ takeOver?: boolean }` (the claim gate's, like a decision's), else 400 `invalid_request`. */
+export function bodyHandoff(body: Record<string, unknown>): { takeOver: boolean } {
+  for (const key of Object.keys(body)) if (key !== 'takeOver') throw new ValidationError();
+  return { takeOver: bodyTakeOver(body) };
+}
+
 /** What `POST /reports/dismiss-open` takes, checked for shape. */
 export interface DismissOpenBody {
   scope: 'person' | 'reporter';

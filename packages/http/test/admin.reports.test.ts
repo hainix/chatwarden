@@ -122,7 +122,10 @@ describe('adminRoutes: shape', () => {
       'POST /reports/:id/ai/dont-teach',
       'POST /reports/:id/ai/read',
       'POST /reports/:id/decide',
+      // The urgent lane (0.2.0): their own checks are in admin.urgent.test.ts.
+      'POST /reports/:id/handoff',
       'POST /reports/:id/suggest',
+      'POST /reports/:id/urgent',
       'POST /reports/dismiss-open',
       // AI levels 3 and 4 (0.1.13): the "do not automate" mark lives with the people routes (its own checks are in admin.automation.test.ts).
       'PUT /people/:id/automation',

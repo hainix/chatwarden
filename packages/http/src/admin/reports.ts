@@ -1,6 +1,6 @@
 import { BULK_DISMISS_MAX, reasonLabel, safeWarn, suggestedRule } from '@chatwarden/core';
 import type { AiBrief, CaseClaim, Chatwarden, ReporterAccuracy, ReportQuery, StaffReport } from '@chatwarden/core';
-import { NotFoundError, ValidationError } from '../errors.js';
+import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { roleAtLeast } from '../permissions.js';
 import { flagKey, handleFlags } from './handles.js';
@@ -8,7 +8,7 @@ import { namedIn, parseDecision, peopleOf } from './apply.js';
 import type { AdminCall, AdminContext } from './context.js';
 import { gateCase } from './claims.js';
 import { decideAs } from './decideAs.js';
-import { bodyAiEcho, bodyDecideRename, bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
+import { bodyAiEcho, bodyDecideRename, bodyDismissOpen, bodyHandoff, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, bodyUrgentOn, has, optionalBody, queryLevel, queryLimit } from './validate.js';
 
 /** How many recent reports `GET /people/:ref/history` summarises when `limit` is absent. */
 const HISTORY_REPORTS_DEFAULT = 20;
@@ -89,6 +89,13 @@ export interface ReportSummary {
   originLabel?: string;
   /** With `origin`: the filter counter key that made the report (`link.unlisted`, `phrase.<id>` ...): a closed shape, never text from a line. The hub words it ("Filter: Links"). */
   originKey?: string;
+  /**
+   * Present (true) only on an urgent report: its reason is flagged urgent (a snapshot taken when it was filed) or a moderator marked it. Absent otherwise, so a body with none urgent is
+   * as it was. A word on the row, never a colour. Staff only. @experimental
+   */
+  urgent?: true;
+  /** Present only after a moderator marked the case as passed to the game's safety team: when (never who). Staff only. @experimental */
+  handoffAt?: number;
   /** Present (true) only when the reported person's handle is one the matcher flags and `names.maskInHub` is on: the hub masks it until shown. Staff only. */
   targetHandleFlagged?: true;
   /** The same for the reporter's handle. */
@@ -110,7 +117,7 @@ const counts = (res: Extract<Awaited<ReturnType<Chatwarden['reports']['dismissMa
   open: res.open,
   dismissed: res.dismissed,
   replayed: res.replayed,
-  skipped: { claimed: res.skipped.claimed, decided: res.skipped.decided },
+  skipped: { claimed: res.skipped.claimed, decided: res.skipped.decided, urgent: res.skipped.urgent },
   more: res.more,
 });
 
@@ -155,10 +162,20 @@ const summarize = (
   ...(boosted ? { boosted: true as const } : {}),
   ...originOf(r),
   ...(originLabel === undefined ? {} : { originLabel }),
+  ...(r.urgent ? { urgent: true as const } : {}),
+  ...(r.handoffAt === null ? {} : { handoffAt: r.handoffAt }),
 });
 
 /**
  * The report and decision routes (staff only, each audited):
+ * - `GET /reports?urgent=1&status=open&cursor&limit` (`reports.read`): the OPEN urgent reports only, as summaries, newest first, found at any age (a report older than the queue's pages
+ *   still shows). `urgent` must be `1`; a status other than `open` is 400 `invalid_query`, so is any other value. An urgent row carries `urgent: true` (and `handoffAt` once marked); a row that
+ *   is not urgent has neither key. Every other row is as below.
+ * - `POST /reports/:id/urgent { on }` (`reports.urgent`, a moderator's by default): mark a report urgent or not urgent. `{ ok: true }`, also for a repeat; 404 `not_found`; 409
+ *   `already_decided` for a decided report; 400 `invalid_request` for anything but exactly `{ on: boolean }`. Audited `report.urgent` on the report, after the write (best effort).
+ * - `POST /reports/:id/handoff { takeOver? }` (`reports.handoff`, a moderator's by default): mark the case as passed to the game's safety team: who and when, the first mark only (a
+ *   repeat is `{ ok: true }` and changes nothing). It honours the claim gate exactly like a decision (409 `claimed`; `takeOver` needs `claims.override` and is audited `case.takeover`, first).
+ *   It contacts no one. 404 `not_found`; 409 `already_decided`. Audited `report.handoff` on the report, after the write (best effort). The kit raises `report.handoff` (ids and a time).
  * - `GET /reports?status&reason&cursor&limit`: the queue as summaries (`reason` is a reason id, the old `disruption` included, or `none` for
  *   the reports that gave no reason; a malformed one is 400 `invalid_query`), no evidence beyond the `targetHandle` and `reporterHandle`
  *   (`report.view`, no target)
@@ -242,10 +259,14 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
 
   return {
     'GET /reports': ctx.secure('reports.read', (c) => {
-      const { status, cursor, reason } = c.req.query;
+      const { status, cursor, reason, urgent } = c.req.query;
       const limit = queryLimit(c.req.query.limit);
+      // The urgent queue: `urgent=1` and nothing else is a value; it means open reports, so another status is a contradiction (the facade refuses it too).
+      if (urgent !== undefined && urgent !== '1') throw new HttpError('invalid_query');
+      const urgentOnly = urgent === '1';
       // The facade validates `status` and the cursor (ReportQueryError -> 400) and clamps the limit.
       const page = cw.reports.list({
+        ...(urgentOnly ? { urgent: true as const } : {}),
         ...(status === undefined ? {} : { status: status as NonNullable<ReportQuery['status']> }),
         ...(cursor === undefined ? {} : { before: cursor }),
         ...(limit === undefined ? {} : { limit }),
@@ -322,14 +343,16 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         ...(flagged(l.handle) ? { handleFlagged: true as const } : {}),
       }));
       if (failed.length > 0) safeWarn(ctx.logger, 'chatwarden.http_notice_text_failed', { error: failed[0] instanceof Error ? failed[0].name : 'unknown', count: failed.length });
-      // A player's report carries no `origin` keys (the body is as it was); a report nobody filed carries them, with `reporterPerson` null.
-      const { origin: _origin, originKey: _originKey, ...plain } = report;
-      void _origin;
-      void _originKey;
+      // A player's report carries no `origin` keys (the body is as it was); a report nobody filed carries them, with `reporterPerson` null. The raw hand-off, escalation and evidence
+      // columns are not the body's shape: `urgent` and `handoff: { at, by }` stand in for them (staff ids, never a player's).
+      const { origin: _origin, originKey: _originKey, handoffAt, handoffBy, escalatedTo: _to, escalatedBy: _by, escalatedAt: _at, evidenceRef: _ref, ...plain } = report;
+      void [_origin, _originKey, _to, _by, _at, _ref];
       // A held report shows `hold: { code, at }` (never who held it); every other body is as it was.
       const held = cw.legal.status(id);
       const shown = {
         ...plain,
+        urgent: report.urgent,
+        handoff: handoffAt === null ? null : { at: handoffAt, by: handoffBy },
         ...originOf(report),
         ...(held === null ? {} : { hold: held }),
         ...(originLabelOf(report) === undefined ? {} : { originLabel: originLabelOf(report) }),
@@ -342,6 +365,28 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         status: 200,
         body: { report: shown, history, suggest, rule, claim, ai, ...(aiExpected === undefined ? {} : { aiExpected }) },
       };
+    }),
+
+    'POST /reports/:id/urgent': ctx.secure('reports.urgent', (c) => {
+      const id = c.params.id as string;
+      const on = bodyUrgentOn(bodyObject(c.req));
+      const res = cw.cases.setUrgent(id, c.authz.actor, on);
+      if (!res.ok) throw res.refused === 'closed' ? new HttpError('already_decided') : new NotFoundError();
+      // The mark has committed: an audit failure is logged, never turned into an error.
+      c.audit('report.urgent', { type: 'report', ref: id }, 'best-effort');
+      return { status: 200, body: { ok: true } };
+    }),
+
+    'POST /reports/:id/handoff': ctx.secure('reports.handoff', (c) => {
+      const id = c.params.id as string;
+      const { takeOver } = bodyHandoff(optionalBody(c.req));
+      const report = load(id);
+      // The same claim gate as a decision, on the reported person's case; a decided report is not gated (it answers already_decided below).
+      if (report.status === 'open') gateCase(ctx, c, report.targetPerson, takeOver);
+      const res = cw.cases.handoff(id, c.authz.actor);
+      if (!res.ok) throw res.refused === 'closed' ? new HttpError('already_decided') : new NotFoundError();
+      c.audit('report.handoff', { type: 'report', ref: id }, 'best-effort');
+      return { status: 200, body: { ok: true } };
     }),
 
     'POST /reports/:id/suggest': ctx.secure('reports.read', (c) => {

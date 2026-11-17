@@ -35,6 +35,14 @@ function withoutNewPermissions(bodies: Record<string, unknown>): Record<string, 
       for (const key of ['reports.urgent', 'reports.handoff', 'reports.comment', 'reports.escalate', 'insights.read', 'rooms.read', 'rooms.manage']) delete can[key];
     }
   }
+  // 0.2.0 adds `urgent` (the open urgent count) to GET /changes, and `urgent` and `handoff` to the report.
+  const changed = (copy['changes'] as { body?: Record<string, unknown> } | undefined)?.body;
+  if (changed !== undefined) delete changed['urgent'];
+  const shown = (copy['report'] as { body?: { report?: Record<string, unknown> } } | undefined)?.body?.report;
+  if (shown !== undefined) {
+    delete shown['urgent'];
+    delete shown['handoff'];
+  }
   // 0.2.0 adds `noticeText` to each own excerpt line of GET /reports/:id, the one other deliberate difference here.
   const report = (copy['report'] as { body?: { report?: { excerpt?: Array<Record<string, unknown>> } } } | undefined)?.body?.report;
   for (const l of report?.excerpt ?? []) delete l['noticeText'];

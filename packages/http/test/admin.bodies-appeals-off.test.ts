@@ -40,10 +40,10 @@ describe('appeals off: 404 on every route and GET /me, GET /changes, GET /people
     expect(Object.keys(b.meOwner as object).sort()).toEqual(['actor', 'can', 'role']);
   });
 
-  it('GET /changes is exactly { token, changed }, in that order', async () => {
+  it('GET /changes is exactly { token, changed, urgent }, in that order (urgent is the open urgent count, 0.2.0)', async () => {
     const b = await bodies();
     const c = b.changes as { token: string; changed: boolean };
-    expect(JSON.stringify(c)).toBe(JSON.stringify({ token: c.token, changed: true }));
+    expect(JSON.stringify(c)).toBe(JSON.stringify({ token: c.token, changed: true, urgent: 0 }));
   });
 
   it('GET /people/:ref/history keeps exactly its 0.1.7 keys', async () => {

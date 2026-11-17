@@ -71,7 +71,7 @@ describe('GET /me has features only when on; GET /changes has appeals only for a
     const w = await appealsWorld({ names: { renames: true } });
     const body = await me(w);
     expect(Object.keys(body.can)).toContain('appeals.read');
-    expect(keysDeep(body).size).toBeLessThan(40);
+    expect(keysDeep(body).size).toBeLessThan(50);
     expect(w.routeAudit()).toEqual([]);
   });
 
@@ -82,7 +82,7 @@ describe('GET /me has features only when on; GET /changes has appeals only for a
     await w.appeal();
     const res = await changes(w);
     expect(res.appeals).toBe(2);
-    expect(Object.keys(res).sort()).toEqual(['appeals', 'changed', 'token']);
+    expect(Object.keys(res).sort()).toEqual(['appeals', 'changed', 'token', 'urgent']);
     for (const role of ['senior', 'owner'] as const) expect((await changes(w, role)).appeals, role).toBe(2);
     await w.call('POST', `/appeals/${a.appealId}/decide`, { role: 'senior', actor: 'senior_bea', body: { outcome: 'uphold', reason: 'r' } });
     expect((await changes(w)).appeals).toBe(1);
@@ -91,10 +91,10 @@ describe('GET /me has features only when on; GET /changes has appeals only for a
   it('GET /changes has no appeals key for a caller without appeals.read, and none with appeals off', async () => {
     const closed = await appealsWorld({ permissions: { 'appeals.read': 'senior' } });
     await closed.appeal();
-    expect(Object.keys(await changes(closed, 'moderator')).sort()).toEqual(['changed', 'token']);
+    expect(Object.keys(await changes(closed, 'moderator')).sort()).toEqual(['changed', 'token', 'urgent']);
     expect((await changes(closed, 'senior')).appeals).toBe(1);
     const off = await appealsWorld({ appeals: { enabled: false } });
-    expect(Object.keys(await changes(off, 'owner')).sort()).toEqual(['changed', 'token']);
+    expect(Object.keys(await changes(off, 'owner')).sort()).toEqual(['changed', 'token', 'urgent']);
   });
 
   it('GET /changes: the token moves when an appeal is filed and when it is decided', async () => {

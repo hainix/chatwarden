@@ -30,6 +30,7 @@ import type {
   DecideResult,
   DismissOpenInput,
   DismissOpenResult,
+  ReportMarkResult,
   ExceptionInput,
   ExceptionPatch,
   FilterCheckView,
@@ -167,6 +168,17 @@ export interface HubClient {
   suggest(id: string, input: SuggestInput): Promise<Suggestion>;
   /** `POST /reports/:id/decide`: decide the report. A replay of the same decision applies nothing twice. */
   decide(id: string, input: DecideInput, options?: { keepalive?: boolean }): Promise<DecideResult>;
+  /**
+   * `POST /reports/:id/urgent` (needs `reports.urgent`, a moderator's by default): mark an open report urgent or not urgent. Rejects with `not_found` (404) or `already_decided` (409).
+   * @experimental
+   */
+  setUrgent(id: string, on: boolean): Promise<ReportMarkResult>;
+  /**
+   * `POST /reports/:id/handoff` (needs `reports.handoff`): mark the case as passed to the game's safety team (who and when, the first mark only). It honours the claim like a decision:
+   * `takeOver: true` (a senior's) moves another moderator's claim. Rejects with `claimed` (409), `not_found` (404) or `already_decided` (409). It contacts no one.
+   * @experimental
+   */
+  handoff(id: string, options?: { takeOver?: boolean }): Promise<ReportMarkResult>;
   /**
    * `POST /reports/dismiss-open` (needs `reports.decide.bulk`): dismiss every open report about one person, or from one reporter, as "nothing
    * wrong here" (the kit's standard reason; a sweep never takes one). Retrying is safe: a closed report counts as `replayed`.
@@ -367,10 +379,13 @@ export function createHubClient(transport: Transport): HubClient {
   return {
     me: () => get<Me>('/me'),
 
-    listReports: (query = {}) => get<Page<ReportSummary>>('/reports', q({ status: query.status, reason: query.reason === null ? 'none' : query.reason, cursor: query.cursor, limit: query.limit })),
+    listReports: (query = {}) =>
+      get<Page<ReportSummary>>('/reports', q({ status: query.status, reason: query.reason === null ? 'none' : query.reason, urgent: query.urgent === true ? '1' : undefined, cursor: query.cursor, limit: query.limit })),
     getReport: (id, options = {}) => get<ReportDetail>(`/reports/${enc(id)}`, q({ level: options.level })),
     suggest: (id, input) => post<Suggestion>(`/reports/${enc(id)}/suggest`, input),
     decide: (id, input, options = {}) => post<DecideResult>(`/reports/${enc(id)}/decide`, input, options),
+    setUrgent: (id, on) => post<ReportMarkResult>(`/reports/${enc(id)}/urgent`, { on }),
+    handoff: (id, options = {}) => post<ReportMarkResult>(`/reports/${enc(id)}/handoff`, options.takeOver === true ? { takeOver: true } : undefined),
     dismissOpen: (input, options = {}) => post<DismissOpenResult>('/reports/dismiss-open', input, options),
     readAgain: (id) => post<AiReadAgainResult>(`/reports/${enc(id)}/ai/read`, undefined),
     aiStatus: () => get<AiStatusView>('/ai/status'),

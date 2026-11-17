@@ -29,7 +29,7 @@ const TOKEN_RE = /^[A-Za-z0-9_.-]{1,64}$/;
  * - `POST /cases/:ref/viewing` (`reports.read`): a heartbeat that you have the case open (30 s, in memory, never stored).
  *   `{ viewers: string[] }`, the others. 404 `not_found` when the person has no open case (nothing is tracked); one actor
  *   keeps at most 20 cases open, a newer beat dropping their oldest.
- * - `GET /changes?since=<token>` (`reports.read`): `{ token, changed }`, and `appeals`, the number of open appeals, only while appeals are on and
+ * - `GET /changes?since=<token>` (`reports.read`): `{ token, changed, urgent }` (`urgent` is how many open reports are urgent), and `appeals`, the number of open appeals, only while appeals are on and
  *   the caller holds `appeals.read`. One read, no audit row.
  * - `GET /reasons` (`reasons.read`): `{ reasons: [{ id, label, text, active }] }`, in the order they were added.
  * - `POST /reasons { label, text }`, `PATCH /reasons/:id { label?, text? }`, `POST /reasons/:id/active { active }`
@@ -120,7 +120,8 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
       const token = cw.changes.token();
       // The open appeals, only while appeals are on and the caller may read them: else the body is what 0.1.7 sent.
       const appeals = cw.appeals.enabled() && roleAtLeast(c.authz.role, ctx.permissions['appeals.read']) ? { appeals: cw.appeals.openCount() } : {};
-      return { status: 200, body: { token, changed: since !== token, ...appeals } };
+      // The open urgent reports, for the queue's one chip: a count, always there (0 when none).
+      return { status: 200, body: { token, changed: since !== token, urgent: cw.cases.urgentCount(), ...appeals } };
     }),
 
     'GET /reasons': ctx.secure('reasons.read', () => ({ status: 200, body: { reasons: cw.reasons.list() } })),

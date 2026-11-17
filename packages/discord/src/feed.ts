@@ -70,8 +70,14 @@ export interface DiscordFeedOptions {
    * ONLY inside these links. A value that is not an http(s) URL, or a throw, drops that one link and not the post.
    */
   hubLink: (kind: 'report' | 'person', id: string) => string;
-  /** A Discord role id (digits) to ping on a severe report or a severe sanction. Nothing else ever pings anyone. */
+  /** A Discord role id (digits) to ping on a severe report or a severe sanction, and on nothing else but an urgent report (see `urgentMention`). */
   mentionRoleId?: string;
+  /**
+   * @experimental A Discord role id (digits) to ping on an URGENT report. An urgent report posts "Urgent report. Open in the hub." with this mention and a link, and nothing else: never
+   * its reason (a welfare report's most of all), category, rule, handle or note. Without it the urgent post is the same and pings nobody. An urgent report is posted even with `severeOnly`.
+   * Checked once, here (`RangeError`, never echoing it). `report.handoff` posts nothing.
+   */
+  urgentMention?: string;
   /** Post only severe reports and their outcomes. Default false. */
   severeOnly?: boolean;
   /** The `fetch` to POST with. Default: the global one. */
@@ -183,10 +189,11 @@ type Job = PostJob | EditJob;
 export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFeed {
   if (typeof options !== 'object' || options === null) throw new RangeError('discordFeed: options are required');
   // Every field is read exactly once, here.
-  const { webhookUrl, hubLink, mentionRoleId, severeOnly, logger, components } = options;
+  const { webhookUrl, hubLink, mentionRoleId, urgentMention, severeOnly, logger, components } = options;
   const base = parseWebhookUrl(webhookUrl);
   if (typeof hubLink !== 'function') throw new RangeError('discordFeed: hubLink must be a function');
   if (mentionRoleId !== undefined && !isSnowflake(mentionRoleId)) throw new RangeError('discordFeed: mentionRoleId must be a Discord role id (digits)');
+  if (urgentMention !== undefined && !isSnowflake(urgentMention)) throw new RangeError('discordFeed: urgentMention must be a Discord role id (digits)');
   if (severeOnly !== undefined && typeof severeOnly !== 'boolean') throw new RangeError('discordFeed: severeOnly must be a boolean');
   if (components !== undefined && typeof components !== 'function') throw new RangeError('discordFeed: components must be a function');
   const onlySevere = severeOnly === true;
@@ -509,7 +516,20 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     return 'Filter';
   };
 
+  /** The post of an urgent report: the role mention, "Urgent report." and one link, nothing else. It names no reason and no category, whatever the report is. */
+  const onUrgentCreated = (e: KitEventOf<'report.created'>): void => {
+    const report = readReport(e.type, e.reportId);
+    const person = report === null ? null : personOf(report.targetPerson);
+    const ping = urgentMention !== undefined;
+    const content = fitMessage(ping ? `<@&${urgentMention}> **Urgent report.**` : '**Urgent report.**', [], link('report', e.reportId, 'Open in the hub') ?? '');
+    const message: ForumMessage = { content, ...(ping ? { mentionRoleId: urgentMention } : {}) };
+    const rows = buttonsFor(e.reportId);
+    toPerson(e.type, person, UNATTRIBUTED, rows === undefined ? message : { ...message, components: rows }, rows === undefined ? undefined : e.reportId);
+  };
+
   const onCreated = (e: KitEventOf<'report.created'>): void => {
+    // Urgent first and whatever `severeOnly` says: a threat or a report of someone at risk is never left out of the feed.
+    if (e.urgent === true) return onUrgentCreated(e);
     const severe = isSevereCategory(e.category);
     if (onlySevere && !severe) return;
     const report = readReport(e.type, e.reportId);

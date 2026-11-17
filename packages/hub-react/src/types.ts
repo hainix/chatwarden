@@ -200,6 +200,12 @@ export interface ListReportsQuery {
   reason?: string | null;
   cursor?: string;
   limit?: number;
+  /**
+   * Only the open urgent reports, found at any age (`GET /reports?urgent=1`): the urgent queue. It means open reports, so it needs `status` to be `open` or absent (the server refuses
+   * another). Absent or false: every report.
+   * @experimental
+   */
+  urgent?: boolean;
 }
 
 /**
@@ -286,6 +292,11 @@ export interface Changes {
    * @experimental
    */
   appeals?: number;
+  /**
+   * How many open reports are urgent, for the queue's one chip. Absent from an older server.
+   * @experimental
+   */
+  urgent?: number;
 }
 
 /**
@@ -359,8 +370,17 @@ export interface DismissOpenResult {
   open: number;
   dismissed: number;
   replayed: number;
-  skipped: { claimed: number; decided: number };
+  /** `urgent`: urgent reports a sweep never closes (they stay open). Absent from an older server. */
+  skipped: { claimed: number; decided: number; urgent?: number };
   more: boolean;
+}
+
+/**
+ * The answer of `setUrgent` and `handoff`: nothing but `ok`.
+ * @experimental
+ */
+export interface ReportMarkResult {
+  ok: true;
 }
 
 /**

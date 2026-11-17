@@ -80,6 +80,9 @@ const SPECS: Spec[] = [
   { name: 'PUT /reports/:id/hold', method: 'PUT', path: (i) => `/reports/${i.report}/hold`, body: { code: 'other' }, lock: { 'legal.hold': 'owner' }, min: 'senior' },
   { name: 'DELETE /reports/:id/hold', method: 'DELETE', path: (i) => `/reports/${i.held}/hold`, lock: {}, min: 'owner' },
   { name: 'GET /reports/:id/bundle', method: 'GET', path: (i) => `/reports/${i.report}/bundle`, lock: {}, min: 'owner' },
+  // The urgent lane (0.2.0): mark a report urgent, mark it as passed to the safety team. Their own checks are in admin.urgent.test.ts.
+  { name: 'POST /reports/:id/urgent', method: 'POST', path: (i) => `/reports/${i.report}/urgent`, body: { on: true }, lock: { 'reports.urgent': 'owner' }, min: 'moderator' },
+  { name: 'POST /reports/:id/handoff', method: 'POST', path: (i) => `/reports/${i.report}/handoff`, body: {}, lock: { 'reports.handoff': 'owner' }, min: 'moderator' },
   { name: 'GET /audit', method: 'GET', path: () => '/audit', lock: { 'audit.read': 'owner' }, min: 'senior' },
 ];
 
