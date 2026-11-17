@@ -79,6 +79,8 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
   }, [draft, local, state]);
   const isDirty = useMemo(() => reportingDirty(draft, state.effective.reporting), [draft, state]);
   const problems: Problems = { ...local, ...serverProblems };
+  // Which reasons are urgent in the settings in force: switching one off says that the reports already filed stay urgent.
+  const savedUrgent = useMemo(() => new Map((state.effective.reporting?.reasons ?? []).map((x) => [x.id, x.urgent] as const)), [state]);
 
   const save = useSaveFlow({
     policy,
@@ -148,7 +150,7 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
       <fieldset className="cw-settings-body" disabled={!editable}>
         <legend className="cw-sr">{t('hub.reporting.body')}</legend>
         <FlowPanel draft={draft} set={setDraft} problems={problems} />
-        <ReasonsPanel draft={draft} set={setDraft} problems={problems} rules={rules} />
+        <ReasonsPanel draft={draft} set={setDraft} problems={problems} rules={rules} saved={savedUrgent} readOnly={!editable} />
         <ThanksPanel draft={draft} set={setDraft} problems={problems} />
       </fieldset>
       <PlayersSee draft={draft} />

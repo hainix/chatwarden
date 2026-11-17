@@ -159,9 +159,9 @@ describe('readReporting keeps the new fields only when they are well formed', ()
 
   it('drops a thanks that is not text, a showResources that is not true, and resources that are not a list of labelled items', () => {
     const read = readReporting({ flow: 'one_tap', thanks: '', reasons: [reason('a', 'A', { thanks: 5, showResources: 'yes' })], resources: [{ detail: 'no label' }, 'text', null, { label: 'Ok', detail: 'd' }] });
-    expect(read?.reasons[0]).toEqual({ id: 'a', label: 'A', hint: '', group: '', asksNote: false });
+    expect(read?.reasons[0]).toEqual({ id: 'a', label: 'A', hint: '', group: '', asksNote: false, thanks: null, showResources: false });
     expect(read?.resources).toEqual([{ label: 'Ok', detail: 'd', url: null }]);
-    expect(readReporting({ flow: 'one_tap', thanks: '', reasons: [], resources: 'nope' })).not.toHaveProperty('resources');
+    expect(readReporting({ flow: 'one_tap', thanks: '', reasons: [], resources: 'nope' })?.resources).toEqual([]);
   });
 });
 

@@ -49,7 +49,7 @@ describe('GET /rules gives the dialog its reporting payload', () => {
     expect(r?.flow).toBe('one_tap');
     expect(r?.thanks).toBe("Thanks for the report. We'll look into it.");
     expect(r?.reasons.map((x) => x.id)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'other']);
-    expect(r?.reasons[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', asksNote: false });
+    expect(r?.reasons[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', asksNote: false, thanks: null, showResources: false });
   });
 
   it('an older server with no reporting key reads as undefined, and the rest of the answer is unchanged', async () => {
@@ -78,7 +78,7 @@ describe('GET /rules gives the dialog its reporting payload', () => {
       body: { summary: 's', rules: [], reporting: { flow: 'reason_first', thanks: 'T', reasons: [{ id: 'a', label: 'A', hint: 'h', group: 'G', asksNote: true, rules: [1, 2], enabled: true, actor: 'ann@example.test' }] } },
     });
     const r = (await w.client.rules()).reporting;
-    expect(r?.reasons[0]).toEqual({ id: 'a', label: 'A', hint: 'h', group: 'G', asksNote: true });
+    expect(r?.reasons[0]).toEqual({ id: 'a', label: 'A', hint: 'h', group: 'G', asksNote: true, thanks: null, showResources: false });
   });
 
   it('drops a reason with no id or label, fills a missing hint, group and asksNote, and reads an unknown flow as one tap', async () => {
@@ -88,7 +88,7 @@ describe('GET /rules gives the dialog its reporting payload', () => {
       body: { summary: 's', rules: [], reporting: { flow: 'bogus', thanks: 5, reasons: [{ id: 'a', label: 'A' }, { id: 7, label: 'B' }, { id: 'c' }, null, 'x'] } },
     });
     const r = (await w.client.rules()).reporting;
-    expect(r).toEqual({ flow: 'one_tap', thanks: '', reasons: [{ id: 'a', label: 'A', hint: '', group: '', asksNote: false }] });
+    expect(r).toEqual({ flow: 'one_tap', thanks: '', resources: [], reasons: [{ id: 'a', label: 'A', hint: '', group: '', asksNote: false, thanks: null, showResources: false }] });
   });
 });
 
@@ -555,7 +555,7 @@ describe('with no reporting payload the dialog is one tap with the default words
     const ids = (html: string) => html.replace(/_r_[a-z0-9]+_/g, 'ID');
     const without = ids(a.container.innerHTML);
     a.unmount();
-    const b = renderUi(<ReportDialog {...await s.dialog({ reporting: { flow: 'one_tap', thanks: '', reasons: [] } })} />);
+    const b = renderUi(<ReportDialog {...await s.dialog({ reporting: { flow: 'one_tap', thanks: '', reasons: [], resources: [] } })} />);
     expect(ids(b.container.innerHTML)).toBe(without);
   });
 
@@ -695,7 +695,7 @@ describe('words', () => {
   it('every word of the new screens is a key in the catalog, so a translation can replace it', async () => {
     const t = createT({ ...en, 'player.report.oneTap.send': 'Melden', 'player.report.addNote': 'Notiz', 'player.report.why': 'Warum?', 'player.report.thanks': 'Danke' }, 'de');
     const s = await setup();
-    const { user } = renderUi(<ReportDialog {...await s.dialog({ t, locale: 'de', reporting: { flow: 'one_tap', thanks: '', reasons: [{ id: 'other', label: 'Anderes', hint: '', group: '', asksNote: true }] } })} />);
+    const { user } = renderUi(<ReportDialog {...await s.dialog({ t, locale: 'de', reporting: { flow: 'one_tap', thanks: '', resources: [], reasons: [{ id: 'other', label: 'Anderes', hint: '', group: '', asksNote: true, thanks: null, showResources: false }] } })} />);
     await user.click(btn('Melden'));
     expect(await findStatus()).toHaveTextContent('Danke');
   });

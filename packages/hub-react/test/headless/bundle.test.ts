@@ -20,7 +20,8 @@ const BUDGET = 48 * 1024;
 /** The same, for everything: the first fetch plus the chunks loaded on demand (the AI's ranking, 0.7 KB when this was set: the first-fetch budget plus that, rounded up). A bundler that does not split puts them in one file, so this is the ceiling for such an adopter. */
 // Raised to 36 KB at 0.1.8 with the first-fetch budget above (measured 30,953 bytes in all).
 // Raised to 40 KB at 0.1.13 with the first-fetch budget above.
-const TOTAL_BUDGET = 40 * 1024;
+// Raised to 56 KB at 0.2.0 with the first-fetch budget above (measured 41,252 bytes in all after the urgent lane).
+const TOTAL_BUDGET = 56 * 1024;
 
 /** React, React DOM, the JSX runtime and the scheduler do not exist: resolving any of them is an error. */
 const noReact: Plugin = {

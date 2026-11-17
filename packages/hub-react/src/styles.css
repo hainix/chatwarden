@@ -4239,3 +4239,60 @@
   flex-basis: 100%;
   margin: 0;
 }
+
+/* Reporting reasons: the urgent lane's fields behind each reason's "More". Safety panel: the disclosure, the resource list. */
+.cw-hub .cw-reason-more {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-reason-more p {
+  margin: 0;
+}
+.cw-hub .cw-pv-box {
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.cw-hub .cw-section-toggle {
+  justify-self: start;
+}
+.cw-hub .cw-section-body {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-safety-resources {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-safety-list {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-safety-resource {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-safety-resource .cw-field {
+  width: 100%;
+  min-width: 0;
+}

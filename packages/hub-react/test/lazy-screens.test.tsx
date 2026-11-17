@@ -146,3 +146,60 @@ describe('the privacy and legal-hold parts load when needed, not with the hub', 
     }
   });
 });
+
+describe('the Safety panel and the urgent parts are lazy', () => {
+  it('the Advanced screen asks for the Safety panel, a case, a person and the Reporting screen do not (a moderator reads it too)', async () => {
+    const { partLoaders, resetLazyParts } = await import('../src/lazyParts.js');
+    resetLazyParts();
+    const asked = new Set<string>();
+    const real = { ...partLoaders };
+    for (const name of ['safetyPanel', 'whatToDo'] as const) {
+      (partLoaders as Record<string, () => unknown>)[name] = () => {
+        asked.add(name);
+        return real[name]();
+      };
+    }
+    try {
+      const w = await hubWorld({ role: 'moderator' });
+      const f = await w.file({ reason: 'spam' });
+      for (const path of [`/reports/${f.id}`, `/people/${f.person}`, '/settings/reporting']) {
+        const { unmount } = renderHub(w, { path });
+        await waitFor(() => expect(screen.queryByText('Loading', { exact: false })).not.toBeInTheDocument());
+        unmount();
+      }
+      expect([...asked]).toEqual([]);
+      const { unmount } = renderHub(w, { path: '/settings/advanced' });
+      await waitFor(() => expect(asked.has('safetyPanel')).toBe(true));
+      expect(asked.has('whatToDo')).toBe(false);
+      unmount();
+    } finally {
+      Object.assign(partLoaders, real);
+    }
+  });
+
+  it('an urgent case asks for the What to do panel (and an ordinary one does not)', async () => {
+    const { partLoaders, resetLazyParts } = await import('../src/lazyParts.js');
+    resetLazyParts();
+    const asked: string[] = [];
+    const real = { ...partLoaders };
+    (partLoaders as Record<string, () => unknown>)['whatToDo'] = () => {
+      asked.push('whatToDo');
+      return real['whatToDo']();
+    };
+    try {
+      const w = await hubWorld({ role: 'moderator' });
+      const calm = await w.file({ target: 'Calm', reason: 'spam' });
+      const hot = await w.file({ target: 'Hot', reason: 'threat' });
+      const first = renderHub(w, { path: `/reports/${calm.id}` });
+      await screen.findByRole('tablist');
+      first.unmount();
+      expect(asked).toEqual([]);
+      const second = renderHub(w, { path: `/reports/${hot.id}` });
+      await screen.findByRole('region', { name: 'What to do' });
+      expect(asked).toEqual(['whatToDo']);
+      second.unmount();
+    } finally {
+      Object.assign(partLoaders, real);
+    }
+  });
+});

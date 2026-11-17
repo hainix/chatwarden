@@ -128,7 +128,7 @@ describe('report', () => {
 
   it('the thank-you from GET /rules is shown when reporting is given', async () => {
     w.say('lobby', 'tarvo', 'x');
-    const reporting = { flow: 'one_tap' as const, thanks: 'A moderator will look.', reasons: [] };
+    const reporting = { flow: 'one_tap' as const, thanks: 'A moderator will look.', reasons: [], resources: [] };
     const { user } = await join({ reporting });
     await user.click(optionsOf('tarvo'));
     await user.click(within(log()).getByRole('button', { name: 'Report' }));

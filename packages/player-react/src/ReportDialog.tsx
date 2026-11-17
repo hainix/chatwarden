@@ -126,7 +126,7 @@ export function ReportDialog(props: ReportDialogProps) {
   const [sentReason, setSentReason] = useState<string | null>(null);
 
   // No `reporting` (or something that is not the payload): no reasons to offer, as when `GET /rules` cannot be loaded.
-  const read = readReporting(props.reporting) ?? { flow: 'one_tap' as const, reasons: [], thanks: '' };
+  const read = readReporting(props.reporting) ?? { flow: 'one_tap' as const, reasons: [], thanks: '', resources: [] };
   const thanks = read.thanks.trim();
   const hasReasons = read.reasons.length > 0;
   // A flow that asks for a reason has nothing to ask with when the list is empty.
@@ -193,7 +193,7 @@ export function ReportDialog(props: ReportDialogProps) {
   const sentItem = read.reasons.find((r) => r.id === sentReason);
   const ownThanks = (sentItem?.thanks ?? '').trim();
   const shownThanks = ownThanks !== '' ? ownThanks : thanks;
-  const resources = taken && sentItem?.showResources === true ? (read.resources ?? []) : [];
+  const resources = taken && sentItem?.showResources === true ? read.resources : [];
   const remaining = taken && typeof result.remaining === 'number' && Number.isFinite(result.remaining) && result.remaining >= 0 ? result.remaining : null;
   const refusedKey = (r: unknown): PlayerText => {
     const refused = (r as { refused?: unknown }).refused;

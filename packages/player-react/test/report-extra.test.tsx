@@ -19,9 +19,10 @@ const axeViolations = async (container: HTMLElement): Promise<string[]> =>
 const reporting: PlayerReporting = {
   flow: 'one_tap',
   thanks: 'Thanks.',
+  resources: [],
   reasons: [
-    { id: 'spam', label: 'Spam', hint: '', group: '', asksNote: false },
-    { id: 'other', label: 'Something else', hint: '', group: '', asksNote: true },
+    { id: 'spam', label: 'Spam', hint: '', group: '', asksNote: false, thanks: null, showResources: false },
+    { id: 'other', label: 'Something else', hint: '', group: '', asksNote: true, thanks: null, showResources: false },
   ],
 };
 const ok = (): ReportResult => ({ ok: true, reportId: 'r1', remaining: 3 });

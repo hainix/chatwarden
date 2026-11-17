@@ -11,11 +11,12 @@ import { ALICE, BOB, playerWorld } from './world.js';
 // clicks"). One dialog: the question, the quoted line, an optional "Why?" select, a note behind "Add a note" (or shown when the
 // reason asks for one), Report. After the send: "Report sent", the thank-you, Close. There is no follow-up step.
 
-const reason = (id: string, label: string, group: string, extra: Partial<PlayerReporting['reasons'][number]> = {}) => ({ id, label, hint: '', group, asksNote: false, ...extra });
+const reason = (id: string, label: string, group: string, extra: Partial<PlayerReporting['reasons'][number]> = {}) => ({ id, label, hint: '', group, asksNote: false, thanks: null, showResources: false, ...extra });
 
 const STUDIO: PlayerReporting = {
   flow: 'one_tap',
   thanks: 'Thanks. A moderator will have a look.',
+  resources: [],
   reasons: [
     reason('harassment', 'Harassment', 'Chat', { hint: 'Targeting or bullying someone' }),
     reason('other', 'Something else', '', { asksNote: true, hint: 'Anything the list does not cover' }),
@@ -378,8 +379,8 @@ describe('the "Add a note" door', () => {
 describe('with no reasons to offer', () => {
   it.each([
     ['no payload', undefined],
-    ['an empty list in one_tap', { flow: 'one_tap', thanks: '', reasons: [] } as PlayerReporting],
-    ['an empty list in reason_required', { flow: 'reason_required', thanks: '', reasons: [] } as PlayerReporting],
+    ['an empty list in one_tap', { flow: 'one_tap', thanks: '', reasons: [], resources: [] } as PlayerReporting],
+    ['an empty list in reason_required', { flow: 'reason_required', thanks: '', reasons: [], resources: [] } as PlayerReporting],
   ] as const)('%s: just the question, Report and Cancel, and one press files it', async (_name, reporting) => {
     const onSubmit = sender();
     const shown = props(onSubmit);

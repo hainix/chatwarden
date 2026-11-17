@@ -52,13 +52,13 @@ export function readReporting(raw: unknown): PlayerReporting | undefined {
       hint: text(r.hint) ? r.hint : '',
       group: text(r.group) ? r.group : '',
       asksNote: r.asksNote === true,
-      // A reason's own thank-you and whether it offers the help resources: only when they are well formed.
-      ...(text(r.thanks) ? { thanks: r.thanks } : {}),
-      ...(r.showResources === true ? { showResources: true } : {}),
+      // A reason's own thank-you (null: the general one) and whether it offers the help resources: only when they are well formed.
+      thanks: text(r.thanks) ? r.thanks : null,
+      showResources: r.showResources === true,
     }));
   const flow = FLOWS.find((f) => f === raw.flow) ?? 'one_tap';
-  const resources = Array.isArray(raw.resources) ? raw.resources.map(resourceOf).filter((r): r is NonNullable<typeof r> => r !== undefined).slice(0, MAX_RESOURCES) : undefined;
-  return { flow, reasons, thanks: text(raw.thanks) ? raw.thanks : '', ...(resources === undefined ? {} : { resources }) };
+  const resources = Array.isArray(raw.resources) ? raw.resources.map(resourceOf).filter((r): r is NonNullable<typeof r> => r !== undefined).slice(0, MAX_RESOURCES) : [];
+  return { flow, reasons, thanks: text(raw.thanks) ? raw.thanks : '', resources };
 }
 
 export type ReasonItem = PlayerReporting['reasons'][number];

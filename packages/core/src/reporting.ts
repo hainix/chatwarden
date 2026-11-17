@@ -115,15 +115,14 @@ export interface ResolvedReporting {
 /**
  * What a player's client may read: the enabled reasons and nothing of the staff side (no rule mapping, no urgent flag, no safety
  * guidance or contact line). A reason's `thanks` is `null` when the global `thanks` applies; the top-level `resources` are shown after
- * the thank-you for a reason whose `showResources` is true. The server always sends the three new fields; they are optional in the type
- * so a client written before them still compiles (a missing one reads as `null`, `false` and no resources).
+ * the thank-you for a reason whose `showResources` is true. The server always sends the three new fields, and a client reads a missing one as `null`, `false` and no resources.
  */
 export interface PlayerReporting {
   flow: ReportFlow;
-  reasons: Array<{ id: string; label: string; hint: string; group: string; asksNote: boolean; thanks?: string | null; showResources?: boolean }>;
+  reasons: Array<{ id: string; label: string; hint: string; group: string; asksNote: boolean; thanks: string | null; showResources: boolean }>;
   thanks: string;
   /** @experimental */
-  resources?: SafetyResource[];
+  resources: SafetyResource[];
 }
 
 const reason = (
