@@ -67,6 +67,13 @@ export interface RetentionPolicy {
    * least 30 days: the hub reads a 30 day window. A report a filter filed (`origin: 'filter'`) goes with the others, on `reportsMs`.
    */
   filterHitsMs: number;
+  /**
+   * A report whose reason is `welfare` (its excerpt, note, comments and decision row) is deleted once it is older than this: the most
+   * sensitive text the kit holds, so a shorter clock than `reportsMs`. At least 1 day (a floor, not an off switch).
+   */
+  welfareReportsMs: number;
+  /** A daily line count (`desk.insights`: a date and two counts, no player data) is deleted once its day is older than this. At least 31 days: Insights reads a 90 day window and the page says "counted from". */
+  chatCountsMs: number;
 }
 
 export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
@@ -84,12 +91,14 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   appealsMs: 365 * DAY_MS,
   blockedNamesMs: 30 * DAY_MS,
   filterHitsMs: 90 * DAY_MS,
+  welfareReportsMs: 30 * DAY_MS,
+  chatCountsMs: 400 * DAY_MS,
 };
 
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
 
-const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'aiActionsMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs', 'filterHitsMs'] as const;
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'aiActionsMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs', 'filterHitsMs', 'welfareReportsMs', 'chatCountsMs'] as const;
 
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
@@ -104,6 +113,7 @@ const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'ba
  * - `signalsMs` at least 14 days: a counting window needs at least two weeks of rows
  * - `appealsMs` at least 90 days: the per-rule appeal counts read that far back
  * - `filterHitsMs` at least 30 days: the hub's longest window of filter counts
+ * - `welfareReportsMs` at least 1 day and `chatCountsMs` at least 31 days (neither is an off switch: 0 is refused)
  * - `appealStatementsMs` and `blockedNamesMs` at least 0 (0 keeps the text only until the next purge)
  *
  * Every field present must also be a finite number (`reportsMs` and `strikesMs` have no floor, only this).
@@ -151,6 +161,12 @@ export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWi
   if (below(policy.filterHitsMs, 30 * DAY_MS)) {
     throw new ProfileError('retention.filterHitsMs', 'must be at least 30 days: the hub reads a 30 day window of filter counts');
   }
+  if (below(policy.welfareReportsMs, DAY_MS)) {
+    throw new ProfileError('retention.welfareReportsMs', 'must be at least 1 day: a welfare report is kept for a short time, not removed on sight');
+  }
+  if (below(policy.chatCountsMs, 31 * DAY_MS)) {
+    throw new ProfileError('retention.chatCountsMs', 'must be at least 31 days: the Insights page reads a month of daily line counts');
+  }
   if (below(policy.appealStatementsMs, 0)) {
     throw new ProfileError('retention.appealStatementsMs', 'must be 0 or more: 0 clears a statement as soon as its appeal is decided');
   }
@@ -193,6 +209,10 @@ export interface PurgeResult {
   appealsClosed: number;
   /** Chat-filter hit counter rows deleted (`retention.filterHitsMs`). */
   filterHits: number;
+  /** Welfare reports deleted (`retention.welfareReportsMs`; their comments go with them). Not counted in `reports`. 0 for a store without the method. */
+  welfareReports: number;
+  /** Daily line-count rows deleted (`retention.chatCountsMs`). 0 for a store without the method. */
+  chatCounts: number;
   /** Erasures that kept a remainder (a sanction in force) and were finished by this pass: the person's subject and identifier rows were deleted. */
   erasuresFinished: number;
   /** Strike, signal, notice and kept-name rows dropped because their subject has no subject row and they were older than ten minutes. */
@@ -265,6 +285,8 @@ export async function purge(
     appealsMs: policy.appealsMs ?? RETENTION_DEFAULTS.appealsMs,
     blockedNamesMs: policy.blockedNamesMs ?? RETENTION_DEFAULTS.blockedNamesMs,
     filterHitsMs: policy.filterHitsMs ?? RETENTION_DEFAULTS.filterHitsMs,
+    welfareReportsMs: policy.welfareReportsMs ?? RETENTION_DEFAULTS.welfareReportsMs,
+    chatCountsMs: policy.chatCountsMs ?? RETENTION_DEFAULTS.chatCountsMs,
   };
   if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
@@ -281,6 +303,8 @@ export async function purge(
   checkWindow('appealsMs', p.appealsMs);
   checkWindow('blockedNamesMs', p.blockedNamesMs);
   checkWindow('filterHitsMs', p.filterHitsMs);
+  checkWindow('welfareReportsMs', p.welfareReportsMs);
+  checkWindow('chatCountsMs', p.chatCountsMs);
   return store.transaction(() => {
     const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
     // Link rows (`cw.links`) are ids only and outlive the report they name by no useful time: the same clock as reports. Not counted in the result. A live row (an active EOS sanction, the EOS cursor) is kept by the store whatever its age.
@@ -313,6 +337,9 @@ export async function purge(
       blockedNames: store.purgeBlockedNames?.(now - p.blockedNamesMs) ?? 0,
       // Counter rows are keyed by UTC day: a day goes once it ended before the cutoff (strictly older than the day the cutoff falls in).
       filterHits: store.purgeFilterHits(Math.floor((now - p.filterHitsMs) / DAY_MS)),
+      // Set by the urgent lane (welfare reports) and by Insights (daily counts); 0 until then.
+      welfareReports: 0,
+      chatCounts: 0,
     };
     // Last: the finish of an erase that kept a remainder (a sanction in force) needs the sanction rows above to be gone, and the sweep of stray rows (a row whose person was
     // erased, written by a process that had not yet heard) needs the persons' rows to be gone first. A stray younger than ten minutes is kept: a subject row can trail its first

@@ -7,6 +7,7 @@ import {
   MAX_REASON_RULES,
   MAX_REPORT_REASONS,
   OTHER_REASON_ID,
+  REPORT_EVIDENCE_URL_MAX,
   REPORT_FLOWS,
   REPORT_GROUP_MAX,
   REPORT_HINT_MAX,
@@ -21,6 +22,13 @@ import type { ReportingSettings, ResolvedReporting } from './reporting.js';
 import { deepFreeze } from './freeze.js';
 import { mergeFilters, resolveFilters } from './filters.js';
 import type { FilterSettings, ResolvedFilters } from './filters.js';
+import { resolveDesk } from './desk.js';
+import type { DeskSettings, ResolvedDesk } from './desk.js';
+import { resolveRooms } from './roomSettings.js';
+import type { ResolvedRooms, RoomsSettings } from './roomSettings.js';
+import { resolveSafety } from './safety.js';
+import type { ResolvedSafety, SafetySettings } from './safety.js';
+import { httpsUrl } from './settingsCheck.js';
 import { mergePace, resolvePace } from './pace.js';
 import type { PaceSettings, ResolvedPace } from './pace.js';
 import { resolveAppeals } from './appeals.js';
@@ -194,6 +202,24 @@ export interface ModerationProfile extends ModerationProfileBase {
    * @experimental
    */
   filters?: FilterSettings;
+  /**
+   * The moderators' desk: staff comments and "ask for a look" (`workflow`), the Insights page (`insights`) and the report surge. All
+   * off until set. See {@link DeskSettings}.
+   * @experimental
+   */
+  desk?: DeskSettings;
+  /**
+   * Safety: the guidance and the contact line a moderator reads on an urgent case, and the resources a reporter is shown. The kit
+   * routes and surfaces; it never diagnoses or contacts anyone. See {@link SafetySettings}.
+   * @experimental
+   */
+  safety?: SafetySettings;
+  /**
+   * Rooms under attack: how long a lock or an emergency lasts, what emergency adds, probation for new accounts and unknown ages. See
+   * {@link RoomsSettings}.
+   * @experimental
+   */
+  rooms?: RoomsSettings;
 }
 
 /**
@@ -253,6 +279,12 @@ export interface ResolvedProfile extends ModerationProfileBase {
   names: ResolvedNames;
   /** The filter settings in force, every field filled in (`null` is off). @experimental */
   filters: ResolvedFilters;
+  /** The desk settings in force, every field filled in. @experimental */
+  desk: ResolvedDesk;
+  /** The safety settings in force: the guidance (the default when unset), the contact line and the resources. @experimental */
+  safety: ResolvedSafety;
+  /** The room settings in force, every field filled in. @experimental */
+  rooms: ResolvedRooms;
 }
 
 /** @deprecated The same as {@link ModerationProfile}, which now has the two fields optional. */
@@ -295,12 +327,15 @@ const TOP_KEYS = [
   'appeals',
   'names',
   'filters',
+  'desk',
+  'safety',
+  'rooms',
   'levels',
   'guidelines',
 ] as const;
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
-const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters'];
+const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms'];
 const AI_KEYS = ['level', 'learn', 'dailyCalls', 'actExcludeRules'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
@@ -470,9 +505,9 @@ function validateGuidelines(v: unknown, path: string): void {
   }
 }
 
-const REPORTING_KEYS = ['flow', 'reasons', 'thanks'] as const;
-const REASON_KEYS = ['id', 'label', 'hint', 'group', 'rules', 'asksNote', 'enabled'] as const;
-const REASON_OPTIONAL: readonly string[] = ['hint', 'group', 'rules', 'asksNote', 'enabled'];
+const REPORTING_KEYS = ['flow', 'reasons', 'thanks', 'evidenceUrl'] as const;
+const REASON_KEYS = ['id', 'label', 'hint', 'group', 'rules', 'asksNote', 'enabled', 'urgent', 'thanks', 'showResources'] as const;
+const REASON_OPTIONAL: readonly string[] = ['hint', 'group', 'rules', 'asksNote', 'enabled', 'urgent', 'thanks', 'showResources'];
 
 /** A line of text of `min` to `max` characters (not blank when `min` is 1). */
 function lineOf(v: unknown, path: string, min: 0 | 1, max: number): void {
@@ -512,6 +547,7 @@ function validateReporting(v: unknown, path: string): void {
   const rep = obj(v, path, REPORTING_KEYS, REPORTING_KEYS);
   if (Object.hasOwn(rep, 'flow')) oneOf(rep['flow'], `${path}.flow`, REPORT_FLOWS, "must be 'one_tap', 'reason_first' or 'reason_required'");
   if (Object.hasOwn(rep, 'thanks')) lineOf(rep['thanks'], `${path}.thanks`, 1, REPORT_THANKS_MAX);
+  if (Object.hasOwn(rep, 'evidenceUrl') && rep['evidenceUrl'] !== null) httpsUrl(rep['evidenceUrl'], `${path}.evidenceUrl`, REPORT_EVIDENCE_URL_MAX, true);
   if (!Object.hasOwn(rep, 'reasons')) return;
 
   const rp = `${path}.reasons`;
@@ -537,7 +573,8 @@ function validateReporting(v: unknown, path: string): void {
         if (!positiveInt(n)) fail(`${ip}.rules[${j}]`, 'must be a whole rule number from 1');
       });
     }
-    for (const key of ['asksNote', 'enabled'] as const) {
+    if (Object.hasOwn(reason, 'thanks') && reason['thanks'] !== null) lineOf(reason['thanks'], `${ip}.thanks`, 1, REPORT_THANKS_MAX);
+    for (const key of ['asksNote', 'enabled', 'urgent', 'showResources'] as const) {
       if (Object.hasOwn(reason, key) && typeof reason[key] !== 'boolean') fail(`${ip}.${key}`, 'must be true or false');
     }
   });
@@ -594,6 +631,9 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   if (Object.hasOwn(p, 'appeals')) resolveAppeals(p['appeals'] as AppealSettings, 'profile.appeals');
   if (Object.hasOwn(p, 'names')) resolveNames(p['names'] as NameSettings, 'profile.names');
   if (Object.hasOwn(p, 'filters')) resolveFilters(p['filters'] as FilterSettings, 'profile.filters');
+  if (Object.hasOwn(p, 'desk')) resolveDesk(p['desk'] as DeskSettings, 'profile.desk');
+  if (Object.hasOwn(p, 'safety')) resolveSafety(p['safety'] as SafetySettings, 'profile.safety');
+  if (Object.hasOwn(p, 'rooms')) resolveRooms(p['rooms'] as RoomsSettings, 'profile.rooms');
 
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
   oneOf(prof['mode'], 'profile.profanity.mode', PROFANITY_MODES, "must be 'allow', 'star' or 'refuse'");
@@ -711,6 +751,9 @@ function finalize(value: unknown): ResolvedProfile {
     setOwn(copy, 'appeals', resolveAppeals(copy['appeals'] as AppealSettings | undefined, 'profile.appeals'));
     setOwn(copy, 'names', resolveNames(copy['names'] as NameSettings | undefined, 'profile.names'));
     setOwn(copy, 'filters', resolveFilters(copy['filters'] as FilterSettings | undefined, 'profile.filters'));
+    setOwn(copy, 'desk', resolveDesk(copy['desk'] as DeskSettings | undefined, 'profile.desk'));
+    setOwn(copy, 'safety', resolveSafety(copy['safety'] as SafetySettings | undefined, 'profile.safety'));
+    setOwn(copy, 'rooms', resolveRooms(copy['rooms'] as RoomsSettings | undefined, 'profile.rooms'));
   }
   return deepFreeze(copy as ResolvedProfile);
 }
@@ -731,6 +774,9 @@ export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
     appeals: resolveAppeals(p.appeals),
     names: resolveNames(p.names),
     filters: resolveFilters(p.filters),
+    desk: resolveDesk(p.desk),
+    safety: resolveSafety(p.safety),
+    rooms: resolveRooms(p.rooms),
   };
 }
 
@@ -1051,7 +1097,7 @@ export function defineProfile(p: ModerationProfile): ResolvedProfile {
  * The parts of a profile the hub may edit, and the order they are listed in. Everything else (identity, the written
  * levels, the AI context, profanity handling) stays in code: changing profanity means rebuilding the filter.
  */
-export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters'] as const;
+export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms'] as const;
 export type PolicySection = (typeof POLICY_SECTIONS)[number];
 
 /** One ladder cell as the editor sends it: the label may be left out and is then generated ("Restrict chat 6 hours"). */
@@ -1106,6 +1152,12 @@ export interface PolicyLayer {
    * `ignore` replace whole, and a field left out inherits the profile's. @experimental
    */
   filters?: FilterSettings;
+  /** The desk settings: `workflow`, `insights` and the `surge` window. Each is optional and merges onto the profile's. @experimental */
+  desk?: DeskSettings;
+  /** The safety settings: `guidance`, `contact` and `resources` (a list replaces the whole list). Each is optional and merges onto the profile's. @experimental */
+  safety?: SafetySettings;
+  /** The room settings: `defaultModeMs`, `emergency`, `probation` and `unknownAge`. Each is optional and merges onto the profile's. @experimental */
+  rooms?: RoomsSettings;
 }
 
 /** The longest outcome text a layer may set on a guideline tier. */

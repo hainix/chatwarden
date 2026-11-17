@@ -400,6 +400,6 @@ export class PolicyService {
       }
       samples[sample] = levels;
     }
-    return { ok: true, samples, reporting: playerReporting(candidate.reporting) };
+    return { ok: true, samples, reporting: playerReporting(candidate.reporting, candidate.safety) };
   }
 }

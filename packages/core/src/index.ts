@@ -156,6 +156,7 @@ export {
   playerReporting,
   reasonLabel,
   reasonOfCategory,
+  REPORT_EVIDENCE_URL_MAX,
   REPORT_FLOWS,
   suggestedRule,
 } from './reporting.js';
@@ -239,6 +240,22 @@ export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
+// Desk, safety and room settings (@experimental): the three profile sections of the urgent-lane and rooms release, all defaulted.
+export { resolveDesk } from './desk.js';
+export type { DeskSettings, ResolvedDesk, SurgeSettings } from './desk.js';
+export {
+  DEFAULT_SAFETY_GUIDANCE,
+  resolveSafety,
+  SAFETY_CONTACT_MAX,
+  SAFETY_DETAIL_MAX,
+  SAFETY_GUIDANCE_MAX,
+  SAFETY_LABEL_MAX,
+  SAFETY_RESOURCES_MAX,
+  SAFETY_URL_MAX,
+} from './safety.js';
+export type { ResolvedSafety, SafetyResource, SafetyResourceInput, SafetySettings } from './safety.js';
+export { resolveRooms } from './roomSettings.js';
+export type { EmergencySettings, ProbationSettings, ResolvedRooms, RoomsSettings, UnknownAge } from './roomSettings.js';
 export { WEBHOOK_KEY_TTL_MS } from './types.js';
 export { HOLD_CODES, isHoldCode } from './legal.js';
 export type { HeldSet, HoldCode, HoldRow } from './legal.js';

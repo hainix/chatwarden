@@ -37,10 +37,10 @@ describe('GET /rules: reporting', () => {
   it('lists Inappropriate name under Chat, with no rule mapping', async () => {
     const { rules } = await setup();
     const name = reportingOf(await rules()).reasons.find((x) => x.id === 'name');
-    expect(name).toEqual({ id: 'name', label: 'Inappropriate name', hint: 'An offensive or inappropriate player name', group: 'Chat', asksNote: false });
+    expect(name).toEqual({ id: 'name', label: 'Inappropriate name', hint: 'An offensive or inappropriate player name', group: 'Chat', asksNote: false, thanks: null, showResources: false });
   });
 
-  it('carries the default flow, the eleven default reasons in order and the default thank-you', async () => {
+  it('carries the default flow, the twelve default reasons in order and the default thank-you', async () => {
     const { rules } = await setup();
     const res = await rules();
     expect(res.status).toBe(200);
@@ -48,6 +48,7 @@ describe('GET /rules: reporting', () => {
     const r = reportingOf(res);
     expect(r.flow).toBe('one_tap');
     expect(r.thanks).toBe("Thanks for the report. We'll look into it.");
+    // `welfare` is in the defaults but switched off, so a player is not offered it.
     expect(r.reasons.map((x) => x.id)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'other']);
     expect(r.reasons.map((x) => x.label)).toEqual([
       'Insults or harassment', 'Hate', 'Sexual content', 'Threats', 'Spam or ads', 'Sharing personal info', 'Inappropriate name', 'Cheating', 'Throwing or griefing', 'Leaving or AFK', 'Something else',
@@ -56,9 +57,9 @@ describe('GET /rules: reporting', () => {
     expect(r.reasons.map((x) => x.asksNote)).toEqual([false, false, false, false, false, false, false, false, false, false, true]);
   });
 
-  it('each reason has exactly id, label, hint, group, asksNote', async () => {
+  it('each reason has exactly id, label, hint, group, asksNote, thanks, showResources', async () => {
     const { rules } = await setup();
-    for (const x of reportingOf(await rules()).reasons) expect(Object.keys(x).sort()).toEqual(['asksNote', 'group', 'hint', 'id', 'label']);
+    for (const x of reportingOf(await rules()).reasons) expect(Object.keys(x).sort()).toEqual(['asksNote', 'group', 'hint', 'id', 'label', 'showResources', 'thanks']);
   });
 
   it('lists enabled reasons only, and follows the studio’s order, labels, hints and groups', async () => {
@@ -76,9 +77,10 @@ describe('GET /rules: reporting', () => {
       flow: 'reason_first',
       thanks: 'Got it, thank you.',
       reasons: [
-        { id: 'lag_switch', label: 'Lag switching', hint: 'Cutting their own connection', group: 'Gameplay', asksNote: true },
-        { id: 'other', label: 'Anything else', hint: '', group: '', asksNote: false },
+        { id: 'lag_switch', label: 'Lag switching', hint: 'Cutting their own connection', group: 'Gameplay', asksNote: true, thanks: null, showResources: false },
+        { id: 'other', label: 'Anything else', hint: '', group: '', asksNote: false, thanks: null, showResources: false },
       ],
+      resources: [],
     });
   });
 
@@ -97,11 +99,11 @@ describe('GET /rules: reporting', () => {
     const res = await rules();
     const reporting = reportingOf(res);
     const keys = keysDeep(reporting);
-    for (const forbidden of ['rules', 'enabled', 'rule', 'subject', 'actor', 'reason', 'profile', 'layer', 'version']) expect(keys.has(forbidden), forbidden).toBe(false);
+    for (const forbidden of ['rules', 'enabled', 'rule', 'subject', 'actor', 'reason', 'profile', 'layer', 'version', 'urgent', 'guidance', 'contact']) expect(keys.has(forbidden), forbidden).toBe(false);
     const text = JSON.stringify(reporting);
     expect(text).not.toMatch(/"B"/);
     expect(text).not.toContain('[1,2]');
-    expect(Object.keys(reporting).sort()).toEqual(['flow', 'reasons', 'thanks']);
+    expect(Object.keys(reporting).sort()).toEqual(['flow', 'reasons', 'resources', 'thanks']);
   });
 
   it('needs no identity and is the same for everyone', async () => {

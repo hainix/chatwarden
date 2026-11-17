@@ -145,7 +145,7 @@ describe('reporting on a phone (360px)', () => {
     const w = await hubWorld({ role: 'owner' });
     renderHub(w, { path: '/settings/reporting' });
     const list = await screen.findByRole('list', { name: 'Reasons' });
-    expect(within(list).getAllByRole('group')).toHaveLength(11);
+    expect(within(list).getAllByRole('group')).toHaveLength(12);
     expect(list.className).toContain('cw-reasons');
     const regions = screen.getAllByRole('region').map((r) => r.getAttribute('aria-labelledby') !== null && r.querySelector('h2')?.textContent);
     expect(regions.filter(Boolean).at(-1)).toBe('What players see');

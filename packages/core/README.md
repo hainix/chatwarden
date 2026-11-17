@@ -308,6 +308,11 @@ blocked names and `withdrawNotice`, `withMemoryAppeals` and `withMemoryNames`, a
 Appeals and Names screens of `@chatwarden/hub-react`. The names a game already used (`cw.names.check` and its reasons, `cw.notices`, `cw.sanctions`) are
 not experimental, but some of their unions are wider now: see "Upgrading to 0.1.9".
 
+Also `@experimental` in 0.2.0: the `desk`, `safety` and `rooms` profile sections (`DeskSettings`, `ResolvedDesk`, `resolveDesk`, `SurgeSettings`, `SafetySettings`,
+`ResolvedSafety`, `SafetyResource`, `SafetyResourceInput`, `resolveSafety`, `DEFAULT_SAFETY_GUIDANCE`, `RoomsSettings`, `ResolvedRooms`, `resolveRooms`, `EmergencySettings`,
+`ProbationSettings`, `UnknownAge`), the reporting reason fields `urgent`, `thanks` and `showResources`, `reporting.evidenceUrl`, the default `welfare` reason (switched off;
+`threat` is urgent by default), and the retention fields `welfareReportsMs` (30 days, never less than 1 day) and `chatCountsMs` (400 days, never less than 31).
+
 ## Slow mode and flood control
 
 Optional and off until you set it, `@experimental` until 0.2 and new in 0.1.8. Three checks pace one player's lines in one room: **slow mode**

@@ -45,18 +45,18 @@ const r = (id: string, over: Partial<ReportReasonInput> = {}): ReportReasonInput
 const other = (): ReportReasonInput => r('other', { label: 'Something else' });
 
 describe('defaults', () => {
-  it('every preset resolves to one_tap, the eleven default reasons and the thank-you', () => {
+  it('every preset resolves to one_tap, the twelve default reasons and the thank-you', () => {
     for (const name of ['relaxed', 'standard', 'strict'] as const) {
       const p = PRESETS[name];
       expect(p.reporting.flow).toBe('one_tap');
       expect(p.reporting.thanks).toBe("Thanks for the report. We'll look into it.");
       expect(p.reporting.reasons.map((x) => x.id)).toEqual([
-        'harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'other',
+        'harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'welfare', 'cheating', 'griefing', 'afk', 'other',
       ]);
     }
   });
 
-  it('the default reasons have the briefed labels, groups, rules, notes and are all on', () => {
+  it('the default reasons have the briefed labels, groups, rules and notes, and are all on but welfare', () => {
     const table = DEFAULT_REPORT_REASONS.map((x) => [x.id, x.label, x.group, x.rules, x.asksNote, x.enabled]);
     expect(table).toEqual([
       ['harassment', 'Insults or harassment', 'Chat', [2], false, true],
@@ -66,6 +66,7 @@ describe('defaults', () => {
       ['spam', 'Spam or ads', 'Chat', [4], false, true],
       ['personal_info', 'Sharing personal info', 'Chat', [2], false, true],
       ['name', 'Inappropriate name', 'Chat', [7], false, true],
+      ['welfare', 'Someone may be in trouble', 'Chat', [], true, false],
       ['cheating', 'Cheating', 'Gameplay', [5], false, true],
       ['griefing', 'Throwing or griefing', 'Gameplay', [6], false, true],
       ['afk', 'Leaving or AFK', 'Gameplay', [6], false, true],
@@ -125,7 +126,7 @@ describe('a profile without reporting (0.1.1) or with part of it', () => {
 
   it('a reason given as { id, label } is filled: no hint, no group, no rules, no note, enabled', () => {
     const p = resolveProfile('standard', { reporting: { reasons: [r('lag'), other()] } });
-    expect(p.reporting.reasons[0]).toEqual({ id: 'lag', label: 'Label lag', hint: '', group: '', rules: [], asksNote: false, enabled: true });
+    expect(p.reporting.reasons[0]).toEqual({ id: 'lag', label: 'Label lag', hint: '', group: '', rules: [], asksNote: false, enabled: true, urgent: false, thanks: null, showResources: false });
   });
 
   it('overriding one reporting key keeps the others (objects merge, the reasons list replaces)', () => {
@@ -255,7 +256,7 @@ describe('validation: the reasons list', () => {
     const p = resolveProfile('standard', {
       reporting: { reasons: [r('other', { label: 'Anything else', hint: 'Tell us', group: 'More', rules: [8], asksNote: false })] },
     });
-    expect(p.reporting.reasons[0]).toEqual({ id: 'other', label: 'Anything else', hint: 'Tell us', group: 'More', rules: [8], asksNote: false, enabled: true });
+    expect(p.reporting.reasons[0]).toEqual({ id: 'other', label: 'Anything else', hint: 'Tell us', group: 'More', rules: [8], asksNote: false, enabled: true, urgent: false, thanks: null, showResources: false });
   });
   it('a reason may be switched off and the others reordered freely', () => {
     const p = resolveProfile('standard', { reporting: { reasons: [other(), r('b', { enabled: false }), r('a')] } });
@@ -374,24 +375,26 @@ describe('playerReporting: what a player may read', () => {
     flow: 'reason_first',
     thanks: 'Thank you.',
     reasons: [
-      { id: 'a', label: 'A', hint: 'hint a', group: 'G', rules: [1, 2], asksNote: true, enabled: true },
-      { id: 'b', label: 'B', hint: '', group: '', rules: [3], asksNote: false, enabled: false },
-      { id: 'other', label: 'Else', hint: 'h', group: '', rules: [], asksNote: true, enabled: true },
+      { id: 'a', label: 'A', hint: 'hint a', group: 'G', rules: [1, 2], asksNote: true, enabled: true, urgent: false, thanks: null, showResources: false },
+      { id: 'b', label: 'B', hint: '', group: '', rules: [3], asksNote: false, enabled: false, urgent: false, thanks: null, showResources: false },
+      { id: 'other', label: 'Else', hint: 'h', group: '', rules: [], asksNote: true, enabled: true, urgent: false, thanks: null, showResources: false },
     ],
+    evidenceUrl: null,
   };
 
-  it('lists enabled reasons in order with exactly id, label, hint, group, asksNote', () => {
+  it('lists enabled reasons in order with exactly id, label, hint, group, asksNote, thanks, showResources', () => {
     const p = playerReporting(sample);
     expect(p).toEqual({
       flow: 'reason_first',
       thanks: 'Thank you.',
       reasons: [
-        { id: 'a', label: 'A', hint: 'hint a', group: 'G', asksNote: true },
-        { id: 'other', label: 'Else', hint: 'h', group: '', asksNote: true },
+        { id: 'a', label: 'A', hint: 'hint a', group: 'G', asksNote: true, thanks: null, showResources: false },
+        { id: 'other', label: 'Else', hint: 'h', group: '', asksNote: true, thanks: null, showResources: false },
       ],
+      resources: [],
     });
-    for (const x of p.reasons) expect(Object.keys(x).sort()).toEqual(['asksNote', 'group', 'hint', 'id', 'label']);
-    expect(Object.keys(p).sort()).toEqual(['flow', 'reasons', 'thanks']);
+    for (const x of p.reasons) expect(Object.keys(x).sort()).toEqual(['asksNote', 'group', 'hint', 'id', 'label', 'showResources', 'thanks']);
+    expect(Object.keys(p).sort()).toEqual(['flow', 'reasons', 'resources', 'thanks']);
   });
   it('shows no rule mapping and no enabled flag anywhere', () => {
     expect(JSON.stringify(playerReporting(sample))).not.toMatch(/rules|enabled/);

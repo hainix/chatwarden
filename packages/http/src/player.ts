@@ -156,7 +156,7 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
         // The public shape: number, title, text. (`retired` is dropped: only active rules are listed.)
         rules: cw.rules.active().map((r) => ({ number: r.number, title: r.title, text: r.text })),
         // What the report screen needs; `playerReporting` copies each field by name, so nothing of the staff side can leak in.
-        reporting: playerReporting(cw.profile.reporting),
+        reporting: playerReporting(cw.profile.reporting, cw.profile.safety),
       },
     })),
 

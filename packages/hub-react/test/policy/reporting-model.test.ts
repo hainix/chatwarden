@@ -127,9 +127,25 @@ describe('reportingLayer', () => {
     const d = patchReason(fresh(), row(fresh(), 'hate').key, { label: 'Hate speech' });
     const layer = reportingLayer(d, base());
     expect(Object.keys(layer ?? {})).toEqual(['reasons']);
-    expect(layer?.reasons).toHaveLength(11);
+    expect(layer?.reasons).toHaveLength(12);
     expect(layer?.reasons?.find((r) => r.id === 'hate')?.label).toBe('Hate speech');
-    expect(layer?.reasons?.[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', rules: [2], asksNote: false, enabled: true });
+    expect(layer?.reasons?.[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', rules: [2], asksNote: false, enabled: true, urgent: false, thanks: null, showResources: false });
+  });
+
+  it('carries urgent, thanks and showResources through a save untouched (threat stays urgent, welfare keeps its resources)', () => {
+    const d = patchReason(fresh(), row(fresh(), 'hate').key, { label: 'Hate speech' });
+    const sent = reportingLayer(d, base())?.reasons ?? [];
+    expect(sent.find((r) => r.id === 'threat')).toMatchObject({ urgent: true, thanks: null, showResources: false });
+    expect(sent.find((r) => r.id === 'welfare')).toMatchObject({ urgent: true, showResources: true, enabled: false });
+    expect(sent.filter((r) => r.urgent === true).map((r) => r.id)).toEqual(['threat', 'welfare']);
+  });
+
+  it('a reason with its own thank-you keeps it through a save', () => {
+    const b = base();
+    const own: ResolvedReporting = { ...b, reasons: b.reasons.map((r) => (r.id === 'spam' ? { ...r, thanks: 'Thanks, we read every one.' } : r)) };
+    const d = patchReason(reportingDraftOf(own), reportingDraftOf(own).reasons.find((r) => r.id === 'hate')!.key, { label: 'Hate speech' });
+    expect(reportingLayer(d, b)?.reasons?.find((r) => r.id === 'spam')?.thanks).toBe('Thanks, we read every one.');
+    expect(reportingDirty(reportingDraftOf(own), b)).toBe(true);
   });
 
   it('a new row gets an id from its label that no other row has, and keeps its place', () => {
@@ -138,7 +154,7 @@ describe('reportingLayer', () => {
     const d1 = patchReason(a.draft, a.key as string, { label: 'Hate' });
     const layer = reportingLayer(d1, base());
     const ids = layer?.reasons?.map((r) => r.id);
-    expect(ids).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'hate_2', 'other']);
+    expect(ids).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'welfare', 'cheating', 'griefing', 'afk', 'hate_2', 'other']);
   });
 
   it('"Something else" is always sent switched on', () => {
@@ -223,7 +239,7 @@ describe('the rows', () => {
 
   it('removes any other reason', () => {
     const d = fresh();
-    expect(removeReason(d, row(d, 'hate').key).reasons).toHaveLength(10);
+    expect(removeReason(d, row(d, 'hate').key).reasons).toHaveLength(11);
     expect(removeReason(d, 'no-such-key')).toBe(d);
   });
 
@@ -253,7 +269,7 @@ describe('the rows', () => {
   it('says where a row is after a move, one-based, out of the whole list', () => {
     const d = fresh();
     const moved = moveReason(d, row(d, 'hate').key, -1);
-    expect(positionOf(moved, row(moved, 'hate').key)).toEqual({ n: 1, total: 11 });
+    expect(positionOf(moved, row(moved, 'hate').key)).toEqual({ n: 1, total: 12 });
     expect(positionOf(moved, 'no-such-key')).toBeNull();
   });
 
@@ -271,7 +287,7 @@ describe('the rows', () => {
   it('adds a blank row on, before "Something else", up to 20 reasons, and then adds nothing', () => {
     let d = fresh();
     const a = addReason(d);
-    expect(a.draft.reasons).toHaveLength(12);
+    expect(a.draft.reasons).toHaveLength(13);
     expect(a.draft.reasons.at(-1)?.id).toBe('other');
     expect(a.draft.reasons.at(-2)).toMatchObject({ key: a.key, id: '', label: '', enabled: true, asksNote: false, rules: [] });
     d = a.draft;
