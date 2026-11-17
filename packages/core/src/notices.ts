@@ -518,9 +518,20 @@ export class NoticeService {
       if (typeof l.raw !== 'string' || !Number.isFinite(l.ts) || Number.isNaN(new Date(l.ts).getTime())) {
         throw new ExcerptError('invalid_line');
       }
-      const text = l.blocked !== true && typeof l.delivered === 'string' ? l.delivered : this.maskRaw(l.raw);
-      return { text, day: new Date(l.ts).toISOString().slice(0, 10) };
+      return { text: this.lineText(l), day: new Date(l.ts).toISOString().slice(0, 10) };
     });
+  }
+
+  /**
+   * The text a player is shown for one excerpt line, and the very text {@link createForSanction} stores for it: the delivered form (the
+   * starring the chat filter already applied) of a line that was delivered, otherwise the raw line with only the matched terms starred, or all
+   * of it starred when the matcher cannot say where they are (no `spans`, an empty or unusable answer, a throw, a term switched off since). It is
+   * never the raw text of a blocked line. Throws `ExcerptError('invalid_line')` for a line with no raw text. Staff side: for a screen that
+   * previews a notice, so what it shows is what the player will read.
+   */
+  lineText(line: ReportExcerptLine): string {
+    if (typeof line !== 'object' || line === null || typeof line.raw !== 'string') throw new ExcerptError('invalid_line');
+    return line.blocked !== true && typeof line.delivered === 'string' ? line.delivered : this.maskRaw(line.raw);
   }
 
   /**

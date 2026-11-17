@@ -188,6 +188,8 @@ const summarize = (
  *   person's appeals as the core's `AppealSummary`s, newest first, with no statement (only for a caller who holds `appeals.read`), and `renames`,
  *   `{ at, pending }` for each time a rename was required (no reason, no actor). A third, `automation: { code, at }`, only while a senior has marked the
  *   person "do not automate" (the closed reason code and when; never who).
+ * - `noticeText` on each excerpt line of `GET /reports/:id` that some person wrote themselves (`ownLineIds`): the text that person's notice shows for it
+ *   (`cw.notices.lineText`: delivered, or with only the blocked terms starred, never raw). A line nobody wrote has none.
  * - Handle flags: beside a handle the matcher flags, while `names.maskInHub` is on (the default), a body carries `true` under `targetHandleFlagged` /
  *   `reporterHandleFlagged` (a queue row, and the report in `GET /reports/:id`), `handleFlagged` on each excerpt line of that report and on the
  *   history's `handle`. Otherwise the key is absent, so an unflagged body is what 0.1.7 sent. It is the matcher's reading only
@@ -275,12 +277,19 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       c.audit('report.view', { type: 'report', ref: id });
       // The handles the matcher flags (the report's two, and each excerpt line's): the hub masks them until shown. Absent when none is.
       const flagged = handleFlags(cw);
+      // The text the player's notice shows for a line, on each line some person wrote themselves (`ownLineIds`): delivered, or starred where a
+      // term was blocked, never raw. A line nobody wrote has none.
+      const own = new Set(Object.values(report.ownLineIds).flat());
       const shown = {
         ...report,
         reportedReasonLabel: labelOf(report),
         ...flagKey(flagged, 'targetHandleFlagged', report.targetHandle),
         ...flagKey(flagged, 'reporterHandleFlagged', report.reporterHandle),
-        excerpt: report.excerpt.map((l) => (flagged(l.handle) ? { ...l, handleFlagged: true as const } : l)),
+        excerpt: report.excerpt.map((l) => ({
+          ...l,
+          ...(own.has(l.lineId) ? { noticeText: cw.notices.lineText(l) } : {}),
+          ...(flagged(l.handle) ? { handleFlagged: true as const } : {}),
+        })),
       };
       return {
         status: 200,

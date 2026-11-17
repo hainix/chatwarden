@@ -545,6 +545,7 @@ cw.names.renamed(who);
   `rename.required`. It answers `{ ok: true, noticeId }` or `{ ok: false, error }` with `error` `off`, `not_found`, `pending` (a request is already waiting) or
   `invalid`. `cw.names.renamesEnabled()` says whether it can work now (the setting is on and the store can release a rename), and `cw.names.renamesOf(subject)`
   lists a person's requests for the hub.
+- **Seeing what a player would read.** `cw.notices.lineText(line)` (staff side, `@experimental`) is the text a sanction notice stores for one report excerpt line: the delivered form, or the raw line with only the matched terms starred (all stars when the matcher cannot say where). It is never the raw text of a blocked line.
 - **A game must act on `rename.required` and call `renamed`.** The kit cannot make a game rename anyone. It never learns the new name and never checks that one was
   chosen. Listen for the event (or take it by webhook with `includeAccounts`, see `@chatwarden/http`), find the player with `cw.people.accountIds(event.target)`
   (the account ids you passed as `RawWho.accountId`; a guest has none; server side only), hold them with `cw.names.pendingRename(who)` at login, and call

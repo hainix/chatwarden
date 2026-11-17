@@ -89,6 +89,7 @@ import type {
   RawWho,
   ReasonRow,
   ReportCategory,
+  ReportExcerptLine,
   ConductLevel,
   Store,
   StoredReport,
@@ -685,6 +686,13 @@ export interface Chatwarden {
     record(who: RawWho): PlayerNotice[];
     /** True while the person has a warning they have not acknowledged. */
     pendingWarning(who: RawWho): boolean;
+    /**
+     * Staff side: the text a player is shown for one report excerpt line, the same text a sanction notice stores for it. A delivered line is its
+     * delivered form; a blocked line (or one with no delivered form) has only its matched terms starred, or is all stars when the matcher cannot
+     * say where they are. Never the raw text of a blocked line. Throws for a line with no raw text. Never send a raw line to a player.
+     * @experimental
+     */
+    lineText(line: ReportExcerptLine): string;
   };
   /**
    * Appeals (0.1.9, `profile.appeals`, off until turned on). The player side takes the same `RawWho` as `notices` and FINDS the person
@@ -1575,6 +1583,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),
       record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
+      lineText: (line) => notices.lineText(line),
     },
     appeals: {
       enabled: () => appealService.enabled(),

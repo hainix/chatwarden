@@ -19,6 +19,7 @@ function docAbove(signature: string): string {
 
 describe('@experimental on the 0.1.9 facade members', () => {
   const members: Array<[string, string]> = [
+    ['notices.lineText', 'lineText(line'],
     ['names.requireRename', 'requireRename(input'],
     ['names.pendingRename', 'pendingRename(who'],
     ['names.renamed', 'renamed(who'],

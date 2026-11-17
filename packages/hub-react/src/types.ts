@@ -187,7 +187,11 @@ export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
   reportedReasonLabel?: string | null;
   targetHandleFlagged?: boolean;
   reporterHandleFlagged?: boolean;
-  excerpt: Array<StaffReport['excerpt'][number] & { handleFlagged?: boolean }>;
+  /**
+   * `noticeText` is on each line some person wrote themselves: the text the player's notice shows for it (delivered, or starred where a term was
+   * blocked, never raw). Absent from an older server and from a line nobody wrote.
+   */
+  excerpt: Array<StaffReport['excerpt'][number] & { handleFlagged?: boolean; noticeText?: string }>;
 };
 
 /**
@@ -638,6 +642,8 @@ export interface PolicyDocs {
   profile: Chatwarden['profile'];
   rules: CommunityRule[];
   summary: Chatwarden['summary'];
+  /** Whether an upheld decision thanks the reporter (`limits.reporterFeedback`). Absent from an older server. */
+  notices?: { reporterFeedback: boolean };
   documents: { codeOfConduct: string; moderatorGuide: string; agentBrief: string };
 }
 

@@ -11,9 +11,11 @@ describe('GET /policy', () => {
       profile: unknown;
       rules: unknown;
       summary: string;
+      notices: { reporterFeedback: boolean };
       documents: { codeOfConduct: string; moderatorGuide: string; agentBrief: string };
     };
-    expect(Object.keys(body).sort()).toEqual(['documents', 'profile', 'rules', 'summary']);
+    expect(Object.keys(body).sort()).toEqual(['documents', 'notices', 'profile', 'rules', 'summary']);
+    expect(body.notices).toEqual({ reporterFeedback: true });
     expect(Object.keys(body.documents).sort()).toEqual(['agentBrief', 'codeOfConduct', 'moderatorGuide']);
     expect(body.profile).toEqual(JSON.parse(JSON.stringify(cw.profile)));
     expect(body.rules).toEqual(JSON.parse(JSON.stringify(cw.rules.all())));
