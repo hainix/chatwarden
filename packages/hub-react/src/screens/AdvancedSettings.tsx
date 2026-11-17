@@ -4,6 +4,7 @@ import { useHub } from '../context.js';
 import { LazyAppealSettings, LazyDeskSettings, LazyFilterSettings, LazyNameSettings, LazyPaceSettings, LazyPrivacySettings, LazySafetySettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
 import { usePolicy } from '../policyHooks.js';
 import { ErrorBlock, Fetched } from '../ui.js';
+import { YourView } from './YourView.js';
 
 // Settings > Advanced: the one door for power settings. A panel is off until the owner turns it on, and nothing here is on a screen a moderator uses every
 // day. The policy is read once for all the panels (so they share one version, and a save in one is seen by the others); each panel is its own lazy chunk.
@@ -22,6 +23,8 @@ export function AdvancedSettingsScreen() {
         </h2>
       </div>
       <p className="cw-hint">{t('hub.settings.advanced.intro')}</p>
+      {/* The one panel that needs nothing from the server: this browser's own view of an excerpt. */}
+      <YourView />
       <Fetched state={{ data: policy.data, error: policy.error, loading: policy.loading, reload: policy.reload }} what={t('hub.state.what.settings')}>
         {(state) => (
           failed ? (

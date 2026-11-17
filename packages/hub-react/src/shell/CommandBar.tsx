@@ -9,6 +9,7 @@ import { personTag } from '../format.js';
 import { Icon } from '../icons.js';
 import { groupName } from '../labels.js';
 import { useOptionalQueue } from '../liveQueue.js';
+import { useCareSettings } from '../case/useCare.js';
 import { useFeatures } from '../features.js';
 import { TABS } from '../nav.js';
 import { keyLabel } from '../shortcuts.js';
@@ -36,6 +37,7 @@ export interface CommandBarProps {
 export function CommandBar({ shortcuts, onClose, onChoose }: CommandBarProps) {
   const { t, can, client } = useHub();
   const features = useFeatures();
+  const hiding = useCareSettings().hideExcerpts;
   const queue = useOptionalQueue();
   const canUndo = useOptionalDecisions()?.canUndo === true;
   const [query, setQuery] = useState('');
@@ -66,6 +68,7 @@ export function CommandBar({ shortcuts, onClose, onChoose }: CommandBarProps) {
     const out: CommandItem[] = [];
     if (queue !== null && can('reports.decide')) out.push({ id: 'action:take-next', kind: 'action', label: t('hub.queue.takeNext'), target: { type: 'takeNext' } });
     if (canUndo) out.push({ id: 'action:undo', kind: 'action', label: t('hub.command.undo'), target: { type: 'undo' } });
+    out.push({ id: 'action:care', kind: 'action', label: t(hiding ? 'hub.care.command.off' : 'hub.care.command.on'), target: { type: 'care' } });
     out.push({ id: 'action:shortcuts', kind: 'action', label: t('hub.command.shortcuts'), target: { type: 'shortcuts' } });
     for (const tab of TABS) {
       if (tab.permission === null || can(tab.permission)) out.push({ id: `screen:${tab.tab}`, kind: 'screen', label: t(tab.label), target: { type: 'go', route: tab.route } });
@@ -99,7 +102,7 @@ export function CommandBar({ shortcuts, onClose, onChoose }: CommandBarProps) {
     }
     for (const term of terms) out.push({ id: `term:${term}`, kind: 'term', label: term, target: { type: 'go', route: { name: 'terms' } } });
     return out;
-  }, [queue, can, t, terms, canUndo, features.insights]);
+  }, [queue, can, t, terms, canUndo, features.insights, hiding]);
 
   const results = useMemo(() => rankCommands(items, query), [items, query]);
   const found = activeId === null ? -1 : results.findIndex((r) => r.id === activeId);

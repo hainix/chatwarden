@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { NOTICE_WORDS, noticeView, restrictedChatText } from '@chatwarden/core/notice-copy';
 import type { EffectCode, NoticeOp, NoticePlan, NoticeView } from '@chatwarden/core/notice-copy';
 import type { PlayerNotice } from '@chatwarden/core';
+import { useOptionalCase } from '../case/CaseContext.js';
 import { useHub } from '../context.js';
 import { listOf } from '../format.js';
 import { Card } from '../ui.js';
@@ -37,6 +38,8 @@ const CARDED: readonly string[] = ['warning', 'chat', 'area', 'ban'];
 
 function NoticeBlock({ notice, view, appeals }: { notice: PlayerNotice; view: NoticeView; appeals: boolean }) {
   const { t } = useHub();
+  // The lines a notice would quote are the case's own words: while the careful view hides them, so does the preview.
+  const careHidden = useOptionalCase()?.care.hidden === true;
   const button = (label: string) => <span className="cw-pv-btn">{t('hub.preview.button', { label })}</span>;
   return (
     <div className="cw-pv-notice" lang="en">
@@ -56,7 +59,8 @@ function NoticeBlock({ notice, view, appeals }: { notice: PlayerNotice; view: No
         </dl>
       )}
       {view.refHint !== null && <p className="cw-pv-hint">{view.refHint}</p>}
-      {view.linesLabel !== null && (
+      {view.linesLabel !== null && careHidden && <p className="cw-hint">{t('hub.care.preview')}</p>}
+      {view.linesLabel !== null && !careHidden && (
         <>
           <p className="cw-pv-lines-label">{view.linesLabel}</p>
           <ul className="cw-pv-lines">

@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { AiReadSlot } from '../case/AiRead.js';
 import { AskedLine } from '../case/AskedLine.js';
+import { BreakNote } from '../case/BreakNote.js';
+import { HiddenExcerpt } from '../case/HiddenExcerpt.js';
 import { CaseMenu } from '../case/CaseMenu.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
 import { useCase } from '../case/CaseContext.js';
@@ -61,6 +63,7 @@ function Header({ detail }: { detail: ReportDetail }) {
       </div>
       <UrgentStrip />
       <AskedLine />
+      <BreakNote />
       {showHold && <LazyCaseHold reportId={report.id} hold={held} canHold={can('legal.hold')} canRelease={me.role === 'owner'} onChanged={read.reload} />}
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
         <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>
@@ -99,11 +102,26 @@ function Evidence({ detail }: { detail: ReportDetail }) {
   return (
     <>
       <AiReadSlot read={ai} />
-      <div className="cw-note">
-        <h3>{t('hub.report.note.label')}</h3>
-        {report.note === null || report.note.trim() === '' ? <p className="cw-hint">{t('hub.report.note.none')}</p> : <p className="cw-note-text">{report.note}</p>}
-      </div>
-      <Transcript report={report} people={people} picks={picks} />
+      {report.note === null || report.note.trim() === '' ? (
+        <div className="cw-note">
+          <h3>{t('hub.report.note.label')}</h3>
+          <p className="cw-hint">{t('hub.report.note.none')}</p>
+        </div>
+      ) : (
+        <HiddenExcerpt what="note">
+          <div className="cw-note">
+            <h3>{t('hub.report.note.label')}</h3>
+            <p className="cw-note-text">{report.note}</p>
+          </div>
+        </HiddenExcerpt>
+      )}
+      {report.excerpt.length === 0 ? (
+        <Transcript report={report} people={people} picks={picks} />
+      ) : (
+        <HiddenExcerpt what="chat" lines={report.excerpt.length}>
+          <Transcript report={report} people={people} picks={picks} />
+        </HiddenExcerpt>
+      )}
     </>
   );
 }

@@ -4394,3 +4394,38 @@
 .cw-hub .cw-insights-window {
   max-width: 16rem;
 }
+
+/* The careful view: the one button that stands in for a hidden excerpt, the opened content, the break note and the panel's count. A button and plain words: no colour of their own. */
+.cw-hub .cw-hidden-excerpt {
+  min-width: 0;
+  padding-block: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-hidden-excerpt .cw-btn {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-revealed {
+  min-width: 0;
+}
+.cw-hub .cw-revealed:focus {
+  outline: none;
+}
+.cw-hub .cw-break-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-break-note p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-care-count {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}

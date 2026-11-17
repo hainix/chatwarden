@@ -30,6 +30,8 @@ import { RuleField } from './RuleField.js';
 import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { Line } from './Transcript.js';
 import { AskedLine } from './AskedLine.js';
+import { BreakNote } from './BreakNote.js';
+import { HiddenExcerpt } from './HiddenExcerpt.js';
 import { CaseMenu } from './CaseMenu.js';
 import { UrgentStrip } from './UrgentStrip.js';
 
@@ -70,9 +72,8 @@ function Said({ report, target, people }: { report: StaffReport; target: ReportP
   const mine = ownLinesOf(all, target.ref);
   const more = all.length - mine.length;
   const shown = whole ? all : mine;
-  return (
-    <section className="cw-scard-said" aria-labelledby={id}>
-      <h3 id={id}>{t('hub.simple.said.title')}</h3>
+  const body = (
+    <>
       {mine.length === 0 && <p className="cw-hint">{t('hub.report.excerpt.silent', { name: personName(target, people, t) })}</p>}
       {shown.length > 0 && (
         <div className="cw-transcript cw-scard-lines">
@@ -97,6 +98,18 @@ function Said({ report, target, people }: { report: StaffReport; target: ReportP
         >
           {whole ? t('hub.simple.chat.hide') : t('hub.simple.chat.show', { count: more })}
         </button>
+      )}
+    </>
+  );
+  return (
+    <section className="cw-scard-said" aria-labelledby={id}>
+      <h3 id={id}>{t('hub.simple.said.title')}</h3>
+      {all.length === 0 ? (
+        body
+      ) : (
+        <HiddenExcerpt what="chat" lines={all.length}>
+          {body}
+        </HiddenExcerpt>
       )}
     </section>
   );
@@ -432,6 +445,7 @@ export function CaseCard() {
           </header>
           <UrgentStrip />
           <AskedLine />
+          <BreakNote />
           <CommentsDisclosure />
           <ReporterWarning report={report} people={people} />
           <AiReadSlot read={c.aiRead} />

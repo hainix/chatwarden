@@ -68,6 +68,15 @@ export function onPage(type: string, listener: (event: Event) => void): () => vo
   return () => window.removeEventListener(type, listener);
 }
 
+/**
+ * The same, in the capture phase: it runs before anything inside the page hears the event, so it can take a key (say, an Escape that closes a note) for itself with `stopPropagation()`
+ * before the hub's own handler acts on it.
+ */
+export function onPageFirst(type: string, listener: (event: Event) => void): () => void {
+  window.addEventListener(type, listener, true);
+  return () => window.removeEventListener(type, listener, true);
+}
+
 // ---- The page's hubs: who answers a key when nothing is focused -------------------------------------------------------------
 //
 // A hub hears the keys pressed while focus is inside it (React's `onKeyDown` on its root). After load, though, focus is on the page's

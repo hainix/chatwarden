@@ -20,6 +20,7 @@ import type { AppealDecisionInput, AppealDetail, PersonHistory, PolicyDocs, Reas
 import { Card, Fetched, Link, Masked, Notice, PersonChip, Tag, Time } from '../ui.js';
 import { Field } from './ActionEditor.js';
 import { ReasonChips } from './DecisionBar.js';
+import { HiddenExcerpt } from './HiddenExcerpt.js';
 
 // One appeal, in the case pane (appeals, design 4.9): what was given and why it was contested, in the player's own words (plain text, hidden when it trips the
 // term filter), what they were shown, and three ways to rule on it with a private reason. An appeal is decided by one write, so there is no claim and no Undo
@@ -158,9 +159,8 @@ function Statement({ appeal, nameFlagged }: { appeal: AppealDetail; nameFlagged:
   const flagged = appeal.statementFlagged;
   const all = reveal?.all === true;
   const shown = !flagged || all || reveal?.shows(STATEMENT) === true;
-  return (
-    <section className="cw-appeal-said" aria-labelledby={id}>
-      <h3 id={id}>{t('hub.appeals.statement.title')}</h3>
+  const body = (
+    <>
       {appeal.statement === null ? (
         <p className="cw-hint">{t('hub.appeals.statement.purged')}</p>
       ) : (
@@ -179,6 +179,12 @@ function Statement({ appeal, nameFlagged }: { appeal: AppealDetail; nameFlagged:
           </label>
         )}
       </div>
+    </>
+  );
+  return (
+    <section className="cw-appeal-said" aria-labelledby={id}>
+      <h3 id={id}>{t('hub.appeals.statement.title')}</h3>
+      {appeal.statement === null ? body : <HiddenExcerpt what="appeal">{body}</HiddenExcerpt>}
     </section>
   );
 }

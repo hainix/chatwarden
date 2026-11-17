@@ -19,6 +19,8 @@ import { NameRevealContext } from '../names.js';
 import type { NameReveal } from '../names.js';
 import type { AiReadView, DecideInput, PersonHistory, ReportDetail } from '../types.js';
 import { QUICK_ACT_COOLDOWN_MS, hasAged, monotonicNow } from './actGuard.js';
+import { useCareOpen } from './useCare.js';
+import type { CareOpen } from './useCare.js';
 import { useDecisionForm } from './useDecisionForm.js';
 import type { DecisionDraft } from './useDecisionForm.js';
 
@@ -42,6 +44,8 @@ export interface CaseValue {
   entry: DecisionEntry | undefined;
   /** The decision was made in this visit and the case is off the screen (waiting or just sent). False for a later visit to a closed case. */
   left: boolean;
+  /** The careful view of this case: whether its excerpts are hidden until opened, opening them, and the break note. A visit's state: gone when the case is left. */
+  care: CareOpen;
   /** The decision form, shared by the transcript's margin boxes and the decision bar. */
   draft: DecisionDraft;
   /** What the AI read of this report, or null (the AI is off, or no read yet). Advice, never a decision. */
@@ -98,6 +102,7 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     wantsHistory ? client.personHistory(person, { limit: 1 }) : Promise.resolve(null),
   );
 
+  const care = useCareOpen(now);
   const [revealAll, setRevealAll] = useState(false);
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((lineId: string): void => {
@@ -170,6 +175,7 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     next: report === undefined ? null : nextOpenReport(queue?.groups ?? [], report.targetPerson, reportId, decisions.decidedIds()),
     entry,
     left,
+    care,
     draft,
     aiRead,
     aiCase,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { CaseProvider } from './case/CaseContext.js';
+import { toggleHideExcerpts } from './care.js';
 import { CaseSession, useCaseActions } from './cases.js';
 import type { CommandTarget } from './commands.js';
 import { useHub } from './context.js';
@@ -277,6 +278,7 @@ function CommandWindow({ shortcuts, onClose, onFailed, open }: { shortcuts: bool
     if (target.type === 'go') go(target.route);
     else if (target.type === 'shortcuts') open('shortcuts');
     else if (target.type === 'undo') undo();
+    else if (target.type === 'care') toggleHideExcerpts();
     else void actions.takeNext();
   };
   return <LazyCommandBar shortcuts={shortcuts} onClose={onClose} onChoose={choose} onFailed={onFailed} />;
