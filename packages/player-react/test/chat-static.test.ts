@@ -69,7 +69,7 @@ describe('the words', () => {
 
   it('every dynamic player.chat.<x>.${...} key has a catalog entry for each value it is given', () => {
     // The refusal and closed tables are read as `player.chat.refused.${reason}` and `player.chat.closed.${why}`.
-    for (const reason of ['length', 'rate', 'gate', 'blocked', 'profanity', 'slow_mode', 'flood', 'duplicate', 'unknown']) expect(keys.has(`player.chat.refused.${reason}`), reason).toBe(true);
+    for (const reason of ['length', 'rate', 'gate', 'blocked', 'profanity', 'link', 'personal_info', 'filter', 'slow_mode', 'flood', 'duplicate', 'unknown']) expect(keys.has(`player.chat.refused.${reason}`), reason).toBe(true);
     for (const why of ['banned', 'forbidden', 'unauthorized', 'room_closed', 'shutdown', 'replaced', 'not_found', 'unsupported']) expect(keys.has(`player.chat.closed.${why}`), why).toBe(true);
   });
 

@@ -33,6 +33,10 @@ export const enChat = {
   'player.chat.refused.gate': 'You cannot send messages here right now.',
   'player.chat.refused.blocked': 'That message was not sent. It breaks a community rule.',
   'player.chat.refused.profanity': 'That message was not sent. Please leave out the swearing.',
+  // The chat filters (links, personal info, phrases, caps and repeats). The rule's own label follows when the refusal names one, as for `blocked`. Nothing says which pattern matched.
+  'player.chat.refused.link': 'Links are not allowed in chat here.',
+  'player.chat.refused.personal_info': "Please don't share personal details such as phone numbers or emails.",
+  'player.chat.refused.filter': 'That message was not sent. It breaks a chat rule.',
   'player.chat.refused.slow_mode': 'Slow mode is on. You can send another message in {left}.',
   'player.chat.refused.flood': 'You are sending messages too fast. Try again in {left}.',
   'player.chat.refused.duplicate': 'You already sent that. Say something different, or try again in {left}.',

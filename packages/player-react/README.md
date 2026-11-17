@@ -555,6 +555,14 @@ it itself (`player.chat.refused.*`, with the wait held on Send); for your own UI
 catalogs). With no usable wait the box uses the `.soon` sentences ("Try again in a moment."), and `player.pace.ready` ("You can send a message again.") is
 what `RestrictedChatLine` says once the wait is over; it appears only when the parent renders again.
 
+## Chat filter words
+
+New in 0.2.0, `@experimental`. When the owner turns on a chat filter a refusal can also be `link`, `personal_info` or `filter` (a phrase, caps or repeats), with the
+Community Rule the owner chose. The box words each one (`player.chat.refused.link`, `player.chat.refused.personal_info`, `player.chat.refused.filter`: "Links are not
+allowed in chat here.", "Please don't share personal details such as phone numbers or emails.", "That message was not sent. It breaks a chat rule.") and adds
+"Community Rule N." when the refusal names one, as it does for `blocked`. Nothing says which pattern matched. A line the filter masks reaches its author as the
+delivered text, so the box shows what everyone else sees. A reason the box does not know gets the generic sentence.
+
 ## Security notes
 
 - **Nothing else about anyone reaches the page.** The components show only what `GET /notices` and `GET /record` return: the rule, the

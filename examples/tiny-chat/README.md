@@ -77,6 +77,21 @@ CW_DEMO_PACE=1 npm start -w @chatwarden/example-tiny-chat
   a `pace` in `overrides` wins field by field. A real app sets `pace` in its profile, or the owner sets it in the hub (Settings, Advanced).
 - It is per process, like the fixed rate limit: this demo is one process.
 
+## Chat filters (demo, optional)
+
+Off unless `CW_DEMO_FILTERS=1`. With it, tiny-chat turns on three chat filters (`overrides.filters`): a link is refused (the box says "Links are not allowed in
+chat here. Community Rule 4."), a phone number or an email is masked (the author sees the starred line, as everyone does), and a line with "buy gold" is
+delivered and files a report with no reporter. Open the moderator hub: the report is in the queue as "Filter: Gold ads", with no reporter, and a moderator
+decides it like any other. Settings, Advanced, "Chat filters" shows what each filter did. Without the variable none of it exists.
+
+```sh
+CW_DEMO_FILTERS=1 npm start -w @chatwarden/example-tiny-chat
+```
+
+- `startServer({ demoFilters })` takes the same switch as an option (an option that is passed wins over the environment; `false` forces it off), and a
+  `filters` in `overrides` wins block by block. A real app sets `filters` in its profile, or the owner sets them in the hub.
+- The WebSocket protocol sends `{ type: 'refused', reason: 'link', rule: 4 }` for a refused link, and never the matched part.
+
 ## Appeals and renames (demo, optional)
 
 Off unless `CW_DEMO_APPEALS=1`. With it, tiny-chat turns on appeals (`overrides.appeals.enabled`) and required renames (`overrides.names.renames`).

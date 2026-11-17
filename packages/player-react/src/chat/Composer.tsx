@@ -9,7 +9,7 @@ import type { SendResult, WireLine, WireRefusal } from './wire.js';
 /** How long a refusal stays under the input (a wait stays until it ends). */
 const REFUSAL_MS = 8000;
 /** The reasons with a sentence of their own; any other gets the generic one. */
-const KNOWN = new Set(['length', 'rate', 'gate', 'blocked', 'profanity', 'slow_mode', 'flood', 'duplicate']);
+const KNOWN = new Set(['length', 'rate', 'gate', 'blocked', 'profanity', 'link', 'personal_info', 'filter', 'slow_mode', 'flood', 'duplicate']);
 /** The reasons whose sentence holds the wait. */
 const WITH_WAIT = new Set(['slow_mode', 'flood', 'duplicate']);
 /** The counter shows in the last this many characters. */

@@ -597,11 +597,13 @@ on until an owner turns a block on, and a filter never writes a strike, a sancti
 
 A refused author is told the kind (`link`, `personal_info`, `filter`) and the rule, never the matched part. Filters fail open: a throw inside them is logged by class and
 the line goes on. `cw.filters.test(text, candidate?)` tries a line, `cw.filters.check(candidate, lines)` runs candidate settings over recent lines, and
-`cw.filters.stats({ days: 7 | 30 })` reads what the filters did (counts by counter key and applied action, held in memory and written every 30 seconds).
+`cw.filters.stats({ days: 7 | 30 })` reads what the filters did (counts by counter key and applied action, held in memory and written to the store every 30 seconds and on `close()`: a crash loses at most 30 seconds of counts, and the counts are for tuning, not for evidence). A day's rows are kept `retention.filterHitsMs` (90 days, at least 30).
+
+A `flag` files one report with no reporter through `cw.reports.fileSystem({ origin: 'filter', originKey, roomId, target, lineId, reportedReason })`: an ordinary open report (the room's evidence as its excerpt, `reporterPerson` null in the staff views, `report.created` with `origin: 'filter'`) that a person decides, and that touches no reporter machinery (no accuracy, notice, suspension, bulk dismissal or AI act). There is at most one open filter report for a person in a room, and at most `flagCapPerDay` (default 50) filter reports a UTC day across the instance, counted from the store so processes sharing it share the count. It answers `filed`, `open_exists`, `capped`, `no_subject` (a guest) or `off`, and the counters say what came of each flag: `flag`, `flag_capped` or `count`. A `Store` you write yourself needs `addFilterHits`, `listFilterHits`, `purgeFilterHits` and `countOriginReports`, and its `insertReport` answers false for a second open `'filter'` report against one person in one room (SQLite: migration 26, `kit_filter_hits` and the `origin` and `origin_key` columns of `kit_reports`).
 
 **Experimental in 0.2.0:** `FilterSettings`, `LinkSettings`, `PersonalInfoSettings`, `PhraseRuleSettings`, `RatioSettings`, `ResolvedFilters` and its parts,
 `resolveFilters`, `checkFilters`, `mergeFilters`, `overlayFilters`, `FILTER_SUGGESTIONS`, `FILTER_ACTIONS`, `FILTER_LIMITS`, `SHARED_HOSTING_SUFFIXES`,
-`FilterVerdict`, `FilterHit`, `FilterRefusal`, `FilterStats`, `FilterTestResult`, `FilterCheckResult`, `cw.filters`, `ChatServiceDeps.filters` and the three new
+`FilterVerdict`, `FilterHit`, `FilterRefusal`, `FilterStats`, `FilterTestResult`, `FilterCheckResult`, `FilterHitRow`, `ReportOrigin`, `SystemReportInput`, `SystemReportResult`, `cw.filters`, `cw.reports.fileSystem`, `ChatServiceDeps.filters` and the three new
 `RefuseReason` values `link`, `personal_info` and `filter` (an exhaustive `switch` over the reasons needs the new cases to compile).
 
 ## Upgrading to 0.1.9

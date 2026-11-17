@@ -51,7 +51,8 @@ export interface WireMuted {
 
 /**
  * Why a line was not sent, for its author. `reason` is one of: `length`, `rate`, `gate`, `restricted`, `blocked`, `profanity`, `banned`,
- * `empty`, and, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`). A reader treats any other string as unknown.
+ * `empty`, `link`, `personal_info` and `filter` (the chat filters, `profile.filters`: a link, personal details, a phrase rule or caps and repeats;
+ * with `rule`, the Community Rule the owner chose for it, and never what matched), and, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`). A reader treats any other string as unknown.
  * Never carries text, a handle, an id or a moderator's note.
  * @experimental
  */

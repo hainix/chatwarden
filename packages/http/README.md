@@ -567,7 +567,7 @@ proxy from holding its first frames back. Errors use the kit's shapes.
 | Route | Body | Answer |
 | --- | --- | --- |
 | `GET /rooms/:room/stream` | none | `200 text/event-stream`: a `hello` first, then `line`, `hide`, `state`, `notices` and `bye` frames, and a `: ping` comment every `heartbeatMs` |
-| `POST /rooms/:room/lines` | `{ text }` | `200 { ok: true, line }` or `200 { ok: false, refused: { reason, until?, byModerator?, rule?, noticeId?, retryAfterMs? } }` (a refusal is an answer) |
+| `POST /rooms/:room/lines` | `{ text }` | `200 { ok: true, line }` or `200 { ok: false, refused: { reason, until?, byModerator?, rule?, noticeId?, retryAfterMs? } }` (a refusal is an answer). With the chat filters on (0.2.0, `profile.filters`) `reason` can also be `link`, `personal_info` or `filter`, with the `rule` the owner chose and never what matched; a masked line is delivered starred and the author's `line` shows the starred text |
 | `POST /rooms/:room/mute` | `{ lineId, on }` or `{ ref, on }` | `200 { ok, hiddenIds }`: the ids of the muted player's lines the server hid from the muter |
 | `POST /rooms/:room/report` | `{ lineId, reason?, note? }` | `200 { ok: true, remaining }` or `200 { ok: false, refused }`; nothing else, never a report id |
 

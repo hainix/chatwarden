@@ -41,6 +41,7 @@
 //              WebSocket protocol above, for a browser: Server-Sent Events down, POST up.
 //              GET  /chat/rooms/:room/stream           the stream (hello, line, hide, state, notices, bye frames)
 //              POST /chat/rooms/:room/lines { text }   -> { ok: true, line } | { ok: false, refused: { reason, until?, rule?, noticeId?, ... } }
+//              (CW_DEMO_FILTERS=1 turns on three chat filters: a link is refused `link`, a phone number is masked, "buy gold" files a report with no reporter)
 //              POST /chat/rooms/:room/mute { lineId | ref, on }       -> { ok, hiddenIds }
 //              POST /chat/rooms/:room/report { lineId, reason?, note? } -> { ok: true, remaining } | { ok: false, refused }
 //              DEMO ONLY identity, as for /api: the `x-chatwarden-key` header, or `?key=`. The name other players see is `Player N`, N a
@@ -141,6 +142,14 @@ export interface TinyChatOptions {
    * which is the rule working. A real app sets `appeals` and `names` in its profile, or the owner sets them in the hub (Settings, Advanced).
    */
   demoAppeals?: boolean;
+  /**
+   * DEMO ONLY: turn on three chat filters (`overrides.filters`), so they can be seen with the chat box and over the WebSocket: a link is refused (`link`,
+   * Community Rule 4), a phone number or email is masked, and a "buy gold" phrase is delivered and files a report with no reporter that a moderator reads in the
+   * queue (the staff routes show its `reporterPerson` as null). Default: on when the `CW_DEMO_FILTERS` environment variable is exactly `1`. An explicit `false`
+   * forces it off. A `filters` you give in `overrides` wins block by block. A real app sets `filters` in its profile, or the owner sets them in the hub
+   * (Settings, Advanced, Chat filters).
+   */
+  demoFilters?: boolean;
 }
 
 /** The secret to run with, or a throw in production when none was configured. */
@@ -321,6 +330,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   // The demo appeals: only when asked (the option, else CW_DEMO_APPEALS=1). Off, the profile has no appeals and no names section at all.
   const demoAppeals = opts.demoAppeals !== undefined ? opts.demoAppeals : process.env.CW_DEMO_APPEALS === '1';
   if (demoAppeals) console.warn('tiny-chat: CW_DEMO_APPEALS is on: players can appeal a sanction and moderators can ask for a new name. It is a demo setting; the owner can change it in the hub (Settings, Advanced).');
+  // The demo chat filters: only when asked (the option, else CW_DEMO_FILTERS=1). Off, the profile has no filters at all.
+  const demoFilters = opts.demoFilters !== undefined ? opts.demoFilters : process.env.CW_DEMO_FILTERS === '1';
+  if (demoFilters) console.warn('tiny-chat: CW_DEMO_FILTERS is on: links are refused, phone numbers and emails are masked, and "buy gold" files a report for a moderator. They are demo settings; the owner can change them in the hub (Settings, Advanced).');
   const terms = new LiveTerms({ store, pack: opts.pack ?? syntheticTermPack(), clock });
   await terms.load();
 
@@ -362,6 +374,16 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       ...opts.overrides,
       ...(demoAi ? { ai: { level: 2, ...opts.overrides?.ai } } : {}),
       ...(demoPace ? { pace: { slowModeMs: 2000, ...opts.overrides?.pace } } : {}),
+      ...(demoFilters
+        ? {
+            filters: {
+              links: { action: 'refuse' as const },
+              personalInfo: { action: 'mask' as const },
+              phrases: [{ id: 'gold', label: 'Gold ads', action: 'flag' as const, phrases: ['buy gold', 'free gold'] }],
+              ...opts.overrides?.filters,
+            },
+          }
+        : {}),
       ...(demoAppeals ? { appeals: { enabled: true, ...opts.overrides?.appeals }, names: { renames: true, ...opts.overrides?.names } } : {}),
     },
     ...(demoAi ? { ai: { adapter: createFakeModerationAI(demoScript, { id: 'demo-fake' }) } } : {}),
