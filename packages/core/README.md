@@ -770,6 +770,7 @@ in a browser.
 | `autoRestrictRule` | The rule number the automatic slur filter cites (default 1). Must be an active rule. |
 | `ai` | `{ adapter, maxLevel?, dailyBudgetMicros?, ... }`: turns on AI reads (levels 1 and 2). Off without it. See "The AI (levels 1 and 2)" below. |
 | `signals` | `{ accountAgeDays? }`: the one hook the profile cannot hold (how old a player's account is, for the new-account guard). The kinds, guards and feeds are in `profile.signals`. Needs a store with the signal methods (SQLite; `withMemorySignals(store)` for the in-memory store). `@experimental`. |
+| `bundleSecret` | `@experimental`. At least 32 characters: signs the evidence bundle of a held report (`cw.legal.bundle`) with an HMAC. Never logged, never echoed. Without one the bundle is produced unsigned (`hmacSha256: null`). A shorter one throws at creation. |
 
 Bad options throw at creation (`ProfileError`, `RangeError`), before the store is touched.
 

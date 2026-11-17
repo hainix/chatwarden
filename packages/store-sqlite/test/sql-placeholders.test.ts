@@ -185,6 +185,8 @@ describe('the privacy statements bind exactly as many values as they have placeh
       .filter(([k, v]) => k.endsWith('_SQL') && typeof v === 'string')
       .map(([k, v]) => [k, v as string] as [string, string]),
     ['IDENTIFIER_UPSERT_SQL', IDENTIFIER_UPSERT_SQL],
+    ['AI_ACTION_PURGE_SQL', AI_ACTION_PURGE_SQL],
+    ['AI_ACTION_NOTES_SQL', AI_ACTION_NOTES_SQL],
   ]);
   const EXPECTED: Record<string, number> = {
     ERASE_CLOSURE_SQL: 1,
@@ -209,6 +211,13 @@ describe('the privacy statements bind exactly as many values as they have placeh
     ERASURES_PURGE_SQL: 1,
     EXPORT_MUTES_SQL: 4,
     EXPORT_SANCTIONS_SQL: 2,
+    HOLD_PLACE_SQL: 4,
+    HOLD_RELEASE_SQL: 3,
+    HOLD_LOAD_SQL: 1,
+    HOLD_LIST_SQL: 0,
+    EXPORT_HOLDS_SQL: 3,
+    AI_ACTION_PURGE_SQL: 1,
+    AI_ACTION_NOTES_SQL: 1,
     IDENTIFIER_UPSERT_SQL: 6,
   };
 

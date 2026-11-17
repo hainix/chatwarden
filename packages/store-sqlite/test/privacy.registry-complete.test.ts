@@ -40,8 +40,7 @@ describe('completeness (sqlite): every kit_ table in sqlite_master is in the reg
         .all()
         .map((r) => String(r.name)),
     );
-    // kit_legal_holds is added by the legal-hold task (migration 26 block 3); until it lands the registry may name it before the table exists.
-    for (const t of claimed()) if (t !== 'kit_legal_holds') expect(real.has(t), t).toBe(true);
+    for (const t of claimed()) expect(real.has(t), t).toBe(true);
   });
 
   it('names the tables and columns this release added: kit_filter_hits, kit_erasures, kit_reports.origin and origin_key and their indexes', () => {

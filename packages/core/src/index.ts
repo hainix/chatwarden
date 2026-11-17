@@ -1,4 +1,4 @@
-export const VERSION = '0.1.14';
+export { VERSION } from './version.js';
 
 export type {
   Clock,
@@ -240,6 +240,12 @@ export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 export { WEBHOOK_KEY_TTL_MS } from './types.js';
+export { HOLD_CODES, isHoldCode } from './legal.js';
+export type { HeldSet, HoldCode, HoldRow } from './legal.js';
+export { BUNDLE_DISCLAIMER } from './legalService.js';
+export type { BundlePerson, EvidenceBundle, HoldResult, LegalService } from './legalService.js';
+export { CANONICALIZATION, canonicalJson, signBundle, verifyBundle } from './canonical.js';
+export type { BundleIntegrity } from './canonical.js';
 export {
   ERASED_LINE,
   EXPORT_SECTION_MAX,

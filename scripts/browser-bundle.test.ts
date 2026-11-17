@@ -47,7 +47,11 @@ const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.
 // Raised to 160 KB at 0.2.0: the chat filters (the link, personal-info, ratio and phrase scanners, the engine and the settings) are imported statically
 // by the chat path and add about 13 KB gzip (design note on filters, Ruling 25). If this guard trips again because of them, the engine can be split
 // behind an `import()` loaded when `filters` is first set (the signals precedent); that was not needed to stay under this budget.
-const SIZE_BUDGET_GZIP = 160 * 1024;
+// Raised to 176 KB at 0.2.0 (privacy and legal hold): the store contract grows by the export, the erase and the hold in the in-memory store (about 2 KB gzip),
+// and core carries the privacy registry, the canonical JSON and the bundle (about 4 KB). With the dist rebuilt, the hub's own strings (the Chat filters panel
+// words) already put the entry near 161 KB, so this is the generous raise the release asks for; the guard still catches large accidental growth. The bundle
+// builder and the registry could load behind an `import()` the way the signal service does, if a later theme needs the room.
+const SIZE_BUDGET_GZIP = 176 * 1024;
 
 /**
  * The browser build without the server-only AI module, as a bundler that splits at `import()` gives a page that never passes an adapter:

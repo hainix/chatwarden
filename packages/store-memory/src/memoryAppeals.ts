@@ -204,8 +204,9 @@ class MemoryAppeals extends MemoryStore {
 
   clearAppealStatements(before: number): number {
     const cleared: Array<{ row: AppealRow; statement: string }> = [];
+    const heldGroups = this.heldGroupIds();
     for (const r of this.appealState().rows.values()) {
-      if (r.status === 'open' || r.decidedAt === null || r.decidedAt >= before || r.statement === null) continue;
+      if (r.status === 'open' || r.decidedAt === null || r.decidedAt >= before || r.statement === null || heldGroups.has(r.groupId)) continue;
       cleared.push({ row: r, statement: r.statement });
       r.statement = null;
     }
@@ -220,8 +221,9 @@ class MemoryAppeals extends MemoryStore {
   purgeAppeals(before: number): number {
     const s = this.appealState();
     const gone: AppealRow[] = [];
+    const heldGroups = this.heldGroupIds();
     for (const r of s.rows.values()) {
-      if (r.status === 'open' || r.decidedAt === null || r.decidedAt >= before) continue;
+      if (r.status === 'open' || r.decidedAt === null || r.decidedAt >= before || heldGroups.has(r.groupId)) continue;
       // A decided appeal on a sanction still in force stays (no end, or an end after the cutoff): it is what stops a second appeal against it.
       const held = this.sanctions.find((x) => x.groupId === r.groupId && x.targetType === 'subject');
       if (held !== undefined && held.kind !== 'warning' && held.kind !== 'note' && held.revokedAt === null && (held.endsAt === null || held.endsAt > before)) continue;

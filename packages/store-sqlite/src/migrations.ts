@@ -781,6 +781,9 @@ CREATE INDEX kit_ai_actions_by_created ON kit_ai_actions (created_at);
     //   the insert's second ON CONFLICT clause names; `kit_reports_by_origin` serves the daily cap (`origin = ? AND created_at >= ?`).
     // Block 2 (chat filters): `kit_filter_hits`, one row per UTC day, counter key and applied action. No person, no room, no text; counts for tuning a rule.
     //   `action` is what was applied: count, flag, mask, refuse, or flag_capped (the daily cap turned a flag into a count).
+    // Block 3 (legal hold): `kit_legal_holds`, one row per held report (report id, a code from the closed list, who and when, and the release). The row stays after a
+    //   release (the audit story) and a new hold on the same report replaces it. `kit_legal_holds_open` is the partial index the purges and the erase read to find the open
+    //   holds: every purge statement excludes the reports in it, and the sanction groups decided from them.
     // Block 4 (privacy requests): `kit_erasures`, one receipt row per erase (counts as JSON, no subject, no text); `pending_subject` is set only while an erase keeps
     //   a remainder (a sanction in force) and is cleared when it finishes, and its partial index serves `purge()`'s finish pass. One `kit_meta` row, `erasure_epoch`,
     //   a counter every erase moves, which another process re-reads to learn that a person it has in memory is gone.
@@ -800,6 +803,16 @@ CREATE TABLE kit_filter_hits (
   hits   INTEGER NOT NULL,
   PRIMARY KEY (day, key, action)
 ) WITHOUT ROWID;
+
+CREATE TABLE kit_legal_holds (
+  report_id   TEXT PRIMARY KEY,
+  code        TEXT NOT NULL CHECK (code IN ('law_enforcement_request', 'legal_proceeding', 'platform_request', 'safety_review', 'other')),
+  held_by     TEXT NOT NULL,
+  held_at     INTEGER NOT NULL,
+  released_by TEXT,
+  released_at INTEGER
+);
+CREATE INDEX kit_legal_holds_open ON kit_legal_holds (released_at) WHERE released_at IS NULL;
 
 CREATE TABLE kit_erasures (
   id              TEXT PRIMARY KEY,

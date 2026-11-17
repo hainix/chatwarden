@@ -71,6 +71,9 @@ import type {
   ErasureCounts,
   ErasureRow,
   SubjectExport,
+  HeldSet,
+  HoldCode,
+  HoldRow,
 } from '@chatwarden/core';
 import type {
   AuditEntry,
@@ -82,6 +85,15 @@ import type {
 } from '@chatwarden/matcher';
 import {
   ERASURES_PURGE_SQL,
+  HELD_GROUP_IDS,
+  HELD_REPORT_IDS,
+  HOLD_LIST_SQL,
+  HOLD_LOAD_SQL,
+  HOLD_PLACE_SQL,
+  HOLD_RELEASE_SQL,
+  HELD_SET_GROUPS_SQL,
+  SANCTION_GROUPS_OF_REPORT_SQL,
+  HELD_SET_REPORTS_SQL,
   eraseSubjects as eraseSubjectsSql,
   erasureEpoch as erasureEpochSql,
   exportSubjects as exportSubjectsSql,
@@ -579,8 +591,8 @@ export const aiActionListSql = (states: number, cursor: boolean): string =>
   } ORDER BY created_at DESC, id DESC LIMIT ?`;
 /** Rows created at or after a time, counted by state and refusal code. */
 /** Retention of the action rows (`retention.aiActionsMs`): by age through `kit_ai_actions_by_created`; a reviewer's private note goes with the report window. */
-export const AI_ACTION_PURGE_SQL = 'DELETE FROM kit_ai_actions WHERE created_at < ?';
-export const AI_ACTION_NOTES_SQL = 'UPDATE kit_ai_actions SET undo_note = NULL WHERE created_at < ? AND undo_note IS NOT NULL';
+export const AI_ACTION_PURGE_SQL = `DELETE FROM kit_ai_actions WHERE created_at < ? AND report_id NOT IN ${HELD_REPORT_IDS}`;
+export const AI_ACTION_NOTES_SQL = `UPDATE kit_ai_actions SET undo_note = NULL WHERE created_at < ? AND undo_note IS NOT NULL AND report_id NOT IN ${HELD_REPORT_IDS}`;
 export const AI_ACTION_COUNTS_SQL = 'SELECT state, refused_code, COUNT(*) AS n FROM kit_ai_actions WHERE created_at >= ? GROUP BY state, refused_code';
 /** The states in which an action acted (or, in shadow, would have). */
 const AI_ACTED_STATES = "('shadow', 'active', 'confirmed', 'undone')";
@@ -648,6 +660,18 @@ export function inSavepoint<T>(db: DatabaseSync, fn: () => T): T {
   }
   db.exec(`RELEASE ${name}`);
   return value;
+}
+
+/** A `kit_legal_holds` row as the facade's {@link HoldRow}. */
+function holdRowOf(r: Record<string, unknown>): HoldRow {
+  return {
+    reportId: String(r.report_id),
+    code: String(r.code) as HoldCode,
+    heldBy: String(r.held_by),
+    heldAt: Number(r.held_at),
+    releasedBy: r.released_by === null ? null : String(r.released_by),
+    releasedAt: r.released_at === null ? null : Number(r.released_at),
+  };
 }
 
 /** A `kit_links` row as the facade's {@link LinkRow}. */
@@ -1358,11 +1382,11 @@ export class SqliteStore implements Store, TermStore {
 
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
     return this.transaction(() => {
-      const reads = Number(this.db.prepare('DELETE FROM kit_ai_reads WHERE created_at < ?').run(readsBefore).changes);
+      const reads = Number(this.db.prepare(`DELETE FROM kit_ai_reads WHERE created_at < ? AND report_id NOT IN ${HELD_REPORT_IDS}`).run(readsBefore).changes);
       this.db.prepare('DELETE FROM kit_ai_spend WHERE at < ?').run(readsBefore);
-      const outcomes = Number(this.db.prepare('DELETE FROM kit_ai_outcomes WHERE decided_at < ?').run(outcomesBefore).changes);
+      const outcomes = Number(this.db.prepare(`DELETE FROM kit_ai_outcomes WHERE decided_at < ? AND report_id NOT IN ${HELD_REPORT_IDS}`).run(outcomesBefore).changes);
       // The only chat text that outlives a report goes on its own, shorter clock; the row keeps its counts.
-      this.db.prepare('UPDATE kit_ai_outcomes SET example_json = NULL WHERE decided_at < ? AND example_json IS NOT NULL').run(examplesBefore);
+      this.db.prepare(`UPDATE kit_ai_outcomes SET example_json = NULL WHERE decided_at < ? AND example_json IS NOT NULL AND report_id NOT IN ${HELD_REPORT_IDS}`).run(examplesBefore);
       return { reads, outcomes };
     });
   }
@@ -1759,7 +1783,7 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() =>
       Number(
         this.db
-          .prepare("UPDATE kit_appeals SET statement = NULL WHERE status <> 'open' AND decided_at < ? AND statement IS NOT NULL")
+          .prepare(`UPDATE kit_appeals SET statement = NULL WHERE status <> 'open' AND decided_at < ? AND statement IS NOT NULL AND group_id NOT IN ${HELD_GROUP_IDS}`)
           .run(before).changes,
       ),
     );
@@ -1773,7 +1797,7 @@ export class SqliteStore implements Store, TermStore {
             // A decided appeal on a sanction still in force stays: no end, or an end after the cutoff, and not revoked. That row is what
             // stops a second appeal against it.
             `DELETE FROM kit_appeals
-             WHERE status <> 'open' AND decided_at < ?
+             WHERE status <> 'open' AND decided_at < ? AND group_id NOT IN ${HELD_GROUP_IDS}
                AND NOT EXISTS (
                  SELECT 1 FROM kit_sanctions s
                  WHERE s.group_id = kit_appeals.group_id AND s.target_type = 'subject' AND s.revoked_at IS NULL
@@ -1960,6 +1984,12 @@ export class SqliteStore implements Store, TermStore {
       where.push(`(${AUDIT_ACTION_SQL}) = ?`);
       args.push(q.action);
     }
+    if (q.targets !== undefined) {
+      const targets = q.targets.slice(0, 20);
+      // An empty list matches nothing.
+      where.push(targets.length === 0 ? '0 = 1' : `(${targets.map(() => '(subject_type = ? AND subject_ref = ?)').join(' OR ')})`);
+      for (const t of targets) args.push(t.type, t.ref);
+    }
     if (q.before !== undefined) {
       if (q.beforeId === undefined) {
         where.push('at < ?');
@@ -1981,7 +2011,16 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() => {
       // An erasure receipt lives as long as an audit row; one that still keeps a subject (a pending remainder) is never dropped.
       this.db.prepare(ERASURES_PURGE_SQL).run(before);
-      return Number(this.db.prepare('DELETE FROM kit_audit WHERE at < ?').run(before).changes);
+      // The audit rows that name a held report or one of its sanction groups stay with them.
+      return Number(
+        this.db
+          .prepare(
+            `DELETE FROM kit_audit WHERE at < ?
+               AND NOT (subject_type = 'report' AND subject_ref IN ${HELD_REPORT_IDS})
+               AND NOT (subject_type = 'sanction' AND subject_ref IN ${HELD_GROUP_IDS})`,
+          )
+          .run(before).changes,
+      );
     });
   }
 
@@ -2009,6 +2048,36 @@ export class SqliteStore implements Store, TermStore {
 
   erasureEpoch(): number {
     return this.transaction(() => erasureEpochSql(this.db));
+  }
+
+  // Legal hold (0.2.0). A hold is a row; every purge and the erase read it themselves (see the statements in ./privacy.ts).
+
+  placeHold(row: HoldRow): boolean {
+    return this.transaction(() => Number(this.db.prepare(HOLD_PLACE_SQL).run(row.reportId, row.code, row.heldBy, row.heldAt).changes) > 0);
+  }
+
+  releaseHold(reportId: string, by: string, at: number): boolean {
+    return this.transaction(() => Number(this.db.prepare(HOLD_RELEASE_SQL).run(by, at, reportId).changes) > 0);
+  }
+
+  loadHold(reportId: string): HoldRow | null {
+    const r = this.transaction(() => this.db.prepare(HOLD_LOAD_SQL).get(reportId));
+    return r === undefined ? null : holdRowOf(r);
+  }
+
+  listHolds(): HoldRow[] {
+    return this.transaction(() => this.db.prepare(HOLD_LIST_SQL).all().map(holdRowOf));
+  }
+
+  sanctionGroupsOfReport(reportId: string): string[] {
+    return this.transaction(() => this.db.prepare(SANCTION_GROUPS_OF_REPORT_SQL).all(reportId).map((r) => String(r.group_id)));
+  }
+
+  heldSet(): HeldSet {
+    return this.transaction(() => ({
+      reportIds: this.db.prepare(HELD_SET_REPORTS_SQL).all().map((r) => String(r.report_id)),
+      groupIds: this.db.prepare(HELD_SET_GROUPS_SQL).all().map((r) => String(r.group_id)),
+    }));
   }
 
   // Webhook keys. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.
@@ -2549,14 +2618,16 @@ export class SqliteStore implements Store, TermStore {
         .prepare(
           `DELETE FROM kit_ai_reads WHERE report_id IN (
              SELECT id FROM kit_reports
-             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?))`,
+             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?)
+               AND id NOT IN ${HELD_REPORT_IDS})`,
         )
         .run(before, keepBadFaithSince);
       const n = Number(
         this.db
           .prepare(
             `DELETE FROM kit_reports
-             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?)`,
+             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?)
+               AND id NOT IN ${HELD_REPORT_IDS}`,
           )
           .run(before, keepBadFaithSince).changes,
       );
@@ -2573,7 +2644,8 @@ export class SqliteStore implements Store, TermStore {
           .prepare(
             `DELETE FROM kit_sanctions
              WHERE ((ends_at IS NOT NULL AND ends_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?))
-               AND (gap_status IS NULL OR gap_status <> 'open')`
+               AND (gap_status IS NULL OR gap_status <> 'open')
+               AND group_id NOT IN ${HELD_GROUP_IDS}`
           )
           .run(before, before).changes,
       ),
@@ -2598,12 +2670,13 @@ export class SqliteStore implements Store, TermStore {
         this.db
           .prepare(
             `DELETE FROM kit_notices
-             WHERE (withdrawn_at IS NOT NULL AND created_at < ?)
+             WHERE ((withdrawn_at IS NOT NULL AND created_at < ?)
                 OR (acked_at IS NOT NULL AND created_at < ?
                     AND kind IN ('warning', 'report_outcome', 'rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'))
                 OR (acked_at IS NULL AND kind IN ('appeal_upheld', 'appeal_reduced', 'appeal_revoked') AND created_at < ?)
                 OR (acked_at IS NULL AND kind = 'rename_required' AND created_at < ?)
-                OR (until IS NOT NULL AND until < ?)`,
+                OR (until IS NOT NULL AND until < ?))
+               AND (group_id IS NULL OR group_id NOT IN ${HELD_GROUP_IDS})`,
           )
           .run(before, before, appealBefore, renameBefore, before).changes,
       ),

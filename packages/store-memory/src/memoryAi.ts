@@ -530,8 +530,9 @@ class MemoryAi extends MemoryStore {
     // In place, so the journal of an earlier write in the same transaction still points at this list.
     const rows = this.actions();
     const snapshot = [...rows];
-    const kept = snapshot.filter((r) => r.createdAt >= before);
-    const noted = kept.filter((r) => r.createdAt < undoNotesBefore && r.undoNote !== null).map((r) => [r, r.undoNote] as const);
+    const held = this.heldReportIds();
+    const kept = snapshot.filter((r) => r.createdAt >= before || held.has(r.reportId));
+    const noted = kept.filter((r) => r.createdAt < undoNotesBefore && r.undoNote !== null && !held.has(r.reportId)).map((r) => [r, r.undoNote] as const);
     for (const [r] of noted) r.undoNote = null;
     rows.splice(0, rows.length, ...kept);
     this.undoWith(() => {
@@ -544,12 +545,14 @@ class MemoryAi extends MemoryStore {
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
     const reads = this.aiReads;
     const outcomes = new Map(this.aiOutcomes);
-    const keptReads = reads.filter((r) => r.createdAt >= readsBefore);
+    const held = this.heldReportIds();
+    const keptReads = reads.filter((r) => r.createdAt >= readsBefore || held.has(r.reportId));
     const ledger = this.aiSpend;
     this.aiSpend = ledger.filter((e) => e.at >= readsBefore);
     const stripped: Array<[AiOutcomeRow, AiOutcomeRow['example']]> = [];
     let gone = 0;
     for (const [id, r] of outcomes) {
+      if (held.has(id)) continue;
       if (r.decidedAt < outcomesBefore) {
         this.aiOutcomes.delete(id);
         gone += 1;

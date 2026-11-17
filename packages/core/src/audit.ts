@@ -161,6 +161,8 @@ export interface AuditListQuery {
   limit: number;
   actor?: string;
   action?: AuditAction;
+  /** Only entries that point at one of these (at most 20). Absent: every entry. Combines (AND) with the other filters. The bundle of a held report reads its own rows with it. */
+  targets?: readonly AuditTarget[];
 }
 
 /** One entry of `cw.audit.list`: `target` is absent when the entry had none. */

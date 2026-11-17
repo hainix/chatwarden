@@ -1,5 +1,6 @@
 import { safeWarn } from './log.js';
 import type { AppealOutcome } from './appeals.js';
+import type { HoldCode } from './legal.js';
 import type { RuleRef } from './rules.js';
 import type { Logger, ReportCategory, SanctionKind, Source, SubjectId } from './types.js';
 
@@ -88,7 +89,14 @@ export type KitEvent =
    * or a webhook that opted in to accounts.
    * Carries subject ids: staff channels only, never send to a player. @experimental
    */
-  | { type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null };
+  | { type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null }
+  /**
+   * A report was held for legal reasons (`cw.legal.hold`): the game's own process takes it from here. It carries the report id, the time, the closed hold `code`
+   * and the person the report is about (canonical at emit time), never text. The kit forwards it to no one; the game finds the player through
+   * `cw.people.accountIds(target)` or a webhook that opted in to accounts. It is emitted once, after the hold is stored, and never for a refusal or a release.
+   * Carries subject ids: staff channels only, never send to a player. @experimental
+   */
+  | { type: 'report.escalated'; reportId: string; at: number; code: HoldCode; target: StaffRef };
 
 /** Every event type, for checking a subscription. */
 export const KIT_EVENT_TYPES: readonly KitEvent['type'][] = [
@@ -101,6 +109,7 @@ export const KIT_EVENT_TYPES: readonly KitEvent['type'][] = [
   'appeal.created',
   'appeal.decided',
   'rename.required',
+  'report.escalated',
 ];
 
 /** The event of a type. */

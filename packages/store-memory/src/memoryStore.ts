@@ -32,6 +32,8 @@ import type {
   DiscordThreadRow,
   AppealRow,
   BlockedNameRow,
+  HeldSet,
+  HoldRow,
   ErasePlan,
   ErasureCounts,
   ErasureRemoved,
@@ -119,6 +121,8 @@ export class MemoryStore implements Store {
   protected aiSpend: Array<{ readId: string; attempt: number; at: number; micros: number }> = [];
   /** AI casebook outcomes by report. */
   protected aiOutcomes = new Map<string, AiOutcomeRow>();
+  /** Legal holds by report id (open and released). */
+  protected holds = new Map<string, HoldRow>();
   /** Erasure receipts in insertion order. */
   protected erasures: ErasureRow[] = [];
   /** The erasure epoch (see `erasureEpoch`). */
@@ -482,6 +486,7 @@ export class MemoryStore implements Store {
       .filter((r) => {
         if (q.actor !== undefined && r.actor !== q.actor) return false;
         if (q.action !== undefined && r.action !== q.action) return false;
+        if (q.targets !== undefined && !q.targets.slice(0, 20).some((t) => r.target !== null && r.target.type === t.type && r.target.ref === t.ref)) return false;
         if (q.before === undefined) return true;
         if (r.at !== q.before) return r.at < q.before;
         return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
@@ -501,7 +506,12 @@ export class MemoryStore implements Store {
       });
     }
     const snapshot = [...this.auditRows];
-    const kept = snapshot.filter((r) => r.at >= before);
+    // The audit rows that name a held report or one of its sanction groups stay with them.
+    const heldReports = this.heldReportIds();
+    const heldGroups = this.heldGroupIds();
+    const kept = snapshot.filter(
+      (r) => r.at >= before || (r.target !== null && ((r.target.type === 'report' && heldReports.has(r.target.ref)) || (r.target.type === 'sanction' && heldGroups.has(r.target.ref)))),
+    );
     const n = snapshot.length - kept.length;
     if (n > 0) {
       this.auditRows = kept;
@@ -948,8 +958,9 @@ export class MemoryStore implements Store {
 
   purgeReports(before: number, keepBadFaithSince: number): number {
     const snapshot = [...this.reports];
+    const held = this.heldReportIds();
     const kept = snapshot.filter(
-      (r) => r.createdAt >= before || (r.badFaith && r.actionedAt !== null && r.actionedAt >= keepBadFaithSince),
+      (r) => r.createdAt >= before || (r.badFaith && r.actionedAt !== null && r.actionedAt >= keepBadFaithSince) || held.has(r.id),
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
@@ -974,9 +985,10 @@ export class MemoryStore implements Store {
   purgeSanctions(before: number): number {
     const snapshot = [...this.sanctions];
     const owners = new Map(this.refOwners);
+    const heldGroups = this.heldGroupIds();
     const kept = snapshot.filter(
       (r) =>
-        r.gapStatus === 'open' || !((r.endsAt !== null && r.endsAt < before) || (r.revokedAt !== null && r.revokedAt < before)),
+        r.gapStatus === 'open' || heldGroups.has(r.groupId) || !((r.endsAt !== null && r.endsAt < before) || (r.revokedAt !== null && r.revokedAt < before)),
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
@@ -1088,8 +1100,10 @@ export class MemoryStore implements Store {
       unseen !== undefined &&
       n.ackedAt === null &&
       ((appealKinds.includes(n.kind) && n.createdAt < unseen.appealBefore) || (n.kind === 'rename_required' && n.createdAt < unseen.renameBefore));
+    const heldGroups = this.heldGroupIds();
     const kept = snapshot.filter(
       (n) =>
+        (n.groupId !== null && heldGroups.has(n.groupId)) ||
         !(
           (n.withdrawnAt !== null && n.createdAt < before) ||
           (n.ackedAt !== null && seenGoes.includes(n.kind) && n.createdAt < before) ||
@@ -1155,7 +1169,8 @@ export class MemoryStore implements Store {
     const add = (category: PrivacyCategory, n: number): void => {
       if (n > 0) removed[category] = (removed[category] ?? 0) + n;
     };
-    const held = plan.heldReportIds;
+    // The store consults its own holds, whatever the caller passed: an erase can never reach a held report.
+    const held = new Set([...plan.heldReportIds, ...this.heldReportIds()]);
 
     // Which sanction groups stay: a held report's groups always; in `safety`, the groups in force on the person.
     const personGroups = new Set(this.sanctions.filter((r) => r.targetType === 'subject' && set.has(r.value)).map((r) => r.groupId));
@@ -1376,6 +1391,62 @@ export class MemoryStore implements Store {
     return this.epoch;
   }
 
+  // Legal hold (0.2.0). A hold is a row; every purge and the erase read it themselves.
+
+  placeHold(row: HoldRow): boolean {
+    const prior = this.holds.get(row.reportId);
+    if (prior !== undefined && prior.releasedAt === null) return false;
+    this.holds.set(row.reportId, { ...row, releasedBy: null, releasedAt: null });
+    this.undoWith(() => {
+      if (prior === undefined) this.holds.delete(row.reportId);
+      else this.holds.set(row.reportId, prior);
+    });
+    return true;
+  }
+
+  releaseHold(reportId: string, by: string, at: number): boolean {
+    const prior = this.holds.get(reportId);
+    if (prior === undefined || prior.releasedAt !== null) return false;
+    this.holds.set(reportId, { ...prior, releasedBy: by, releasedAt: at });
+    this.undoWith(() => this.holds.set(reportId, prior));
+    return true;
+  }
+
+  loadHold(reportId: string): HoldRow | null {
+    const row = this.holds.get(reportId);
+    return row === undefined ? null : { ...row };
+  }
+
+  listHolds(): HoldRow[] {
+    return [...this.holds.values()]
+      .filter((h) => h.releasedAt === null)
+      .sort((a, b) => a.heldAt - b.heldAt || compare(a.reportId, b.reportId))
+      .map((h) => ({ ...h }));
+  }
+
+  sanctionGroupsOfReport(reportId: string): string[] {
+    const out: string[] = [];
+    for (const r of this.sanctions) if (r.reportId === reportId && !out.includes(r.groupId)) out.push(r.groupId);
+    return out;
+  }
+
+  heldSet(): HeldSet {
+    const reportIds = [...this.heldReportIds()].sort(compare);
+    return { reportIds, groupIds: [...this.heldGroupIds()].sort(compare) };
+  }
+
+  /** The reports an open hold protects. */
+  protected heldReportIds(): Set<string> {
+    return new Set([...this.holds.values()].filter((h) => h.releasedAt === null).map((h) => h.reportId));
+  }
+
+  /** The sanction groups decided from a held report: their rows, notices and appeals are protected with it. */
+  protected heldGroupIds(): Set<string> {
+    const held = this.heldReportIds();
+    if (held.size === 0) return new Set();
+    return new Set(this.sanctions.filter((r) => r.reportId != null && held.has(r.reportId)).map((r) => r.groupId));
+  }
+
   exportSubjects(subjects: readonly SubjectId[]): SubjectExport {
     const set = this.closure(subjects);
     const hooks = this as unknown as Partial<PrivacyHooks>;
@@ -1503,7 +1574,10 @@ export class MemoryStore implements Store {
           .sort((a, b) => a.at - b.at || compare(a.id, b.id))
           .map((r) => ({ at: r.at, action: r.action })),
       ),
-      holds: [],
+      holds: this.listHolds()
+        .filter((h) => this.reports.some((r) => r.id === h.reportId && (set.has(r.targetSubject) || set.has(r.reporterSubject))))
+        .slice(0, EXPORT_CAP)
+        .map((h) => ({ reportId: h.reportId, at: h.heldAt, code: h.code })),
       truncated,
     };
   }

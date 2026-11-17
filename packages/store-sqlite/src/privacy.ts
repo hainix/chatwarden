@@ -10,6 +10,27 @@ export const EPOCH_KEY = 'erasure_epoch';
 
 const IN_ARG = '(SELECT value FROM json_each(?))';
 
+// Legal hold. A purge and the erase consult the table themselves, so no caller can forget a hold. The subselects have no placeholders.
+/** The reports an open hold protects. */
+export const HELD_REPORT_IDS = '(SELECT report_id FROM kit_legal_holds WHERE released_at IS NULL)';
+/** The sanction groups decided from a held report: their rows, notices and appeals are protected with it. */
+export const HELD_GROUP_IDS = `(SELECT group_id FROM kit_sanctions WHERE report_id IN ${HELD_REPORT_IDS})`;
+/** Place a hold: a new one, or the replacement of a RELEASED one (an open hold is left alone and the statement changes nothing). Binds: report, code, by, at. */
+export const HOLD_PLACE_SQL = `INSERT INTO kit_legal_holds (report_id, code, held_by, held_at, released_by, released_at) VALUES (?, ?, ?, ?, NULL, NULL)
+  ON CONFLICT (report_id) DO UPDATE SET code = excluded.code, held_by = excluded.held_by, held_at = excluded.held_at, released_by = NULL, released_at = NULL
+  WHERE kit_legal_holds.released_at IS NOT NULL`;
+/** Release an open hold. Binds: by, at, report. */
+export const HOLD_RELEASE_SQL = 'UPDATE kit_legal_holds SET released_by = ?, released_at = ? WHERE report_id = ? AND released_at IS NULL';
+export const HOLD_LOAD_SQL = 'SELECT report_id, code, held_by, held_at, released_by, released_at FROM kit_legal_holds WHERE report_id = ?';
+export const HOLD_LIST_SQL = 'SELECT report_id, code, held_by, held_at, released_by, released_at FROM kit_legal_holds WHERE released_at IS NULL ORDER BY held_at, report_id';
+/** The groups a report's decision wrote, by the first row of each (a group's rows are written together). Binds: the report. */
+export const SANCTION_GROUPS_OF_REPORT_SQL = 'SELECT group_id, MIN(rowid) AS first FROM kit_sanctions WHERE report_id = ? GROUP BY group_id ORDER BY first';
+export const HELD_SET_REPORTS_SQL = 'SELECT report_id FROM kit_legal_holds WHERE released_at IS NULL ORDER BY report_id';
+export const HELD_SET_GROUPS_SQL = `SELECT DISTINCT group_id FROM kit_sanctions WHERE report_id IN ${HELD_REPORT_IDS} ORDER BY group_id`;
+/** The held reports about or by the set, for an export. Binds: the set, the set, the limit. */
+export const EXPORT_HOLDS_SQL = `SELECT h.report_id, h.held_at, h.code FROM kit_legal_holds h JOIN kit_reports r ON r.id = h.report_id
+  WHERE h.released_at IS NULL AND (r.target_subject IN (SELECT value FROM json_each(?)) OR r.reporter_subject IN (SELECT value FROM json_each(?))) ORDER BY h.held_at, h.report_id LIMIT ?`;
+
 /** Every subject of the request and every subject merged into one of them (a recursive walk down `merged_into`). Binds: the request as a JSON array. */
 export const ERASE_CLOSURE_SQL = `WITH RECURSIVE c(id) AS (
   SELECT id FROM kit_subjects WHERE id IN ${IN_ARG}
@@ -180,19 +201,21 @@ export function closure(db: DatabaseSync, subjects: readonly string[]): string[]
 function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[]): ErasureCounts {
   const removed: ErasureRemoved = {};
   const setJ = j(set);
-  const held = j(plan.heldReportIds);
+  // The store consults its own holds, whatever the caller passed: an erase can never reach a held report.
+  const heldIds = new Set([...plan.heldReportIds, ...column(db, HELD_SET_REPORTS_SQL)]);
+  const held = j(heldIds);
   const setSet = new Set(set);
 
   // Which groups stay: a held report's groups always; in `safety`, the groups in force on the person.
   const personGroups = column(db, GROUPS_OF_SET_SQL, setJ);
-  const heldGroups = new Set(plan.heldReportIds.size === 0 ? [] : column(db, GROUPS_OF_HELD_SQL, held));
+  const heldGroups = new Set(heldIds.size === 0 ? [] : column(db, GROUPS_OF_HELD_SQL, held));
   const inForce = new Set(plan.mode === 'safety' ? column(db, GROUPS_IN_FORCE_SQL, setJ, plan.at) : []);
   const keepIdentifiers = inForce.size > 0;
   const keepGroups = new Set(personGroups.filter((g) => inForce.has(g) || heldGroups.has(g)));
   const goneGroups = personGroups.filter((g) => !keepGroups.has(g));
   const clearGroups = [...keepGroups].filter((g) => inForce.has(g) && !heldGroups.has(g));
   const keptSanctionRows = keepGroups.size === 0 ? 0 : num(db.prepare(COUNT_GROUP_ROWS_SQL).get(j(keepGroups))?.n);
-  const heldNaming = plan.heldReportIds.size === 0 ? 0 : num(db.prepare(HELD_NAMING_SQL).get(held, setJ, setJ, setJ)?.n);
+  const heldNaming = heldIds.size === 0 ? 0 : num(db.prepare(HELD_NAMING_SQL).get(held, setJ, setJ, setJ)?.n);
 
   // Reports about the person go, with everything that hangs on them.
   const aboutIds = column(db, REPORTS_ABOUT_IDS_SQL, setJ, held);
@@ -348,6 +371,8 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
       if (rows.length > EXPORT_SECTION_MAX) truncated.push(name);
       return rows.slice(0, EXPORT_SECTION_MAX).map(map);
     };
+    const holds = db.prepare(EXPORT_HOLDS_SQL).all(setJ, setJ, cap);
+    if (holds.length > EXPORT_SECTION_MAX) truncated.push('holds');
     const head = db.prepare(EXPORT_SUBJECTS_SQL).get(setJ);
     const ids = db.prepare(EXPORT_IDENTIFIERS_SQL).get(setJ);
     const mutes = db.prepare(EXPORT_MUTES_SQL).get(setJ, setJ, setJ, setJ);
@@ -421,7 +446,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
         outcomes: outcomes.slice(0, EXPORT_SECTION_MAX).map((r) => ({ verdict: String(r.verdict), agreement: String(r.agreement) })),
       },
       audit: section('audit', EXPORT_AUDIT_SQL, (r) => ({ at: num(r.at), action: String(r.action) })),
-      holds: [],
+      holds: holds.slice(0, EXPORT_SECTION_MAX).map((r) => ({ reportId: String(r.report_id), at: num(r.held_at), code: String(r.code) })),
       truncated,
     };
   });

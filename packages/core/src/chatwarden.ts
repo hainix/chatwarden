@@ -52,6 +52,9 @@ import type { ReportCounts, ReportDetailInput, ReportDetailResult, ReportInput, 
 import { checkLinkRow, hasLinkMethods, isLinkSystem, isLinkValue, linkLimit } from './links.js';
 import type { LinkRow, LinkSystem } from './links.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
+import { checkBundleSecret, createLegal } from './legalService.js';
+import type { LegalService } from './legalService.js';
+import { VERSION } from './version.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
@@ -247,6 +250,13 @@ export interface ChatwardenOptions {
      */
     accountAgeDays?: (accountIds: readonly string[]) => number | null | undefined;
   };
+  /**
+   * The secret that signs an evidence bundle (`cw.legal.bundle`): at least 32 characters, the same rule as a webhook secret. It is read from here and nowhere else and
+   * is never logged, never put in a body or an error. Without one a bundle is produced unsigned (its `hmacSha256` is null and the hub says "not signed"); the
+   * SHA-256 still shows the file was not edited. A shorter secret throws at creation, naming `bundleSecret` and never its value.
+   * @experimental
+   */
+  bundleSecret?: string;
 }
 
 /** The moderation kit as an adopter uses it. Nothing here returns an identifier meant for a player. */
@@ -872,6 +882,13 @@ export interface Chatwarden {
     automation: AutomationFacade;
   };
   /**
+   * Legal hold (0.2.0): hold a report so no retention purge and no erase reaches it or what hangs on it, release it, and produce its signed evidence bundle. A senior
+   * holds and the owner releases and downloads in the HTTP layer; `hold` emits `report.escalated` (ids and a code, never text). The kit judges nothing and forwards
+   * nothing: it keeps what it held.
+   * @experimental
+   */
+  legal: LegalService;
+  /**
    * The Discord feed's thread map (`@chatwarden/discord`): the forum thread kept per person (`kit_discord_threads`). A
    * thin facade over the store, which throws its own error if it fails. Holds no chat text.
    */
@@ -1001,6 +1018,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const profanity = buildProfanityFilter(opts, baseProfile.profanity);
   if (profanity === undefined && baseProfile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
 
+  // At least 32 characters or absent; checked here, with the other options, before anything starts.
+  const bundleSecret = checkBundleSecret(opts.bundleSecret);
   const bus = new EventBus(logger);
   const subjects = new SubjectIndex(store, clock, { logger });
   const sanctions = new SanctionIndex({ enabled, subjects });
@@ -1743,6 +1762,15 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       accountIds: (subject) => (typeof subject === 'string' ? subjects.identifiersOf(subject).accounts : []),
       automation,
     },
+    legal: createLegal({
+      store,
+      clock,
+      emit: (event) => bus.emit(event),
+      canonical: (subject) => subjects.canonical(subject),
+      accountIds: (subject) => subjects.identifiersOf(subject).accounts,
+      bundleSecret,
+      kitVersion: VERSION,
+    }),
     discordThreads: {
       get: (subject) => store.transaction(() => store.getDiscordThread(subject)),
       put: (row) => store.transaction(() => store.putDiscordThread(row)),

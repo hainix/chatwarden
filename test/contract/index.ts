@@ -10,6 +10,7 @@ import { appealsContract } from './appeals.contract.js';
 import { auditContract } from './audit.contract.js';
 import { discordThreadsContract } from './discordThreads.contract.js';
 import { filtersContract } from './filters.contract.js';
+import { legalContract } from './legal.contract.js';
 import { linksContract } from './links.contract.js';
 import { mutesContract } from './mutes.contract.js';
 import { namesContract } from './names.contract.js';
@@ -36,6 +37,7 @@ export {
   auditContract,
   discordThreadsContract,
   filtersContract,
+  legalContract,
   linksContract,
   mutesContract,
   namesContract,
@@ -81,6 +83,7 @@ export const CONTRACT_AREAS = [
   'links',
   'filters',
   'privacy',
+  'legal',
 ] as const;
 
 /**
@@ -112,4 +115,5 @@ export function storeContract(name: string, make: () => Store, dump?: (s: Store)
   linksContract(name, make);
   filtersContract(name, make);
   privacyContract(name, make, dump);
+  legalContract(name, make);
 }

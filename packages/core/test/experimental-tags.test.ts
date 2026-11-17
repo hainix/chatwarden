@@ -39,3 +39,21 @@ describe('@experimental on the 0.1.9 facade members', () => {
     expect(docAbove('countsByTerm(q: { days: BlockedDays }): Record<string, number>;')).not.toContain('@experimental');
   });
 });
+
+// The 0.2.0 top-level members of the facade (privacy requests and legal hold) are `@experimental` too: two-space indent, one level up from the nested ones above.
+describe('@experimental on the 0.2.0 facade members', () => {
+  const topDoc = (signature: string): string => {
+    const at = SOURCE.indexOf(`
+  ${signature}`);
+    expect(at, `${signature} is declared`).toBeGreaterThan(-1);
+    const end = SOURCE.lastIndexOf('*/', at);
+    const start = SOURCE.lastIndexOf('/**', end);
+    expect(SOURCE.slice(end + 2, at).trim(), `${signature} has a doc block`).toBe('');
+    return SOURCE.slice(start, end + 2);
+  };
+  for (const [name, signature] of [['legal', 'legal: LegalService;']] as Array<[string, string]>) {
+    it(`${name} is tagged @experimental`, () => {
+      expect(topDoc(signature)).toContain('@experimental');
+    });
+  }
+});

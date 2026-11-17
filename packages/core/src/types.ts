@@ -6,6 +6,7 @@ import type { AiCellCounts } from './ai/gates.js';
 import type { AIExample, AIRead, AISignal } from './ai/types.js';
 import type { AppealStatus } from './appeals.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
+import type { HeldSet, HoldRow } from './legal.js';
 import type { LinkRow, LinkSystem } from './links.js';
 import type { NameReason } from './names.js';
 import type { ErasePlan, ErasureCounts, ErasureRow, SubjectExport } from './privacy.js';
@@ -1824,6 +1825,31 @@ export interface Store {
 
   /** A counter that moves on every erase and on nothing else; persists with the store and is shared by every process on the database. Starts at 0. */
   erasureEpoch(): number;
+
+  // Legal hold (0.2.0). REQUIRED. `cw.legal` is the only caller. A hold protects one report and what hangs on it (see {@link HeldSet}): while it is open, EVERY purge
+  // (`purgeReports`, `purgeSanctions`, `purgeNotices`, `purgeAppeals`, `clearAppealStatements`, `purgeAi`, `purgeAiActions`, `purgeAudit`) and `eraseSubjects` leave its rows alone,
+  // whatever their age and whatever the caller passed: the store consults its own holds, so no caller can forget one.
+
+  /**
+   * Place a hold. Returns true when this call placed it; false (nothing changed) while the report is already held. A report whose earlier hold was released can be held
+   * again (the released row is replaced). The store does not check that the report exists: the caller does.
+   */
+  placeHold(row: HoldRow): boolean;
+
+  /** Release the open hold of a report at `at`, by `by`. True only when this call released one. The row stays, with its release. */
+  releaseHold(reportId: string, by: string, at: number): boolean;
+
+  /** The hold row of a report (open or released), or null when it was never held. A copy. */
+  loadHold(reportId: string): HoldRow | null;
+
+  /** The open holds, oldest first (`heldAt`, then report id). Copies. */
+  listHolds(): HoldRow[];
+
+  /** The report ids and sanction groups the open holds protect (see {@link HeldSet}). */
+  heldSet(): HeldSet;
+
+  /** The sanction groups whose rows cite this report (`report_id`), oldest first by first write: what a decision of the report wrote. Empty for an unknown report. */
+  sanctionGroupsOfReport(reportId: string): string[];
 }
 
 // ---------------------------------------------------------------------------
