@@ -109,7 +109,8 @@ export function planActing(step: ActingStep, row: AiActingRow, input: ActingInpu
   if (!ok) return refuse('wrong_state');
   // 2. The actor, the reason and (for a step that raises) the word.
   const actor: unknown = input.actor;
-  if (!isValidAuditActor(actor)) return refuse('invalid');
+  // An actor that names the AI (`ai:<adapter>`) is refused: the AI path can never move its own switch, whatever calls this (the facade is public).
+  if (!isValidAuditActor(actor) || actor.startsWith('ai:')) return refuse('invalid');
   const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
   if (reason === '' || reason.length > AUDIT_REASON_MAX) return refuse('invalid');
   if (raises && input.confirm !== ACT_WORD) return refuse('invalid');

@@ -62,6 +62,21 @@ describe('off to shadow', () => {
     expect(planActing('shadow', OFF, input({ reason: 'x'.repeat(2000) }), ctx()).ok).toBe(true);
   });
 
+  it('refuses an actor that names the AI (ai: prefix) on every step: the AI path can never flip its own switch', () => {
+    for (const step of ['shadow', 'start', 'pause', 'resume', 'off'] as const) {
+      for (const actor of ['ai:fake', 'ai:', 'ai:model-1', 'ai:owner_ann']) {
+        // a row the step starts from, so the actor is the only thing wrong
+        const row = step === 'shadow' ? OFF : { ...OFF, mode: 'shadow' as const, paused: step === 'resume' };
+        expect(planActing(step, row, input({ actor }), ctx()), `${step} ${actor}`).toEqual({ ok: false, error: 'invalid' });
+      }
+    }
+  });
+
+  it('an actor that only contains ai: later on, or starts with a similar word, is still a person', () => {
+    expect(planActing('shadow', OFF, input({ actor: 'owner_ai:x' }), ctx()).ok).toBe(true);
+    expect(planActing('shadow', OFF, input({ actor: 'aide_ann' }), ctx()).ok).toBe(true);
+  });
+
   it('refuses an actor the audit trail cannot hold as invalid', () => {
     for (const actor of ['', ' ', 'two words', 'a'.repeat(129), undefined, 7, null]) {
       expect(planActing('shadow', OFF, input({ actor }), ctx()), String(actor)).toEqual({ ok: false, error: 'invalid' });
