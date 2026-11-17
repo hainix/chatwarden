@@ -351,7 +351,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
 - the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked`, `usePerson` and `usePolicy`, and the types `HubRead`,
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
-  includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh`, `HubControllerOptions.host`, `HubClient.dismissOpen`, `HubClient.aiGates`, `HubClient.setAutomation`,
+  includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh`, `HubControllerOptions.host`, `HubClient.dismissOpen`, `HubClient.aiGates`, `HubClient.aiActing`, `HubClient.aiActingStep`, `HubClient.aiActions`, `HubClient.setAutomation`,
   `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss`, `ReporterRecord.accuracy`, the signal and pace fields `PersonHistory.signals`, `PersonHistory.automation`, `PolicyLayer.appeals`, `PolicyLayer.names`, `PolicyLayer.pace`, `PolicyLayer.signals`, `ReportSummary.boosted` and `Suggestion.signals`, the AI methods `HubClient.readAgain`, `HubClient.aiStatus` and `HubClient.dontTeach`, and the appeals and names fields and methods `Changes.appeals`, `PersonHistory.appeals`, `PersonHistory.renames`, `HubClient.appeals`, `HubClient.appeal`, `HubClient.decideAppeal`, `HubClient.appealStats`, `HubClient.rename` and `HubClient.listBlockedNames`. The names are the same declarations the main entry re-exports (`createHubClient`,
   `fetchTransport`, `HubError`, the staff types and so on), so they are experimental there too. The kit's own types that `/headless` passes through
   (`Role`, `Me`, `StaffReport` and the other types declared in `@chatwarden/core` and `@chatwarden/http`) follow those packages.
@@ -365,7 +365,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `CLAIM_BEAT_MS`, `QUEUE_MAX_PAGES`, `QUEUE_PAGE`, `SESSION_REPORTERS_MAX`, `SESSION_TTL_MS`, `TAKE_COOLDOWN_MS`,
     `TOAST_ERROR_MS`, `TOAST_HELD_MAX`, `TOAST_MAX`, `TOAST_MS`, `UNDO_MS`, `VIEWING_BEAT_MS`
   - types:
-    `ActionResult`, `ActionState`, `ActionStore`, `AiGateCell`, `AiGatesView`, `AiReadAgainResult`, `AiStatusView`, `AppealDecided`, `AppealDecisionInput`, `AppealDetail`, `AppealOutcome`,
+    `ActionResult`, `ActionState`, `ActionStore`, `AiActingInput`, `AiActingState`, `AiActingStep`, `AiActionView`, `AiActionsPage`, `AiGateCell`, `AiGatesView`, `AiReadAgainResult`, `AiStatusView`, `AppealDecided`, `AppealDecisionInput`, `AppealDetail`, `AppealOutcome`,
     `AppealRow`, `AppealRuleStats`, `AppealStats`, `AppealStatus`, `AppealSummary`, `AutomationCode`, `AutomationInput`, `BlockedDays`, `BlockedLine`, `BlockedName`, `CaseStore`, `CaseStoreOptions`, `Changes`, `Claim`,
     `ClaimResult`, `CloseGapInput`, `CommunityApplied`, `CommunityStatus`, `CommunitySummary`, `Connection`, `ContinueOutcome`, `DecideCommand`, `DecideInput`, `DecideOptions`, `DecideResult`,
     `DecisionEntry`, `DecisionForm`, `DecisionHost`, `DecisionOutcome`, `DecisionState`, `DecisionStore`, `DecisionStoreOptions`,

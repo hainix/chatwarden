@@ -4,6 +4,7 @@ import { hubWorld } from './world.js';
 import axe from 'axe-core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { forgetHiddenAi } from '../src/ai/hide.js';
+import { actWorld } from './aiActWorld.js';
 import { aiCase, strip } from './aiHub.js';
 import { rulesCss } from './css.js';
 
@@ -106,6 +107,39 @@ describe.each(['light', 'dark'] as const)('axe on the gate table and the Person 
     await screen.findByText(/Do not automate: the AI never acts on this person/);
     await user.click(await screen.findByRole('button', { name: 'More' }));
     expect(screen.getByRole('group', { name: 'Do not automate' })).toBeInTheDocument();
+    expect(await violations(container)).toEqual([]);
+  });
+});
+
+// Acting, release 2 (Settings > AI): the Act option and its reason, the owner's dialog, the status line with Pause, and the "Would have acted" table, under axe in both themes.
+describe.each(['light', 'dark'] as const)('axe on the Act option, the dialog and the shadow list, %s theme', (theme) => {
+  it('the option disabled for a senior, with its reason', async () => {
+    const { w } = await actWorld({ role: 'senior', actor: 'sam@example.test' });
+    const { container } = renderHub(w, { path: '/settings/ai', theme });
+    await screen.findByText('Only the owner can switch acting on.');
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the dialog, empty and filled', async () => {
+    const { w } = await actWorld();
+    const { container, user } = renderHub(w, { path: '/settings/ai', theme });
+    await user.click(await screen.findByRole('radio', { name: /^Act/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Switch on acting' });
+    expect(await violations(container)).toEqual([]);
+    await user.type(within(dialog).getByRole('textbox', { name: /Type ACT to confirm/ }), 'ACT');
+    await user.type(within(dialog).getByRole('textbox', { name: /Why are you turning this on/ }), 'A reason');
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the status line with Pause, and the list in Advanced', async () => {
+    const { w, startShadow, shadowRow } = await actWorld();
+    startShadow();
+    shadowRow((await w.file({ target: 'Target1', reporter: 'Reporter1' })).id);
+    const { container, user } = renderHub(w, { path: '/settings/ai', theme });
+    await screen.findByRole('button', { name: 'Pause acting' });
+    await user.click(await screen.findByRole('button', { name: 'Advanced' }));
+    const table = await screen.findByRole('table', { name: 'Would have acted' });
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(5);
     expect(await violations(container)).toEqual([]);
   });
 });

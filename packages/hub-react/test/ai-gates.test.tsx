@@ -230,13 +230,13 @@ describe('the gate table', () => {
     });
   });
 
-  it('R1 shows "Acting is not available in this version" and offers no Act option', async () => {
+  it('R2 says the AI applies nothing to a player in this version, and the Act option cannot be used where the code does not allow it', async () => {
     const { w } = await gatesWorld();
     await openTable(w);
-    expect(screen.getByText('Acting is not available in this version.')).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: /^Act/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /^(Act|Start acting|Allow the AI to act|Turn on acting)/i })).toBeNull();
-    expect(screen.getAllByRole('radio')).toHaveLength(3);
+    expect(screen.getByText(/In this version the AI applies nothing to a player/)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /^Act/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /^(Start acting|Allow the AI to act|Turn on acting)/i })).toBeNull();
+    expect(screen.getAllByRole('radio')).toHaveLength(4);
   });
 
   it('with no appeals the appeals checks read "not available"', async () => {

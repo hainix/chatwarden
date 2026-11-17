@@ -9,6 +9,8 @@ import type {
   AppealStats as KitAppealStats,
   AppealStatus as KitAppealStatus,
   AppealSummary as KitAppealSummary,
+  AiActingState as KitAiActingState,
+  AiActionView as KitAiActionView,
   AiGatesView as KitAiGatesView,
   AiReadView,
   AiStatsView,
@@ -101,6 +103,31 @@ export type AiGatesView = KitAiGatesView;
 
 /** One cell of {@link AiGatesView}: a rule at a conduct level. @experimental */
 export type AiGateCell = AiGatesView['cells'][number];
+
+/**
+ * `GET /ai/acting` (AI levels 3 and 4, release 2): where acting stands, in numbers the server counted: the mode (`off`, `shadow` or `on`), whether it is paused, since when, the days
+ * of shadow done and how many reports shadow recorded as "would have acted". In this release no mode applies a step to a player.
+ * @experimental
+ */
+export type AiActingState = KitAiActingState;
+
+/** One row of `GET /ai/actions`: a step the AI would have applied (release 2: always `shadow`). Staff only: it carries a person ref. @experimental */
+export type AiActionView = KitAiActionView;
+
+/** A page of {@link AiActionView}, newest first; `next` is the cursor for the page after, or null. @experimental */
+export interface AiActionsPage {
+  items: AiActionView[];
+  next: string | null;
+}
+
+/** The acting steps: the owner's `shadow`, `start` (shadow to on), `resume` and `off`, and a senior's `pause`. The hub's screen offers no `start`: in this release nothing acting leads to is applied. @experimental */
+export type AiActingStep = 'shadow' | 'start' | 'pause' | 'resume' | 'off';
+
+/** What an acting step is sent: the word `ACT` and a reason for `shadow` from `off` and for `start`, a reason for the rest. @experimental */
+export interface AiActingInput {
+  confirm?: 'ACT';
+  reason: string;
+}
 
 /** The closed reasons a person can be marked "do not automate" for. @experimental */
 export type AutomationCode = KitAutomationCode;
