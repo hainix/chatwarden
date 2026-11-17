@@ -22,6 +22,7 @@ import type {
   CommunityRule,
   ConductLevel,
   DecisionAction,
+  EvidenceBundle,
   GapRow,
   GuideSection,
   PolicyLayer,
@@ -64,6 +65,8 @@ export type PrivacyStatementView = PrivacyStatement;
 export type ErasePreviewView = ErasePreview;
 /** `POST /people/:ref/privacy/erase`: the receipt (counts and words, no person). @experimental */
 export type ErasureReceiptView = ErasureReceipt;
+/** `GET /reports/:id/bundle`: a report's evidence bundle, signed when the kit has a `bundleSecret` (the owner saves it as a file). @experimental */
+export type EvidenceBundleView = EvidenceBundle;
 /** The reasons a report can be held for: a closed list, no free text. @experimental */
 export type HoldCodeView = HoldCode;
 /** What `report.hold` carries on a held report: the code and when, never who. @experimental */

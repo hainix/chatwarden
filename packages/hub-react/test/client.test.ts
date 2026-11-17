@@ -249,6 +249,8 @@ describe('every staff route has a client method', () => {
       ['privacyStatement', () => c.privacyStatement(), { method: 'GET', path: '/privacy/statement' }],
       ['holdReport', () => c.holdReport(renamed.id, 'safety_review'), { method: 'PUT', path: `/reports/${renamed.id}/hold`, body: { code: 'safety_review' } }],
       ['releaseHold', () => c.releaseHold(renamed.id), { method: 'DELETE', path: `/reports/${renamed.id}/hold` }],
+      ['reportBundle', () => c.reportBundle(renamed.id), { method: 'GET', path: `/reports/${renamed.id}/bundle` }],
+      ['reportBundle with accounts', () => c.reportBundle(renamed.id, { accounts: true }), { method: 'GET', path: `/reports/${renamed.id}/bundle`, query: { accounts: '1' } }],
     ];
     expect(aiRead).not.toBeNull();
     const results: unknown[] = [];
@@ -276,12 +278,8 @@ describe('every staff route has a client method', () => {
     await exercise(w);
     const keys = Object.keys(w.routes);
     expect(keys.length).toBeGreaterThanOrEqual(26);
-    // The one route the hub has no method for on purpose: the evidence bundle is a signed JSON attachment the owner downloads with the API (the
-    // runbook in docs/privacy-requests.md), not a screen of the hub. A route that is not on this list needs a method.
-    const NO_HUB_METHOD = ['GET /reports/:id/bundle'];
-    expect(keys.filter((key) => NO_HUB_METHOD.includes(key))).toEqual(NO_HUB_METHOD);
+    // Every route the API mounts has a hub method now (the evidence bundle too): none is exempt.
     const missing = keys.filter((key) => {
-      if (NO_HUB_METHOD.includes(key)) return false;
       const { method, re } = matcher(key.replace(/~ref/g, ''));
       return !w.sent.some((r) => r.method === method && re.test(r.path));
     });
@@ -295,6 +293,18 @@ describe('every staff route has a client method', () => {
     await w.client.revokeSanction('a b', 'r').catch(() => undefined);
     expect(w.sent.map((r) => r.path)).toEqual(['/reports/a%2Fb%3Fx%3D1%23y', '/people/..%2Faudit/history', '/sanctions/a%20b/revoke']);
     expect(w.sent.every((r) => r.query === undefined || Object.keys(r.query).length === 0)).toBe(true);
+  });
+
+  it('reportBundle encodes the id and sends accounts only when asked', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    await w.client.reportBundle('a/b?x=1#y').catch(() => undefined);
+    await w.client.reportBundle('r2', { accounts: false }).catch(() => undefined);
+    await w.client.reportBundle('r3', { accounts: true }).catch(() => undefined);
+    expect(w.sent.map((r) => [r.method, r.path, r.query ?? {}])).toEqual([
+      ['GET', '/reports/a%2Fb%3Fx%3D1%23y/bundle', {}],
+      ['GET', '/reports/r2/bundle', {}],
+      ['GET', '/reports/r3/bundle', { accounts: '1' }],
+    ]);
   });
 
   it('typed: me() answers who is signed in and what they can do', async () => {

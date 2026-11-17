@@ -10,6 +10,7 @@ import type {
   AutomationInput,
   ErasePreviewView,
   ErasureReceiptView,
+  EvidenceBundleView,
   HoldCodeView,
   PrivacyExportView,
   PrivacyStatementView,
@@ -249,6 +250,8 @@ export interface HubClient {
   holdReport(id: string, code: HoldCodeView): Promise<{ ok: true }>;
   /** `DELETE /reports/:id/hold`: release a hold. Owner only. @experimental */
   releaseHold(id: string): Promise<{ ok: true }>;
+  /** `GET /reports/:id/bundle` (owner only): the report's evidence bundle, signed when the kit has a `bundleSecret`. Account ids only with `accounts: true`. The route audits before it answers. @experimental */
+  reportBundle(id: string, options?: { accounts?: boolean }): Promise<EvidenceBundleView>;
 
   // Rule gaps
   /** `GET /gaps`. */
@@ -389,6 +392,7 @@ export function createHubClient(transport: Transport): HubClient {
     privacyStatement: () => get<PrivacyStatementView>('/privacy/statement'),
     holdReport: (id, code) => call<{ ok: true }>({ method: 'PUT', path: `/reports/${enc(id)}/hold`, body: { code } }),
     releaseHold: (id) => call<{ ok: true }>({ method: 'DELETE', path: `/reports/${enc(id)}/hold` }),
+    reportBundle: (id, options) => get<EvidenceBundleView>(`/reports/${enc(id)}/bundle`, options?.accounts === true ? { accounts: '1' } : undefined),
 
     personHistory: (ref, options = {}) => get<PersonHistory>(`/people/${enc(ref)}/history`, q({ limit: options.limit })),
     listSanctions: (query = {}) => get<Page<SanctionRow>>('/sanctions', q({ cursor: query.cursor, limit: query.limit, source: query.source })),

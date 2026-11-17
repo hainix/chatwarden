@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
@@ -166,6 +166,35 @@ describe('erasing', () => {
     w.intercept.fn = null;
     await user.click(within(dialog).getByRole('button', { name: 'Erase data' }));
     await screen.findByRole('dialog', { name: 'Erased' });
+  });
+
+  it('a double submit in one tick sends one erase and never shows an error behind the receipt', async () => {
+    const w = await world();
+    const f = await w.file();
+    const { dialog, user } = await open(w, f.person);
+    await user.type(within(dialog).getByRole('textbox', { name: 'Type ERASE to confirm' }), 'ERASE');
+    const form = dialog.querySelector('form') as HTMLFormElement;
+    act(() => {
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+    const receipt = await screen.findByRole('dialog', { name: 'Erased' });
+    const real = erases(w).filter((r) => (r.body as { dryRun?: boolean }).dryRun !== true);
+    expect(real).toHaveLength(1);
+    await waitFor(() => expect(receipt).toBeInTheDocument());
+    expect(screen.queryByText(/Could not erase/)).toBeNull();
+  });
+
+  it('a submit while the word is not typed sends nothing, twice over', async () => {
+    const w = await world();
+    const f = await w.file();
+    const { dialog } = await open(w, f.person);
+    const form = dialog.querySelector('form') as HTMLFormElement;
+    act(() => {
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+    expect(erases(w).filter((r) => (r.body as { dryRun?: boolean }).dryRun !== true)).toHaveLength(0);
   });
 
   it('Cancel closes it and erases nothing', async () => {

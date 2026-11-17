@@ -109,6 +109,8 @@ export function ErasePreview({ person, onClose, onErased }: { person: string; on
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<HubError | null>(null);
   const [receipt, setReceipt] = useState<ErasureReceiptView | null>(null);
+  // `busy` is state, so two submits in one tick both see it off: a ref says "already sent" at once (like the export button of Privacy.tsx). Only a failure clears it.
+  const sent = useRef(false);
 
   // The dry run: on open, and again whenever the choice changes. An answer for an older choice is dropped.
   useEffect(() => {
@@ -132,7 +134,8 @@ export function ErasePreview({ person, onClose, onErased }: { person: string; on
 
   const submit = (e: FormEvent): void => {
     e.preventDefault();
-    if (!ready) return;
+    if (!ready || sent.current) return;
+    sent.current = true;
     setBusy(true);
     setError(null);
     client.privacyErase(person, { keep, confirm: person }).then(
@@ -142,6 +145,7 @@ export function ErasePreview({ person, onClose, onErased }: { person: string; on
       },
       (cause: unknown) => {
         // The dialog stays open with the choice and the typed word, so the owner can try again.
+        sent.current = false;
         setBusy(false);
         setError(toHubError(cause));
       },
