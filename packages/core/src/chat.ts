@@ -12,6 +12,8 @@ import { createPacer } from './pacing.js';
 import type { PaceKey, Pacer } from './pacing.js';
 import type { Limits } from './limits.js';
 import { slidingWindow } from './rateLimit.js';
+import type { RoomModeState } from './roomModes.js';
+import type { ResolvedRooms } from './roomSettings.js';
 import type { SlidingWindow } from './rateLimit.js';
 import { parseRuleRef } from './rules.js';
 import { applySanction } from './sanctions.js';
@@ -36,6 +38,7 @@ import type {
 //   2. the seat's occupant, then the gate hook
 //   3. active restriction                -> 'restricted' (chat, ban, or the in-memory automatic one)
 //   4. length > 200                      -> 'length'
+//   4b. the room's mode (staff exempt)   -> 'locked' | 'new_account' (a pause for the room, never a sanction: no strike, not kept, spends nothing; before pacing and the matcher)
 //   5. pacing, when configured           -> 'slow_mode' | 'flood' | 'duplicate' (read only: a refusal writes nothing and
 //                                           spends nothing; it carries `retryAfterMs`)
 //   6. rate, 3 per 5 s per room:seat     -> 'rate' (spent even when the line is then blocked)
@@ -85,8 +88,12 @@ interface BlockedLine {
  * `'link'`, `'personal_info'` and `'filter'` are chat-filter refusals (`profile.filters`) and only ever appear once a filter rule says `refuse`.
  * They carry the Community Rule the rule cites (`rule`) and nothing else: never the matched part, the rule's id or a counter. `'filter'` is what a
  * phrase rule or a ratio rule (caps, repeats, emoji, mentions) answers. The line was not delivered, not kept and earned no strike. @experimental
+ *
+ * `'locked'` and `'new_account'` are a room's mode (`cw.rooms.setMode`): a locked room takes lines from staff only, and an emergency room is read-only for an account younger than
+ * `rooms.emergency.newAccountDays`. Both carry `until`, when the mode ends, and nothing else. They are checked after the person's own restriction and the length, and before pacing, the rate
+ * budget and the matcher: a line refused for the mode is never matched, earns no strike, is not kept and spends nothing. @experimental
  */
-export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason | 'link' | 'personal_info' | 'filter';
+export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason | 'link' | 'personal_info' | 'filter' | 'locked' | 'new_account';
 
 export type ChatResult =
   | { deliver: { lineId: string; text: string } }
@@ -194,6 +201,15 @@ export interface ChatServiceDeps {
    * A throw is logged by class and dropped; the answer never waits for it and never changes. @experimental
    */
   counter?: { delivered(): void; refused(): void };
+  /**
+   * Room modes (`cw.rooms.setMode`). `state` is the mode in force for a room with its expiry applied (read on every line), `settings` the `rooms` section in force and `accountAge` the age in
+   * days of a person's account, or null when unknown (a guest, no hook, a throw). Without `rooms` no room has a mode. @experimental
+   */
+  rooms?: {
+    state: (roomId: string) => RoomModeState;
+    settings: () => ResolvedRooms;
+    accountAge: (subject: SubjectId | null) => number | null;
+  };
 }
 
 /** What pacing says about a line: a refusal, or the key to commit under; neither when nothing is paced. */
@@ -275,6 +291,7 @@ export class ChatService {
   private readonly filters: ChatServiceDeps['filters'];
   private readonly onFilterFlag: ChatServiceDeps['onFilterFlag'];
   private readonly counter: ChatServiceDeps['counter'];
+  private readonly rooms: ChatServiceDeps['rooms'];
   /** The filters run on every line: a failure of them is limited to one log line a minute. */
   private readonly filterWarn: ThrottledWarn;
 
@@ -314,6 +331,7 @@ export class ChatService {
     this.filters = deps.filters;
     this.onFilterFlag = deps.onFilterFlag;
     this.counter = deps.counter;
+    this.rooms = deps.rooms;
     this.filterWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.pacer = deps.pace === undefined ? undefined : createPacer({ clock: deps.clock, settings: deps.pace.settings });
     this.notices = deps.notices;
@@ -330,7 +348,7 @@ export class ChatService {
    * Decide one line. Never throws: an unexpected internal failure is logged (event and error class only)
    * and the line is refused with `'gate'`, the one reason that means "you cannot chat right now".
    */
-  accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult {
+  accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult {
     let result: ChatResult;
     try {
       result = this.run(roomId, seatId, text, opts);
@@ -410,6 +428,23 @@ export class ChatService {
     }
   }
 
+  /**
+   * What a room's mode says to this person right now: `null` to let the line on, or the refusal (`locked`, or `new_account` in an emergency for an account younger than
+   * `rooms.emergency.newAccountDays`, an unknown age following `rooms.unknownAge`) with when the mode ends. Staff is never refused. A pure read except that a mode that has run out is
+   * noticed (and announced once). `accept` makes the same decision; the chat box's hello reads it through `cw.rooms.postingState`.
+   */
+  modeRefusal(roomId: string, subject: SubjectId | null, staff: boolean): { reason: 'locked' | 'new_account'; until: number | null } | null {
+    if (this.rooms === undefined || staff) return null;
+    const state = this.rooms.state(roomId);
+    if (state.mode === 'normal') return null;
+    if (state.mode === 'locked') return { reason: 'locked', until: state.until };
+    const { emergency, unknownAge } = this.rooms.settings();
+    if (emergency.newAccountDays === 0) return null;
+    const age = this.rooms.accountAge(subject);
+    const isNew = age === null ? unknownAge === 'treat_as_new' : age < emergency.newAccountDays;
+    return isNew ? { reason: 'new_account', until: state.until } : null;
+  }
+
   /** Forget a room's pacing state (the room is closing). */
   dropPaceRoom(roomId: string): void {
     this.pacer?.dropRoom(roomId);
@@ -417,7 +452,7 @@ export class ChatService {
 
   // --- internals -----------------------------------------------------------
 
-  private run(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult {
+  private run(roomId: string, seatId: string, text: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult {
     if (typeof text !== 'string') return refuse('empty');
     const trimmed = text.trim();
     if (trimmed.length === 0) return refuse('empty');
@@ -441,6 +476,11 @@ export class ChatService {
     }
 
     if (trimmed.length > this.maxLength) return refuse('length');
+
+    // The room's mode: after the person's own restriction (they are told that first) and the length, before everything that costs or records anything. A line refused here is never
+    // matched, so it earns no strike and no automatic timeout, is not kept as evidence and spends no pacing or rate budget. Only the facade's option makes a caller staff.
+    const mode = this.modeRefusal(roomId, subject, opts?.staff === true);
+    if (mode !== null) return refuse(mode.reason, { until: mode.until });
 
     // Pacing asks before `rate` so the specific, retryable message wins over the blunt one; it only reads, so a refusal spends nothing.
     // With every check off it builds nothing (no key, no canonical lookup) and there is nothing to commit.

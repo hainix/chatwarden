@@ -133,7 +133,7 @@ interface RoomState {
  * room means calling `RoomRoster.close` and `EvidenceBuffer.drop` (the facade does both).
  */
 export class RoomRoster {
-  private readonly rooms = new Map<string, RoomState>();
+  private readonly byRoom = new Map<string, RoomState>();
 
   /**
    * Put a subject in a seat. An occupied seat is replaced (the seat changed hands). `tags`
@@ -146,10 +146,10 @@ export class RoomRoster {
     handle: string,
     tags?: Record<string, string>,
   ): void {
-    let room = this.rooms.get(roomId);
+    let room = this.byRoom.get(roomId);
     if (!room) {
       room = { seats: new Map(), tags: {} };
-      this.rooms.set(roomId, room);
+      this.byRoom.set(roomId, room);
     }
     room.seats.set(seatId, { subject, handle });
     if (tags) Object.assign(room.tags, tags);
@@ -157,33 +157,38 @@ export class RoomRoster {
 
   /** Empty a seat. A no-op when the seat or room is unknown. Room tags are kept. */
   unseat(roomId: string, seatId: string): void {
-    this.rooms.get(roomId)?.seats.delete(seatId);
+    this.byRoom.get(roomId)?.seats.delete(seatId);
   }
 
   /** Seat ids currently held in the room, sorted; [] for an unknown room. A copy. */
   seats(roomId: string): string[] {
-    return [...(this.rooms.get(roomId)?.seats.keys() ?? [])].sort();
+    return [...(this.byRoom.get(roomId)?.seats.keys() ?? [])].sort();
   }
 
   occupant(roomId: string, seatId: string): { subject: SubjectId | null; handle: string } | null {
-    const found = this.rooms.get(roomId)?.seats.get(seatId);
+    const found = this.byRoom.get(roomId)?.seats.get(seatId);
     return found ? { ...found } : null;
+  }
+
+  /** Every room the roster knows, with its tags and how many seats are held now. Copies; in no promised order. Holds no seat id or handle. */
+  rooms(): Array<{ roomId: string; tags: Record<string, string>; seated: number }> {
+    return [...this.byRoom.entries()].map(([roomId, room]) => ({ roomId, tags: { ...room.tags }, seated: room.seats.size }));
   }
 
   /** Tags of the room, or `{}` for an unknown room. A copy. */
   tags(roomId: string): Record<string, string> {
-    return { ...this.rooms.get(roomId)?.tags };
+    return { ...this.byRoom.get(roomId)?.tags };
   }
 
   /** Forget the room's seats and tags. */
   close(roomId: string): void {
-    this.rooms.delete(roomId);
+    this.byRoom.delete(roomId);
   }
 
   /** Turn the seats these people hold (their whole alias set) into guests: the seat and its handle stay, the person goes. Used by `cw.privacy.erase`. */
   forget(subjects: ReadonlySet<SubjectId>): void {
     if (subjects.size === 0) return;
-    for (const room of this.rooms.values()) {
+    for (const room of this.byRoom.values()) {
       for (const seat of room.seats.values()) if (seat.subject !== null && subjects.has(seat.subject)) seat.subject = null;
     }
   }

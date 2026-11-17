@@ -4,6 +4,10 @@ import { AuditService } from './audit.js';
 import type { AuditPage, AuditQuery, AuditRecordInput, Role } from './audit.js';
 import { ChatService } from './chat.js';
 import { ChatCounter, utcDay } from './chatCounter.js';
+import { AccountAges } from './accountAge.js';
+import { RoomModes } from './roomModes.js';
+import type { RoomModeState } from './roomModes.js';
+import type { RoomMode } from './roomSettings.js';
 import { checkInsightsDays, computeInsights, INSIGHTS_ROW_CAP } from './insights.js';
 import type { InsightsDays, InsightsResult } from './insights.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
@@ -298,8 +302,27 @@ export interface Chatwarden {
      * stored layer, which sits on top of the profile in code. @experimental
      */
     setPace(roomId: string, pace: PaceSettings | null): void;
-    /** The pace in force for the room: the profile's (code, then the stored layer) with the room's override applied. Every field filled, `null` is off. @experimental */
+    /**
+     * The pace in force for the room: the profile's (code, then the stored layer) with the room's override applied; while the room is in emergency its slow mode is the stricter of its own and
+     * `rooms.emergency.slowModeMs`. Every field filled, `null` is off. @experimental
+     */
     pace(roomId: string): ResolvedPace;
+    /**
+     * Put the room in a mode: `normal` (clears at once), `locked` (only staff may chat: `chat.accept(..., { staff: true })` or `ChatMember.staff`) or `emergency` (slow mode, and accounts younger
+     * than `rooms.emergency.newAccountDays` read-only). Every mode but normal ends by itself after `opts.forMs` (60 000 to 86 400 000, whole ms) or `rooms.defaultModeMs`; there is no "until I
+     * turn it off". A second call replaces the first whole and restarts the clock. Raises `room.mode`. A mode is never a sanction. In memory, this process only, like the pace: a game that runs
+     * several processes calls it in each; `rooms.close` clears it. `RangeError` for an unknown mode or a bad length, `TypeError` for a bad room id; either changes nothing. @experimental
+     */
+    setMode(roomId: string, mode: RoomMode, opts?: { forMs?: number }): RoomModeState;
+    /** The room's mode now, with the expiry applied (a mode that ran out is noticed here, announced once as `room.mode` with `expired`). A copy. @experimental */
+    mode(roomId: string): RoomModeState;
+    /** The rooms this process knows (seated players, or a mode set), up to 500, the most seated first: tags, seats held, mode and end. No seat id, no handle. @experimental */
+    list(): Array<{ roomId: string; tags: Record<string, string>; seated: number; mode: RoomMode; until: number | null }>;
+    /**
+     * Whether a seat may chat in the room right now: `'ok'`, `'locked'` or `'new_account'` (an emergency and a young account). The same decision as `accept` for the seat; `opts.staff`
+     * (the game's word, as for `accept`) is always `'ok'`. A pure read, for the chat box's hello. @experimental
+     */
+    postingState(roomId: string, seatId: string, opts?: { staff?: boolean }): 'ok' | 'locked' | 'new_account';
   };
   /**
    * The chat filters (`profile.filters`): what they did, and a way to try them before they act. All off until an owner turns a block on.
@@ -327,7 +350,7 @@ export interface Chatwarden {
     check(candidate: FilterSettings, lines: readonly string[]): FilterCheckResult;
   };
   chat: {
-    accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult;
+    accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult;
     /** Should `viewerSeat` be shown a line `senderSeat` sent (mutes applied)? */
     visibleTo(roomId: string, viewerSeat: string, senderSeat: string): boolean;
     /**
@@ -1156,7 +1179,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
    * profile's own object; one with an override is merged once per change of the profile's pace (it is a new object on every layer
    * change), not once per line.
    */
-  const paceOf = (roomId: string): ResolvedPace => {
+  const profilePaceOf = (roomId: string): ResolvedPace => {
     const base = policy.profileNow().pace;
     const over = paceOverrides.get(roomId);
     if (over === undefined) return base;
@@ -1166,6 +1189,40 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     paceMerged.set(roomId, { base, merged });
     return merged;
   };
+
+  // Room modes: this process only, in memory, expiring (roomModes.ts). A change and an expiry are announced as `room.mode`.
+  const roomModes = new RoomModes({
+    clock,
+    defaultModeMs: () => policy.profileNow().rooms.defaultModeMs,
+    changed: (change) => bus.emit({ type: 'room.mode', roomId: change.roomId, mode: change.mode, until: change.until, ...(change.expired === true ? { expired: true as const } : {}), at: change.at }),
+  });
+  /** The emergency pace of a room: the room's merged pace with the slow mode raised to the emergency one, kept while both inputs are the same objects and the same length. */
+  const emergencyPace = new Map<string, { base: ResolvedPace; slowModeMs: number; merged: ResolvedPace }>();
+  /**
+   * The pace in force for a room: the override over the profile's (the layer over the code), and, while the room is in emergency, a slow mode that is the stricter of the room's and
+   * `rooms.emergency.slowModeMs`. A room with no override and no emergency gets the profile's own object.
+   */
+  const paceOf = (roomId: string): ResolvedPace => {
+    const base = profilePaceOf(roomId);
+    if (roomModes.get(roomId).mode !== 'emergency') {
+      emergencyPace.delete(roomId);
+      return base;
+    }
+    const slowModeMs = Math.max(base.slowModeMs ?? 0, policy.profileNow().rooms.emergency.slowModeMs);
+    const cached = emergencyPace.get(roomId);
+    if (cached !== undefined && cached.base === base && cached.slowModeMs === slowModeMs) return cached.merged;
+    const merged: ResolvedPace = { ...base, slowModeMs };
+    emergencyPace.set(roomId, { base, slowModeMs, merged });
+    return merged;
+  };
+  // How old a player's account is (the adopter's hook, cached ten minutes): for an emergency's read-only rule and, later, probation.
+  const accountAges = new AccountAges({
+    hook: opts.signals?.accountAgeDays,
+    accountIds: (subject) => subjects.identifiersOf(subject).accounts,
+    canonical: (subject) => subjects.canonical(subject),
+    clock,
+    logger,
+  });
 
   // The chat filters: the engine (the per-room settings getter and the account-age lookup) and the hit counters, held in memory, written to the
   // store every 30 seconds and on close (a crash loses at most 30 seconds of counts). Nothing is built per line while every block is off.
@@ -1187,6 +1244,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const chatCounter = new ChatCounter({ clock, store, logger, enabled: () => policy.profileNow().desk.insights });
   const chat = new ChatService({
     counter: chatCounter,
+    rooms: { state: (roomId) => roomModes.get(roomId), settings: () => policy.profileNow().rooms, accountAge: (subject) => accountAges.ageOf(subject) },
     roster,
     buffer,
     subjects,
@@ -1607,6 +1665,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     const reloaded = (what: string) => (err: unknown) => safeWarn(logger, 'chatwarden.privacy_failed', { error: err instanceof Error ? err.name : typeof err, what });
     buffer.scrub(people);
     chat.forgetPeople(people);
+    accountAges.forget(people);
     strikes.forgetPeople(people);
     notices.forgetPeople(people);
     signals.forgetPeople?.(people);
@@ -1657,6 +1716,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         buffer.drop(roomId);
         paceOverrides.delete(roomId);
         paceMerged.delete(roomId);
+        emergencyPace.delete(roomId);
+        roomModes.clear(roomId);
         chat.dropPaceRoom(roomId);
       },
       subjectAt: (roomId, seatId) => {
@@ -1678,6 +1739,28 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         else paceOverrides.set(roomId, Object.freeze(kept));
       },
       pace: (roomId) => paceOf(roomId),
+      setMode: (roomId, mode, o) => roomModes.set(roomId, mode, o),
+      mode: (roomId) => roomModes.get(roomId),
+      list: () => {
+        const modes = new Map(roomModes.active().map((m) => [m.roomId, m] as const));
+        const seen = new Set<string>();
+        const rows: Array<{ roomId: string; tags: Record<string, string>; seated: number; mode: RoomMode; until: number | null }> = [];
+        for (const room of roster.rooms()) {
+          seen.add(room.roomId);
+          const m = modes.get(room.roomId);
+          rows.push({ roomId: room.roomId, tags: room.tags, seated: room.seated, mode: m?.mode ?? 'normal', until: m?.until ?? null });
+        }
+        for (const m of modes.values()) if (!seen.has(m.roomId)) rows.push({ roomId: m.roomId, tags: {}, seated: 0, mode: m.mode, until: m.until });
+        // A room that is empty and has no mode is not worth a row; the most seated first, then by room id so the order is stable.
+        return rows
+          .filter((r) => r.seated > 0 || r.mode !== 'normal')
+          .sort((a, b) => b.seated - a.seated || (a.roomId < b.roomId ? -1 : a.roomId > b.roomId ? 1 : 0))
+          .slice(0, 500);
+      },
+      postingState: (roomId, seatId, o) => {
+        const subject = roster.occupant(roomId, seatId)?.subject ?? null;
+        return chat.modeRefusal(roomId, subject, o?.staff === true)?.reason ?? 'ok';
+      },
     },
     filters: {
       stats: (q) => {

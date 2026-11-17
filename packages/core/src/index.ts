@@ -267,6 +267,7 @@ export {
 export type { ResolvedSafety, SafetyResource, SafetyResourceInput, SafetySettings } from './safety.js';
 export { ROOM_MODES, resolveRooms } from './roomSettings.js';
 export type { EmergencySettings, ProbationSettings, ResolvedRooms, RoomMode, RoomsSettings, UnknownAge } from './roomSettings.js';
+export type { RoomModeState } from './roomModes.js';
 export { WEBHOOK_KEY_TTL_MS } from './types.js';
 export { HOLD_CODES, isHoldCode } from './legal.js';
 export type { HeldSet, HoldCode, HoldRow } from './legal.js';
