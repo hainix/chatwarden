@@ -316,6 +316,11 @@ The vocabulary of this release is `@experimental` too: the audit actions `report
 `room.retract` and `insights.view`, the `room` audit target and `roomAuditRef` (a room id that is not a valid audit ref is recorded as `h-` and a keyed hash), and the events
 `report.handoff`, `case.escalated` (the desk's second look; the legal hold stays `report.escalated`), `room.mode`, `line.retracted` and `insights.digest` (`InsightsDigest`, `RoomMode`,
 `ROOM_MODES`). `report.created` now carries `urgent` and always a `reportedReason` (`string | null`).
+The store side: `StoredReport` gains optional `urgent` and `evidenceRef`; `ReportRecord` returns them, the hand-off and escalation fields (`handoffAt`, `handoffBy`, `escalatedTo`,
+`escalatedBy`, `escalatedAt`) and now always `reportedReason` and `detailAt` (a custom `Store` must supply them). `OpenReportQuery` and `ReportListQuery` take `urgent`. The optional
+`Store` methods `setReportUrgent`, `setHandoff`, `setEscalation`, `countOpenUrgent`, `countOpenEscalated`, `insertComment`, `listComments`, `deleteComment`, `countComments`,
+`purgeReportsByReason`, `addChatCounts`, `chatCounts`, `purgeChatCounts` and `insightRows` (with `CommentRow`, `ChatDayRow`, `InsightRow`, `COMMENTS_PER_REPORT_MAX`) back the urgent lane,
+the staff thread and Insights; `purgeReports` also deletes the staff comments of the reports it deletes.
 
 ## Slow mode and flood control
 

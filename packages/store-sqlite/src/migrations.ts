@@ -789,6 +789,11 @@ CREATE INDEX kit_ai_actions_by_created ON kit_ai_actions (created_at);
     //   a counter every erase moves, which another process re-reads to learn that a person it has in memory is gone.
     // Block 5 (privacy requests): the lookup indexes the erase paths need, so no erase scans a table by a person: `kit_mutes_by_target`, `kit_blocked_names_by_subject`,
     //   `kit_signals_by_source` (rows the person caused) and `kit_sanctions_by_report` (the NULL-out when a report is deleted).
+    // Block 6 (urgent lane and desk): `kit_reports` gains `urgent` (a snapshot taken at filing, 0 on every existing row; `kit_reports_urgent_open` is the partial index
+    //   the urgent queue and its count read), the hand-off pair (`handoff_at`, `handoff_by`, the first mark only), the escalation triple (`escalated_to` senior or owner, by
+    //   whom, when; all NULL while none is asked) and `evidence_ref` (the game's opaque id). Staff ids only, never a player. `kit_report_comments` is the staff thread of a
+    //   report (a comment, an ask, an escalation, a look done), at most 50 a report, deleted with its report; `kit_chat_days` is one row per UTC day with two counts (lines
+    //   delivered and refused), written only when `desk.insights` is on: no player, room or text.
     version: 26,
     sql: `
 ALTER TABLE kit_reports ADD COLUMN origin TEXT CHECK (origin IS NULL OR origin IN ('filter', 'watch'));
@@ -829,6 +834,32 @@ CREATE INDEX kit_mutes_by_target ON kit_mutes (target_id);
 CREATE INDEX kit_blocked_names_by_subject ON kit_blocked_names (subject_id);
 CREATE INDEX kit_signals_by_source ON kit_signals (by_subject) WHERE by_subject IS NOT NULL;
 CREATE INDEX kit_sanctions_by_report ON kit_sanctions (report_id) WHERE report_id IS NOT NULL;
+
+ALTER TABLE kit_reports ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX kit_reports_urgent_open ON kit_reports (created_at, id) WHERE urgent = 1 AND status = 'open';
+ALTER TABLE kit_reports ADD COLUMN handoff_at INTEGER;
+ALTER TABLE kit_reports ADD COLUMN handoff_by TEXT;
+ALTER TABLE kit_reports ADD COLUMN escalated_to TEXT CHECK (escalated_to IN ('senior', 'owner'));
+ALTER TABLE kit_reports ADD COLUMN escalated_by TEXT;
+ALTER TABLE kit_reports ADD COLUMN escalated_at INTEGER;
+ALTER TABLE kit_reports ADD COLUMN evidence_ref TEXT;
+
+CREATE TABLE kit_report_comments (
+  id        TEXT PRIMARY KEY,
+  report_id TEXT NOT NULL,
+  at        INTEGER NOT NULL,
+  actor     TEXT NOT NULL,
+  role      TEXT NOT NULL,
+  kind      TEXT NOT NULL CHECK (kind IN ('comment', 'ask', 'escalate', 'clear')),
+  text      TEXT
+);
+CREATE INDEX kit_report_comments_by_report ON kit_report_comments (report_id, at, id);
+
+CREATE TABLE kit_chat_days (
+  day       TEXT PRIMARY KEY,
+  delivered INTEGER NOT NULL,
+  refused   INTEGER NOT NULL
+);
 `,
   },
 ];

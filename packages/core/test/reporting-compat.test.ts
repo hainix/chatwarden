@@ -71,13 +71,13 @@ describe('types written against 0.1.1 still compile', () => {
     expect(asStore).toBeDefined();
   });
 
-  it('a custom Store whose loadReport returns a 0.1.1-shaped record (no reportedReason, no detailAt) still compiles and reads', async () => {
-    // Written for 0.1.1: a ReportRecord literal with none of the new fields.
-    const old: ReportRecord = {
+  it('a custom Store whose loadReport returns a record with none of the later fields (no reportedReason, no detailAt, no urgent) is still read', async () => {
+    // Written for 0.1.1: a record with none of the new fields. The type now requires them (a custom Store must supply them), so this one is cast: the kit still reads it.
+    const old = {
       id: 'old', createdAt: 1, roomId: 'x', tags: {}, reporterSubject: 's_a', reporterSeat: 'p1', reporterHandle: 'A', targetSubject: 's_b', targetSeat: 'p2',
       targetHandle: 'B', category: 'disruption', note: null, lineId: null, excerpt: [], people: [], status: 'open',
       badFaith: false, actionedAt: null, actionedBy: null, modNote: null, badFaithEvidence: null, origin: null, originKey: null,
-    };
+    } as unknown as ReportRecord;
     class LegacyStore extends MemoryStore {
       override loadReport(): ReportRecord | null {
         return old;

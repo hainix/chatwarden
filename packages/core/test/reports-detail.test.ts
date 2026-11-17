@@ -112,7 +112,8 @@ describe('a store that returns 0.1.1-shaped records (no reportedReason, no detai
         if (r === null) return null;
         const { reportedReason: _a, detailAt: _b, ...rest } = r;
         void [_a, _b];
-        return rest;
+        // The type now requires both (a custom Store must supply them); this legacy store does not, and the kit still reads it.
+        return rest as unknown as typeof r;
       }
     }
     const w = await world({}, new Legacy());

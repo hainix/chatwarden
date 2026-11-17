@@ -3,9 +3,11 @@ import type {
   AiReadRow,
   AuditListQuery,
   AuditRow,
+  ChatDayRow,
   ClaimAttempt,
   ClaimMode,
   ClaimRow,
+  CommentRow,
   DecisionRow,
   FilterHitRow,
   MuteRow,
@@ -34,6 +36,7 @@ import type {
   BlockedNameRow,
   HeldSet,
   HoldRow,
+  InsightRow,
   ErasePlan,
   ErasureCounts,
   ErasureRemoved,
@@ -60,6 +63,10 @@ export function newId(): string {
   const n = raw[i]! << 16; // 16 bytes leave one byte over
   return out + chars[n >> 18]! + chars[(n >> 12) & 63]!;
 }
+
+/** The most entries one report's thread holds (core's `COMMENTS_PER_REPORT_MAX`; local because this package imports types only from core). */
+const COMMENTS_MAX = 50;
+const COMMENT_KINDS: readonly string[] = ['comment', 'ask', 'escalate', 'clear'];
 
 /** A report plus the moderation columns a decision fills. */
 export type StoredReportRow = ReportRecord;
@@ -97,6 +104,10 @@ export class MemoryStore implements Store {
   protected reports: StoredReportRow[] = [];
   /** The chat-filter hit counters by (day, key, action). */
   protected filterHits = new Map<string, FilterHitRow>();
+  /** The staff thread entries of every report, in insertion order. */
+  protected comments: CommentRow[] = [];
+  /** The daily line counts by UTC day (`desk.insights`). */
+  protected chatDays = new Map<string, ChatDayRow>();
   /** Recorded decisions by key. */
   protected decisions = new Map<string, DecisionRow>();
   /** Notices in insertion order (stands in for SQLite's rowid). */
@@ -688,6 +699,13 @@ export class MemoryStore implements Store {
       originKey: row.originKey ?? null,
       reportedReason: row.reportedReason ?? null,
       detailAt: null,
+      urgent: row.urgent === true,
+      evidenceRef: row.evidenceRef ?? null,
+      handoffAt: null,
+      handoffBy: null,
+      escalatedTo: null,
+      escalatedBy: null,
+      escalatedAt: null,
       badFaith: false,
       actionedAt: null,
       actionedBy: null,
@@ -759,6 +777,7 @@ export class MemoryStore implements Store {
         if (r.status !== 'open') return false;
         if (q.category !== undefined && r.category !== q.category) return false;
         if (q.reason !== undefined && (r.reportedReason ?? null) !== q.reason) return false;
+        if (q.urgent === true && !r.urgent) return false;
         if (q.after === undefined) return true;
         if (r.createdAt !== q.after) return r.createdAt > q.after;
         return q.afterId !== undefined && compare(r.id, q.afterId) > 0;
@@ -819,6 +838,7 @@ export class MemoryStore implements Store {
       .filter((r) => {
         if (q.status !== undefined && r.status !== q.status) return false;
         if (q.reason !== undefined && r.reportedReason !== q.reason) return false;
+        if (q.urgent === true && !r.urgent) return false;
         if (q.before === undefined) return true;
         if (r.createdAt !== q.before) return r.createdAt < q.before;
         return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
@@ -957,11 +977,19 @@ export class MemoryStore implements Store {
   // restores the previous contents.
 
   purgeReports(before: number, keepBadFaithSince: number): number {
-    const snapshot = [...this.reports];
     const held = this.heldReportIds();
-    const kept = snapshot.filter(
+    return this.dropReports(
       (r) => r.createdAt >= before || (r.badFaith && r.actionedAt !== null && r.actionedAt >= keepBadFaithSince) || held.has(r.id),
     );
+  }
+
+  /**
+   * Delete the reports `keep` says to drop (it returns true for a report that STAYS), with everything that goes with a report: its recorded decisions, its AI reads and its
+   * staff comments, all journaled. Returns how many reports it deleted.
+   */
+  private dropReports(keep: (r: StoredReportRow) => boolean): number {
+    const snapshot = [...this.reports];
+    const kept = snapshot.filter(keep);
     const n = snapshot.length - kept.length;
     if (n > 0) {
       this.reports = kept;
@@ -973,13 +1001,142 @@ export class MemoryStore implements Store {
       const reads = this.aiReads;
       const gone = new Set(snapshot.filter((r) => !alive.has(r.id)).map((r) => r.id));
       this.aiReads = reads.filter((r) => !gone.has(r.reportId));
+      // So does the staff thread.
+      const comments = this.comments;
+      this.comments = comments.filter((c) => !gone.has(c.reportId));
       this.undoWith(() => {
         this.reports = snapshot;
         this.aiReads = reads;
+        this.comments = comments;
         for (const d of dropped) this.decisions.set(d.key, d);
       });
     }
     return n;
+  }
+
+  purgeReportsByReason(reason: string, before: number): number {
+    const held = this.heldReportIds();
+    return this.dropReports((r) => r.reportedReason !== reason || r.createdAt >= before || held.has(r.id));
+  }
+
+  // The urgent lane, the staff workflow and Insights (synchronous, see the Store interface).
+
+  setReportUrgent(id: string, on: boolean): boolean {
+    const r = this.reports.find((x) => x.id === id);
+    if (r === undefined || r.status !== 'open' || r.urgent === on) return false;
+    const before = r.urgent;
+    r.urgent = on;
+    this.undoWith(() => {
+      r.urgent = before;
+    });
+    this.bump();
+    return true;
+  }
+
+  setHandoff(id: string, by: string, at: number): boolean {
+    const r = this.reports.find((x) => x.id === id);
+    if (r === undefined || r.handoffAt !== null) return false;
+    const before = { handoffAt: r.handoffAt, handoffBy: r.handoffBy };
+    r.handoffAt = at;
+    r.handoffBy = by;
+    this.undoWith(() => Object.assign(r, before));
+    this.bump();
+    return true;
+  }
+
+  setEscalation(id: string, patch: { to: 'senior' | 'owner'; by: string; at: number } | null): boolean {
+    if (patch !== null && patch.to !== 'senior' && patch.to !== 'owner') throw new Error('setEscalation: to must be senior or owner');
+    const r = this.reports.find((x) => x.id === id);
+    if (r === undefined || r.status !== 'open') return false;
+    const next = patch === null ? { escalatedTo: null, escalatedBy: null, escalatedAt: null } : { escalatedTo: patch.to, escalatedBy: patch.by, escalatedAt: patch.at };
+    if (r.escalatedTo === next.escalatedTo && r.escalatedBy === next.escalatedBy && r.escalatedAt === next.escalatedAt) return false;
+    const before = { escalatedTo: r.escalatedTo, escalatedBy: r.escalatedBy, escalatedAt: r.escalatedAt };
+    Object.assign(r, next);
+    this.undoWith(() => Object.assign(r, before));
+    this.bump();
+    return true;
+  }
+
+  countOpenUrgent(): number {
+    return this.reports.filter((r) => r.status === 'open' && r.urgent).length;
+  }
+
+  countOpenEscalated(): Record<'senior' | 'owner', number> {
+    const out = { senior: 0, owner: 0 };
+    for (const r of this.reports) if (r.status === 'open' && r.escalatedTo !== null) out[r.escalatedTo] += 1;
+    return out;
+  }
+
+  insertComment(row: CommentRow): boolean {
+    if (!this.reports.some((r) => r.id === row.reportId)) return false;
+    if (this.comments.filter((c) => c.reportId === row.reportId).length >= COMMENTS_MAX) return false;
+    // After the two refusals above, like the SQLite statement order: a bad kind or a clashing id throws, as a CHECK and a primary key do.
+    if (!COMMENT_KINDS.includes(row.kind)) throw new Error('CHECK constraint failed: kit_report_comments.kind');
+    if (this.comments.some((c) => c.id === row.id)) throw new Error('UNIQUE constraint failed: kit_report_comments.id');
+    this.comments.push({ ...row });
+    this.undoWith(() => {
+      this.comments.length -= 1;
+    });
+    this.bump();
+    return true;
+  }
+
+  listComments(reportId: string): CommentRow[] {
+    return this.comments
+      .filter((c) => c.reportId === reportId)
+      .sort((a, b) => a.at - b.at || compare(a.id, b.id))
+      .map((c) => ({ ...c }));
+  }
+
+  deleteComment(id: string): boolean {
+    const at = this.comments.findIndex((c) => c.id === id);
+    if (at < 0) return false;
+    const [gone] = this.comments.splice(at, 1);
+    this.undoWith(() => {
+      this.comments.splice(at, 0, gone as CommentRow);
+    });
+    this.bump();
+    return true;
+  }
+
+  countComments(reportId: string): number {
+    return this.comments.filter((c) => c.reportId === reportId).length;
+  }
+
+  addChatCounts(day: string, delivered: number, refused: number): void {
+    const held = this.chatDays.get(day);
+    if (held === undefined) {
+      this.chatDays.set(day, { day, delivered, refused });
+      this.undoWith(() => this.chatDays.delete(day));
+    } else {
+      const before = { delivered: held.delivered, refused: held.refused };
+      held.delivered += delivered;
+      held.refused += refused;
+      this.undoWith(() => Object.assign(held, before));
+    }
+  }
+
+  chatCounts(fromDay: string, toDay: string): ChatDayRow[] {
+    return [...this.chatDays.values()]
+      .filter((r) => r.day >= fromDay && r.day <= toDay)
+      .sort((a, b) => compare(a.day, b.day))
+      .map((r) => ({ ...r }));
+  }
+
+  purgeChatCounts(beforeDay: string): number {
+    const gone = [...this.chatDays].filter(([day]) => day < beforeDay);
+    for (const [day] of gone) this.chatDays.delete(day);
+    if (gone.length > 0) this.undoWith(() => gone.forEach(([day, r]) => this.chatDays.set(day, r)));
+    return gone.length;
+  }
+
+  insightRows(since: number, limit: number): InsightRow[] {
+    const n = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1;
+    return this.reports
+      .filter((r) => r.createdAt >= since)
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, n)
+      .map((r) => ({ createdAt: r.createdAt, actionedAt: r.actionedAt, status: r.status, reportedReason: r.reportedReason, urgent: r.urgent, badFaith: r.badFaith }));
   }
 
   purgeSanctions(before: number): number {
@@ -1222,6 +1379,11 @@ export class MemoryStore implements Store {
         });
       }
       hooks.privacyUnlinkAppealReports?.(about);
+      // The staff thread of a deleted report goes with it (staff workflow rows).
+      const comments = this.comments;
+      const keptComments = comments.filter((c) => !about.has(c.reportId));
+      add('workflow', comments.length - keptComments.length);
+      this.swap(comments, keptComments, (v) => (this.comments = v));
       const kept = this.reports.filter((r) => !about.has(r.id));
       add('reports_about', this.reports.length - kept.length);
       this.swap(this.reports, kept, (v) => (this.reports = v));

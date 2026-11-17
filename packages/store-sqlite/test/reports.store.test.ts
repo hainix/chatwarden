@@ -76,6 +76,8 @@ describe('migration 6: kit_reports', () => {
       'reported_reason', 'detail_at',
       // Migration 26 (release 0.2.0, chat filters): reports nobody filed.
       'origin', 'origin_key',
+      // Migration 26 (release 0.2.0, the urgent lane): urgent, the hand-off pair, the escalation triple and the game's evidence id.
+      'urgent', 'handoff_at', 'handoff_by', 'escalated_to', 'escalated_by', 'escalated_at', 'evidence_ref',
     ]);
     const by = (n: string) => info.find((c) => c.name === n);
     expect(by('status')?.dflt_value).toBe("'open'");

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, CONDUCT_LEVELS, ROLES } from '@chatwarden/core';
+import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, COMMENTS_PER_REPORT_MAX, CONDUCT_LEVELS, ROLES } from '@chatwarden/core';
 import type {
   AppealRow,
   AppealStatus,
@@ -34,9 +34,12 @@ import type {
   AuditTargetType,
   FilterHitRow,
   ReportOrigin,
+  ChatDayRow,
   ClaimAttempt,
   ClaimMode,
   ClaimRow,
+  CommentRow,
+  InsightRow,
   DecisionRow,
   MuteRow,
   NoAutomationRow,
@@ -160,15 +163,50 @@ function detailFromJson(json: unknown): { detail?: AuditDetail } {
  */
 export const REPORT_INSERT_SQL = `INSERT INTO kit_reports
    (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
-    target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status, origin, origin_key)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status, origin, origin_key, urgent, evidence_ref)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
  ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING
  ON CONFLICT (target_subject, room_id) WHERE origin = 'filter' AND status = 'open' DO NOTHING`;
 /** The values `REPORT_INSERT_SQL` binds, one for each `?`, in order. */
 export const reportInsertArgs = (r: StoredReport): Array<string | number | null> => [
   r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle, r.targetSubject, r.targetSeat, r.targetHandle,
   r.category, r.reportedReason ?? null, r.note, r.lineId, JSON.stringify(r.excerpt), JSON.stringify(r.people), r.status, r.origin ?? null, r.originKey ?? null,
+  r.urgent === true ? 1 : 0, r.evidenceRef ?? null,
 ];
+/** Set an open report's urgent flag when it differs. Binds: the new value, the id, the new value. */
+export const REPORT_URGENT_SET_SQL = "UPDATE kit_reports SET urgent = ? WHERE id = ? AND status = 'open' AND urgent <> ?";
+/** Record the hand-off of a report that has none. Binds: the time, who, the id. */
+export const REPORT_HANDOFF_SET_SQL = 'UPDATE kit_reports SET handoff_at = ?, handoff_by = ? WHERE id = ? AND handoff_at IS NULL';
+/** Set or clear (three NULLs) the escalation of an open report when it differs. Binds: to, by, at, the id, then to, by, at again for the comparison. */
+export const REPORT_ESCALATION_SET_SQL =
+  "UPDATE kit_reports SET escalated_to = ?, escalated_by = ?, escalated_at = ? WHERE id = ? AND status = 'open' AND (escalated_to IS NOT ? OR escalated_by IS NOT ? OR escalated_at IS NOT ?)";
+/** The open urgent reports: served by `kit_reports_urgent_open`. */
+export const URGENT_COUNT_SQL = "SELECT COUNT(*) AS n FROM kit_reports INDEXED BY kit_reports_urgent_open WHERE urgent = 1 AND status = 'open'";
+/** The open escalated reports by the role asked. */
+export const ESCALATED_COUNT_SQL = "SELECT escalated_to AS role, COUNT(*) AS n FROM kit_reports WHERE status = 'open' AND escalated_to IS NOT NULL GROUP BY escalated_to";
+/** Add a thread entry to a report that exists and holds fewer than 50, in one statement. Binds: id, report, at, actor, role, kind, text, then the report (existence) and the report (count). */
+export const COMMENT_INSERT_SQL = `INSERT INTO kit_report_comments (id, report_id, at, actor, role, kind, text)
+ SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM kit_reports WHERE id = ?) AND (SELECT COUNT(*) FROM kit_report_comments WHERE report_id = ?) < ${COMMENTS_PER_REPORT_MAX}`;
+/** A report's thread, oldest first: served by `kit_report_comments_by_report`. Binds: the report. */
+export const COMMENT_LIST_SQL = 'SELECT id, report_id, at, actor, role, kind, text FROM kit_report_comments WHERE report_id = ? ORDER BY at, id';
+/** How many entries a thread holds. Binds: the report. */
+export const COMMENT_COUNT_SQL = 'SELECT COUNT(*) AS n FROM kit_report_comments WHERE report_id = ?';
+/** Delete one entry. Binds: its id. */
+export const COMMENT_DELETE_SQL = 'DELETE FROM kit_report_comments WHERE id = ?';
+/** Delete the thread entries of reports that no longer exist. */
+export const COMMENTS_ORPHAN_DELETE_SQL = 'DELETE FROM kit_report_comments WHERE report_id NOT IN (SELECT id FROM kit_reports)';
+/** The reports a reason purge deletes: the reason, older than the cutoff, not held. Binds: the reason, the cutoff. */
+export const REASON_PURGE_WHERE = `reported_reason = ? AND created_at < ? AND id NOT IN ${HELD_REPORT_IDS}`;
+/** Add to a day's line counts. Binds: the day, delivered, refused. */
+export const CHAT_COUNTS_ADD_SQL =
+  'INSERT INTO kit_chat_days (day, delivered, refused) VALUES (?, ?, ?) ON CONFLICT (day) DO UPDATE SET delivered = delivered + excluded.delivered, refused = refused + excluded.refused';
+/** The line counts of a day range, inclusive. Binds: the first day, the last day. */
+export const CHAT_COUNTS_LIST_SQL = 'SELECT day, delivered, refused FROM kit_chat_days WHERE day >= ? AND day <= ? ORDER BY day';
+/** Delete the line counts of days before a day. Binds: the day. */
+export const CHAT_COUNTS_PURGE_SQL = 'DELETE FROM kit_chat_days WHERE day < ?';
+/** The reports Insights reads: since a time, newest first. Binds: the time, the limit. */
+export const INSIGHT_ROWS_SQL =
+  'SELECT created_at, actioned_at, status, reported_reason, urgent, bad_faith FROM kit_reports WHERE created_at >= ? ORDER BY created_at DESC, id DESC LIMIT ?';
 /** How many reports with an origin were filed since a time (the daily cap): the origin, then the time. Served by `kit_reports_by_origin`. */
 export const ORIGIN_REPORTS_COUNT_SQL = 'SELECT COUNT(*) AS n FROM kit_reports WHERE origin = ? AND created_at >= ?';
 /** The hit counter upsert: the day, key, action and the hits to add. */
@@ -209,6 +247,13 @@ function reportFromRow(r: Record<string, unknown>): ReportRecord {
     detailAt: r.detail_at === null || r.detail_at === undefined ? null : Number(r.detail_at),
     origin: r.origin === null || r.origin === undefined ? null : (String(r.origin) as ReportOrigin),
     originKey: r.origin_key === null || r.origin_key === undefined ? null : String(r.origin_key),
+    urgent: Number(r.urgent) === 1,
+    evidenceRef: r.evidence_ref === null || r.evidence_ref === undefined ? null : String(r.evidence_ref),
+    handoffAt: r.handoff_at === null || r.handoff_at === undefined ? null : Number(r.handoff_at),
+    handoffBy: r.handoff_by === null || r.handoff_by === undefined ? null : String(r.handoff_by),
+    escalatedTo: r.escalated_to === 'senior' || r.escalated_to === 'owner' ? r.escalated_to : null,
+    escalatedBy: r.escalated_by === null || r.escalated_by === undefined ? null : String(r.escalated_by),
+    escalatedAt: r.escalated_at === null || r.escalated_at === undefined ? null : Number(r.escalated_at),
     note: r.note === null ? null : String(r.note),
     lineId: r.line_id === null ? null : String(r.line_id),
     excerpt: JSON.parse(String(r.excerpt_json)) as ReportRecord['excerpt'],
@@ -2330,6 +2375,8 @@ export class SqliteStore implements Store, TermStore {
       where.push('reported_reason = ?');
       args.push(q.reason);
     }
+    // Served by the partial index kit_reports_urgent_open (`urgent = 1 AND status = 'open'`, ordered by created_at, id).
+    if (q.urgent === true) where.push('urgent = 1');
     if (q.after !== undefined) {
       if (q.afterId === undefined) {
         where.push('created_at > ?');
@@ -2339,7 +2386,9 @@ export class SqliteStore implements Store, TermStore {
         args.push(q.after, q.after, q.afterId);
       }
     }
-    const sql = `SELECT * FROM kit_reports WHERE ${where.join(' AND ')} ORDER BY created_at, id LIMIT ?`;
+    // The urgent scan reads the partial index, so it stays one index range however many reports are open.
+    const index = q.urgent === true ? ' INDEXED BY kit_reports_urgent_open' : '';
+    const sql = `SELECT * FROM kit_reports${index} WHERE ${where.join(' AND ')} ORDER BY created_at, id LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
   }
 
@@ -2423,6 +2472,7 @@ export class SqliteStore implements Store, TermStore {
         args.push(q.reason);
       }
     }
+    if (q.urgent === true) where.push('urgent = 1');
     if (q.before !== undefined) {
       if (q.beforeId === undefined) {
         where.push('created_at < ?');
@@ -2639,9 +2689,142 @@ export class SqliteStore implements Store, TermStore {
           .run(before, keepBadFaithSince).changes,
       );
       // A recorded decision outlives only its report.
+      if (n > 0) {
+        this.db.prepare('DELETE FROM kit_decisions WHERE report_id NOT IN (SELECT id FROM kit_reports)').run();
+        // The staff thread of a deleted report goes with it.
+        this.db.prepare(COMMENTS_ORPHAN_DELETE_SQL).run();
+      }
+      return n;
+    });
+  }
+
+  purgeReportsByReason(reason: string, before: number): number {
+    return this.transaction(() => {
+      // The same set every time: the reason, older than the cutoff (strict), not held. The side rows go first, in this transaction, so a failure undoes all of it.
+      this.db.prepare(`DELETE FROM kit_ai_reads WHERE report_id IN (SELECT id FROM kit_reports WHERE ${REASON_PURGE_WHERE})`).run(reason, before);
+      this.db.prepare(`DELETE FROM kit_report_comments WHERE report_id IN (SELECT id FROM kit_reports WHERE ${REASON_PURGE_WHERE})`).run(reason, before);
+      const n = Number(this.db.prepare(`DELETE FROM kit_reports WHERE ${REASON_PURGE_WHERE}`).run(reason, before).changes);
       if (n > 0) this.db.prepare('DELETE FROM kit_decisions WHERE report_id NOT IN (SELECT id FROM kit_reports)').run();
       return n;
     });
+  }
+
+  // The urgent lane, the staff workflow and Insights (synchronous, see the Store interface).
+
+  setReportUrgent(id: string, on: boolean): boolean {
+    return this.transaction(() => {
+      const v = on ? 1 : 0;
+      if (Number(this.db.prepare(REPORT_URGENT_SET_SQL).run(v, id, v).changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  setHandoff(id: string, by: string, at: number): boolean {
+    return this.transaction(() => {
+      if (Number(this.db.prepare(REPORT_HANDOFF_SET_SQL).run(at, by, id).changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  setEscalation(id: string, patch: { to: 'senior' | 'owner'; by: string; at: number } | null): boolean {
+    // Checked here as well as by the column's CHECK, so an unknown report and a bad value fail the same way in every store.
+    if (patch !== null && patch.to !== 'senior' && patch.to !== 'owner') throw new Error('setEscalation: to must be senior or owner');
+    return this.transaction(() => {
+      const to = patch === null ? null : patch.to;
+      const by = patch === null ? null : patch.by;
+      const at = patch === null ? null : patch.at;
+      if (Number(this.db.prepare(REPORT_ESCALATION_SET_SQL).run(to, by, at, id, to, by, at).changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  countOpenUrgent(): number {
+    return this.transaction(() => Number(this.db.prepare(URGENT_COUNT_SQL).get()?.n ?? 0));
+  }
+
+  countOpenEscalated(): Record<'senior' | 'owner', number> {
+    return this.transaction(() => {
+      const out = { senior: 0, owner: 0 };
+      for (const r of this.db.prepare(ESCALATED_COUNT_SQL).all()) {
+        if (r.role === 'senior' || r.role === 'owner') out[r.role] = Number(r.n);
+      }
+      return out;
+    });
+  }
+
+  insertComment(row: CommentRow): boolean {
+    return this.transaction(() => {
+      // One statement: the report must exist and the thread must hold fewer than 50. A clashing id or an unknown kind throws (the key and the CHECK).
+      const res = this.db.prepare(COMMENT_INSERT_SQL).run(row.id, row.reportId, row.at, row.actor, row.role, row.kind, row.text, row.reportId, row.reportId);
+      if (Number(res.changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  listComments(reportId: string): CommentRow[] {
+    return this.transaction(() =>
+      this.db.prepare(COMMENT_LIST_SQL).all(reportId).map((r) => ({
+        id: String(r.id),
+        reportId: String(r.report_id),
+        at: Number(r.at),
+        actor: String(r.actor),
+        role: String(r.role) as CommentRow['role'],
+        kind: String(r.kind) as CommentRow['kind'],
+        text: r.text === null ? null : String(r.text),
+      })),
+    );
+  }
+
+  deleteComment(id: string): boolean {
+    return this.transaction(() => {
+      if (Number(this.db.prepare(COMMENT_DELETE_SQL).run(id).changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  countComments(reportId: string): number {
+    return this.transaction(() => Number(this.db.prepare(COMMENT_COUNT_SQL).get(reportId)?.n ?? 0));
+  }
+
+  addChatCounts(day: string, delivered: number, refused: number): void {
+    this.transaction(() => {
+      this.db.prepare(CHAT_COUNTS_ADD_SQL).run(day, delivered, refused);
+    });
+  }
+
+  chatCounts(fromDay: string, toDay: string): ChatDayRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(CHAT_COUNTS_LIST_SQL)
+        .all(fromDay, toDay)
+        .map((r) => ({ day: String(r.day), delivered: Number(r.delivered), refused: Number(r.refused) })),
+    );
+  }
+
+  purgeChatCounts(beforeDay: string): number {
+    return this.transaction(() => Number(this.db.prepare(CHAT_COUNTS_PURGE_SQL).run(beforeDay).changes));
+  }
+
+  insightRows(since: number, limit: number): InsightRow[] {
+    const n = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1;
+    return this.transaction(() =>
+      this.db
+        .prepare(INSIGHT_ROWS_SQL)
+        .all(since, n)
+        .map((r) => ({
+          createdAt: Number(r.created_at),
+          actionedAt: r.actioned_at === null ? null : Number(r.actioned_at),
+          status: String(r.status) as InsightRow['status'],
+          reportedReason: r.reported_reason === null ? null : String(r.reported_reason),
+          urgent: Number(r.urgent) === 1,
+          badFaith: Number(r.bad_faith) === 1,
+        })),
+    );
   }
 
   purgeSanctions(before: number): number {

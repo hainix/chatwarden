@@ -748,6 +748,18 @@ export interface StoredReport {
   origin?: 'filter' | 'watch' | null;
   /** For an origin report, the counter key that made it (a closed shape `[a-z0-9_.:-]{1,48}`, never text from a line); omitted or null otherwise. */
   originKey?: string | null;
+  /**
+   * The report is urgent: a snapshot taken when it was filed (its reason is flagged urgent, or a system filter said so), changed afterwards only by a moderator
+   * (`setReportUrgent`). Omitted reads as false. A store returns it on every record.
+   * @experimental
+   */
+  urgent?: boolean;
+  /**
+   * An opaque id the game gave for the evidence of the gameplay behind the report (a match, a replay): a closed alphabet with no dot or slash, supplied by the server
+   * and never by a player. The kit never fetches it. Omitted or null reads as null. A store returns it on every record.
+   * @experimental
+   */
+  evidenceRef?: string | null;
   status: 'open';
 }
 
@@ -774,22 +786,32 @@ export interface FilterHitRow {
  * until then. `badFaith` marks a dismissal as the reporter's bad faith (it counts toward their suspension).
  * Private: moderator tools only.
  */
-export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason' | 'origin' | 'originKey'> {
+export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason' | 'origin' | 'originKey' | 'urgent' | 'evidenceRef'> {
   /** Where the report came from: `'filter'`, `'watch'`, or null for a player's report. Every first-party store returns it. See {@link StoredReport.origin}. */
   origin: ReportOrigin | null;
   /** The counter key of an origin report; null otherwise. */
   originKey: string | null;
   /**
    * The reason the reporter gave (a reason id), or null. Rows stored before 0.1.2 carry their old category here (`disruption` as
-   * `griefing`). Every first-party store returns it; it is optional here so a custom store's 0.1.1-shaped record still type-checks (a
-   * missing one reads as the old category, see `StaffReport`, where it is always present).
+   * `griefing`). Every store returns it (a custom `Store` must).
    */
-  reportedReason?: string | null;
+  reportedReason: string | null;
   /**
    * When the reporter added their one follow-up (`cw.reports.addDetail`), epoch ms, or null. At most one per report, and only
-   * while the report is open.
+   * while the report is open. Every store returns it.
    */
-  detailAt?: number | null;
+  detailAt: number | null;
+  /** Urgent now (see {@link StoredReport.urgent}). Every store returns it (a custom `Store` must). @experimental */
+  urgent: boolean;
+  /** The game's evidence id, or null (see {@link StoredReport.evidenceRef}). Every store returns it. @experimental */
+  evidenceRef: string | null;
+  /** When a moderator marked the case as passed to the game's safety team, and who: the first mark only. Null until then. Staff ids, not players. @experimental */
+  handoffAt: number | null;
+  handoffBy: string | null;
+  /** A second look was asked of this role (`'senior'` or `'owner'`), by whom and when; all three null while none is asked, and cleared when the report is decided. @experimental */
+  escalatedTo: 'senior' | 'owner' | null;
+  escalatedBy: string | null;
+  escalatedAt: number | null;
   status: 'open' | 'actioned' | 'dismissed';
   badFaith: boolean;
   actionedAt: number | null;
@@ -810,6 +832,8 @@ export interface ReportListQuery {
   beforeId?: string;
   /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. */
   reason?: string | null;
+  /** Only urgent reports when true; false or omitted keeps all. @experimental */
+  urgent?: boolean;
   limit: number;
 }
 
@@ -819,11 +843,50 @@ export interface OpenReportQuery {
   category?: ReportCategory;
   /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. A store must apply it. */
   reason?: string | null;
+  /** Only urgent reports when true (the urgent pass of "take next" and `GET /reports?urgent=1`); false or omitted keeps all. @experimental */
+  urgent?: boolean;
   /** Keyset cursor: only reports newer than this (`createdAt` above it, or equal with an id above `afterId`). `afterId` without `after` is ignored. */
   after?: number;
   afterId?: string;
   /** Clamped to 1..200 (a fraction is floored). */
   limit: number;
+}
+
+/**
+ * One entry of the staff thread on a report: a comment, an ask for a second look (`ask`), an escalation to the owner (`escalate`) or the note that a look was done
+ * (`clear`). Staff only: `actor` is a staff ref, never a player. `text` is null for an entry with no note. Deleted with its report. @experimental
+ */
+export interface CommentRow {
+  id: string;
+  reportId: string;
+  /** Epoch ms. */
+  at: number;
+  actor: string;
+  role: 'moderator' | 'senior' | 'owner';
+  kind: 'comment' | 'ask' | 'escalate' | 'clear';
+  text: string | null;
+}
+
+/** The most entries one report's thread holds: the store refuses the next. @experimental */
+export const COMMENTS_PER_REPORT_MAX = 50;
+
+/** One day of line counts (`desk.insights`): the UTC date as `YYYY-MM-DD` and two counts. No player, room or text. @experimental */
+export interface ChatDayRow {
+  day: string;
+  delivered: number;
+  refused: number;
+}
+
+/**
+ * One report as Insights reads it: times, status, the reason id the reporter gave and two flags. No text, no subject, no handle, no actor. @experimental
+ */
+export interface InsightRow {
+  createdAt: number;
+  actionedAt: number | null;
+  status: 'open' | 'actioned' | 'dismissed';
+  reportedReason: string | null;
+  urgent: boolean;
+  badFaith: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1690,7 +1753,7 @@ export interface Store {
   /**
    * Delete reports with `createdAt < before`, except a bad-faith dismissal still inside its window
    * (`bad_faith = 1` and `actionedAt >= keepBadFaithSince`): the reporter's suspension reads it. Also deletes the
-   * recorded decisions of reports that no longer exist, and the AI reads of the reports it deletes (not their casebook outcomes: those
+   * recorded decisions of reports that no longer exist, the staff comments of the reports it deletes, and the AI reads of the reports it deletes (not their casebook outcomes: those
    * have their own clock, see `purgeAi`). Returns how many reports it deleted.
    */
   purgeReports(before: number, keepBadFaithSince: number): number;
@@ -1858,6 +1921,62 @@ export interface Store {
 
   /** The sanction groups whose rows cite this report (`report_id`), oldest first by first write: what a decision of the report wrote. Empty for an unknown report. */
   sanctionGroupsOfReport(reportId: string): string[];
+
+  // The urgent lane, the staff workflow and Insights (0.2.0). OPTIONAL: a store without them cannot run `desk.workflow` (`createChatwarden` says so) and the urgent lane
+  // and Insights degrade to nothing. All SYNCHRONOUS, in `transaction` like every report write. A write that changes the open count, the urgent count, an escalation, a
+  // hand-off or a comment moves `changeToken()` inside the same transaction; an undone transaction leaves it as it was. Counts of lines (`addChatCounts`) never move it.
+  // Both first-party stores implement them.
+
+  /** Set an OPEN report's urgent flag. True when this call changed it; false (nothing changed) for an unknown or decided report or when it already had that value. */
+  setReportUrgent?(id: string, on: boolean): boolean;
+
+  /** Record the hand-off of a report (any status). The FIRST call wins: true when it recorded `by` and `at`, false (nothing changed) afterwards or for an unknown report. */
+  setHandoff?(id: string, by: string, at: number): boolean;
+
+  /**
+   * Ask for a second look at an OPEN report (`patch`), replacing an earlier ask, or clear it (`null`). True when this call changed it; false for an unknown or decided report
+   * or when there was nothing to change. `to` must be `'senior'` or `'owner'`: anything else throws and writes nothing.
+   */
+  setEscalation?(id: string, patch: { to: 'senior' | 'owner'; by: string; at: number } | null): boolean;
+
+  /** How many reports are open and urgent. */
+  countOpenUrgent?(): number;
+
+  /** How many open reports are escalated, by the role asked. */
+  countOpenEscalated?(): Record<'senior' | 'owner', number>;
+
+  /**
+   * Add an entry to a report's thread. False (nothing written) when the report does not exist or already holds {@link COMMENTS_PER_REPORT_MAX} entries; a clashing id or an
+   * unknown `kind` or `role` throws. The report may be decided: a thread outlives the decision.
+   */
+  insertComment?(row: CommentRow): boolean;
+
+  /** A report's thread, oldest first (`at`, then `id`). Copies. Empty for an unknown report. */
+  listComments?(reportId: string): CommentRow[];
+
+  /** Delete one entry. True when it removed one. */
+  deleteComment?(id: string): boolean;
+
+  /** How many entries a report's thread holds. */
+  countComments?(reportId: string): number;
+
+  /**
+   * Delete reports whose `reportedReason` is `reason` and whose `createdAt < before` (strict), with their staff comments, recorded decisions and AI reads, in one
+   * transaction; a report held for legal reasons is skipped. The welfare retention clock. Returns how many reports it deleted.
+   */
+  purgeReportsByReason?(reason: string, before: number): number;
+
+  /** Add to the line counts of a UTC day (`YYYY-MM-DD`), made when there is none: additive, so two connections add correctly. Never moves the change token. */
+  addChatCounts?(day: string, delivered: number, refused: number): void;
+
+  /** The line counts of the days `fromDay` to `toDay` inclusive, ordered by day. Copies. */
+  chatCounts?(fromDay: string, toDay: string): ChatDayRow[];
+
+  /** Delete the line counts of days strictly before `beforeDay`. Returns how many rows went. */
+  purgeChatCounts?(beforeDay: string): number;
+
+  /** The reports created at or after `since`, newest first, at most `limit` (clamped to at least 1), as {@link InsightRow}s: no text, subject, handle or actor. */
+  insightRows?(since: number, limit: number): InsightRow[];
 }
 
 // ---------------------------------------------------------------------------

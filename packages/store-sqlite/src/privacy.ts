@@ -60,6 +60,8 @@ export const REPORTS_NAMING_SQL = `SELECT id, reporter_subject, reporter_seat, r
     AND (reporter_subject IN ${IN_ARG} OR EXISTS (SELECT 1 FROM json_each(kit_reports.people_json) p WHERE p.value IN ${IN_ARG}))`;
 /** Delete the reports of a list. Binds: the ids. */
 export const REPORTS_DELETE_SQL = `DELETE FROM kit_reports WHERE id IN ${IN_ARG}`;
+/** The staff thread entries of a list of reports (they go with the reports). Binds: the ids. */
+export const COMMENTS_DELETE_SQL = `DELETE FROM kit_report_comments WHERE report_id IN ${IN_ARG}`;
 /** The decisions of a list of reports. Binds: the ids. */
 export const DECISIONS_DELETE_SQL = `DELETE FROM kit_decisions WHERE report_id IN ${IN_ARG}`;
 export const AI_READS_DELETE_SQL = `DELETE FROM kit_ai_reads WHERE report_id IN ${IN_ARG}`;
@@ -275,6 +277,7 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bu
   if (aboutIds.length > 0) {
     const ids = j(aboutIds);
     db.prepare(DECISIONS_DELETE_SQL).run(ids);
+    addCount(removed, 'workflow', num(db.prepare(COMMENTS_DELETE_SQL).run(ids).changes));
     addCount(removed, 'ai', num(db.prepare(AI_READS_DELETE_SQL).run(ids).changes));
     addCount(removed, 'ai', num(db.prepare(AI_OUTCOMES_DELETE_SQL).run(ids).changes));
     addCount(removed, 'ai', num(db.prepare(AI_ACTIONS_DELETE_SQL).run(ids).changes));

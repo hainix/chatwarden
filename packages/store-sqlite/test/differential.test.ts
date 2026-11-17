@@ -530,3 +530,81 @@ describe('the appeal and blocked-name methods: one script, the same answer from 
     }
   });
 });
+
+describe('the desk methods: urgent, hand-off, escalation, comments, day counts and the welfare purge', () => {
+  it('give identical answers on one script of writes and reads, in memory and in SQLite', () => {
+    const a = mem();
+    const b = sql();
+    const both = <T>(fn: (s: Store) => T): [T, T] => [fn(a), fn(b)];
+    const same = (label: string, fn: (s: Store) => unknown): void => {
+      const [x, y] = both(fn);
+      expect(y, label).toEqual(x);
+    };
+    for (let i = 0; i < 12; i++) {
+      const row = report({
+        id: `r${String(i).padStart(2, '0')}`,
+        createdAt: NOW + (i % 4) * 10,
+        reporterSubject: `s_rep${i}`,
+        reportedReason: i % 3 === 0 ? 'welfare' : i % 3 === 1 ? 'threat' : null,
+        urgent: i % 2 === 0,
+        evidenceRef: i % 5 === 0 ? `m_${i}` : null,
+      });
+      same(`insert ${i}`, (s) => s.insertReport(row));
+    }
+    same('close', (s) => s.closeReport('r02', 'actioned', false, 'mod', NOW + 99, 'n'));
+    same('close bad faith', (s) => s.closeReport('r05', 'dismissed', true, 'mod', NOW + 98, 'n', 'ev'));
+    for (const id of ['r00', 'r01', 'r02', 'r07', 'nope']) {
+      same(`urgent on ${id}`, (s) => s.setReportUrgent?.(id, true));
+      same(`urgent off ${id}`, (s) => s.setReportUrgent?.(id, false));
+      same(`handoff ${id}`, (s) => s.setHandoff?.(id, 'mod_ann', NOW + 5));
+      same(`handoff again ${id}`, (s) => s.setHandoff?.(id, 'mod_bea', NOW + 6));
+      same(`escalate ${id}`, (s) => s.setEscalation?.(id, { to: id === 'r07' ? 'owner' : 'senior', by: 'mod_ann', at: NOW + 7 }));
+    }
+    same('clear', (s) => s.setEscalation?.('r01', null));
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 3; j++) {
+        same(`comment ${i}.${j}`, (s) =>
+          s.insertComment?.({ id: `c${i}${j}`, reportId: `r0${i}`, at: NOW + 20 - j, actor: 'mod_ann', role: j === 0 ? 'senior' : 'moderator', kind: (['comment', 'ask', 'escalate', 'clear'] as const)[j] ?? 'comment', text: j === 1 ? null : `text ${i}${j}` }),
+        );
+      }
+    }
+    same('comment unknown', (s) => s.insertComment?.({ id: 'cx', reportId: 'nope', at: 1, actor: 'a', role: 'owner', kind: 'comment', text: 'x' }));
+    for (const id of ['r00', 'r01', 'r02', 'r03', 'r09', 'nope']) {
+      same(`list ${id}`, (s) => s.listComments?.(id));
+      same(`count ${id}`, (s) => s.countComments?.(id));
+    }
+    same('delete', (s) => s.deleteComment?.('c01'));
+    same('delete again', (s) => s.deleteComment?.('c01'));
+    same('urgent count', (s) => s.countOpenUrgent?.());
+    same('escalated count', (s) => s.countOpenEscalated?.());
+    const queries: Array<Parameters<Store['listOpenReports']>[0]> = [
+      { urgent: true, limit: 50 },
+      { urgent: true, limit: 3 },
+      { urgent: true, after: NOW + 10, afterId: 'r04', limit: 50 },
+      { urgent: true, reason: 'threat', limit: 50 },
+      { urgent: true, reason: null, limit: 50 },
+      { urgent: true, category: 'harassment', limit: 50 },
+      { limit: 50 },
+    ];
+    for (const q of queries) same(`open ${JSON.stringify(q)}`, (s) => s.listOpenReports(q));
+    for (const q of [{ urgent: true, limit: 50 }, { urgent: true, status: 'open' as const, limit: 4 }, { urgent: true, before: NOW + 20, beforeId: 'r06', limit: 50 }]) same(`list ${JSON.stringify(q)}`, (s) => s.listReports(q));
+    for (const since of [0, NOW, NOW + 10, NOW + 25]) {
+      for (const limit of [0, 3, 100]) same(`insights ${since} ${limit}`, (s) => s.insightRows?.(since, limit));
+    }
+    for (const [day, d, r] of [['2026-11-15', 1, 2], ['2026-11-15', 4, 0], ['2026-11-16', 3, 3], ['2026-11-17', 0, 1]] as const) same(`counts ${day}`, (s) => s.addChatCounts?.(day, d, r));
+    same('counts read', (s) => s.chatCounts?.('2026-11-14', '2026-11-18'));
+    same('counts mid', (s) => s.chatCounts?.('2026-11-16', '2026-11-16'));
+    same('counts purge', (s) => s.purgeChatCounts?.('2026-11-16'));
+    same('counts read after', (s) => s.chatCounts?.('2026-11-01', '2026-12-01'));
+    // the welfare purge, with a hold on one old report, then the general purge
+    same('hold', (s) => s.placeHold({ reportId: 'r03', code: 'other', heldBy: 'sen', heldAt: NOW, releasedBy: null, releasedAt: null }));
+    same('reason purge', (s) => s.purgeReportsByReason?.('welfare', NOW + 25));
+    same('after the reason purge', (s) => s.listReports({ limit: 200 }));
+    for (const id of ['r00', 'r03', 'r06']) same(`comments after ${id}`, (s) => s.listComments?.(id));
+    same('general purge', (s) => s.purgeReports(NOW + 15, NOW));
+    same('after the general purge', (s) => s.listReports({ limit: 200 }));
+    for (const id of ['r00', 'r01', 'r02', 'r03', 'r04']) same(`comments last ${id}`, (s) => s.listComments?.(id));
+    // every write above moved the change token the same number of times in both stores
+    same('the change token', (s) => s.changeToken());
+  });
+});

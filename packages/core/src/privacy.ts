@@ -196,10 +196,10 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
   },
   {
     category: 'workflow',
-    tables: ['kit_claims', 'kit_discord_threads', 'kit_links'],
+    tables: ['kit_claims', 'kit_discord_threads', 'kit_links', 'kit_report_comments'],
     export: 'Not exported: these are staff workflow rows.',
-    eraseSafety: 'Deleted: a claim on the case, the Discord thread map entry, the links to deleted reports and the EOS link of a deleted sanction. An EOS report link is only a hash of the report and stays until it ages out.',
-    eraseNone: 'Deleted: a claim on the case, the Discord thread map entry, the links to deleted reports and the EOS link of a deleted sanction. An EOS report link is only a hash of the report and stays until it ages out.',
+    eraseSafety: 'Deleted: a claim on the case, the Discord thread map entry, the staff comments on a deleted report, the links to deleted reports and the EOS link of a deleted sanction. An EOS report link is only a hash of the report and stays until it ages out.',
+    eraseNone: 'Deleted: a claim on the case, the Discord thread map entry, the staff comments on a deleted report, the links to deleted reports and the EOS link of a deleted sanction. An EOS report link is only a hash of the report and stays until it ages out.',
     retention: null,
     jsonColumns: [],
   },
@@ -237,6 +237,7 @@ export const NO_PERSON_TABLES: Readonly<Record<string, string>> = {
   kit_ai_acting: 'One row: the AI acting mode.',
   kit_ai_spend: 'Money ledger of AI calls; no person.',
   kit_erasures: 'Erasure receipts: counts only; the pending subject is cleared when an erase finishes.',
+  kit_chat_days: 'Daily counts of lines delivered and refused (desk.insights): a date and two numbers; never a person, a room or text.',
 };
 
 /**

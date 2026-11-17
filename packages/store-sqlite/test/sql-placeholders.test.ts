@@ -12,11 +12,26 @@ import {
   AI_READ_INSERT_SQL,
   AI_READ_TAKE_SQL,
   AI_UNREVIEWED_SQL,
+  CHAT_COUNTS_ADD_SQL,
+  CHAT_COUNTS_LIST_SQL,
+  CHAT_COUNTS_PURGE_SQL,
+  COMMENT_COUNT_SQL,
+  COMMENT_DELETE_SQL,
+  COMMENT_INSERT_SQL,
+  COMMENT_LIST_SQL,
+  COMMENTS_ORPHAN_DELETE_SQL,
+  ESCALATED_COUNT_SQL,
   FILTER_HITS_ADD_SQL,
   FILTER_HITS_LIST_SQL,
   FILTER_HITS_PURGE_SQL,
+  INSIGHT_ROWS_SQL,
   ORIGIN_REPORTS_COUNT_SQL,
+  REASON_PURGE_WHERE,
+  REPORT_ESCALATION_SET_SQL,
+  REPORT_HANDOFF_SET_SQL,
   REPORT_INSERT_SQL,
+  REPORT_URGENT_SET_SQL,
+  URGENT_COUNT_SQL,
   filterHitArgs,
   reportInsertArgs,
   aiActionInsertArgs,
@@ -149,14 +164,15 @@ describe('the filter statements (migration 26) bind exactly as many values as th
     category: 'spam', reportedReason: 'spam', note: null, lineId: null, excerpt: [], people: [], status: 'open', origin: 'filter', originKey: 'link.unlisted',
   };
 
-  it('the report insert has one plain ? for each of its 19 columns and 19 values, the origin pair last (null when the report has none)', () => {
-    expect(placeholders(REPORT_INSERT_SQL)).toBe(19);
-    expect(reportInsertArgs(stored)).toHaveLength(19);
-    expect(reportInsertArgs(stored).slice(-2)).toEqual(['filter', 'link.unlisted']);
+  it('the report insert has one plain ? for each of its 21 columns and 21 values, the origin pair, then urgent and the evidence ref last (0 and null when the report has none)', () => {
+    expect(placeholders(REPORT_INSERT_SQL)).toBe(21);
+    expect(reportInsertArgs(stored)).toHaveLength(21);
+    expect(reportInsertArgs(stored).slice(-4)).toEqual(['filter', 'link.unlisted', 0, null]);
+    expect(reportInsertArgs({ ...stored, urgent: true, evidenceRef: 'm_1' }).slice(-2)).toEqual([1, 'm_1']);
     const plain = { ...stored } as Partial<StoredReport>;
     delete plain.origin;
     delete plain.originKey;
-    expect(reportInsertArgs(plain as StoredReport).slice(-2)).toEqual([null, null]);
+    expect(reportInsertArgs(plain as StoredReport).slice(-4)).toEqual([null, null, 0, null]);
     expect(reportInsertArgs(plain as StoredReport)).toHaveLength(placeholders(REPORT_INSERT_SQL));
     expect(REPORT_INSERT_SQL).not.toMatch(/\?\d/);
   });
@@ -175,6 +191,79 @@ describe('the filter statements (migration 26) bind exactly as many values as th
 
   it('the hit upsert adds to the stored count instead of replacing it', () => {
     expect(FILTER_HITS_ADD_SQL).toMatch(/ON CONFLICT \(day, key, action\) DO UPDATE SET hits = hits \+ excluded\.hits/);
+  });
+});
+
+describe('the desk statements (migration 26, the urgent-lane block) bind exactly as many values as they have placeholders', () => {
+  it('each statement has the number of plain ? placeholders its method binds', () => {
+    const counts: Array<[string, string, number]> = [
+      ['REPORT_URGENT_SET_SQL', REPORT_URGENT_SET_SQL, 3],
+      ['REPORT_HANDOFF_SET_SQL', REPORT_HANDOFF_SET_SQL, 3],
+      ['REPORT_ESCALATION_SET_SQL', REPORT_ESCALATION_SET_SQL, 7],
+      ['URGENT_COUNT_SQL', URGENT_COUNT_SQL, 0],
+      ['ESCALATED_COUNT_SQL', ESCALATED_COUNT_SQL, 0],
+      ['COMMENT_INSERT_SQL', COMMENT_INSERT_SQL, 9],
+      ['COMMENT_LIST_SQL', COMMENT_LIST_SQL, 1],
+      ['COMMENT_COUNT_SQL', COMMENT_COUNT_SQL, 1],
+      ['COMMENT_DELETE_SQL', COMMENT_DELETE_SQL, 1],
+      ['COMMENTS_ORPHAN_DELETE_SQL', COMMENTS_ORPHAN_DELETE_SQL, 0],
+      ['REASON_PURGE_WHERE', REASON_PURGE_WHERE, 2],
+      ['CHAT_COUNTS_ADD_SQL', CHAT_COUNTS_ADD_SQL, 3],
+      ['CHAT_COUNTS_LIST_SQL', CHAT_COUNTS_LIST_SQL, 2],
+      ['CHAT_COUNTS_PURGE_SQL', CHAT_COUNTS_PURGE_SQL, 1],
+      ['INSIGHT_ROWS_SQL', INSIGHT_ROWS_SQL, 2],
+    ];
+    for (const [name, sql, n] of counts) {
+      expect(placeholders(sql), name).toBe(n);
+      expect(sql, name).not.toMatch(/\?\d/);
+      expect(sql, name).not.toMatch(/\s[:@$][a-z]\w*/i);
+    }
+  });
+
+  it('the reason purge runs its three deletes with the two values each, and the statements run on a real database (a spy sees every bind count)', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    store.insertReport({ id: 'w', createdAt: 1, roomId: 'R', tags: {}, reporterSubject: 's_a', reporterSeat: 'p1', reporterHandle: 'A', targetSubject: 's_b', targetSeat: 'p2', targetHandle: 'B', category: 'other', reportedReason: 'welfare', note: null, lineId: null, excerpt: [], people: [], status: 'open' });
+    const known = new Map<string, number>();
+    const real = db.prepare.bind(db);
+    db.prepare = ((text: string) => {
+      const st = real(text);
+      const n = placeholders(text);
+      known.set(text, n);
+      return new Proxy(st, {
+        get(target, prop) {
+          const v = (target as unknown as Record<string | symbol, unknown>)[prop];
+          if (typeof v !== 'function') return v;
+          if (prop === 'run' || prop === 'all' || prop === 'get') {
+            return (...args: unknown[]) => {
+              expect(args.length, text.slice(0, 70)).toBe(n);
+              return (v as (...a: unknown[]) => unknown).apply(target, args);
+            };
+          }
+          return v.bind(target);
+        },
+      });
+    }) as typeof db.prepare;
+    store.setReportUrgent?.('w', true);
+    store.setReportUrgent?.('w', false);
+    store.setHandoff?.('w', 'mod', 5);
+    store.setEscalation?.('w', { to: 'senior', by: 'mod', at: 6 });
+    store.setEscalation?.('w', null);
+    store.insertComment?.({ id: 'c1', reportId: 'w', at: 1, actor: 'mod', role: 'moderator', kind: 'comment', text: 't' });
+    store.listComments?.('w');
+    store.countComments?.('w');
+    store.deleteComment?.('c1');
+    store.countOpenUrgent?.();
+    store.countOpenEscalated?.();
+    store.addChatCounts?.('2026-11-17', 1, 2);
+    store.chatCounts?.('2026-11-17', '2026-11-17');
+    store.purgeChatCounts?.('2026-11-18');
+    store.insightRows?.(0, 10);
+    store.purgeReportsByReason?.('welfare', 10);
+    store.purgeReports(10, 0);
+    for (const sql of [REPORT_URGENT_SET_SQL, REPORT_HANDOFF_SET_SQL, REPORT_ESCALATION_SET_SQL, COMMENT_INSERT_SQL, COMMENT_LIST_SQL, CHAT_COUNTS_ADD_SQL, INSIGHT_ROWS_SQL]) {
+      expect(known.has(sql), sql.slice(0, 60)).toBe(true);
+    }
   });
 });
 

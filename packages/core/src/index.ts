@@ -65,8 +65,11 @@ export type {
   SubjectRecord,
   FilterHitRow,
   ReportOrigin,
+  ChatDayRow,
+  CommentRow,
+  InsightRow,
 } from './types.js';
-export { CLAIM_TTL_MS, CONDUCT_LEVELS } from './types.js';
+export { CLAIM_TTL_MS, COMMENTS_PER_REPORT_MAX, CONDUCT_LEVELS } from './types.js';
 export {
   CaseDesk,
   CLAIM_BUSY_TRIES,
