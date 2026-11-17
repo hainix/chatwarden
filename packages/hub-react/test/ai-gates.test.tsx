@@ -65,7 +65,7 @@ interface Cell {
   excluded: boolean;
   coolingUntil: number | null;
   coolingCode: string | null;
-  checks: Array<{ ok: boolean }>;
+  checks: Array<{ ok: boolean; name?: string; value?: number | null; need?: string }>;
 }
 /** The hostile cell of a rule in a (parsed) answer; a test that asks for one that is not there fails. */
 const cellOf = (b: { cells: Cell[] }, rule: number): Cell => {
@@ -171,6 +171,63 @@ describe('the gate table', () => {
     cleanup();
     await openTable(w);
     expect(await rowOf(/^Rule 2, Hostile/)).toHaveTextContent('an action was revoked on appeal');
+  });
+
+  // Review R1 final M4: the keep gate's number is the Wilson LOWER bound of the undo rate, not the rate; the row must not read like "5.2% were undone".
+  describe('the keep gate says what its number is', () => {
+    const keep = (value: number | null, ok: boolean) => (b: { cells: Cell[] }): void => {
+      const k = cellOf(b, 2).checks.find((c) => c.name === 'keep');
+      if (k === undefined) throw new Error('no keep check');
+      k.value = value;
+      k.ok = ok;
+      k.need = 'lower<=0.05;pair>14d';
+    };
+    const keepCell = async (): Promise<HTMLElement> => within(await rowOf(/^Rule 2, Hostile/)).getAllByRole('cell')[8] as HTMLElement;
+
+    it('a lower bound over the cut reads as "likely above", with the bound named, and never as "needs at most"', async () => {
+      const { w, seed } = await gatesWorld();
+      seed(2, 150);
+      gates(w, keep(0.052, false));
+      await openTable(w);
+      const cell = await keepCell();
+      expect(cell).toHaveTextContent('Undo rate is likely above 5% (lower bound 5.2%)');
+      expect(cell).not.toHaveTextContent('needs at most');
+    });
+
+    it('a lower bound within the cut reads as within it, with the bound named', async () => {
+      const { w, seed } = await gatesWorld();
+      seed(2, 150);
+      gates(w, keep(0.028, true));
+      await openTable(w);
+      const cell = await keepCell();
+      expect(cell).toHaveTextContent('Undo rate is within 5% (lower bound 2.8%)');
+      expect(cell).not.toHaveTextContent('needs at most');
+    });
+
+    it('a lower bound exactly at the cut is within it (the gate passes "at most")', async () => {
+      const { w, seed } = await gatesWorld();
+      seed(2, 150);
+      gates(w, keep(0.05, true));
+      await openTable(w);
+      expect(await keepCell()).toHaveTextContent('Undo rate is within 5% (lower bound 5%)');
+    });
+
+    it('with too few reviewed actions it still says it applies once enough are reviewed', async () => {
+      const { w, seed } = await gatesWorld();
+      seed(2, 150);
+      gates(w, keep(null, true));
+      await openTable(w);
+      expect(await keepCell()).toHaveTextContent('Applies once enough of its actions are reviewed');
+    });
+
+    it('the override gate keeps its own wording (the keep words do not leak into it)', async () => {
+      const { w, seed } = await gatesWorld();
+      seed(2, 150);
+      await openTable(w);
+      const cols = within(await rowOf(/^Rule 2, Hostile/)).getAllByRole('cell');
+      expect(cols[4]).toHaveTextContent('needs at most 5%');
+      expect(cols[4]).not.toHaveTextContent('Undo rate');
+    });
   });
 
   it('R1 shows "Acting is not available in this version" and offers no Act option', async () => {

@@ -143,6 +143,21 @@ describe.each([
       await p.context().close();
     }, 60_000);
 
+    // Review R1 final M6: `.cw-scroll { position: relative }` (the 360 px fix for the gate table) is global to every `Scroll` user, so other table screens are checked too.
+    for (const hash of ['#/settings/ladder', '#/audit', '#/guide']) {
+      it(`another table screen (${hash}) still lays out with no sideways scroll and its table scrolls inside its own box`, async (ctx) => {
+        needsBrowser(ctx);
+        const { page: p, problems } = await open(hash, { width, scheme });
+        await p.locator('chatwarden-hub .cw-scroll').first().waitFor({ timeout: 15_000 });
+        const boxes = await p.evaluate(() => Array.from(document.querySelectorAll('chatwarden-hub'))[0]?.shadowRoot?.querySelectorAll('.cw-scroll').length ?? document.querySelectorAll('.cw-scroll').length);
+        expect(boxes).toBeGreaterThan(0);
+        const wide = await sideways(p);
+        expect(wide.page, `${hash} scrolls sideways`).toBeLessThanOrEqual(wide.window);
+        expect(problems).toEqual([]);
+        await p.context().close();
+      }, 60_000);
+    }
+
     it('the Person page: the quiet line for a marked person, and the "..." item', async (ctx) => {
       needsBrowser(ctx);
       const { page: p, problems } = await open(`#/people/${marked}`, { width, scheme });

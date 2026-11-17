@@ -67,7 +67,8 @@ describe('AiStore', () => {
     try {
       const held = service as unknown as { deps: Record<string, unknown>; store: unknown };
       expect('store' in held.deps).toBe(false);
-      expect(held.store).toBe(store);
+      expect(held.store).not.toBe(store);
+      expect(Object.isFrozen(held.store)).toBe(true);
       // nothing the service holds is a writer of the full store through another name
       for (const v of Object.values(held.deps)) expect(v).not.toBe(store);
     } finally {
@@ -90,9 +91,64 @@ describe('AiStore', () => {
     expect(true).toBe(true);
   });
 
-  it('requireAiStore hands back the same object and refuses a store without the AI methods', () => {
+  it('requireAiStore hands back a frozen object with only the AI methods and the report reads, and refuses a store without the AI methods', () => {
     const store = withMemoryAi(new MemoryStore());
-    expect(requireAiStore(store)).toBe(store);
+    const narrow = requireAiStore(store);
+    expect(narrow).not.toBe(store);
+    expect(Object.isFrozen(narrow)).toBe(true);
+    expect(Object.getPrototypeOf(narrow)).toBe(Object.prototype);
     expect(() => requireAiStore(new MemoryStore())).toThrow(/AI methods/);
+  });
+
+  it('the runtime object holds exactly the AI store methods, loadReport, listReports and aiGateRows (enumerated, not sampled)', () => {
+    const narrow = requireAiStore(withMemoryAi(new MemoryStore())) as unknown as Record<string, unknown>;
+    expect(Object.keys(narrow).sort()).toEqual(
+      [
+        'reserveAiRead', 'completeAiRead', 'failAiRead', 'loadAiRead', 'loadAiReads', 'loadAiReadById', 'loadAiReadFor', 'listAiRetries',
+        'aiSpendSince', 'insertAiOutcome', 'loadAiOutcome', 'markAiOutcome', 'aiExamples', 'aiTeachableCount', 'aiStats',
+        'loadReport', 'listReports', 'aiGateRows',
+      ].sort(),
+    );
+    for (const v of Object.values(narrow)) expect(typeof v).toBe('function');
+  });
+
+  it('no writer is reachable: not by name, not by a cast and a computed key, not by Reflect, a spread or the prototype chain', () => {
+    const store = withMemoryAi(new MemoryStore());
+    const narrow = requireAiStore(store);
+    const writers = ['insertSanctionGroup', 'revokeSanctionGroup', 'closeReport', 'insertDecision', 'insertNotice', 'withdrawNotice', 'withdrawNoticeGroup', 'insertStrike', 'upsertMute', 'deleteMute', 'pruneMutes', 'closeGap', 'decideAppeal', 'transaction', 'savePolicyLayer', 'claimCase', 'insertReport', 'purgeSanctions'];
+    const loose = narrow as unknown as Record<string, unknown>;
+    const concat = (a: string, b: string): string => a + b;
+    for (const w of writers) {
+      expect(w in narrow, w).toBe(false);
+      expect(loose[w], w).toBeUndefined();
+      expect(loose[concat(w.slice(0, 3), w.slice(3))], w).toBeUndefined();
+      expect(Reflect.get(narrow, w), w).toBeUndefined();
+      expect(Reflect.has(narrow, w), w).toBe(false);
+      expect({ ...narrow }[w], w).toBeUndefined();
+    }
+    // the store really has them (a control: the checks above would pass vacuously on a store without them)
+    expect(typeof (store as unknown as Record<string, unknown>).insertSanctionGroup).toBe('function');
+    expect(typeof (store as unknown as Record<string, unknown>).closeReport).toBe('function');
+  });
+
+  it('the object cannot be given a writer afterwards (frozen), and its methods call through to the real store', () => {
+    const store = withMemoryAi(new MemoryStore());
+    const narrow = requireAiStore(store) as unknown as Record<string, unknown>;
+    expect(() => {
+      narrow.insertSanctionGroup = () => undefined;
+    }).toThrow(TypeError);
+    expect('insertSanctionGroup' in narrow).toBe(false);
+    // detached from the object, a method still runs against the store (called through), and reads what the store holds
+    const { loadReport, aiTeachableCount } = requireAiStore(store);
+    expect(loadReport('nope')).toBeNull();
+    expect(aiTeachableCount(0)).toBe(0);
+  });
+
+  it('a store without aiGateRows gets no aiGateRows key (the service already treats it as optional)', () => {
+    const full = withMemoryAi(new MemoryStore());
+    const bare = new Proxy(full, { get: (t, k, r) => (k === 'aiGateRows' ? undefined : Reflect.get(t, k, r)) });
+    const narrow = requireAiStore(bare);
+    expect('aiGateRows' in narrow).toBe(false);
+    expect(typeof narrow.loadReport).toBe('function');
   });
 });

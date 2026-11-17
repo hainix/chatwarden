@@ -315,6 +315,106 @@ describe.each(SEAM_SRC)('%s', (file) => {
     expect((await seamMessages(code, file)).length, shape).toBeGreaterThan(0);
   });
 
+  // Review R1 final I1: the bypasses the name-based selectors missed (a cast, an alias under another name, a concatenated key through an alias).
+  const R = 'Record<string, (...a: unknown[]) => unknown>';
+  it.each([
+    [`export class C {
+  store!: object;
+  run(k: string): unknown {
+    return (this.store as unknown as ${R})[k]?.();
+  }
+}
+`, 'a cast of this.store with a variable key'],
+    [`export class C {
+  store!: object;
+  run(): unknown {
+    return (this.store as unknown as ${R}).insertDecision?.();
+  }
+}
+`, 'a cast of this.store, then a named writer'],
+    [`export function f(store: object): unknown {
+  return (store as ${R})['insertDecision'];
+}
+`, 'a cast of store, a literal key'],
+    [`export function f(store: object): unknown {
+  return (<${R}>store).insertDecision;
+}
+`, 'an angle-bracket assertion'],
+    [`export function f(store: object): unknown {
+  return (store satisfies object) && 1;
+}
+`, 'satisfies on the store'],
+    [`export function f(store?: ${R}): unknown {
+  return store![\`x\`];
+}
+`, 'a non-null assertion on the store'],
+    [`export class C {
+  store!: object;
+  run(k: string): unknown {
+    const s = this.store as unknown as ${R};
+    return s[k]?.();
+  }
+}
+`, 'an alias made by a cast'],
+    [`export class C {
+  store!: ${R};
+  run(k: string): unknown {
+    const s = this.store;
+    return s[k]?.();
+  }
+}
+`, 'an alias under another name, a variable key'],
+    [`export class C {
+  store!: ${R};
+  run(): unknown {
+    const s = this.store;
+    return s['insert' + 'Decision']?.();
+  }
+}
+`, 'an alias, a concatenated key'],
+    [`export function f(store: ${R}): unknown {
+  const s = store;
+  return s.insertSanctionGroup?.();
+}
+`, 'an alias, then a named writer'],
+    [`export function f(store: ${R}): unknown {
+  let s: ${R} | undefined;
+  s = store;
+  return s;
+}
+`, 'an alias by assignment'],
+    [`export class C {
+  store!: ${R};
+  run(): unknown {
+    const { store: s } = this;
+    return s;
+  }
+}
+`, 'an alias by destructuring a renamed store'],
+    [`export function f(o: unknown, k: string): unknown {
+  return (o as ${R})[k];
+}
+`, 'a variable key on any cast value'],
+    [`export function f(o: unknown, k: string): unknown {
+  return (o as ${R})['a' + k];
+}
+`, 'a concatenated key on any cast value'],
+  ])('ESLint: ai/ cannot get past the store-named rules by a cast or an alias: %s (%s)', async (code, shape) => {
+    expect((await seamMessages(code, file)).length, shape).toBeGreaterThan(0);
+  });
+
+  it('the new rules leave ordinary code alone: a store passed on, a same-name alias or destructuring, a literal key on a cast, a cast of something else', async () => {
+    const ok = [
+      "export class C {\n  store!: { loadReport(id: string): unknown };\n  run(): unknown {\n    const store = this.store;\n    return store.loadReport('r');\n  }\n}\n",
+      "export class C {\n  store!: { loadReport(id: string): unknown };\n  run(): unknown {\n    const { store } = this;\n    return store.loadReport('r');\n  }\n}\n",
+      "export function f(o: unknown): unknown {\n  return (o as { a: number })['a'];\n}\n",
+      "export function f(o: unknown): number {\n  return (o as { a: number }).a;\n}\n",
+      "export function g(store: object): void {\n  h(store);\n}\nfunction h(_s: object): void {}\n",
+      "export function f(xs: Record<string, number>, k: string): number {\n  const rows = xs;\n  return rows[k] ?? 0;\n}\n",
+    ];
+    for (const code of ok) expect(await seamMessages(code, file), code).toEqual([]);
+  });
+
   it('a variable key on something that is not the store is fine (a control: ordinary lookups stay)', async () => {
     const ok = [
       'export function f(rows: Record<string, number>, k: string): number {\n  return rows[k] ?? 0;\n}\n',

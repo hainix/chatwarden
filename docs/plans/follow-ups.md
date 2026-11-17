@@ -266,3 +266,10 @@ Found building R1 (the seams and the read-only gate dashboard), 2026-11. Design:
 - **Open, R2: the `ai/**` import allowlist.** The AI folder may import only its own files and ten read-only modules of `core/src` (`eslint.config.js`, `AI_ALLOWED_MODULES`). The confirming read and the act planner will
   need `gates`, `reach` and `ceilings` (inside the folder, so fine); a new import from outside is added to that list in view, never by loosening the rule.
 
+- **Open, R3: casebook rows from before 0.1.13 default to `human`.** Migration 24's `DEFAULT 'human'` files every older row as a person's decision, so an older decision made through the `api`, Coop or auto-filter
+  source can count toward volume and recency (its `decided_by` stays empty, so it adds no decider to breadth). The 90-day recent window refills with correctly filed rows in about three months; until then,
+  note it beside the first gate numbers an adopter reads before the AI may act.
+- **Open, R3: the `features.automation` flag, the act path and the lookup.** (a) A `features.automation` flag in `GET /me` could hide the always-visible `...` item for games that do not run the AI at all, as well as
+  for a store that cannot keep the mark. (b) R3's act path must refuse to enable acting on a store without both `setNoAutomation` and `loadNoAutomation` (Task 14's `do_not_automate` check pins "an unsupported store
+  means no acting", not "allowed"). (c) `automationAllowed(person)` with no `lookup` returns `true` (kept for the old signature), so every act call site, in the planner and in the actor, must pass a lookup; pin it in
+  Task 11 and Task 14 tests.

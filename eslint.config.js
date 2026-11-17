@@ -86,6 +86,14 @@ const aiStoreName = '/^\\w*[sS]tore$/';
 const aiStoreLike = (path) => `[${path}.name=${aiStoreName}], [${path}.property.name=${aiStoreName}]`;
 const aiDynamicSyntax = [
   `MemberExpression[computed=true]:matches(${aiStoreLike('object')}):not([property.type='Literal']):not([property.type='TemplateLiteral'][property.expressions.length=0])`,
+  // A cast of the store (`store as unknown as Record<..>`, `<T>store`, `store!`, `store satisfies T`) is how it would be reached through a name the rules above do not see.
+  `:matches(TSAsExpression, TSTypeAssertion, TSSatisfiesExpression, TSNonNullExpression):matches(${aiStoreLike('expression')})`,
+  // A variable key on any cast value (the object of the access is a TSAsExpression, a type assertion or a non-null: `(x as Record<..>)[k]`).
+  `MemberExpression[computed=true]:matches([object.type='TSAsExpression'], [object.type='TSTypeAssertion'], [object.type='TSSatisfiesExpression'], [object.type='TSNonNullExpression']):not([property.type='Literal']):not([property.type='TemplateLiteral'][property.expressions.length=0])`,
+  // An alias of the store under a name that does not end in "store" (`const s = this.store; s[k]`, `s = store`): the name is what the rules above look for.
+  `VariableDeclarator:not([id.name=${aiStoreName}]):matches(${aiStoreLike('init')})`,
+  `AssignmentExpression:not([left.name=${aiStoreName}]):not([left.property.name=${aiStoreName}]):matches(${aiStoreLike('right')})`,
+  `ObjectPattern > Property[computed=false][key.name=${aiStoreName}]:not([value.name=${aiStoreName}])`,
   "Identifier[name='Reflect']",
   `CallExpression[callee.object.name='Object'][callee.property.name=/^(values|entries|assign|getOwnPropertyDescriptors?|getOwnPropertyNames|fromEntries)$/]:matches(${aiStoreLike('arguments.0')}, ${aiStoreLike('arguments.1')})`,
   `SpreadElement:matches(${aiStoreLike('argument')})`,

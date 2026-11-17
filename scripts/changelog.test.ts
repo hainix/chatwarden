@@ -427,7 +427,9 @@ describe('the 0.1.13 notes (the AI gate dashboard and the do-not-automate mark),
     // The seam and the refused source.
     '`source: \'ai\'`',
     '`applySanction`',
-    '`writeSanction`',
+    'frozen object',
+    '`loadReport`, `listReports` and `aiGateRows`',
+    'a cast of it and an alias of it',
     '`validateSanctionInput`',
     '`service`',
     // The new names.

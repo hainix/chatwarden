@@ -58,7 +58,11 @@ function gateText(gate: Gate, check: { value: number | null; need: string }, cel
         ? t('hub.settings.ai.gates.acts.none', { days: dayCount(need.none) })
         : t('hub.settings.ai.gates.acts.ago', { days: Math.floor(value / 86_400_000), need: dayCount(need.none) });
     case 'keep':
-      return value === null ? t('hub.settings.ai.gates.keep.none') : t('hub.settings.ai.gates.atMost', { value: pct(value), need: percentNeed(need.lower) });
+      // The number is the lower bound of the undo rate (a confidence bound), not the rate itself: say so, so it is not read as "this share was undone".
+      if (value === null) return t('hub.settings.ai.gates.keep.none');
+      return Number(need.lower) < value
+        ? t('hub.settings.ai.gates.keep.over', { value: pct(value), need: percentNeed(need.lower) })
+        : t('hub.settings.ai.gates.keep.within', { value: pct(value), need: percentNeed(need.lower) });
   }
 }
 

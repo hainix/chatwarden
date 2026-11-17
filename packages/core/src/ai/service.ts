@@ -286,31 +286,64 @@ export function aiActorOf(adapterId: string): string {
   return `ai:${id === '' ? 'adapter' : id}`;
 }
 
-const REQUIRED_STORE_METHODS = [
-  'reserveAiRead',
-  'completeAiRead',
-  'failAiRead',
-  'loadAiRead',
-  'loadAiReads',
-  'loadAiReadById',
-  'loadAiReadFor',
-  'listAiRetries',
-  'aiSpendSince',
-  'insertAiOutcome',
-  'loadAiOutcome',
-  'markAiOutcome',
-  'aiExamples',
-  'aiTeachableCount',
-  'aiStats',
-] as const;
+/** The AI methods a store must have, read off it by name (a static read each, so the lint's view of "no computed access" holds here too). */
+function probeStore(store: Store): Record<string, unknown> {
+  return {
+    reserveAiRead: store.reserveAiRead,
+    completeAiRead: store.completeAiRead,
+    failAiRead: store.failAiRead,
+    loadAiRead: store.loadAiRead,
+    loadAiReads: store.loadAiReads,
+    loadAiReadById: store.loadAiReadById,
+    loadAiReadFor: store.loadAiReadFor,
+    listAiRetries: store.listAiRetries,
+    aiSpendSince: store.aiSpendSince,
+    insertAiOutcome: store.insertAiOutcome,
+    loadAiOutcome: store.loadAiOutcome,
+    markAiOutcome: store.markAiOutcome,
+    aiExamples: store.aiExamples,
+    aiTeachableCount: store.aiTeachableCount,
+    aiStats: store.aiStats,
+  };
+}
 
-/** The store, typed with its AI methods; throws a plain error when it has not got them. */
+function missingAiMethods(store: Store): string[] {
+  return Object.entries(probeStore(store))
+    .filter(([, fn]) => typeof fn !== 'function')
+    .map(([name]) => name);
+}
+
+/**
+ * The store as the AI module may hold it: a frozen plain object with ONLY the AI methods, `loadReport`, `listReports` and `aiGateRows`, each a call through to the
+ * real store (so a spy on the store still sees it); throws a plain error when the store has not got the AI methods. This is the runtime half of the seam (the `AiStore` type is the compile-time half
+ * and the lint the third): a cast, a computed key or `Reflect` on this object finds no writer, because the object has none.
+ */
 export function requireAiStore(store: Store): AiStore {
-  const missing = REQUIRED_STORE_METHODS.filter((m) => typeof (store as unknown as Record<string, unknown>)[m] !== 'function');
+  const missing = missingAiMethods(store);
   if (missing.length > 0) {
     throw new Error(`createChatwarden: the AI needs a store with the AI methods (${missing.join(', ')}); use the memory or SQLite store, or leave the "ai" option out`);
   }
-  return store as AiStore;
+  const narrow: AiStore = {
+    reserveAiRead: (...a) => store.reserveAiRead!(...a),
+    completeAiRead: (...a) => store.completeAiRead!(...a),
+    failAiRead: (...a) => store.failAiRead!(...a),
+    loadAiRead: (...a) => store.loadAiRead!(...a),
+    loadAiReads: (...a) => store.loadAiReads!(...a),
+    loadAiReadById: (...a) => store.loadAiReadById!(...a),
+    loadAiReadFor: (...a) => store.loadAiReadFor!(...a),
+    listAiRetries: (...a) => store.listAiRetries!(...a),
+    aiSpendSince: (...a) => store.aiSpendSince!(...a),
+    insertAiOutcome: (...a) => store.insertAiOutcome!(...a),
+    loadAiOutcome: (...a) => store.loadAiOutcome!(...a),
+    markAiOutcome: (...a) => store.markAiOutcome!(...a),
+    aiExamples: (...a) => store.aiExamples!(...a),
+    aiTeachableCount: (...a) => store.aiTeachableCount!(...a),
+    aiStats: (...a) => store.aiStats!(...a),
+    loadReport: (...a) => store.loadReport(...a),
+    listReports: (...a) => store.listReports(...a),
+    ...(typeof store.aiGateRows === 'function' ? { aiGateRows: (...a) => store.aiGateRows!(...a) } : {}),
+  };
+  return Object.freeze(narrow);
 }
 
 /**
@@ -319,7 +352,7 @@ export function requireAiStore(store: Store): AiStore {
  */
 export function checkAiSetup(store: Store, options: AiOptions): string[] {
   checkOptions(options);
-  return REQUIRED_STORE_METHODS.filter((m) => typeof (store as unknown as Record<string, unknown>)[m] !== 'function');
+  return missingAiMethods(store);
 }
 
 function checkOptions(o: AiOptions): Required<Omit<AiOptions, 'adapter' | 'contextTags'>> & { contextTags: string[] } {
