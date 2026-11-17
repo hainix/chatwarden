@@ -772,4 +772,29 @@ CREATE INDEX kit_ai_actions_by_group ON kit_ai_actions (group_id);
 CREATE INDEX kit_ai_actions_by_created ON kit_ai_actions (created_at);
 `,
   },
+  {
+    // Release 0.2.0. ONE migration for the whole release: each theme appends a labelled block below and nobody adds a 27. Additive throughout: no table is
+    // rebuilt and no row is touched, and the runner wraps this in one savepoint with the version bump, so a failure leaves version 25.
+    //
+    // Block 1 (chat filters): reports nobody filed. `origin` ('filter' now, 'watch' later; NULL for a player's report) and `origin_key` (the counter key
+    //   that made it, a closed shape, never text). `kit_reports_open_filter` is the one-open-filter-report-per-(person, room) rule, a partial unique index
+    //   the insert's second ON CONFLICT clause names; `kit_reports_by_origin` serves the daily cap (`origin = ? AND created_at >= ?`).
+    // Block 2 (chat filters): `kit_filter_hits`, one row per UTC day, counter key and applied action. No person, no room, no text; counts for tuning a rule.
+    //   `action` is what was applied: count, flag, mask, refuse, or flag_capped (the daily cap turned a flag into a count).
+    version: 26,
+    sql: `
+ALTER TABLE kit_reports ADD COLUMN origin TEXT CHECK (origin IS NULL OR origin IN ('filter', 'watch'));
+ALTER TABLE kit_reports ADD COLUMN origin_key TEXT;
+CREATE UNIQUE INDEX kit_reports_open_filter ON kit_reports (target_subject, room_id) WHERE origin = 'filter' AND status = 'open';
+CREATE INDEX kit_reports_by_origin ON kit_reports (origin, created_at) WHERE origin IS NOT NULL;
+
+CREATE TABLE kit_filter_hits (
+  day    INTEGER NOT NULL,
+  key    TEXT    NOT NULL,
+  action TEXT    NOT NULL CHECK (action IN ('count', 'flag', 'mask', 'refuse', 'flag_capped')),
+  hits   INTEGER NOT NULL,
+  PRIMARY KEY (day, key, action)
+) WITHOUT ROWID;
+`,
+  },
 ];

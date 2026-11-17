@@ -82,6 +82,7 @@ describe('defaults', () => {
       appealStatementsMs: 90 * DAY,
       appealsMs: 365 * DAY,
       blockedNamesMs: 30 * DAY,
+      filterHitsMs: 90 * DAY,
     });
   });
 });
@@ -395,15 +396,15 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 40 * DAY));
     t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY });
     await t.sanction(t.subject('k1'), NOW - 200 * DAY, DAY);
-    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0 });
   });
 
   it('on an empty store, or run twice, deletes nothing', async () => {
     const { store } = setup();
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0 });
     store.insertReport(report('r1', NOW - 100 * DAY));
     await purge(store, NOW);
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0 });
   });
 
   it('a custom policy overrides the defaults, field by field', async () => {
@@ -412,9 +413,9 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 10 * DAY));
     await t.sanction(t.subject('k1'), NOW - 20 * DAY, DAY); // ended 19 d ago
     const res = await purge(t.store, NOW, { reportsMs: 5 * DAY });
-    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0 });
     const res2 = await purge(t.store, NOW, { strikesMs: 5 * DAY, sanctionAfterEndMs: 5 * DAY });
-    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0 });
   });
 
   it('a zero window purges everything already past', async () => {
@@ -447,7 +448,7 @@ describe('purge: result, policy and scope', () => {
 
   it('a finite now (zero, negative) is accepted (control)', async () => {
     const t = setup();
-    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0 });
     await expect(purge(t.store, -5)).resolves.toBeDefined();
   });
 
@@ -834,7 +835,7 @@ describe('appeals and blocked-name retention', () => {
 
   it('the result of a purge always has the three fields, 0 when nothing is due', async () => {
     const { store } = appealsSetup();
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0 });
   });
 
   it('strict cutoffs: a row exactly on the line is kept, one millisecond older goes', async () => {
@@ -919,7 +920,7 @@ describe('appeals and blocked-name retention', () => {
     const { store } = setup();
     store.insertStrike(strike('old', NOW - 60 * DAY));
     const res = await purge(store, NOW);
-    expect(res).toMatchObject({ strikes: 1, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(res).toMatchObject({ strikes: 1, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0 });
     // a store with only the appeal methods, and one with only the name methods
     const onlyAppeals = withMemoryAppeals(new MemoryStore());
     onlyAppeals.insertAppeal(appeal('a', 'g-a'));
@@ -1097,5 +1098,69 @@ describe('unseen message notices, running sanctions and orphaned appeals (review
     const plain = setup().store;
     plain.insertStrike(strike('old', NOW - 60 * DAY));
     expect(await purge(plain, NOW)).toMatchObject({ strikes: 1, appealsClosed: 0 });
+  });
+});
+
+describe('filter hits (F5)', () => {
+  const today = Math.floor(NOW / DAY);
+  const hit = (day: number, key = 'link.unlisted') => ({ day, key, action: 'count' as const, hits: 1 });
+
+  it('filterHitsMs default is 90 days; below 30 days is refused naming retention.filterHitsMs; 30 days and above pass', () => {
+    expect(RETENTION_DEFAULTS.filterHitsMs).toBe(90 * DAY);
+    expect(() => checkRetentionFloors({ filterHitsMs: 30 * DAY - 1 }, 30 * DAY)).toThrow(ProfileError);
+    try {
+      checkRetentionFloors({ filterHitsMs: 29 * DAY }, 30 * DAY);
+      throw new Error('expected a refusal');
+    } catch (e) {
+      expect((e as ProfileError).path).toBe('retention.filterHitsMs');
+      expect((e as ProfileError).message).toMatch(/30 days/);
+    }
+    expect(() => checkRetentionFloors({ filterHitsMs: 30 * DAY }, 30 * DAY)).not.toThrow();
+    expect(() => checkRetentionFloors({ filterHitsMs: 400 * DAY }, 30 * DAY)).not.toThrow();
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, '30' as never]) expect(() => checkRetentionFloors({ filterHitsMs: bad }, 30 * DAY)).toThrow(ProfileError);
+  });
+
+  it('purge deletes day rows strictly older and reports filterHits; the edge day stays', async () => {
+    const { store } = setup();
+    const cut = Math.floor((NOW - 90 * DAY) / DAY);
+    store.addFilterHits([hit(cut - 2), hit(cut - 1, 'a'), hit(cut), hit(today)]);
+    const res = await purge(store, NOW);
+    expect(res.filterHits).toBe(2);
+    expect(store.listFilterHits(0, today).map((r) => r.day)).toEqual([cut, today]);
+    expect((await purge(store, NOW)).filterHits).toBe(0);
+  });
+
+  it('filterHitsMs moves the window', async () => {
+    const { store } = setup();
+    store.addFilterHits([hit(today - 40), hit(today - 10), hit(today)]);
+    expect((await purge(store, NOW, { filterHitsMs: 30 * DAY })).filterHits).toBe(1);
+    expect(store.listFilterHits(0, today).map((r) => r.day)).toEqual([today - 10, today]);
+  });
+
+  it('a purge with no hit rows reports 0', async () => {
+    const { store } = setup();
+    expect((await purge(store, NOW)).filterHits).toBe(0);
+  });
+
+  it('reports of origin filter purge on reportsMs like any report; the counters do not touch them', async () => {
+    const { store } = setup();
+    const filed = (id: string, createdAt: number) => ({ ...report(id, createdAt), reporterSubject: `filter:${id}`, reporterSeat: '', reporterHandle: '', origin: 'filter' as const, originKey: 'link.unlisted' });
+    store.insertReport(filed('old', NOW - 91 * DAY));
+    store.insertReport(filed('new', NOW - 1 * DAY));
+    store.addFilterHits([hit(today)]);
+    const res = await purge(store, NOW);
+    expect(res.reports).toBe(1);
+    expect(store.loadReport('old')).toBeNull();
+    expect(store.loadReport('new')).not.toBeNull();
+  });
+
+  it('a purge failing in the hit table undoes the whole purge', async () => {
+    const { store } = setup();
+    store.insertReport(report('old', NOW - 120 * DAY));
+    store.purgeFilterHits = () => {
+      throw new Error('boom');
+    };
+    await expect(purge(store, NOW)).rejects.toThrow('boom');
+    expect(store.loadReport('old')).not.toBeNull();
   });
 });

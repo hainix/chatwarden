@@ -736,7 +736,34 @@ export interface StoredReport {
   lineId: string | null;
   excerpt: ReportExcerptLine[];
   people: SubjectId[];
+  /**
+   * Who made the report when it was not a player: `'filter'` (a chat filter's `flag`, `cw.reports.fileSystem`) or `'watch'` (the AI watch,
+   * later). Omitted or null for an ordinary player report. An origin report has `reporterSubject` of the form `filter:<report id>`, an empty
+   * seat and handle, and is not counted as anyone's reporting: the reporter readers (tally, outcomes, accuracy, bulk dismissal, notices on a
+   * decision, suspension, ranking) leave it out. A store refuses (`insertReport` answers false) a second OPEN `'filter'` report for one
+   * (target, room).
+   */
+  origin?: 'filter' | 'watch' | null;
+  /** For an origin report, the counter key that made it (a closed shape `[a-z0-9_.:-]{1,48}`, never text from a line); omitted or null otherwise. */
+  originKey?: string | null;
   status: 'open';
+}
+
+/** The origins a report can have besides a player. @experimental */
+export type ReportOrigin = 'filter' | 'watch';
+
+/** Is this a report nobody filed (a chat filter's flag, the AI watch)? True for any origin; a record with none (or from an older custom store) is a player's report. */
+export const isOriginReport = (report: { origin?: ReportOrigin | null }): boolean => report.origin !== undefined && report.origin !== null;
+
+/**
+ * One row of the chat-filter hit counters: a UTC day number (epoch ms divided by one day, rounded down), a counter key, the action applied
+ * (`flag_capped` when the daily cap turned a flag into a count) and how many times. No person, room or text. @experimental
+ */
+export interface FilterHitRow {
+  day: number;
+  key: string;
+  action: 'count' | 'flag' | 'mask' | 'refuse' | 'flag_capped';
+  hits: number;
 }
 
 /**
@@ -745,7 +772,11 @@ export interface StoredReport {
  * until then. `badFaith` marks a dismissal as the reporter's bad faith (it counts toward their suspension).
  * Private: moderator tools only.
  */
-export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason'> {
+export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason' | 'origin' | 'originKey'> {
+  /** Where the report came from: `'filter'`, `'watch'`, or null for a player's report. Every first-party store returns it. See {@link StoredReport.origin}. */
+  origin: ReportOrigin | null;
+  /** The counter key of an origin report; null otherwise. */
+  originKey: string | null;
   /**
    * The reason the reporter gave (a reason id), or null. Rows stored before 0.1.2 carry their old category here (`disruption` as
    * `griefing`). Every first-party store returns it; it is optional here so a custom store's 0.1.1-shaped record still type-checks (a
@@ -1070,13 +1101,32 @@ export interface Store {
 
   /**
    * Insert one report. Returns false, having written nothing, when a report by the same reporter subject
-   * against the same target subject in the same room already exists (the UNIQUE backstop); any other
-   * failure throws.
+   * against the same target subject in the same room already exists (the UNIQUE backstop), or when the row has
+   * `origin: 'filter'` and an OPEN `'filter'` report against the same target in the same room already exists (one
+   * open filter report for a person and room); any other failure throws.
    */
   insertReport(row: StoredReport): boolean;
 
   /** One report with its decision columns, or null when there is none by that id. */
   loadReport(id: string): ReportRecord | null;
+
+  /**
+   * How many reports with this origin were filed (`createdAt`) at or after `since`, whatever their status. The read behind the filters' daily
+   * cap, so processes sharing one store share the count.
+   */
+  countOriginReports(origin: ReportOrigin, since: number): number;
+
+  /**
+   * Add to the chat-filter hit counters: each row's `hits` is added to the stored row for its (day, key, action), made when there is none. A
+   * list that holds the same (day, key, action) twice adds both. Synchronous, one transaction.
+   */
+  addFilterHits(rows: readonly FilterHitRow[]): void;
+
+  /** The counter rows for the UTC days `sinceDay` to `untilDay` inclusive, ordered by day, key, then action. Copies. */
+  listFilterHits(sinceDay: number, untilDay: number): FilterHitRow[];
+
+  /** Delete the counter rows of days strictly before `beforeDay`. Returns how many rows were deleted. */
+  purgeFilterHits(beforeDay: number): number;
 
   /**
    * Reports newest first (`created_at` descending, then `id` descending, so a tie is stable), whole records. `status`

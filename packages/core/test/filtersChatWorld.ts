@@ -24,6 +24,8 @@ export interface Opts {
   settings?: (roomId: string) => ResolvedFilters;
   accountIsNew?: (subject: SubjectId | null, days: number) => boolean;
   noFiltersDep?: boolean;
+  /** Filters wired, but no `onFilterFlag` hook. */
+  noFlagHook?: boolean;
   pace?: ResolvedPace;
   profanityMode?: 'allow' | 'star' | 'refuse';
   count?: (hit: FilterHit) => void;
@@ -94,10 +96,14 @@ export function setup(opts: Opts = {}) {
               opts.count?.(hit);
             },
           },
-          onFilterFlag: (info: { roomId: string; seatId: string; subject: SubjectId; lineId: string; hit: FilterHit }) => {
-            calls.flags.push({ lineId: info.lineId, hit: info.hit, inBuffer: buffer.get(info.roomId, info.lineId) !== undefined });
-            return opts.onFlag?.(info);
-          },
+          ...(opts.noFlagHook === true
+            ? {}
+            : {
+                onFilterFlag: (info: { roomId: string; seatId: string; subject: SubjectId; lineId: string; hit: FilterHit }) => {
+                  calls.flags.push({ lineId: info.lineId, hit: info.hit, inBuffer: buffer.get(info.roomId, info.lineId) !== undefined });
+                  return opts.onFlag?.(info);
+                },
+              }),
         }),
   });
   const sit = (seat: string, ids: Identifiers | null, room = ROOM): SubjectId | null => {

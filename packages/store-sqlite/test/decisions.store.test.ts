@@ -92,8 +92,8 @@ describe('migration 10: kit_reports.bad_faith_evidence', () => {
     const info = db.prepare('PRAGMA table_info(kit_reports)').all();
     const col = info.find((c) => c.name === 'bad_faith_evidence');
     expect(col).toMatchObject({ type: 'TEXT', notnull: 0, dflt_value: null });
-    // It was the last column when it was added; migration 17 has since added two more after it.
-    expect(info.map((c) => String(c.name)).slice(-3)).toEqual(['bad_faith_evidence', 'reported_reason', 'detail_at']);
+    // It was the last column when it was added; migration 17 has since added two more after it, and migration 26 two (origin, origin_key).
+    expect(info.map((c) => String(c.name)).slice(-5)).toEqual(['bad_faith_evidence', 'reported_reason', 'detail_at', 'origin', 'origin_key']);
     db.close();
   });
 
@@ -136,6 +136,8 @@ describe('loadReport / closeReport', () => {
       ...r,
       reportedReason: null,
       detailAt: null,
+      origin: null,
+      originKey: null,
       badFaith: false,
       actionedAt: null,
       actionedBy: null,

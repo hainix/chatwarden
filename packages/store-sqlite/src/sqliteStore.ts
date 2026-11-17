@@ -32,6 +32,8 @@ import type {
   AuditListQuery,
   AuditRow,
   AuditTargetType,
+  FilterHitRow,
+  ReportOrigin,
   ClaimAttempt,
   ClaimMode,
   ClaimRow,
@@ -125,6 +127,37 @@ function detailFromJson(json: unknown): { detail?: AuditDetail } {
   }
 }
 
+/**
+ * One report as the insert writes it: every column, one plain `?` each. Two conflicts are swallowed (and answer "nothing written"): the same
+ * reporter against the same target in the same room, and a second OPEN filter report for one (target, room) (the partial unique index
+ * `kit_reports_open_filter`, migration 26). A clashing primary key, or a CHECK that fails, still throws.
+ */
+export const REPORT_INSERT_SQL = `INSERT INTO kit_reports
+   (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
+    target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status, origin, origin_key)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING
+ ON CONFLICT (target_subject, room_id) WHERE origin = 'filter' AND status = 'open' DO NOTHING`;
+/** The values `REPORT_INSERT_SQL` binds, one for each `?`, in order. */
+export const reportInsertArgs = (r: StoredReport): Array<string | number | null> => [
+  r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle, r.targetSubject, r.targetSeat, r.targetHandle,
+  r.category, r.reportedReason ?? null, r.note, r.lineId, JSON.stringify(r.excerpt), JSON.stringify(r.people), r.status, r.origin ?? null, r.originKey ?? null,
+];
+/** How many reports with an origin were filed since a time (the daily cap): the origin, then the time. Served by `kit_reports_by_origin`. */
+export const ORIGIN_REPORTS_COUNT_SQL = 'SELECT COUNT(*) AS n FROM kit_reports WHERE origin = ? AND created_at >= ?';
+/** The hit counter upsert: the day, key, action and the hits to add. */
+export const FILTER_HITS_ADD_SQL =
+  'INSERT INTO kit_filter_hits (day, key, action, hits) VALUES (?, ?, ?, ?) ON CONFLICT (day, key, action) DO UPDATE SET hits = hits + excluded.hits';
+/** The values `FILTER_HITS_ADD_SQL` binds, in order. */
+export const filterHitArgs = (r: FilterHitRow): [number, string, string, number] => [r.day, r.key, r.action, r.hits];
+/** The hit counter rows of a day range, inclusive: the first day, then the last. */
+export const FILTER_HITS_LIST_SQL = 'SELECT day, key, action, hits FROM kit_filter_hits WHERE day >= ? AND day <= ? ORDER BY day, key, action';
+/** Delete the counter rows of days before the one given. */
+export const FILTER_HITS_PURGE_SQL = 'DELETE FROM kit_filter_hits WHERE day < ?';
+
+/** A reporter value that can be a person. A filter's report names `filter:<report id>`, which no tally or outcome is ever kept under. */
+const isPersonReporter = (reporter: string): boolean => !reporter.startsWith('filter:');
+
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
 function reportFromRow(r: Record<string, unknown>): ReportRecord {
   return {
@@ -141,6 +174,8 @@ function reportFromRow(r: Record<string, unknown>): ReportRecord {
     category: String(r.category) as ReportCategory,
     reportedReason: r.reported_reason === null || r.reported_reason === undefined ? null : String(r.reported_reason),
     detailAt: r.detail_at === null || r.detail_at === undefined ? null : Number(r.detail_at),
+    origin: r.origin === null || r.origin === undefined ? null : (String(r.origin) as ReportOrigin),
+    originKey: r.origin_key === null || r.origin_key === undefined ? null : String(r.origin_key),
     note: r.note === null ? null : String(r.note),
     lineId: r.line_id === null ? null : String(r.line_id),
     excerpt: JSON.parse(String(r.excerpt_json)) as ReportRecord['excerpt'],
@@ -2115,24 +2150,37 @@ export class SqliteStore implements Store, TermStore {
 
   insertReport(r: StoredReport): boolean {
     return this.transaction(() => {
-      // Only the (reporter, target, room) conflict is swallowed; a clashing primary key still throws.
-      const res = this.db
-        .prepare(
-          `INSERT INTO kit_reports
-             (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
-              target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING`,
-        )
-        .run(
-          r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle,
-          r.targetSubject, r.targetSeat, r.targetHandle, r.category, r.reportedReason ?? null, r.note, r.lineId, JSON.stringify(r.excerpt),
-          JSON.stringify(r.people), r.status,
-        );
+      // Only the (reporter, target, room) conflict and the one-open-filter-report-per-(target, room) conflict are swallowed; a clashing primary key still throws.
+      const res = this.db.prepare(REPORT_INSERT_SQL).run(...reportInsertArgs(r));
       if (Number(res.changes) === 0) return false;
       this.bump();
       return true;
     });
+  }
+
+  countOriginReports(origin: ReportOrigin, since: number): number {
+    return this.transaction(() => Number(this.db.prepare(ORIGIN_REPORTS_COUNT_SQL).get(origin, since)?.n ?? 0));
+  }
+
+  addFilterHits(rows: readonly FilterHitRow[]): void {
+    if (rows.length === 0) return;
+    this.transaction(() => {
+      const stmt = this.db.prepare(FILTER_HITS_ADD_SQL);
+      for (const r of rows) stmt.run(...filterHitArgs(r));
+    });
+  }
+
+  listFilterHits(sinceDay: number, untilDay: number): FilterHitRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(FILTER_HITS_LIST_SQL)
+        .all(sinceDay, untilDay)
+        .map((r) => ({ day: Number(r.day), key: String(r.key), action: String(r.action) as FilterHitRow['action'], hits: Number(r.hits) })),
+    );
+  }
+
+  purgeFilterHits(beforeDay: number): number {
+    return this.transaction(() => Number(this.db.prepare(FILTER_HITS_PURGE_SQL).run(beforeDay).changes));
   }
 
   loadReport(id: string): ReportRecord | null {
@@ -2185,9 +2233,10 @@ export class SqliteStore implements Store, TermStore {
   }
 
   listOpenReportsByReporter(reporters: readonly SubjectId[], limit: number): ReportRecord[] {
-    if (reporters.length === 0) return [];
     const n = Math.min(201, Math.max(1, Math.floor(limit)));
-    const unique = [...new Set(reporters)];
+    // A filter's own reporter value (`filter:<id>`) is never a person: leave it out.
+    const unique = [...new Set(reporters)].filter(isPersonReporter);
+    if (unique.length === 0) return [];
     const marks = unique.map(() => '?').join(', ');
     // Served by kit_reports_by_reporter_outcome (migration 19): the reporter, then the filing time, with `status` read from the index
     // before a row is fetched. Named, because without statistics the planner would walk the by-status index (every open report in the
@@ -2199,10 +2248,11 @@ export class SqliteStore implements Store, TermStore {
 
   reporterTally(reporters: readonly SubjectId[]): ReporterTally {
     const tally: ReporterTally = { open: 0, actioned: 0, dismissed: 0, badFaith: 0 };
-    if (reporters.length === 0) return tally;
-    const marks = reporters.map(() => '?').join(', ');
+    const people = reporters.filter(isPersonReporter);
+    if (people.length === 0) return tally;
+    const marks = people.map(() => '?').join(', ');
     const sql = `SELECT status, bad_faith, COUNT(*) AS n FROM kit_reports WHERE reporter_subject IN (${marks}) GROUP BY status, bad_faith`;
-    for (const r of this.transaction(() => this.db.prepare(sql).all(...reporters))) {
+    for (const r of this.transaction(() => this.db.prepare(sql).all(...people))) {
       const n = Number(r.n);
       const status = String(r.status);
       if (status === 'open' || status === 'actioned' || status === 'dismissed') tally[status] += n;
@@ -2213,7 +2263,7 @@ export class SqliteStore implements Store, TermStore {
 
   reporterOutcomes(reporters: readonly SubjectId[], since: number): ReporterOutcomeRow[] {
     // A repeated id would be counted once per chunk it lands in: ask for each reporter once.
-    const unique = [...new Set(reporters)];
+    const unique = [...new Set(reporters)].filter(isPersonReporter);
     if (unique.length === 0) return [];
     // SQLite caps the variables of one statement, so a long list is asked for in chunks. The columns after `reporter_subject` are
     // all in kit_reports_by_reporter_outcome (migration 19), so each chunk is answered from that index alone.
@@ -2269,7 +2319,8 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
   }
 
-  loadReporterDecisions(reporters: readonly SubjectId[]): ReporterDecision[] {
+  loadReporterDecisions(allReporters: readonly SubjectId[]): ReporterDecision[] {
+    const reporters = allReporters.filter(isPersonReporter);
     if (reporters.length === 0) return [];
     // SQLite caps the variables of one statement, so a long list is asked for in chunks.
     const CHUNK = 500;

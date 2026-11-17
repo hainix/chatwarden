@@ -465,8 +465,14 @@ export class ChatService {
     // profanity refusal: not buffered, no strike, no notice, and the line has spent its rate and pacing budget. Every hit is counted, even
     // on a refused line. A failure of the filters lets the line through as it was typed.
     const verdict = this.filterLine(roomId, subject, trimmed);
+    // The one flag that will be handed to `onFilterFlag` (a delivered line, a known speaker, a hook to hand it to) is counted by the hook, by what
+    // came of it. Every other `flag` hit files nothing, so it is counted as a plain `count`: a `flag` row is a report that was filed.
+    let pendingFlag: FilterHit | null = null;
     if (verdict !== null) {
-      for (const hit of verdict.hits) this.countHit(hit);
+      if (verdict.refuse === null && subject !== null && this.onFilterFlag !== undefined) pendingFlag = verdict.flags[0] ?? null;
+      for (const hit of verdict.hits) {
+        if (hit !== pendingFlag) this.countHit(hit.action === 'flag' ? { ...hit, action: 'count' } : hit);
+      }
       if (verdict.refuse !== null) return refuse(verdict.refuse.reason, { rule: verdict.refuse.rule });
     }
     const filtered = verdict === null ? trimmed : (verdict.softened ?? maskSpans(trimmed, verdict.spans));
@@ -474,7 +480,10 @@ export class ChatService {
     // Profanity is softening or a house rule, never a violation: a refusal here is not buffered as a blocked line,
     // earns no strike, note or notice, and (the rate check having passed) has spent the line's rate budget. It reads the masked text.
     const swearing = this.applyProfanity(filtered);
-    if (swearing !== null && swearing.hit && this.profanityMode === 'refuse') return refuse('profanity');
+    if (swearing !== null && swearing.hit && this.profanityMode === 'refuse') {
+      if (pendingFlag !== null) this.countHit({ ...pendingFlag, action: 'count' });
+      return refuse('profanity');
+    }
     const delivered = swearing === null || this.profanityMode !== 'star' ? filtered : swearing.text;
     const lineId = this.buffer.append(roomId, {
       ts: now,
@@ -487,7 +496,7 @@ export class ChatService {
       audience,
     });
     // A `flag` hands the kept line over, once, after it is in the evidence buffer; a guest cannot be reported, so only a known person.
-    if (verdict !== null && verdict.flags.length > 0 && subject !== null) this.tellFlag(roomId, seatId, this.subjects.canonical(subject), lineId, verdict.flags[0]!);
+    if (pendingFlag !== null && subject !== null) this.tellFlag(roomId, seatId, this.subjects.canonical(subject), lineId, pendingFlag);
     return { deliver: { lineId, text: delivered } };
   }
 

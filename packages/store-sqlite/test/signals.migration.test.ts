@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AiReadPending, StoredReport } from '@chatwarden/core';
 import { MIGRATIONS, openStore } from '../src/index.js';
 import type { SqliteStore } from '../src/index.js';
+import { insertOldReport } from './oldRows.js';
 
 // Migration 21: signal rows (flood control and signals). One new table with three indexes, and one nullable column on kit_ai_reads. One-way,
 // wrapped by the runner in one savepoint with the version bump.
@@ -77,7 +78,7 @@ function openAt20(db: DatabaseSync): SqliteStore {
   const store = openStore({ db, migrations: MIGRATIONS.slice(0, 20) });
   expect(store.schemaVersion()).toBe(20);
   for (let i = 0; i < 15; i++) {
-    store.insertReport(report(i));
+    insertOldReport(db, report(i));
     // Written the way version 20 wrote it (the store of today would also fill `purpose`, a column that exists only from version 25).
     const p = pending(i);
     const id = `read-${i}`;
@@ -171,7 +172,7 @@ describe('migration 21: signal rows', () => {
   it('a version 18 database with rows upgrades through 19, 20 and 21 without changing data', () => {
     const db = memDb();
     const s = openStore({ db, migrations: MIGRATIONS.slice(0, 18) });
-    for (let i = 0; i < 10; i++) s.insertReport(report(i));
+    for (let i = 0; i < 10; i++) insertOldReport(db, report(i));
     s.close();
     const before = dump(db, 'kit_reports', 'rowid');
     const store = openStore({ db, migrations: UP_TO_21 });

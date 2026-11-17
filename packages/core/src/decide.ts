@@ -9,7 +9,7 @@ import type { CommunityRules, RuleRef } from './rules.js';
 import { APPEALS_START_TOKEN, isInternalSource, SANCTION_KINDS, SANCTION_SOURCES, validateSanctionInput, writeSanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
 import type { SubjectIndex } from './subjects.js';
-import { CONDUCT_LEVELS } from './types.js';
+import { CONDUCT_LEVELS, isOriginReport } from './types.js';
 import type { AiOutcomeInsert, Clock, ConductLevel, Logger, ReportExcerptLine, ReportRecord, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
 
 // The one path every moderator decision on a report takes. A decision closes the report, writes each sanction and
@@ -465,9 +465,11 @@ export class DecisionService {
   /** Check every action against the report, the rules and the sanction rules. Throws on the first problem. */
   private plan(norm: Normal, report: ReportRecord): Planned[] {
     const target = this.subjects.canonical(report.targetSubject);
-    const reporter = this.subjects.canonical(report.reporterSubject);
-    // A decision acts only on people in the report: its target, its reporter, or someone who wrote in the excerpt.
-    const scope = new Set<SubjectId>([target, reporter, ...report.people.map((p) => this.subjects.canonical(p))]);
+    // A decision acts only on people in the report: its target, its reporter (a report nobody filed, `origin`, has none), or someone who wrote in the excerpt.
+    const scope = new Set<SubjectId>([target, ...report.people.map((p) => this.subjects.canonical(p))]);
+    if (!isOriginReport(report)) scope.add(this.subjects.canonical(report.reporterSubject));
+    // There is no reporter to blame for a report nobody filed.
+    if (norm.verdict === 'bad_faith' && isOriginReport(report)) throw new Error('bad_faith needs a reporter');
 
     return norm.actions.map((a) => {
       if (!scope.has(a.subject)) return bad();
@@ -503,6 +505,7 @@ export class DecisionService {
     const now = this.clock.now();
     const pending = this.index !== undefined && !this.index.isEnabled();
     const reporter = this.subjects.canonical(report.reporterSubject);
+    const reporterTold = !isOriginReport(report);
     const status = isDismissal(norm.verdict) ? 'dismissed' : 'actioned';
     const outcome = this.outcomeFor(norm, report, now);
 
@@ -549,7 +552,7 @@ export class DecisionService {
       }
       // Reporter feedback only on `upheld` with at least one NON-note action: a note is staff-only and must never
       // tell the reporter anything, however many of them sit beside the other actions.
-      if (this.reporterFeedback && norm.verdict === 'upheld' && plan.some(({ action }) => action.kind !== 'note')) {
+      if (reporterTold && this.reporterFeedback && norm.verdict === 'upheld' && plan.some(({ action }) => action.kind !== 'note')) {
         this.notices.createReportOutcome(reporter, { notify: false });
         told.add(reporter);
       }

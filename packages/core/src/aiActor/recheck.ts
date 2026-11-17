@@ -162,7 +162,7 @@ export function recheck(deps: RecheckDeps, p: AiActionProposal): Recheck {
   const openAppeal = (store.listAppealsBy?.(aliases, 200) ?? []).some((a) => a.status === 'open');
   facts.personProtected = acted === undefined || acted.acted > 0 || acted.undone > 0 || openAppeal;
   // 10. The reporter: not a habitual false reporter and not carrying a bad-faith mark.
-  const who = report.reporterSubject === '' ? { habitual: false, badFaith: false } : deps.reporter(report.reporterSubject);
+  const who = isSystemReport(report) ? { habitual: false, badFaith: false } : deps.reporter(report.reporterSubject);
   facts.reporterHabitual = who.habitual || who.badFaith;
   // 11. Caps and review debt.
   const unreviewed = store.aiUnreviewed?.() ?? { n: Number.POSITIVE_INFINITY, oldestActedAt: null };

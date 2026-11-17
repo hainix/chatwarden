@@ -117,8 +117,9 @@ function RecordSection() {
 /** Only when most of the reporter's past reports were not upheld. Plain, and about the numbers, not the person. */
 function ReporterWarning({ report, people }: { report: StaffReport; people: ReportPerson[] }) {
   const { t, can, session } = useHub();
-  const wants = can('history.read');
+  // A report nobody filed (a chat filter's flag) has no reporter and so no record to warn about.
   const ref = report.reporterPerson;
+  const wants = can('history.read') && ref !== null;
   const state = useHubData<ReporterRecord | null>(wants ? `reporter:${ref}` : 'reporter:idle', () => (wants ? session.reporter(ref) : Promise.resolve(null)));
   const record = state.data;
   if (!wants || record === undefined || record === null) return null;

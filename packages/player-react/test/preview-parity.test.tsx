@@ -51,7 +51,7 @@ async function opFor(w: Awaited<ReturnType<typeof playerWorld>>, reportId: strin
   const { report } = await client.getReport(reportId);
   const own = [...(report.ownLineIds[report.targetPerson] ?? [])].reverse();
   const form = { ...emptyForm(), verdict: 'fair' as const, actions: [{ ...newDraft('a1', report.targetPerson, 2), what: `${kind}:${length}`, lineIds: own }] };
-  const op = decideOp(form, { target: report.targetPerson, reporter: report.reporterPerson, ...previewLines(report) });
+  const op = decideOp(form, { target: report.targetPerson, reporter: report.reporterPerson!, ...previewLines(report) });
   if (op === null) throw new Error('no op');
   return op;
 }

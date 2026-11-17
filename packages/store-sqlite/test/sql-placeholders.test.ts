@@ -11,6 +11,13 @@ import {
   AI_READ_INSERT_SQL,
   AI_READ_TAKE_SQL,
   AI_UNREVIEWED_SQL,
+  FILTER_HITS_ADD_SQL,
+  FILTER_HITS_LIST_SQL,
+  FILTER_HITS_PURGE_SQL,
+  ORIGIN_REPORTS_COUNT_SQL,
+  REPORT_INSERT_SQL,
+  filterHitArgs,
+  reportInsertArgs,
   aiActionInsertArgs,
   aiActionListSql,
   aiActionsOnSubjectsSql,
@@ -20,7 +27,7 @@ import {
   aiReadTakeArgs,
   aiGateRowsArgs,
 } from '../src/sqliteStore.js';
-import type { AiActionRow } from '@chatwarden/core';
+import type { AiActionRow, StoredReport } from '@chatwarden/core';
 
 // node:sqlite on Node 22.13 throws "column index out of range" when more values are bound than a statement has placeholders (newer Node tolerates it), and numbered
 // parameters (`?1`) count differently there. So every new statement uses plain `?` and binds exactly as many values as it has, in order. This counts them.
@@ -128,5 +135,40 @@ describe('the read reservation and the acting state bind exactly as many values 
     expect(aiActingUpdateArgs({ mode: 'off', paused: true }, next)).toEqual(['shadow', 5, 'owen', 0, null, null, 'off', 1]);
     expect(aiActingUpdateArgs({ mode: 'shadow', paused: false }, { ...next, paused: true, pausedSince: 9, pausedBy: 'sam' })).toHaveLength(placeholders(AI_ACTING_UPDATE_SQL));
     expect(AI_ACTING_UPDATE_SQL).not.toMatch(/\?\d/);
+  });
+});
+
+describe('the filter statements (migration 26) bind exactly as many values as they have placeholders', () => {
+  const stored: StoredReport = {
+    id: 'r', createdAt: 1, roomId: 'x', tags: { a: 'b' }, reporterSubject: 'filter:r', reporterSeat: '', reporterHandle: '', targetSubject: 's', targetSeat: 'p2', targetHandle: 'T',
+    category: 'spam', reportedReason: 'spam', note: null, lineId: null, excerpt: [], people: [], status: 'open', origin: 'filter', originKey: 'link.unlisted',
+  };
+
+  it('the report insert has one plain ? for each of its 19 columns and 19 values, the origin pair last (null when the report has none)', () => {
+    expect(placeholders(REPORT_INSERT_SQL)).toBe(19);
+    expect(reportInsertArgs(stored)).toHaveLength(19);
+    expect(reportInsertArgs(stored).slice(-2)).toEqual(['filter', 'link.unlisted']);
+    const plain = { ...stored } as Partial<StoredReport>;
+    delete plain.origin;
+    delete plain.originKey;
+    expect(reportInsertArgs(plain as StoredReport).slice(-2)).toEqual([null, null]);
+    expect(reportInsertArgs(plain as StoredReport)).toHaveLength(placeholders(REPORT_INSERT_SQL));
+    expect(REPORT_INSERT_SQL).not.toMatch(/\?\d/);
+  });
+
+  it('the hit upsert takes four values, the list two (the days), the purge one, the origin count two', () => {
+    expect(placeholders(FILTER_HITS_ADD_SQL)).toBe(4);
+    expect(filterHitArgs({ day: 1, key: 'k', action: 'count', hits: 2 })).toEqual([1, 'k', 'count', 2]);
+    expect(placeholders(FILTER_HITS_LIST_SQL)).toBe(2);
+    expect(placeholders(FILTER_HITS_PURGE_SQL)).toBe(1);
+    expect(placeholders(ORIGIN_REPORTS_COUNT_SQL)).toBe(2);
+    for (const sql of [FILTER_HITS_ADD_SQL, FILTER_HITS_LIST_SQL, FILTER_HITS_PURGE_SQL, ORIGIN_REPORTS_COUNT_SQL]) {
+      expect(sql).not.toMatch(/\?\d/);
+      expect(sql).not.toMatch(/\s[:@$][a-z]\w*/i);
+    }
+  });
+
+  it('the hit upsert adds to the stored count instead of replacing it', () => {
+    expect(FILTER_HITS_ADD_SQL).toMatch(/ON CONFLICT \(day, key, action\) DO UPDATE SET hits = hits \+ excluded\.hits/);
   });
 });

@@ -2,6 +2,7 @@ import { ownLineIdsByPerson } from './notices.js';
 import { canonicalReasonId, isReasonId, reasonOfCategory } from './reporting.js';
 import type { ReportReason } from './reporting.js';
 import type { SubjectIndex } from './subjects.js';
+import { isOriginReport } from './types.js';
 import type { ReportRecord, Store, SubjectId } from './types.js';
 
 /** The page size when `limit` is missing or not a number. */
@@ -54,7 +55,8 @@ export interface StaffReport extends ReportRecord {
   /** The reason the reporter gave (an id from the profile's reasons, an old category read as its new id), or null when they gave none. A hint, never the truth. */
   reportedReason: string | null;
   targetPerson: SubjectId;
-  reporterPerson: SubjectId;
+  /** The canonical person who filed the report, or null for a report nobody filed (`origin` is set: a chat filter's flag). */
+  reporterPerson: SubjectId | null;
   ownLineIds: Record<SubjectId, string[]>;
 }
 
@@ -137,7 +139,9 @@ export function staffReport(record: ReportRecord, subjects: SubjectIndex): Staff
     detailAt: record.detailAt ?? null,
     people: record.people.map((p) => subjects.canonical(p)),
     targetPerson: subjects.canonical(record.targetSubject),
-    reporterPerson: subjects.canonical(record.reporterSubject),
+    reporterPerson: isOriginReport(record) ? null : subjects.canonical(record.reporterSubject),
+    origin: record.origin ?? null,
+    originKey: record.originKey ?? null,
     ownLineIds: ownLineIdsByPerson(record, subjects),
   };
 }

@@ -1,5 +1,6 @@
 import { randomId } from './crypto.js';
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
+import { FILTER_LIMITS } from './filters.js';
 import type { Limits } from './limits.js';
 import { safeWarn } from './log.js';
 import { defaultReporting, findReason, legacyCategoryOf, OTHER_REASON_ID } from './reporting.js';
@@ -110,6 +111,30 @@ export interface ReportCounts {
   auto7d: number;
 }
 
+/**
+ * What a chat filter's `flag` files: a report nobody wrote. `originKey` is the counter key that made it (`[a-z0-9_.:-]{1,48}`, never text from a
+ * line); `target` is the speaker's canonical subject (a guest has none and cannot be reported); `reportedReason` is `spam` for a link, phrase or
+ * ratio hit and `personal_info` for a personal-info hit. @experimental
+ */
+export interface SystemReportInput {
+  origin: 'filter';
+  originKey: string;
+  roomId: string;
+  target: SubjectId;
+  lineId: string | null;
+  reportedReason: 'spam' | 'personal_info';
+}
+
+/**
+ * What {@link ReportService.fileSystem} answered: `filed` (one open report now exists), `open_exists` (one is already open for this person and
+ * room, nothing filed), `capped` (the instance already filed `flagCapPerDay` filter reports today), `no_subject` (a guest: nobody to report),
+ * `off` (moderation is off, the input is malformed or the store failed). @experimental
+ */
+export type SystemReportResult = 'filed' | 'open_exists' | 'capped' | 'no_subject' | 'off';
+
+const ORIGIN_KEY = /^[a-z0-9_.:-]{1,48}$/;
+const SYSTEM_REASONS: readonly string[] = ['spam', 'personal_info'];
+
 export interface ReportServiceDeps {
   roster: RoomRoster;
   buffer: EvidenceBuffer;
@@ -132,6 +157,10 @@ export interface ReportServiceDeps {
    * dismissals that suspend a reporter, and how long a dismissal weighs. Default: 10, 3 and 30 days.
    */
   limits?: Limits['reports'];
+  /** The most reports a filter may file in one UTC day, read per call. Defaults to the filters' default (50). */
+  flagCap?: () => number;
+  /** Told once with the id of each report `fileSystem` filed, after it is stored (the facade announces `report.created`). Fenced. */
+  onSystemReport?: (reportId: string) => void;
 }
 
 const newId = (): string => randomId(16);
@@ -195,8 +224,12 @@ export class ReportService {
   private readonly onReport: ReportServiceDeps['onReport'];
   private readonly logger: Logger | undefined;
   private readonly limits: Limits['reports'];
+  private readonly flagCap: () => number;
+  private readonly onSystemReport: ReportServiceDeps['onSystemReport'];
 
   constructor(deps: ReportServiceDeps) {
+    this.flagCap = deps.flagCap ?? (() => FILTER_LIMITS.flagCapDefault);
+    this.onSystemReport = deps.onSystemReport;
     this.roster = deps.roster;
     this.buffer = deps.buffer;
     this.subjects = deps.subjects;
@@ -270,7 +303,124 @@ export class ReportService {
     }
   }
 
+  /**
+   * File the report of a chat filter's `flag`: a report with no reporter (`reporterSubject` is `filter:<report id>`, the seat and handle are empty,
+   * no note), the room's evidence snapshot as its excerpt, status open, `origin: 'filter'` and the counter key. Nothing happens to the speaker until a
+   * person decides it. Never rejects. Answers, in this order:
+   *
+   * - `off`: moderation is disabled, the input is malformed (an origin other than `filter`, a key outside `[a-z0-9_.:-]{1,48}`, no room, a reason
+   *   other than `spam` or `personal_info`), or the store failed (logged by event and error class only).
+   * - `no_subject`: `target` is empty (a guest).
+   * - `capped`: the instance already filed `flagCapPerDay` filter reports since the start of this UTC day (counted from the store, so every process
+   *   sharing it shares the count).
+   * - `open_exists`: this person already has an OPEN filter report in this room (a partial unique index backs the check).
+   * - `filed`.
+   *
+   * The report is announced like any other (`onReport`, then `onSystemReport`).
+   */
+  async fileSystem(input: SystemReportInput): Promise<SystemReportResult> {
+    try {
+      return this.runSystem(input);
+    } catch (err) {
+      if (isUniqueViolation(err)) return 'open_exists';
+      this.warn('reports.system_failed', { error: errName(err) });
+      return 'off';
+    }
+  }
+
   // --- internals -----------------------------------------------------------
+
+  private runSystem(input: SystemReportInput): SystemReportResult {
+    if (!this.enabled()) return 'off';
+    if (typeof input !== 'object' || input === null) return 'off';
+    if (input.origin !== 'filter' || typeof input.originKey !== 'string' || !ORIGIN_KEY.test(input.originKey)) return 'off';
+    if (typeof input.roomId !== 'string' || input.roomId === '') return 'off';
+    if (typeof input.reportedReason !== 'string' || !SYSTEM_REASONS.includes(input.reportedReason)) return 'off';
+    if (!present(input.target)) return 'no_subject';
+    const person = this.subjects.canonical(input.target);
+    const now = this.clock.now();
+    const { roomId } = input;
+
+    const { excerpt, people } = this.snapshotOf(roomId);
+    const line = typeof input.lineId === 'string' ? this.buffer.get(roomId, input.lineId) : undefined;
+    // The seat and handle the person last spoke from in this room, when the buffer still shows one: for the staff view, never for a player.
+    let seen: { seatId: string; handle: string } | undefined = line === undefined ? undefined : { seatId: line.seatId, handle: line.handle };
+    if (seen === undefined) {
+      for (const l of this.buffer.snapshot(roomId)) {
+        if (present(l.subject) && this.subjects.canonical(l.subject) === person) seen = { seatId: l.seatId, handle: l.handle };
+      }
+    }
+    const id = newId();
+    const row: StoredReport = {
+      id,
+      createdAt: now,
+      roomId,
+      tags: this.roster.tags(roomId),
+      reporterSubject: `filter:${id}`,
+      reporterSeat: '',
+      reporterHandle: '',
+      targetSubject: person,
+      targetSeat: seen?.seatId ?? '',
+      targetHandle: seen?.handle ?? '',
+      category: legacyCategoryOf(input.reportedReason),
+      reportedReason: input.reportedReason,
+      note: null,
+      lineId: line === undefined ? null : line.lineId,
+      excerpt,
+      people,
+      status: 'open',
+      origin: 'filter',
+      originKey: input.originKey,
+    };
+    const dayStart = Math.floor(now / DAY_MS) * DAY_MS;
+    const cap = this.flagCap();
+    const outcome = this.store.transaction((): SystemReportResult => {
+      if (this.store.countOriginReports('filter', dayStart) >= cap) return 'capped';
+      return this.store.insertReport(row) ? 'filed' : 'open_exists';
+    });
+    if (outcome !== 'filed') return outcome;
+    this.notify(row, person, now);
+    this.systemFiled(id);
+    return 'filed';
+  }
+
+  /** The room's evidence snapshot as a report excerpt, and the distinct canonical people who wrote in it (first seen first). */
+  private snapshotOf(roomId: string): { excerpt: ReportExcerptLine[]; people: SubjectId[] } {
+    const people: SubjectId[] = [];
+    const index = new Map<SubjectId, number>();
+    const excerpt: ReportExcerptLine[] = this.buffer.snapshot(roomId).map((l) => {
+      let p: number | null = null;
+      if (present(l.subject)) {
+        const person = this.subjects.canonical(l.subject);
+        const seen = index.get(person);
+        if (seen === undefined) {
+          p = people.length;
+          index.set(person, p);
+          people.push(person);
+        } else {
+          p = seen;
+        }
+      }
+      return { lineId: l.lineId, ts: l.ts, seatId: l.seatId, handle: l.handle, raw: l.raw, delivered: l.delivered, blocked: l.blocked, audience: l.audience, p };
+    });
+    return { excerpt, people };
+  }
+
+  /** Tell the facade a system report is stored. Fenced: nothing here can change the answer. */
+  private systemFiled(reportId: string): void {
+    const hook = this.onSystemReport;
+    if (hook === undefined) return;
+    try {
+      const told: unknown = hook(reportId);
+      if (isThenable(told)) {
+        told.then(undefined, (err: unknown) => {
+          this.warn('reports.on_report_failed', { error: errName(err) });
+        });
+      }
+    } catch (err) {
+      this.warn('reports.on_report_failed', { error: errName(err) });
+    }
+  }
 
   /**
    * The reason a report names: `{ id }` (an enabled one; null for none), or why it cannot be taken. A blank reason is none; the
@@ -364,34 +514,7 @@ export class ReportService {
       if ('refusal' in limits) return limits.refusal;
       remaining = Math.max(0, this.limits.perDay - limits.used - 1);
 
-      const snapshot = this.buffer.snapshot(roomId);
-      const people: SubjectId[] = [];
-      const index = new Map<SubjectId, number>();
-      const excerpt: ReportExcerptLine[] = snapshot.map((l) => {
-        let p: number | null = null;
-        if (present(l.subject)) {
-          const person = this.subjects.canonical(l.subject);
-          const seen = index.get(person);
-          if (seen === undefined) {
-            p = people.length;
-            index.set(person, p);
-            people.push(person);
-          } else {
-            p = seen;
-          }
-        }
-        return {
-          lineId: l.lineId,
-          ts: l.ts,
-          seatId: l.seatId,
-          handle: l.handle,
-          raw: l.raw,
-          delivered: l.delivered,
-          blocked: l.blocked,
-          audience: l.audience,
-          p,
-        };
-      });
+      const { excerpt, people } = this.snapshotOf(roomId);
 
       row = {
         id: newId(),

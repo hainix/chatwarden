@@ -42,7 +42,8 @@ export interface ReportSummary {
   status: StaffReport['status'];
   badFaith: boolean;
   targetPerson: string;
-  reporterPerson: string;
+  /** The staff ref of the person who filed the report, or null for a report nobody filed (a chat filter's flag). */
+  reporterPerson: string | null;
   actionedAt: number | null;
   actionedBy: string | null;
   /**
@@ -238,7 +239,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (roleAtLeast(c.authz.role, ctx.permissions['history.read'])) {
         // Who meets the queue signal feed: one grouped read for the page, and none at all with the feed off. It never throws.
         if (open.length > 0 && cw.profile.signals.feeds.queue !== undefined) boosted = cw.signals.boosted(open);
-        const reporters = [...new Set(page.items.filter((r) => r.status === 'open').map((r) => r.reporterPerson))];
+        const reporters = [...new Set(page.items.filter((r) => r.status === 'open').flatMap((r) => (r.reporterPerson === null ? [] : [r.reporterPerson])))];
         if (reporters.length > 0) {
           try {
             accuracy = cw.reports.reporterAccuracy(reporters);
@@ -253,7 +254,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const flagged = handleFlags(cw);
       const items = page.items.map((r) => ({
         ...(r.status === 'open'
-          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), accuracy.get(r.reporterPerson), briefs.get(r.id), boosted.has(r.targetPerson))
+          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), r.reporterPerson === null ? undefined : accuracy.get(r.reporterPerson), briefs.get(r.id), boosted.has(r.targetPerson))
           : summarize(r, undefined, undefined, labelOf(r), undefined, undefined)),
         ...flagKey(flagged, 'targetHandleFlagged', r.targetHandle),
         ...flagKey(flagged, 'reporterHandleFlagged', r.reporterHandle),

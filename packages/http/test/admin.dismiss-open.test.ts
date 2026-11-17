@@ -32,7 +32,7 @@ async function fromReporter(w: W, key: string, count: number) {
     const rec = w.cw.reports.get(res.reportId)!;
     ids.push(res.reportId);
     targets.push(rec.targetPerson);
-    reporterRef = rec.reporterPerson;
+    reporterRef = rec.reporterPerson!;
   }
   return { ids, targets, reporter: reporterRef };
 }
@@ -418,7 +418,7 @@ describe('the figure and the sweep stay on staff channels', () => {
       clock.t += 1000;
       const res = await cw.reports.submit({ roomId: room(i), reporterSeat: 'p1', targetSeat: 'p2', category: 'harassment' });
       if (!res.ok) throw new Error('refused');
-      reporterRef = cw.reports.get(res.reportId)!.reporterPerson;
+      reporterRef = cw.reports.get(res.reportId)!.reporterPerson!;
       if (i < 6) await cw.decide({ reportId: res.reportId, verdict: 'no_action', actions: [], actor: 'ann' });
     }
     const authorize = (req: KitRequest): Authz | null => ({ actor: 'ann', role: (req.headers['x-role'] ?? 'moderator') as Role });

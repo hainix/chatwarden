@@ -7,6 +7,7 @@ import type { StoredReport } from '@chatwarden/core';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { MIGRATIONS, openStore } from '../src/index.js';
 import type { SqliteStore } from '../src/index.js';
+import { insertOldReport } from './oldRows.js';
 
 // Migration 19 and the grouped reporter-outcomes read behind reporter accuracy (D3). The plan check runs the query exactly as the
 // store issues it: the test records the SQL and arguments the store prepares, then asks SQLite for the plan of that same text.
@@ -47,7 +48,8 @@ const dump = (db: DatabaseSync, table: string, order: string): unknown[] => db.p
 type How = 'open' | 'upheld' | 'dismissed' | 'bad_faith';
 let seq = 0;
 /** One report in its own room (the UNIQUE index never trips), closed as given. */
-function fileOn(store: SqliteStore | MemoryStore, reporter: string, how: How, createdAt: number): string {
+/** `old`: the database of a store pinned at an old schema version, written to the way that version wrote (the current insert names columns it does not have). */
+function fileOn(store: SqliteStore | MemoryStore, reporter: string, how: How, createdAt: number, old?: DatabaseSync): string {
   const id = `ro${String(++seq).padStart(5, '0')}`;
   const r: StoredReport = {
     id,
@@ -67,7 +69,8 @@ function fileOn(store: SqliteStore | MemoryStore, reporter: string, how: How, cr
     people: [],
     status: 'open',
   };
-  store.insertReport(r);
+  if (old === undefined) store.insertReport(r);
+  else insertOldReport(old, r);
   if (how === 'upheld') store.closeReport(id, 'actioned', false, 'mod', createdAt + 1, 'n');
   if (how === 'dismissed') store.closeReport(id, 'dismissed', false, 'mod', createdAt + 1, 'n');
   if (how === 'bad_faith') store.closeReport(id, 'dismissed', true, 'mod', createdAt + 1, 'n', 'evidence');
@@ -75,11 +78,11 @@ function fileOn(store: SqliteStore | MemoryStore, reporter: string, how: How, cr
 }
 
 /** A spread of reporters, outcomes and filing times, identical for any store handed to it. */
-function seed(store: SqliteStore | MemoryStore, reporters: number): void {
+function seed(store: SqliteStore | MemoryStore, reporters: number, old?: DatabaseSync): void {
   const hows: How[] = ['open', 'upheld', 'dismissed', 'bad_faith', 'dismissed', 'upheld'];
   for (let i = 0; i < reporters; i++) {
     const per = 1 + (i % 7);
-    for (let j = 0; j < per; j++) fileOn(store, `s_rep${i}`, hows[(i + j) % hows.length] as How, NOW - ((i * 7 + j) % 40) * DAY);
+    for (let j = 0; j < per; j++) fileOn(store, `s_rep${i}`, hows[(i + j) % hows.length] as How, NOW - ((i * 7 + j) % 40) * DAY, old);
   }
 }
 
@@ -113,7 +116,7 @@ const planOf = (db: DatabaseSync, hit: Seen): string[] => db.prepare(`EXPLAIN QU
 function openAt18(db: DatabaseSync, reporters = 0): SqliteStore {
   const store = openStore({ db, migrations: MIGRATIONS.slice(0, 18) });
   expect(store.schemaVersion()).toBe(18);
-  seed(store, reporters);
+  seed(store, reporters, db);
   return store;
 }
 
@@ -145,7 +148,9 @@ describe('migration 19: the covering index for reporter outcomes', () => {
 
     const store = openStore({ db });
     expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
-    expect(dump(db, 'kit_reports', 'rowid')).toEqual(before);
+    // Migration 26 adds two columns, both NULL on every old row: everything that was there is as it was.
+    const withoutOrigin = (rows: unknown[]): unknown[] => rows.map((r) => { const { origin, origin_key, ...rest } = r as Record<string, unknown>; void origin; void origin_key; return rest; });
+    expect(withoutOrigin(dump(db, 'kit_reports', 'rowid'))).toEqual(before);
     expect({ tally: store.reporterTally(['s_rep3', 's_rep4']), list: store.listReports({ limit: 50 }) }).toEqual(readsBefore);
     expect(indexNames(db)).toContain(INDEX);
     expect(db.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });

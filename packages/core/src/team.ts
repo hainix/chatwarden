@@ -6,7 +6,7 @@ import { REPORT_CATEGORIES } from './reports.js';
 import { canonicalReasonId, isReasonId } from './reporting.js';
 import type { ReportReason } from './reporting.js';
 import type { SubjectIndex } from './subjects.js';
-import { CLAIM_TTL_MS } from './types.js';
+import { CLAIM_TTL_MS, isOriginReport } from './types.js';
 import type { Clock, ReasonRow, ReportCategory, Store, SubjectId } from './types.js';
 
 // The team workbench behind `cw.cases`, `cw.changes` and `cw.reasons`: soft claims on a person's case, take next, who
@@ -470,6 +470,8 @@ export class CaseDesk {
       // 201 or more is a case of its own kind: never bury it. One report past the lapse is a case that has waited long enough.
       if (open.length === 0 || open.length > 200) continue;
       if (open.some((r) => now - r.createdAt >= REPORTER_RANK_LAPSE_MS)) continue;
+      // A report nobody filed (a chat filter's flag) is not a habitual reporter's: a case holding one ranks normally.
+      if (open.some((r) => isOriginReport(r))) continue;
       reporters.set(person, [...new Set(open.map((r) => this.subjects.canonical(r.reporterSubject)))]);
     }
     const all = [...new Set([...reporters.values()].flat())];

@@ -200,13 +200,16 @@ export function groupQueue(
       const reason = r.reportedReason ?? null;
       if (!reasons.some((x) => x.id === reason)) reasons.push({ id: reason, label: reason === null ? null : (r.reportedReasonLabel ?? reason) });
       if (r.roomId !== '') rooms.add(r.roomId);
-      reporters.add(r.reporterPerson);
-      if (!reporterPersons.includes(r.reporterPerson)) reporterPersons.push(r.reporterPerson);
-      // Newest first, so the first handle seen for a reporter is their latest. An older server sends none at all.
-      const reporterHandle = r.reporterHandle ?? null;
-      if (reporterHandle !== null && !Object.hasOwn(reporterHandles, r.reporterPerson)) {
-        reporterHandles[r.reporterPerson] = reporterHandle;
-        if (r.reporterHandleFlagged === true) reporterFlagged[r.reporterPerson] = true;
+      // A report nobody filed (a chat filter's flag) has no reporter to count or name.
+      if (r.reporterPerson !== null) {
+        reporters.add(r.reporterPerson);
+        if (!reporterPersons.includes(r.reporterPerson)) reporterPersons.push(r.reporterPerson);
+        // Newest first, so the first handle seen for a reporter is their latest. An older server sends none at all.
+        const reporterHandle = r.reporterHandle ?? null;
+        if (reporterHandle !== null && !Object.hasOwn(reporterHandles, r.reporterPerson)) {
+          reporterHandles[r.reporterPerson] = reporterHandle;
+          if (r.reporterHandleFlagged === true) reporterFlagged[r.reporterPerson] = true;
+        }
       }
       if (r.status === 'open') {
         if (r.boosted === true) boosted = true;

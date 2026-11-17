@@ -3,6 +3,7 @@ import { DECISION_REASON_MAX } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
 import type { SubjectIndex } from './subjects.js';
 import type { CaseClaim } from './team.js';
+import { isOriginReport } from './types.js';
 import type { ReportRecord, Store, SubjectId } from './types.js';
 
 // Bulk dismissal: "nothing wrong here" for every open report about one person (their case) or from one reporter, in one call.
@@ -98,7 +99,7 @@ function scanForReporter(store: Store, subjects: SubjectIndex, root: SubjectId, 
       ...(after === undefined ? {} : { after }),
       ...(afterId === undefined ? {} : { afterId }),
     });
-    for (const r of page) if (subjects.canonical(r.reporterSubject) === root) found.push(r);
+    for (const r of page) if (!isOriginReport(r) && subjects.canonical(r.reporterSubject) === root) found.push(r);
     read += page.length;
     const last = page[page.length - 1];
     if (last === undefined || page.length < asked) break;

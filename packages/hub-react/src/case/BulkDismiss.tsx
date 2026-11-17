@@ -133,7 +133,8 @@ export function BulkDismiss() {
   const actions = useCaseActions();
   const [ask, setAsk] = useState<Ask | null>(null);
   const report = c.detail.data?.report;
-  const reporterRef = report?.reporterPerson;
+  // A report nobody filed (a chat filter's flag) has no reporter: no record to read and no sweep of "their" reports.
+  const reporterRef = report?.reporterPerson ?? undefined;
   const wantsRecord = can('history.read') && reporterRef !== undefined;
   const record = useHubData<ReporterRecord | null>(wantsRecord ? `reporter:${reporterRef}` : 'reporter:idle', () => (wantsRecord ? session.reporter(reporterRef) : Promise.resolve(null)));
 
@@ -141,7 +142,7 @@ export function BulkDismiss() {
 
   const people: ReportPerson[] = c.people;
   const target = people.find((p) => p.role === 'target');
-  const reporter = people.find((p) => p.ref === report.reporterPerson);
+  const reporter = report.reporterPerson === null ? undefined : people.find((p) => p.ref === report.reporterPerson);
   const personLabel = target === undefined ? '' : personName(target, people, t);
   const reporterLabel = reporter === undefined ? '' : personName(reporter, people, t);
   const openAbout = c.group?.open ?? 1;
@@ -167,21 +168,23 @@ export function BulkDismiss() {
             {t('hub.bulk.person', { count: openAbout, name: personLabel })}
           </button>
         )}
-        <div className="cw-bulk-row">
-          <button
-            type="button"
-            className="cw-btn"
-            {...(noticeable ? { 'aria-describedby': `${anchorId(report.id)}-habitual` } : {})}
-            onClick={() => setAsk({ scope: 'reporter', ref: report.reporterPerson, name: reporterLabel })}
-          >
-            {t('hub.bulk.reporter', { name: reporterLabel })}
-          </button>
-          {noticeable && (
-            <p id={`${anchorId(report.id)}-habitual`} className="cw-hint">
-              {t('hub.bulk.reporter.habitual')}
-            </p>
-          )}
-        </div>
+        {report.reporterPerson !== null && (
+          <div className="cw-bulk-row">
+            <button
+              type="button"
+              className="cw-btn"
+              {...(noticeable ? { 'aria-describedby': `${anchorId(report.id)}-habitual` } : {})}
+              onClick={() => setAsk({ scope: 'reporter', ref: report.reporterPerson as string, name: reporterLabel })}
+            >
+              {t('hub.bulk.reporter', { name: reporterLabel })}
+            </button>
+            {noticeable && (
+              <p id={`${anchorId(report.id)}-habitual`} className="cw-hint">
+                {t('hub.bulk.reporter.habitual')}
+              </p>
+            )}
+          </div>
+        )}
       </div>
       {dialog}
     </details>

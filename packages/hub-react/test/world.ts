@@ -168,7 +168,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     if (!res.ok) throw new Error(`report refused: ${res.refused}`);
     const report = cw.reports.get(res.reportId);
     if (report === null) throw new Error('report missing');
-    return { id: res.reportId, person: report.targetPerson, reporter: report.reporterPerson, room };
+    return { id: res.reportId, person: report.targetPerson, reporter: report.reporterPerson!, room };
   };
 
   /**
@@ -217,7 +217,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     return {
       id: res.reportId,
       person: report.targetPerson,
-      reporter: report.reporterPerson,
+      reporter: report.reporterPerson!,
       bystander: byHandle(bystander),
       room,
       lineIds,

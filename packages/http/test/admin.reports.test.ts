@@ -54,7 +54,7 @@ async function world(over: { wrap?: (cw: Chatwarden) => Chatwarden; permissions?
       id: res.reportId,
       report,
       target: report.targetPerson,
-      reporter: report.reporterPerson,
+      reporter: report.reporterPerson!,
       bystander: real.rooms.subjectAt(room, 'p3') as string,
     };
   };

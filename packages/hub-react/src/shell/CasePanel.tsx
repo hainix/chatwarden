@@ -137,7 +137,7 @@ function Reporters({ people }: { people: ReportPerson[] }) {
   const report = detail.data?.report;
   if (report === undefined || !can('history.read')) return null;
   // This report's reporter first, then the others who reported the same person.
-  const refs = [...new Set([report.reporterPerson, ...(group?.reporterPersons ?? [])])];
+  const refs = [...new Set([...(report.reporterPerson === null ? [] : [report.reporterPerson]), ...(group?.reporterPersons ?? [])])];
   const shown = refs.slice(0, REPORTERS_SHOWN);
   // A reporter on this report is named from it; one from an earlier report by the handle that report recorded; else by their tag.
   // `revealed` is for the place that has a Show control; every sentence built from the name keeps it hidden.

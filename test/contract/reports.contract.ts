@@ -43,6 +43,8 @@ export function reportsContract(name: string, make: () => Store): void {
           ...r,
           reportedReason: null,
           detailAt: null,
+          origin: null,
+          originKey: null,
           status: 'open',
           badFaith: false,
           actionedAt: null,

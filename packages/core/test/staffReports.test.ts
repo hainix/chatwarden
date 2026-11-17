@@ -53,6 +53,8 @@ const record = (over: Partial<ReportRecord> = {}): ReportRecord => ({
   category: 'harassment',
   reportedReason: null,
   detailAt: null,
+  origin: null,
+  originKey: null,
   note: null,
   lineId: null,
   excerpt: [],

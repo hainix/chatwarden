@@ -39,7 +39,7 @@ export function peopleOfReport(report: FlaggedReport): ReportPerson[] {
     if (!order.includes(ref)) order.push(ref);
   };
   add(report.targetPerson);
-  add(report.reporterPerson);
+  if (report.reporterPerson !== null) add(report.reporterPerson);
   for (const ref of report.people) add(ref);
 
   const handles = new Map<string, string[]>();

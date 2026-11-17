@@ -554,7 +554,7 @@ describe('as a reporter', () => {
     const ids: string[] = [];
     for (let i = 0; i < 4; i += 1) ids.push((await w.fileRich({ reporter: 'Rae', target: `T${i}`, room: `s${i}` })).id);
     for (const id of ids.slice(0, 3)) await w.client.decide(id, { verdict: 'bad_faith', reason: 'lied', evidence: 'made up', actions: [] });
-    const rae = (await w.client.getReport(ids[0]!)).report.reporterPerson;
+    const rae = (await w.client.getReport(ids[0]!)).report.reporterPerson!;
     await open(w, rae);
     const panel = reporterPanel();
     expect(within(panel).getByText('3 for bad faith.')).toBeInTheDocument();
@@ -566,7 +566,7 @@ describe('as a reporter', () => {
     const ids: string[] = [];
     for (let i = 0; i < 4; i += 1) ids.push((await w.fileRich({ reporter: 'Rae', target: `T${i}`, room: `s${i}` })).id);
     for (const id of ids.slice(0, 3)) await w.client.decide(id, { verdict: 'bad_faith', reason: 'lied', evidence: 'made up', actions: [] });
-    const rae = (await w.client.getReport(ids[0]!)).report.reporterPerson;
+    const rae = (await w.client.getReport(ids[0]!)).report.reporterPerson!;
     w.clock.t += 40 * DAY;
     await open(w, rae);
     expect(within(reporterPanel()).queryByText(/suspended/)).toBeNull();

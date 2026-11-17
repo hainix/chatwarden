@@ -59,6 +59,11 @@ export interface RetentionPolicy {
   appealsMs: number;
   /** A blocked name kept as evidence (`names.keepBlocked`) is deleted once it is older than this. The same clock as strikes. No floor. */
   blockedNamesMs: number;
+  /**
+   * A chat-filter hit counter row (one per UTC day, key and action: no person, room or text) is deleted once its day is wholly older than this. At
+   * least 30 days: the hub reads a 30 day window. A report a filter filed (`origin: 'filter'`) goes with the others, on `reportsMs`.
+   */
+  filterHitsMs: number;
 }
 
 export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
@@ -75,12 +80,13 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   appealStatementsMs: 90 * DAY_MS,
   appealsMs: 365 * DAY_MS,
   blockedNamesMs: 30 * DAY_MS,
+  filterHitsMs: 90 * DAY_MS,
 };
 
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
 
-const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'aiActionsMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs'] as const;
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'aiActionsMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs', 'filterHitsMs'] as const;
 
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
@@ -94,6 +100,7 @@ const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'ba
  * - `aiActionsMs` at least 90 days: the gates read 90 days of the AI's actions
  * - `signalsMs` at least 14 days: a counting window needs at least two weeks of rows
  * - `appealsMs` at least 90 days: the per-rule appeal counts read that far back
+ * - `filterHitsMs` at least 30 days: the hub's longest window of filter counts
  * - `appealStatementsMs` and `blockedNamesMs` at least 0 (0 keeps the text only until the next purge)
  *
  * Every field present must also be a finite number (`reportsMs` and `strikesMs` have no floor, only this).
@@ -138,6 +145,9 @@ export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWi
   if (below(policy.appealsMs, RECORD_FLOOR_MS)) {
     throw new ProfileError('retention.appealsMs', 'must be at least 90 days: the per-rule appeal counts read that far back');
   }
+  if (below(policy.filterHitsMs, 30 * DAY_MS)) {
+    throw new ProfileError('retention.filterHitsMs', 'must be at least 30 days: the hub reads a 30 day window of filter counts');
+  }
   if (below(policy.appealStatementsMs, 0)) {
     throw new ProfileError('retention.appealStatementsMs', 'must be 0 or more: 0 clears a statement as soon as its appeal is decided');
   }
@@ -178,6 +188,8 @@ export interface PurgeResult {
   blockedNames: number;
   /** Open appeals mooted because retention removed their sanction rows. 0 for a store without the appeal methods. */
   appealsClosed: number;
+  /** Chat-filter hit counter rows deleted (`retention.filterHitsMs`). */
+  filterHits: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -208,6 +220,7 @@ function checkWindow(name: string, ms: number): void {
  *   permanent, or timed and not yet ended before that cutoff, and not revoked (that row stops a second appeal). An open appeal is never
  *   deleted or cleared; but one whose sanction rows this pass removed (or that has none) is first mooted, so it ends up decided-like. Blocked names: `at < now - blockedNamesMs` (30 days by default).
  *   A store without the appeal or blocked-name methods has none of these.
+ * - filter hits: a counter row of a UTC day wholly before `now - filterHitsMs` (90 days by default, never less than 30). Reports a filter filed (`origin`) go on `reportsMs` with every report.
  * - links (`cw.links`): `at < now - reportsMs` (90 days by default), every system. A store without the link methods has none.
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
@@ -236,6 +249,7 @@ export async function purge(
     appealStatementsMs: policy.appealStatementsMs ?? RETENTION_DEFAULTS.appealStatementsMs,
     appealsMs: policy.appealsMs ?? RETENTION_DEFAULTS.appealsMs,
     blockedNamesMs: policy.blockedNamesMs ?? RETENTION_DEFAULTS.blockedNamesMs,
+    filterHitsMs: policy.filterHitsMs ?? RETENTION_DEFAULTS.filterHitsMs,
   };
   if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
@@ -251,6 +265,7 @@ export async function purge(
   checkWindow('appealStatementsMs', p.appealStatementsMs);
   checkWindow('appealsMs', p.appealsMs);
   checkWindow('blockedNamesMs', p.blockedNamesMs);
+  checkWindow('filterHitsMs', p.filterHitsMs);
   return store.transaction(() => {
     const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
     // Link rows (`cw.links`) are ids only and outlive the report they name by no useful time: the same clock as reports. Not counted in the result. A live row (an active EOS sanction, the EOS cursor) is kept by the store whatever its age.
@@ -281,6 +296,8 @@ export async function purge(
       appealStatements: store.clearAppealStatements?.(now - p.appealStatementsMs) ?? 0,
       appeals: store.purgeAppeals?.(now - p.appealsMs) ?? 0,
       blockedNames: store.purgeBlockedNames?.(now - p.blockedNamesMs) ?? 0,
+      // Counter rows are keyed by UTC day: a day goes once it ended before the cutoff (strictly older than the day the cutoff falls in).
+      filterHits: store.purgeFilterHits(Math.floor((now - p.filterHitsMs) / DAY_MS)),
     };
   });
 }

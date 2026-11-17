@@ -74,6 +74,8 @@ describe('migration 6: kit_reports', () => {
       'people_json', 'status', 'bad_faith', 'actioned_at', 'actioned_by', 'mod_note', 'bad_faith_evidence',
       // Migration 17: the reason the reporter gave and the time of their one follow-up.
       'reported_reason', 'detail_at',
+      // Migration 26 (release 0.2.0, chat filters): reports nobody filed.
+      'origin', 'origin_key',
     ]);
     const by = (n: string) => info.find((c) => c.name === n);
     expect(by('status')?.dflt_value).toBe("'open'");

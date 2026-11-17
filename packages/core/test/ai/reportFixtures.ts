@@ -74,6 +74,8 @@ export function mkReport(
     targetHandle: target.handle,
     category: 'other',
     reportedReason: o.reason ?? null,
+    origin: null,
+    originKey: null,
     note: o.note ?? null,
     lineId: point === null ? null : (excerpt[point]?.lineId ?? 'line-missing'),
     excerpt,

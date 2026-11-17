@@ -26,7 +26,7 @@ async function fileWith(w: W, o: Partial<ReportInput> = {}, reporterKey = `rk-${
   if (!res.ok) throw new Error(`refused: ${res.refused}`);
   const report = w.cw.reports.get(res.reportId);
   if (report === null) throw new Error('missing');
-  return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson, room };
+  return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson!, room };
 }
 
 const items = (res: { body: unknown }) => (res.body as { items: Array<Record<string, unknown>> }).items;

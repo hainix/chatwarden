@@ -547,7 +547,7 @@ export function teamContract(name: string, make: () => Store): void {
         const against = report({ reporterSubject: 's_other', targetSubject: 's_r1' });
         s.insertReport(mine);
         s.insertReport(against);
-        expect(list(s, ['s_r1'], 10)).toEqual([{ ...mine, reportedReason: null, detailAt: null, status: 'open', badFaith: false, actionedAt: null, actionedBy: null, modNote: null, badFaithEvidence: null }]);
+        expect(list(s, ['s_r1'], 10)).toEqual([{ ...mine, reportedReason: null, detailAt: null, origin: null, originKey: null, status: 'open', badFaith: false, actionedAt: null, actionedBy: null, modNote: null, badFaithEvidence: null }]);
       });
 
       it('an empty list matches nobody; unknown, similar and injection ids match nothing', () => {

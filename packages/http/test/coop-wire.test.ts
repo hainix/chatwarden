@@ -33,6 +33,8 @@ function report(over: Partial<StaffReport> = {}): StaffReport {
     createdAt: Date.UTC(2026, 10, 12, 10, 30, 0),
     roomId: SEEDS.room,
     tags: { tag: 'value', tag2: 'value2' },
+    origin: null,
+    originKey: null,
     reporterSubject: 'sub-rep',
     reporterSeat: SEEDS.repSeat,
     reporterHandle: SEEDS.repHandle,

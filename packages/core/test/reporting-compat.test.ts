@@ -76,7 +76,7 @@ describe('types written against 0.1.1 still compile', () => {
     const old: ReportRecord = {
       id: 'old', createdAt: 1, roomId: 'x', tags: {}, reporterSubject: 's_a', reporterSeat: 'p1', reporterHandle: 'A', targetSubject: 's_b', targetSeat: 'p2',
       targetHandle: 'B', category: 'disruption', note: null, lineId: null, excerpt: [], people: [], status: 'open',
-      badFaith: false, actionedAt: null, actionedBy: null, modNote: null, badFaithEvidence: null,
+      badFaith: false, actionedAt: null, actionedBy: null, modNote: null, badFaithEvidence: null, origin: null, originKey: null,
     };
     class LegacyStore extends MemoryStore {
       override loadReport(): ReportRecord | null {

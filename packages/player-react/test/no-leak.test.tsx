@@ -30,7 +30,7 @@ async function world() {
 
 function secrets(w: PlayerWorld): string[] {
   const staffRefs: string[] = [];
-  for (const r of w.cw.reports.list().items) staffRefs.push(r.targetPerson, r.reporterPerson, ...r.people);
+  for (const r of w.cw.reports.list().items) staffRefs.push(r.targetPerson, r.reporterPerson!, ...r.people);
   const ids = [...w.pending(ALICE), ...w.record(ALICE), ...w.pending(BOB), ...w.pending(CARA)].map((n) => n.id);
   return [
     ...staffRefs,

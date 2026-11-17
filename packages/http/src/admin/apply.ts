@@ -16,7 +16,8 @@ const VERDICTS: readonly DecisionInput['verdict'][] = ['upheld', 'noted', 'no_ac
 
 /** Everyone a report names, as staff refs: the target, the reporter and the people who wrote in the excerpt. */
 export function peopleOf(report: StaffReport): string[] {
-  return [...new Set([report.targetPerson, report.reporterPerson, ...report.people])];
+  // A report nobody filed (a chat filter's flag) has no reporter.
+  return [...new Set([report.targetPerson, ...(report.reporterPerson === null ? [] : [report.reporterPerson]), ...report.people])];
 }
 
 /** A decision as the staff body carries it, checked for shape. */

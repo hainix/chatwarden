@@ -28,7 +28,7 @@ import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkFilterRules, resolveFilters } from './filters.js';
 import type { FilterSettings } from './filters.js';
-import { FilterHits, MemoryHitSink } from './filters/counters.js';
+import { FilterHits } from './filters/counters.js';
 import type { FilterStats } from './filters/counters.js';
 import { checkLines, createFilterEngine, testLine } from './filters/engine.js';
 import type { FilterCheckResult, FilterTestResult } from './filters/engine.js';
@@ -48,7 +48,7 @@ import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
 import { ReportService } from './reports.js';
-import type { ReportCounts, ReportDetailInput, ReportDetailResult, ReportInput, ReportResult } from './reports.js';
+import type { ReportCounts, ReportDetailInput, ReportDetailResult, ReportInput, ReportResult, SystemReportInput, SystemReportResult } from './reports.js';
 import { checkLinkRow, hasLinkMethods, isLinkSystem, isLinkValue, linkLimit } from './links.js';
 import type { LinkRow, LinkSystem } from './links.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
@@ -356,6 +356,15 @@ export interface Chatwarden {
      * See {@link ReportInput} and {@link ReportRefusal}. The kit has no player report route: your game's own route calls this.
      */
     submit(input: ReportInput): Promise<ReportResult>;
+    /**
+     * File the report of a chat filter's `flag` (and, later, of the AI watch): a report with no reporter, `origin: 'filter'`, the room's evidence as its
+     * excerpt, for a person to decide. Nothing happens to the speaker until one does. The chat filters call this themselves when a rule's action is
+     * `flag`; it is public for a game that runs its own rules. Never rejects: `filed`, `open_exists` (one is already open for this person and room),
+     * `capped` (`flagCapPerDay` filter reports filed today across the instance), `no_subject` (a guest), or `off`. See {@link SystemReportInput}.
+     * A report it files is announced like any other (`report.created` with `origin`, `onReport`). Staff views show its reporter as null.
+     * @experimental
+     */
+    fileSystem(input: SystemReportInput): Promise<SystemReportResult>;
     /**
      * The reporter's one optional follow-up after a report: `{ reason?, note? }` attached to the same report. Only the original
      * reporter (the same seat, still in the report's room), once, within ten minutes, and while the report is open; it never
@@ -1045,8 +1054,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     return merged;
   };
 
-  // The chat filters: the engine (the per-room settings getter and the account-age lookup) and the hit counters, written every 30 seconds
-  // and on close. Counts are held in memory here until the store keeps them; nothing is built per line while every block is off.
+  // The chat filters: the engine (the per-room settings getter and the account-age lookup) and the hit counters, held in memory, written to the
+  // store every 30 seconds and on close (a crash loses at most 30 seconds of counts). Nothing is built per line while every block is off.
   const filterEngine = createFilterEngine({
     settings: () => policy.profileNow().filters,
     accountAgeDays: opts.signals?.accountAgeDays,
@@ -1055,7 +1064,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     clock,
     logger,
   });
-  const filterHits = new FilterHits({ clock, logger, sink: new MemoryHitSink() });
+  const filterHits = new FilterHits({
+    clock,
+    logger,
+    sink: { add: (rows) => store.addFilterHits(rows), list: (from, to) => store.listFilterHits(from, to) },
+  });
 
   const chat = new ChatService({
     roster,
@@ -1082,6 +1095,26 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       settings: () => policy.profileNow().filters,
       accountIsNew: (subject, days) => filterEngine.accountIsNew(subject, days),
       count: (hit) => filterHits.count(hit),
+    },
+    // A `flag` files a report with no reporter (see `reports.fileSystem`) and counts by what came of it: `flag` when one was filed, `flag_capped`
+    // when the daily cap stopped it, `count` when one was already open, the speaker is a guest or anything went wrong. The chat path never waits.
+    onFilterFlag: ({ roomId, subject, lineId, hit }) => {
+      void (async () => {
+        let outcome: Awaited<ReturnType<typeof reports.fileSystem>> = 'off';
+        try {
+          outcome = await reports.fileSystem({
+            origin: 'filter',
+            originKey: hit.key,
+            roomId,
+            target: subject,
+            lineId,
+            reportedReason: hit.kind === 'personal_info' ? 'personal_info' : 'spam',
+          });
+        } catch {
+          // fileSystem never rejects; a failure to even ask counts as a plain count
+        }
+        filterHits.count({ key: hit.key, action: outcome === 'filed' ? 'flag' : outcome === 'capped' ? 'flag_capped' : 'count' });
+      })();
     },
     pace: {
       settings: paceOf,
@@ -1110,6 +1143,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     onReport: opts.onReport,
     logger,
     limits: limits.reports,
+    flagCap: () => policy.profileNow().filters.flagCapPerDay,
+    // A report a filter filed is announced like any other: `report.created` with its origin.
+    onSystemReport: (reportId) => announceReport(reportId),
   });
   const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices });
   // The AI service is built after the audit trail it writes to; a decision reaches it through this late binding.
@@ -1219,6 +1255,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         createdAt: stored.createdAt,
         category: stored.category,
         reportedReason: stored.reportedReason,
+        ...(stored.origin === null || stored.origin === undefined ? {} : { origin: stored.origin }),
         roomTags: { ...stored.tags },
       });
     } catch (err) {
@@ -1484,6 +1521,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         if (res.ok) announceReport(res.reportId);
         return res;
       },
+      fileSystem: (input) => reports.fileSystem(input),
       addDetail: async (reportId, reporterSeat, detail) => {
         const res = await reports.addDetail(reportId, reporterSeat, detail);
         // The follow-up changes what the AI would read: queue one new read (it only enqueues; the reporter's ack never waits).

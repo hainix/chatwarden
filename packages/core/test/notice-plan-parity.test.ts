@@ -80,7 +80,7 @@ async function run(c: Case) {
   if (report === null) throw new Error('no report');
   const ref: Record<Who, string> = {
     target: report.targetPerson,
-    reporter: report.reporterPerson,
+    reporter: report.reporterPerson as string,
     third: cw.rooms.subjectAt(room, 'p3') as string,
   };
   const own = (who: Who): string[] => report.ownLineIds[ref[who]] ?? [];

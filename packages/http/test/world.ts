@@ -150,7 +150,7 @@ export async function world(over: WorldOptions = {}) {
     if (!res.ok) throw new Error(`report refused: ${res.refused}`);
     const report = real.reports.get(res.reportId);
     if (report === null) throw new Error('report missing');
-    return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson, room, key };
+    return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson!, room, key };
   };
   /** A second open report against the same person as `prev`, from another reporter in another room. */
   const fileAgainst = (prev: { key: string }, _reporter: string, category: ReportCategory = 'harassment') => file(category, prev.key);

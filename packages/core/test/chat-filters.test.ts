@@ -111,14 +111,14 @@ describe('refuse', () => {
 });
 
 describe('precedence', () => {
-  it('refuse beats mask beats flag beats count; every hit is counted', () => {
+  it('refuse beats mask beats flag beats count; every hit is counted, a flag on a refused line as a plain count (no report is filed)', () => {
     const t = setup({
       filters: { links: { action: 'mask' }, personalInfo: { action: 'flag' }, phrases: [{ id: 'a', action: 'count', phrases: ['buy gold'] }, { id: 'b', action: 'refuse', phrases: ['free gold'] }] },
     });
     t.sit('p1', who('k1'));
     expect(refusal(t.say('p1', 'vlemmo.com a@b.com buy gold free gold')).reason).toBe('filter');
     expect(t.calls.counted.map((h) => h.key)).toEqual(['link.unlisted', 'personal_info.email', 'phrase.a', 'phrase.b']);
-    expect(t.calls.counted.map((h) => h.action)).toEqual(['mask', 'flag', 'count', 'refuse']);
+    expect(t.calls.counted.map((h) => h.action)).toEqual(['mask', 'count', 'count', 'refuse']);
     expect(t.calls.flags).toEqual([]);
   });
 
@@ -187,8 +187,32 @@ describe('count and flag', () => {
     expect(call.lineId).toBe((r as { deliver: { lineId: string } }).deliver.lineId);
     expect(call.inBuffer).toBe(true);
     expect(call.hit.key).toBe('link.unlisted');
-    expect(t.calls.counted.map((h) => h.key)).toEqual(['link.unlisted', 'personal_info.email']);
+    // The flag that is handed over is counted by the hook (by what came of it); the line's other flag files nothing, so it is a plain count.
+    expect(t.calls.counted.map((h) => [h.key, h.action])).toEqual([['personal_info.email', 'count']]);
     void subject;
+  });
+
+  it('flag with no hook to hand it to: every hit is still counted, the flag as a plain count', () => {
+    const t = setup({ filters: { links: { action: 'flag' } }, noFlagHook: true });
+    t.sit('p1', who('k1'));
+    expect(delivered(t.say('p1', 'see vlemmo.com'))).toBe('see vlemmo.com');
+    expect(t.calls.counted.map((h) => [h.key, h.action])).toEqual([['link.unlisted', 'count']]);
+  });
+
+  it('a flagged line the profanity filter then refuses files nothing and counts as a plain count', () => {
+    const t = setup({ filters: { links: { action: 'flag' } }, profanityMode: 'refuse' });
+    t.sit('p1', who('k1'));
+    expect(refusal(t.say('p1', 'see vlemmo.com snerp')).reason).toBe('profanity');
+    expect(t.calls.flags).toEqual([]);
+    expect(t.calls.counted.map((h) => [h.key, h.action])).toEqual([['link.unlisted', 'count']]);
+  });
+
+  it('a flag and a mask on one delivered line: the mask is counted as a mask, the flag is left to the hook to count', () => {
+    const t = setup({ filters: { links: { action: 'mask' }, personalInfo: { action: 'flag' } } });
+    t.sit('p1', who('k1'));
+    t.say('p1', 'vlemmo.com a@b.com');
+    expect(t.calls.counted.map((h) => [h.key, h.action])).toEqual([['link.unlisted', 'mask']]);
+    expect(t.calls.flags.map((f) => f.hit.key)).toEqual(['personal_info.email']);
   });
 
   it('flag: the call carries the room, the seat and the canonical subject', () => {
@@ -203,7 +227,7 @@ describe('count and flag', () => {
     const t = setup({ filters: { links: { action: 'flag' } } });
     t.sit('p3', null);
     expect(delivered(t.say('p3', 'see vlemmo.com'))).toBe('see vlemmo.com');
-    expect(t.calls.counted).toHaveLength(1);
+    expect(t.calls.counted.map((h) => [h.key, h.action])).toEqual([['link.unlisted', 'count']]);
     expect(t.calls.flags).toEqual([]);
   });
 

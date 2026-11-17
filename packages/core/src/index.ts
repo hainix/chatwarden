@@ -63,6 +63,8 @@ export type {
   StoredReport,
   StrikeRow,
   SubjectRecord,
+  FilterHitRow,
+  ReportOrigin,
 } from './types.js';
 export { CLAIM_TTL_MS, CONDUCT_LEVELS } from './types.js';
 export {
@@ -135,6 +137,8 @@ export type {
   ReportRefusal,
   ReportResult,
   ReportServiceDeps,
+  SystemReportInput,
+  SystemReportResult,
 } from './reports.js';
 export {
   canonicalReasonId,

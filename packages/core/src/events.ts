@@ -28,6 +28,8 @@ export type KitEvent =
       category: ReportCategory;
       /** The reason id the reporter gave, or null when they gave none. A hint, never the truth. Never the note. Always set by the kit from 0.1.2; optional in the type so an event built by 0.1.1 code still type-checks. */
       reportedReason?: string | null;
+      /** Present only for a report nobody filed: `'filter'` for a chat filter's flag (`'watch'` later). Absent for a player's report. An id-class field, never text. */
+      origin?: 'filter' | 'watch';
       roomTags: Readonly<Record<string, string>>;
     }
   /** A decision closed a report. Emitted once per decision, never for a replay. */

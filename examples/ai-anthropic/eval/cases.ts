@@ -70,6 +70,8 @@ export function caseToReport(c: EvalCase): ReportRecord {
     createdAt: BASE_TS + c.lines.length * 4000,
     roomId: 'room-eval',
     tags: {},
+    origin: null,
+    originKey: null,
     reporterSubject: 'subject-reporter',
     reporterSeat: SEAT.reporter,
     reporterHandle: 'handle-reporter',

@@ -1,3 +1,4 @@
+import { isOriginReport } from '../types.js';
 import type { ReportRecord, SanctionKind } from '../types.js';
 import type { AiActingMode } from './acting.js';
 import type { AiActCaps } from './caps.js';
@@ -66,8 +67,8 @@ export function actCeiling(step: ActStep | null, cited: readonly string[], own: 
 }
 
 /** A report nobody filed (the watch release's, or one with no reporter). Level 3 never acts on one (design 4.2 check 10). */
-export function isSystemReport(report: Pick<ReportRecord, 'reporterSubject'>): boolean {
-  return (report as { origin?: unknown }).origin === 'watch' || report.reporterSubject === '';
+export function isSystemReport(report: Pick<ReportRecord, 'reporterSubject'> & { origin?: ReportRecord['origin'] }): boolean {
+  return isOriginReport(report) || report.reporterSubject === '';
 }
 
 /** What the caps read (design 4.2 check 11): the actions in the last hour and the UTC day, and the unreviewed ones. */

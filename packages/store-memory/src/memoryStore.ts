@@ -7,6 +7,7 @@ import type {
   ClaimMode,
   ClaimRow,
   DecisionRow,
+  FilterHitRow,
   MuteRow,
   NoticeRow,
   OpenReportQuery,
@@ -14,6 +15,7 @@ import type {
   ReasonRow,
   ReportActivity,
   ReportListQuery,
+  ReportOrigin,
   ReportRecord,
   ReporterDecision,
   ReporterOutcomeRow,
@@ -82,6 +84,8 @@ export class MemoryStore implements Store {
   protected strikes: StrikeRow[] = [];
   /** Reports in insertion order; `insertReport` enforces UNIQUE (reporter, target, room). */
   protected reports: StoredReportRow[] = [];
+  /** The chat-filter hit counters by (day, key, action). */
+  protected filterHits = new Map<string, FilterHitRow>();
   /** Recorded decisions by key. */
   protected decisions = new Map<string, DecisionRow>();
   /** Notices in insertion order (stands in for SQLite's rowid). */
@@ -639,14 +643,19 @@ export class MemoryStore implements Store {
   // Reports (synchronous, see the Store interface)
 
   insertReport(row: StoredReport): boolean {
+    const origin = row.origin ?? null;
     const dup = this.reports.some(
       (r) => r.reporterSubject === row.reporterSubject && r.targetSubject === row.targetSubject && r.roomId === row.roomId,
     );
     if (dup) return false;
+    // One OPEN filter report for a person in a room (the partial unique index of the SQLite store).
+    if (origin === 'filter' && this.reports.some((r) => r.origin === 'filter' && r.status === 'open' && r.targetSubject === row.targetSubject && r.roomId === row.roomId)) return false;
     // Only the (reporter, target, room) clash is swallowed; a clashing id still throws, like a primary key.
     if (this.reports.some((r) => r.id === row.id)) throw new Error('UNIQUE constraint failed: kit_reports.id');
     this.reports.push({
       ...structuredClone(row),
+      origin,
+      originKey: row.originKey ?? null,
       reportedReason: row.reportedReason ?? null,
       detailAt: null,
       badFaith: false,
@@ -665,6 +674,42 @@ export class MemoryStore implements Store {
   loadReport(id: string): ReportRecord | null {
     const r = this.reports.find((x) => x.id === id);
     return r === undefined ? null : structuredClone(r);
+  }
+
+  countOriginReports(origin: ReportOrigin, since: number): number {
+    return this.reports.filter((r) => r.origin === origin && r.createdAt >= since).length;
+  }
+
+  addFilterHits(rows: readonly FilterHitRow[]): void {
+    for (const r of rows) {
+      const k = `${r.day} ${r.key} ${r.action}`;
+      const held = this.filterHits.get(k);
+      if (held === undefined) {
+        this.filterHits.set(k, { ...r });
+        this.undoWith(() => this.filterHits.delete(k));
+      } else {
+        const before = held.hits;
+        held.hits += r.hits;
+        this.undoWith(() => {
+          held.hits = before;
+        });
+      }
+    }
+  }
+
+  listFilterHits(sinceDay: number, untilDay: number): FilterHitRow[] {
+    const less = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+    return [...this.filterHits.values()]
+      .filter((r) => r.day >= sinceDay && r.day <= untilDay)
+      .sort((a, b) => a.day - b.day || less(a.key, b.key) || less(a.action, b.action))
+      .map((r) => ({ ...r }));
+  }
+
+  purgeFilterHits(beforeDay: number): number {
+    const gone = [...this.filterHits].filter(([, r]) => r.day < beforeDay);
+    for (const [k] of gone) this.filterHits.delete(k);
+    if (gone.length > 0) this.undoWith(() => gone.forEach(([k, r]) => this.filterHits.set(k, r)));
+    return gone.length;
   }
 
   listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
@@ -707,7 +752,7 @@ export class MemoryStore implements Store {
     const n = Math.min(201, Math.max(1, Math.floor(limit)));
     const wanted = new Set(reporters);
     return this.reports
-      .filter((r) => r.status === 'open' && wanted.has(r.reporterSubject))
+      .filter((r) => r.status === 'open' && r.origin === null && wanted.has(r.reporterSubject))
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, n)
       .map((r) => structuredClone(r));
@@ -717,7 +762,7 @@ export class MemoryStore implements Store {
     const tally: ReporterTally = { open: 0, actioned: 0, dismissed: 0, badFaith: 0 };
     const wanted = new Set(reporters);
     for (const r of this.reports) {
-      if (!wanted.has(r.reporterSubject)) continue;
+      if (r.origin !== null || !wanted.has(r.reporterSubject)) continue;
       tally[r.status] += 1;
       if (r.badFaith) tally.badFaith += 1;
     }
@@ -728,7 +773,7 @@ export class MemoryStore implements Store {
     const wanted = new Set(reporters);
     const by = new Map<SubjectId, ReporterOutcomeRow>();
     for (const r of this.reports) {
-      if (!wanted.has(r.reporterSubject) || r.status === 'open' || r.createdAt < since) continue;
+      if (r.origin !== null || !wanted.has(r.reporterSubject) || r.status === 'open' || r.createdAt < since) continue;
       const row = by.get(r.reporterSubject) ?? { reporter: r.reporterSubject, actioned: 0, noAction: 0, badFaith: 0 };
       if (r.status === 'actioned') row.actioned += 1;
       else if (r.badFaith) row.badFaith += 1;
@@ -758,7 +803,7 @@ export class MemoryStore implements Store {
     const out: ReporterDecision[] = [];
     // The newest 200 decided reports with a reason, newest first.
     const decided = this.reports
-      .filter((r) => wanted.has(r.reporterSubject) && r.status !== 'open' && (r.reportedReason ?? null) !== null)
+      .filter((r) => r.origin === null && wanted.has(r.reporterSubject) && r.status !== 'open' && (r.reportedReason ?? null) !== null)
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, 200);
     for (const r of decided) {
