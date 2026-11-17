@@ -7,10 +7,17 @@ import type { ConductLevel } from '../types.js';
 /**
  * The prompt version. Bumped when the prompt or the output schema changes; part of the input hash, so a bump makes every stored
  * read stale. 2 added the full-stop spacing line; 3 added the stable paragraph about signal counts; 4 added the stable paragraph about
- * appeal cautions and corrective examples.
+ * appeal cautions and corrective examples; 5 added the confirming read's prompt (`purpose: 'confirm'`) beside it, so every stored read is stale once.
  * @experimental
  */
-export const AI_PROMPT_VERSION = 4;
+export const AI_PROMPT_VERSION = 5;
+
+/**
+ * The version of the confirming read's own prompt (`purpose: 'confirm'`): a counter apart from {@link AI_PROMPT_VERSION}, so a confirming read is never mistaken for a read
+ * of the same version. Bumped when the confirming prompt changes.
+ * @experimental
+ */
+export const AI_CONFIRM_PROMPT_VERSION = 1;
 
 /**
  * One signal count about the reported person (P1), as the model is shown it: the adopter's own short label, whether it counts for or
@@ -67,6 +74,11 @@ export type AIExampleInput = AIExample & { id: string };
 export interface AIReadInput {
   /** Bumped when the prompt or schema changes; part of the cache key and of the invalidation hash. */
   promptVersion: number;
+  /**
+   * `'confirm'` for the confirming read (design 3 ruling 8): the same lines asked a different way (look for the innocent reading), with no signal counts, no casebook examples and no
+   * cautions. Absent for the case's own read (`'read'`). Part of the input hash, so a confirming read is a row of its own and is never the case's read.
+   */
+  purpose?: 'read' | 'confirm';
   /** The structured facts, for an adapter that wants to render its own prompt. */
   report: { reason: { id: string; label: string } | null; note: string | null };
   /** `P1` reported, `P2` reporter, `P3...` the rest. */

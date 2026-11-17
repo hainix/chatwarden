@@ -46,6 +46,19 @@ describe('the request', () => {
     expect(messages[0]?.content).toBe(input.prompt.variable);
   });
 
+  it('sends a confirming read (purpose confirm) exactly as a read: its own stable and variable text, the same schema, and nothing about the purpose', async () => {
+    const { client, calls } = fakeClient();
+    const base = makeInput();
+    const input: AIReadInput = { ...base, purpose: 'confirm', promptVersion: 1, prompt: { ...base.prompt, stable: 'CONFIRM STABLE TEXT', variable: '<data>\nonly lines\n</data>\n' } };
+    await createAnthropicAI({ client }).read(input, { signal: signal() });
+    const body = calls[0]?.body;
+    expect(body?.system).toEqual([{ type: 'text', text: 'CONFIRM STABLE TEXT', cache_control: { type: 'ephemeral' } }]);
+    expect(body?.messages).toEqual([{ role: 'user', content: '<data>\nonly lines\n</data>\n' }]);
+    expect(body?.output_config).toEqual({ effort: 'low', format: { type: 'json_schema', schema: AI_OUTPUT_SCHEMA } });
+    expect(Object.keys(body ?? {}).sort()).toEqual(['max_tokens', 'messages', 'model', 'output_config', 'system']);
+    expect(JSON.stringify(body)).not.toContain('"purpose"');
+  });
+
   it('sends output_config.format json_schema with the static schema and effort low', async () => {
     const { client, calls } = fakeClient();
     await createAnthropicAI({ client }).read(makeInput(), { signal: signal() });

@@ -321,6 +321,7 @@ function aiReadFromRow(r: Record<string, unknown>, lenient = false): AiReadRow |
     id: String(r.id),
     reportId: String(r.report_id),
     inputHash: String(r.input_hash),
+    purpose: String(r.purpose) === 'confirm' ? 'confirm' : 'read',
     status: status as AiReadStatus,
     attempts: Number(r.attempts),
     retryAt: nullableNumber(r.retry_at),
@@ -830,12 +831,12 @@ export class SqliteStore implements Store, TermStore {
       // The UNIQUE (report_id, input_hash) index decides who inserts: of two connections, one gets a row back, the other none.
       const fresh = this.db
         .prepare(
-          `INSERT INTO kit_ai_reads (id, report_id, input_hash, status, attempts, lease_until, adapter, prompt_version, created_at)
-           VALUES (?, ?, ?, 'pending', 1, ?, ?, ?, ?)
+          `INSERT INTO kit_ai_reads (id, report_id, input_hash, status, attempts, lease_until, adapter, prompt_version, created_at, purpose)
+           VALUES (?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?)
            ON CONFLICT (report_id, input_hash) DO NOTHING
            RETURNING id, attempts`,
         )
-        .get(randomBytes(16).toString('base64url'), row.reportId, row.inputHash, leaseUntil, row.adapter, row.promptVersion, now);
+        .get(randomBytes(16).toString('base64url'), row.reportId, row.inputHash, leaseUntil, row.adapter, row.promptVersion, now, row.purpose ?? 'read');
       if (fresh !== undefined) return this.openAttempt(String(fresh.id), Number(fresh.attempts), now);
       // The row exists. Take it over only when its lease has lapsed or its retry time has come: one conditional write, so of two
       // callers racing for it exactly one changes it and the other's WHERE is false. `attempts` is the fence the winner holds.
@@ -979,7 +980,7 @@ export class SqliteStore implements Store, TermStore {
       const rows = this.db
         .prepare(
           `SELECT * FROM kit_ai_reads INDEXED BY kit_ai_reads_by_report
-           WHERE report_id = ? AND status = 'ok' ORDER BY created_at DESC, id DESC LIMIT 20`,
+           WHERE report_id = ? AND status = 'ok' AND purpose = 'read' ORDER BY created_at DESC, id DESC LIMIT 20`,
         )
         .all(reportId);
       for (const r of rows) {
@@ -1011,7 +1012,7 @@ export class SqliteStore implements Store, TermStore {
       const rows = this.db
         .prepare(
           `SELECT * FROM kit_ai_reads INDEXED BY kit_ai_reads_by_report
-           WHERE status = 'ok' AND report_id IN (${wanted.map(() => '?').join(', ')})
+           WHERE status = 'ok' AND purpose = 'read' AND report_id IN (${wanted.map(() => '?').join(', ')})
            ORDER BY report_id, created_at DESC, id DESC`,
         )
         .all(...wanted);
@@ -1031,9 +1032,9 @@ export class SqliteStore implements Store, TermStore {
       this.db
         .prepare(
           `SELECT * FROM (
-             SELECT * FROM kit_ai_reads WHERE status IN ('failed', 'skipped') AND retry_at <= ?
+             SELECT * FROM kit_ai_reads WHERE status IN ('failed', 'skipped') AND retry_at <= ? AND purpose = 'read'
              UNION ALL
-             SELECT * FROM kit_ai_reads WHERE status = 'pending' AND lease_until <= ?
+             SELECT * FROM kit_ai_reads WHERE status = 'pending' AND lease_until <= ? AND purpose = 'read'
            ) WHERE NOT EXISTS (SELECT 1 FROM kit_reports p WHERE p.id = report_id AND p.status <> 'open')
            ORDER BY created_at, id LIMIT ?`,
         )

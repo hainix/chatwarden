@@ -73,6 +73,7 @@ class MemoryAi extends MemoryStore {
         id: newId(),
         reportId: row.reportId,
         inputHash: row.inputHash,
+        purpose: row.purpose ?? 'read',
         status: 'pending',
         attempts: 1,
         retryAt: null,
@@ -216,7 +217,7 @@ class MemoryAi extends MemoryStore {
   }
 
   loadAiRead(reportId: string): AiReadRow | null {
-    return newestOk(this.aiReads.filter((r) => r.reportId === reportId));
+    return newestOk(this.aiReads.filter((r) => r.reportId === reportId && r.purpose === 'read'));
   }
 
   loadAiReadFor(reportId: string, inputHash: string): AiReadRow | null {
@@ -245,6 +246,7 @@ class MemoryAi extends MemoryStore {
     return this.aiReads
       .filter(
         (r) =>
+          r.purpose === 'read' &&
           !decided.has(r.reportId) &&
           (((r.status === 'failed' || r.status === 'skipped') && r.retryAt !== null && r.retryAt <= now) ||
             (r.status === 'pending' && r.leaseUntil !== null && r.leaseUntil <= now)),

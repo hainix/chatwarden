@@ -299,6 +299,9 @@ export interface AiGatesView {
  */
 export type AiGateCell = AiCellGate & { reach: AiReach[]; counts: AiCellCounts; appeals: AiAppealFacts; actsToday: number; excluded: boolean };
 
+/** What {@link AiService.confirmRead} answers. */
+export type ConfirmEnd = { state: 'ok'; readId: string; read: AIRead } | { state: 'none' } | { state: 'wait' };
+
 /** How often the sweeper runs. */
 export const SWEEP_EVERY_MS = 60_000;
 /** The most reports one sweep queues. */
@@ -860,6 +863,29 @@ export class AiService implements AiFacade {
     return grid.map(() => ({ ...UNAVAILABLE_APPEALS }));
   }
 
+  /**
+   * The confirming read of a report (design 3 ruling 8): a second read with a clean prompt (the same lines, a request for the innocent reading, no signals, no examples, no
+   * cautions), reserved, called, validated and stored like a read but as a row of its own that the case never shows. It is asked once: a finished one is returned as it stands, with no
+   * call. `ok` carries the stored read (its evidence as line ids); `none` is no confirmation (declined, invalid, failed for good, the report gone or decided, or the AI off); `wait`
+   * means no call was made or the row is waiting for its lease or retry (a cap, the breaker, another process): ask again later. It costs against the same daily caps as a read and
+   * leaves no audit row of its own. Never throws.
+   */
+  async confirmRead(reportId: string): Promise<ConfirmEnd> {
+    try {
+      if (this.isClosed || typeof reportId !== 'string' || this.level() < 2) return { state: 'none' };
+      const end = await runRead(this.env(), reportId, { purpose: 'confirm' });
+      if (end.ended === 'none') return { state: 'none' };
+      if (end.ended === 'ok' && end.readId !== undefined) {
+        const row = this.store.loadAiReadById(end.readId);
+        return row !== null && row.purpose === 'confirm' && row.status === 'ok' && row.read !== null ? { state: 'ok', readId: row.id, read: row.read } : { state: 'none' };
+      }
+      return { state: 'wait' };
+    } catch (err) {
+      this.warn('ai.confirm_failed', err);
+      return { state: 'wait' };
+    }
+  }
+
   idle(): Promise<void> {
     if (this.isIdle()) return Promise.resolve();
     return new Promise<void>((resolve) => void this.waiters.push(resolve));
@@ -1110,6 +1136,7 @@ export class AiService implements AiFacade {
       dailyCalls: () => this.dailyCalls(),
       closed: () => this.isClosed,
       prepare: (report) => this.prepare(report),
+      confirmAdapter: () => this.opts.act?.confirmAdapter ?? this.adapter,
       examplesFor: (report, prepared) => this.examplesFor(report, prepared),
       signalsFor: (report) => this.deps.signals?.(report.targetSubject) ?? [],
       cautionsFor: () => this.deps.cautions?.() ?? [],
@@ -1168,7 +1195,7 @@ export class AiService implements AiFacade {
     const { report, verdict, ai } = args;
     // The read the moderator saw when the echo names one of this report's finished reads, else the newest.
     const named = ai.readId === null ? null : this.store.loadAiReadById(ai.readId);
-    const row: AiReadRow | null = named !== null && named.reportId === report.id && named.status === 'ok' && named.read !== null ? named : this.store.loadAiRead(report.id);
+    const row: AiReadRow | null = named !== null && named.purpose === 'read' && named.reportId === report.id && named.status === 'ok' && named.read !== null ? named : this.store.loadAiRead(report.id);
     if (row === null) return null;
     const read = row.read;
     const rec = read?.recommendation ?? null;

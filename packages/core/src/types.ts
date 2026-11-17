@@ -262,6 +262,8 @@ export interface AiReadPending {
   promptVersion: number;
   /** `ModerationAI.id` (never a key). */
   adapter: string;
+  /** `'confirm'` for a confirming read (a row of its own, kept apart from the case's reads); default `'read'`. */
+  purpose?: 'read' | 'confirm';
 }
 
 /** What one provider call used and cost: stored on a finished read, and on a failed one that still cost something. */
@@ -300,6 +302,8 @@ export interface AiReadRow {
   id: string;
   reportId: string;
   inputHash: string;
+  /** `'read'` for the case's own read, `'confirm'` for the confirming read made before the AI would act. Every query for "the case's read" leaves `'confirm'` rows out. */
+  purpose: 'read' | 'confirm';
   status: AiReadStatus;
   /** Calls started for this row: 1 when reserved, +1 each time a lease or a retry is taken over. */
   attempts: number;
@@ -1243,14 +1247,14 @@ export interface Store {
   ): boolean;
 
   /**
-   * OPTIONAL. The newest `ok` read of the report (`createdAt` descending, then `id` descending), whatever its input hash; null
-   * when there is none. A row whose stored answer cannot be read is skipped. Pending, failed, declined, invalid and skipped rows
+   * OPTIONAL. The newest `ok` read of the report with purpose `read` (`createdAt` descending, then `id` descending), whatever its input hash (a confirming
+   * read is never the case's read); null when there is none. A row whose stored answer cannot be read is skipped. Pending, failed, declined, invalid and skipped rows
    * are never returned.
    */
   loadAiRead?(reportId: string): AiReadRow | null;
 
   /**
-   * OPTIONAL. The newest `ok` read of each of these reports (one row per report that has one), in the order the ids first appear.
+   * OPTIONAL. The newest `ok` read of purpose `read` of each of these reports (one row per report that has one), in the order the ids first appear.
    * At most the first 200 distinct ids are looked at; unknown ids give nothing.
    */
   loadAiReads?(reportIds: readonly string[]): AiReadRow[];

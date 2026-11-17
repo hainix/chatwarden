@@ -199,9 +199,9 @@ const corrective = (n: number): AIExampleInput => ({ id: `c${n}`, rule: 2, sever
 const standard = (n: number): AIExampleInput => ({ id: `s${n}`, rule: 2, severity: 'rude', verdict: 'upheld', lines: [{ who: 'P1', text: `seed words ${n}` }] });
 
 describe('the prompt', () => {
-  it('the version moved from 3 to 4', () => {
-    expect(AI_PROMPT_VERSION).toBe(4);
-    expect(make().promptVersion).toBe(4);
+  it('the version moved from 3 to 4, and on to 5 for the confirming prompt', () => {
+    expect(AI_PROMPT_VERSION).toBe(5);
+    expect(make().promptVersion).toBe(5);
   });
 
   it('AIExample.kind reaches the prompt with the fixed wording; a standard example is unchanged', () => {
