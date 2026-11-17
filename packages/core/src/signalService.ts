@@ -88,6 +88,8 @@ export interface SignalRuntime {
   /** The counts the AI read may be shown (`feeds.ai`): the feed's kinds and window. `[]` when the feed is off. Never throws. */
   forAi(subject: SubjectId): SignalCount[];
   ladderHits(subject: SubjectId): SignalHit[];
+  /** Forget the memoised account ages of these people (their whole alias set): used when a person is erased. Absent on the inert service. */
+  forgetPeople?(people: ReadonlySet<SubjectId>): void;
 }
 
 export class SignalService implements SignalRuntime {
@@ -104,6 +106,11 @@ export class SignalService implements SignalRuntime {
     this.deps = deps;
     this.readWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.ageWarn = new ThrottledWarn(deps.logger, deps.clock);
+  }
+
+  /** Forget the memoised account ages of these people (their whole alias set): used when a person is erased. */
+  forgetPeople(people: ReadonlySet<SubjectId>): void {
+    for (const p of people) this.ageMemo.delete(p);
   }
 
   /** Does the store keep signals (the three methods)? */

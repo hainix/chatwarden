@@ -278,9 +278,11 @@ describe('SqliteStore purgeNotices', () => {
   it('purge() counts notices and keeps the other tables', async () => {
     const db = new DatabaseSync(':memory:');
     const store = openStore({ db });
+    // These notices belong to a bare subject id with no subject row: the stray-row sweep of the same pass (privacy.registry tests) is off here.
+    store.purgeStrayRows = () => 0;
     store.insertNotice(notice('old', { kind: 'warning', until: null, createdAt: NOW - 200 * DAY, ackedAt: NOW - 199 * DAY }));
     store.insertNotice(notice('keep', { createdAt: NOW - DAY }));
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 1, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 1, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, erasuresFinished: 0, strayRows: 0 });
     expect(ids(db)).toEqual(['keep']);
   });
 
@@ -352,6 +354,7 @@ describe('NoticeService on SQLite', () => {
     const subjects = new SubjectIndex(store, clock, { logger: { warn() {} } });
     const svc = new NoticeService({ store, subjects, rules, clock });
     const a = subjects.resolve({ clientKey: 'ka', accountId: null, ipHash: null }) ?? '';
+    await subjects.flush();
     const ban = svc.createForSanction({ groupId: 'gb', refCode: 'M-BANAA', kind: 'ban', until: null, rule: 1, subject: a });
     const warn = svc.createForSanction({ groupId: 'gw', refCode: 'M-WARNA', kind: 'warning', until: null, rule: 2, subject: a });
     const unseen = svc.createForSanction({ groupId: 'gu', refCode: 'M-UNSEE', kind: 'warning', until: null, rule: 2, subject: a });

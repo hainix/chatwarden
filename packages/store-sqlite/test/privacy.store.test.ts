@@ -19,6 +19,11 @@ const sql = (): { store: Store; db: DatabaseSync } => {
 const mem = (): Store => withMemoryLinks(withMemoryNames(withMemoryAppeals(withMemorySignals(withMemoryAi(new MemoryStore())))));
 const plan = (over: Partial<ErasePlan> = {}): ErasePlan => ({ subjects: ['s_pp'], mode: 'none', heldReportIds: new Set(), receiptId: 'e_diff', at: NOW, ...over });
 
+const explain = (db: DatabaseSync, text: string): string => {
+  const n = (text.replace(/'[^']*'/g, '').match(/\?/g) ?? []).length;
+  return db.prepare(`EXPLAIN QUERY PLAN ${text}`).all(...Array(n).fill('[]')).map((r) => String(r.detail)).join(' | ');
+};
+
 const variants: Array<[string, WorldOptions, Partial<ErasePlan>]> = [
   ['none', {}, {}],
   ['none with a ban', { ban: true }, {}],
@@ -51,7 +56,7 @@ describe('the differential script gives the same counts in memory and sqlite', (
 });
 
 describe('one prepared statement per category, with the indexes the lookups need', () => {
-  const names = Object.keys(P).filter((k) => k.endsWith('_SQL'));
+  const names = Object.keys(P).filter((k) => k.endsWith('_SQL') && typeof (P as unknown as Record<string, unknown>)[k] === 'string');
   const plans = (): Map<string, string> => {
     const { db } = sql();
     const out = new Map<string, string>();
@@ -87,6 +92,17 @@ describe('one prepared statement per category, with the indexes the lookups need
     expect(p.get('EXPORT_ACCOUNTS_SQL')).not.toContain('kit_subject_ids_by_value');
     expect(p.get('EXPORT_SANCTIONS_SQL')).not.toContain('kit_sanctions_by_start');
     expect(p.get('EXPORT_SANCTIONS_SQL')).toContain('kit_sanctions_by_target');
+  });
+});
+
+describe('the stray-row statements use the time index of their table, or the subject index with `only`', () => {
+  it('purgeStrayRows by time walks the time index; with `only` it never walks a whole table', () => {
+    const { db } = sql();
+    const time: Record<string, string> = { STRIKES: 'kit_strikes_by_at', SIGNALS: 'kit_signals_by_at', NOTICES: 'kit_notices_by_created', NAMES: 'kit_blocked_names_by_at' };
+    for (const [k, index] of Object.entries(time)) {
+      expect(explain(db, P.STRAY_BEFORE_SQL[k]!), k).toContain(index);
+      expect(explain(db, P.STRAY_ONLY_SQL[k]!), k).not.toContain('SCAN kit_');
+    }
   });
 });
 

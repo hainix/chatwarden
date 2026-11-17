@@ -67,6 +67,20 @@ class MemoryNames extends MemoryStore {
     return n;
   }
 
+  /** Delete the kept names whose subject does not exist and `matches` (the store's stray rule). A name with no subject is never stray. Returns how many. */
+  privacyPurgeStrayNames(_exists: (id: string) => boolean, matches: (subject: string, at: number) => boolean): number {
+    const snapshot = this.blocked ?? [];
+    const kept = snapshot.filter((r) => r.subject === null || !matches(r.subject, r.at));
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.blocked = kept;
+      this.undoWith(() => {
+        this.blocked = snapshot;
+      });
+    }
+    return n;
+  }
+
   /** The kept names of the set, newest first (time, then write order, descending): the export's names. */
   privacyExportBlockedNames(set: ReadonlySet<string>): BlockedNameRow[] {
     return (this.blocked ?? [])

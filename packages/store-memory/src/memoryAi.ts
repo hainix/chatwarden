@@ -589,7 +589,8 @@ class MemoryAi extends MemoryStore {
 
   /** Delete the action rows of these reports. Returns how many. */
   privacyEraseAiActions(reportIds: ReadonlySet<string>): number {
-    const snapshot = this.actions();
+    if (this.actionRows === undefined) return 0;
+    const snapshot = this.actionRows;
     const kept = snapshot.filter((r) => !reportIds.has(r.reportId));
     const n = snapshot.length - kept.length;
     if (n > 0) {

@@ -31,6 +31,10 @@ export type Role = (typeof ROLES)[number];
  * `person.automation` (0.1.13, appended last) is a senior setting or clearing the "do not automate" mark on a person; it targets the `person` and needs it, and
  * carries no detail (the closed reason code stays in the mark, not in the trail).
  *
+ * The six privacy and legal-hold actions (0.2.0, appended last): `privacy.find` is a staff lookup of a person by an account id (no target: the account id is never
+ * recorded), `privacy.export` and `privacy.erase` point at the `person` and need it (an erase whose person is gone points at the receipt id, `e_...`), and `legal.hold`,
+ * `legal.release` and `legal.bundle` point at the `report` and need it. None of them carries a detail.
+ *
  * The three AI acting actions (0.1.14, appended last): `ai.act` is the AI's own row (an `ai:` actor, no role) when it applied an action, or, in shadow mode, recorded one; it targets the
  * `report` and carries no detail (the state is in the action row, not the trail). `ai.acting` is the owner or a senior moving the acting state (shadow, acting, pause, resume,
  * off) and `ai.undo_all` the owner undoing every AI action since a time; both carry a detail with the sections `['ai']` and the reason, and no target.
@@ -72,6 +76,12 @@ export const AUDIT_ACTIONS = [
   'ai.act',
   'ai.acting',
   'ai.undo_all',
+  'privacy.find',
+  'privacy.export',
+  'privacy.erase',
+  'legal.hold',
+  'legal.release',
+  'legal.bundle',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -98,7 +108,11 @@ const AI_OWN_ACTIONS: readonly string[] = ['ai.read', 'ai.act'];
 const APPEAL_ACTIONS: readonly string[] = ['appeal.view', 'appeal.decide'];
 
 /** The actions that cannot be recorded without a target. */
-const TARGET_REQUIRED: readonly string[] = [...AI_ACTIONS, 'appeal.decide', 'name.rename_required', 'person.automation'];
+const TARGET_REQUIRED: readonly string[] = [...AI_ACTIONS, 'appeal.decide', 'name.rename_required', 'person.automation', 'privacy.export', 'privacy.erase', 'legal.hold', 'legal.release', 'legal.bundle'];
+
+/** The privacy actions that point at a person, the legal ones that point at a report, and the one that points at nothing. */
+const PRIVACY_PERSON_ACTIONS: readonly string[] = ['privacy.export', 'privacy.erase'];
+const LEGAL_REPORT_ACTIONS: readonly string[] = ['legal.hold', 'legal.release', 'legal.bundle'];
 
 /** An actor that is the AI itself, not a person: `ai:` and the adapter's id (`ai:anthropic:claude-haiku-5-5`). */
 const AI_ACTOR_PREFIX = 'ai:';
@@ -276,12 +290,15 @@ function parse(input: unknown): AuditRecordInput | null {
   }
   const extra = parsedDetail === undefined ? {} : { detail: parsedDetail };
   if (target === undefined) return TARGET_REQUIRED.includes(action) ? null : { actor, role: roleOut, action, ...extra };
+  if (action === 'privacy.find') return null;
   if (typeof target !== 'object' || target === null) return null;
   const { type, ref } = target as Record<string, unknown>;
   if (!isTargetType(type) || typeof ref !== 'string' || !REF_RE.test(ref)) return null;
   if (AI_ACTIONS.includes(action) && type !== 'report') return null;
   if (APPEAL_ACTIONS.includes(action) && type !== 'appeal') return null;
   if ((action === 'name.rename_required' || action === 'person.automation') && type !== 'person') return null;
+  if (PRIVACY_PERSON_ACTIONS.includes(action) && type !== 'person') return null;
+  if (LEGAL_REPORT_ACTIONS.includes(action) && type !== 'report') return null;
   return { actor, role: roleOut, action, target: { type, ref }, ...extra };
 }
 

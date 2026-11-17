@@ -185,6 +185,8 @@ describe('the privacy statements bind exactly as many values as they have placeh
       .filter(([k, v]) => k.endsWith('_SQL') && typeof v === 'string')
       .map(([k, v]) => [k, v as string] as [string, string]),
     ['IDENTIFIER_UPSERT_SQL', IDENTIFIER_UPSERT_SQL],
+    ...Object.entries(PRIV.STRAY_BEFORE_SQL).map(([k, v]) => [`STRAY_BEFORE_SQL.${k}`, v] as [string, string]),
+    ...Object.entries(PRIV.STRAY_ONLY_SQL).map(([k, v]) => [`STRAY_ONLY_SQL.${k}`, v] as [string, string]),
     ['AI_ACTION_PURGE_SQL', AI_ACTION_PURGE_SQL],
     ['AI_ACTION_NOTES_SQL', AI_ACTION_NOTES_SQL],
   ]);
@@ -211,6 +213,10 @@ describe('the privacy statements bind exactly as many values as they have placeh
     ERASURES_PURGE_SQL: 1,
     EXPORT_MUTES_SQL: 4,
     EXPORT_SANCTIONS_SQL: 2,
+    'STRAY_BEFORE_SQL.STRIKES': 1,
+    'STRAY_BEFORE_SQL.NOTICES': 1,
+    'STRAY_ONLY_SQL.SIGNALS': 1,
+    'STRAY_ONLY_SQL.NAMES': 1,
     HOLD_PLACE_SQL: 4,
     HOLD_RELEASE_SQL: 3,
     HOLD_LOAD_SQL: 1,
@@ -267,6 +273,8 @@ describe('the privacy statements bind exactly as many values as they have placeh
     store.purgeAudit(2);
     await store.saveIdentifier({ subjectId: 's_qq', kind: 'key', value: 'k2', firstSeen: 1, lastSeen: 2 });
     store.erasureEpoch();
+    store.purgeStrayRows(5);
+    store.purgeStrayRows(0, ['s_gone']);
     expect(seen.size).toBeGreaterThan(20);
     expect(seen.has(IDENTIFIER_UPSERT_SQL)).toBe(true);
   });

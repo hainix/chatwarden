@@ -227,6 +227,11 @@ export class NoticeService {
   private readonly byGroup = new Map<string, { id: string; subject: SubjectId } | null>();
   private readonly byGroupMax: number;
 
+  /** Forget the cached notice lookups of these people (their whole alias set): used when a person is erased. */
+  forgetPeople(people: ReadonlySet<SubjectId>): void {
+    for (const [group, entry] of [...this.byGroup]) if (entry !== null && people.has(entry.subject)) this.byGroup.delete(group);
+  }
+
   constructor(deps: NoticeServiceDeps) {
     this.store = deps.store;
     this.subjects = deps.subjects;

@@ -685,6 +685,99 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
       });
     });
 
+    describe('the change token', () => {
+      it('a real erase moves the change token (the queue shows fewer reports); a dry run, an unknown subject and an export do not', async () => {
+        const s = make();
+        await seedWorld(s);
+        const t0 = s.changeToken();
+        s.eraseSubjects(plan({ dryRun: true }));
+        s.eraseSubjects(plan({ subjects: ['s_nobody'] }));
+        s.exportSubjects(['s_pp']);
+        expect(s.changeToken()).toBe(t0);
+        s.eraseSubjects(plan());
+        expect(s.changeToken()).not.toBe(t0);
+      });
+
+      it('an erase inside a failing transaction gives the token back', async () => {
+        const s = make();
+        await seedWorld(s);
+        const t0 = s.changeToken();
+        expect(() =>
+          s.transaction(() => {
+            s.eraseSubjects(plan());
+            throw new Error('boom');
+          }),
+        ).toThrow('boom');
+        expect(s.changeToken()).toBe(t0);
+      });
+    });
+
+    describe('purgeStrayRows: rows whose subject does not exist', () => {
+      const strayWorld = async (s: Store) => {
+        const x = s as Required<Store>;
+        await s.saveSubject({ id: 's_live', createdAt: NOW, mergedInto: null });
+        const strike = (id: string, subject: string, at: number): StrikeRow => ({ id, at, subject, roomId: 'R', termId: 't', rawLine: `line ${id}` });
+        s.insertStrike(strike('k-old', 's_dead', NOW - 3_600_000));
+        s.insertStrike(strike('k-new', 's_dead', NOW - 1000));
+        s.insertStrike(strike('k-live', 's_live', NOW - 3_600_000));
+        const sig = (id: string, subject: string, at: number) => ({ id, kind: 'k', subject, sourceKey: `b:${id}`, bySubject: null, roomId: null, at, weight: 1, capBucket: 1 });
+        x.insertSignal(sig('sg-old', 's_dead', NOW - 3_600_000));
+        x.insertSignal(sig('sg-live', 's_live', NOW - 3_600_000));
+        s.insertNotice(notice('n-old', 's_dead', null, { createdAt: NOW - 3_600_000 }));
+        s.insertNotice(notice('n-live', 's_live', null, { createdAt: NOW - 3_600_000 }));
+        x.insertBlockedName({ id: 'bn-old', subject: 's_dead', name: 'x', termId: null, reason: 'name_profane', at: NOW - 3_600_000 });
+        x.insertBlockedName({ id: 'bn-null', subject: null, name: 'y', termId: null, reason: 'name_profane', at: NOW - 3_600_000 });
+      };
+
+      it('drops strikes, signals, notices and kept names of a subject that does not exist and are older than the cut; keeps the younger and every row of a live subject', async () => {
+        const s = make();
+        await strayWorld(s);
+        expect(s.purgeStrayRows(NOW - 600_000)).toBe(4);
+        expect(s.loadStrikes(0).map((r) => r.id).sort()).toEqual(['k-live', 'k-new']);
+        expect(s.loadNotices(['s_dead', 's_live']).map((n) => n.id)).toEqual(['n-live']);
+        expect(s.listBlockedNames?.(0, 50).map((r) => r.id)).toEqual(['bn-null']);
+        expect(s.purgeStrayRows(NOW - 600_000)).toBe(0);
+      });
+
+      it('with `only` it drops the rows of exactly those subjects at any age, and nothing of another dead subject', async () => {
+        const s = make();
+        await strayWorld(s);
+        s.insertStrike({ id: 'k-other', at: NOW, subject: 's_other_dead', roomId: 'R', termId: 't', rawLine: 'x' });
+        expect(s.purgeStrayRows(Number.MAX_SAFE_INTEGER, ['s_dead'])).toBeGreaterThan(0);
+        expect(s.loadStrikes(0).map((r) => r.id).sort()).toEqual(['k-live', 'k-other']);
+      });
+
+      it('never reaches a row of a subject that exists, whatever `only` says', async () => {
+        const s = make();
+        await strayWorld(s);
+        expect(s.purgeStrayRows(Number.MAX_SAFE_INTEGER, ['s_live'])).toBe(0);
+        expect(s.loadStrikes(0).map((r) => r.id)).toContain('k-live');
+      });
+
+      it('leaves the notice of a held sanction group alone (a hold keeps it though its person is gone)', async () => {
+        const s = make();
+        s.insertReport(report('rH', 's_other', 's_gone'));
+        s.insertSanctionGroup(group('gH', 'M-HELDX', 's_gone', 'iphash-g', { reportId: 'rH' }));
+        s.insertNotice(notice('n-held', 's_gone', 'gH', { createdAt: NOW - 3_600_000 }));
+        s.insertNotice(notice('n-plain', 's_gone', 'gPlain', { createdAt: NOW - 3_600_000 }));
+        s.placeHold({ reportId: 'rH', code: 'other', heldBy: 'senior_a', heldAt: NOW, releasedBy: null, releasedAt: null });
+        s.purgeStrayRows(NOW - 600_000);
+        expect(s.loadNotices(['s_gone']).map((n) => n.id)).toEqual(['n-held']);
+      });
+
+      it('is journaled: a failing transaction gives the rows back', async () => {
+        const s = make();
+        await strayWorld(s);
+        expect(() =>
+          s.transaction(() => {
+            s.purgeStrayRows(NOW);
+            throw new Error('boom');
+          }),
+        ).toThrow('boom');
+        expect(s.loadStrikes(0).length).toBe(3);
+      });
+    });
+
     describe('export', () => {
       it('returns the sections of the person: accounts as given, counts of keys and addresses, no hash, no other id, handle or line, no reporter identity, no staff ref', async () => {
         const s = make();

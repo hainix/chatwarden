@@ -53,6 +53,8 @@ import { checkLinkRow, hasLinkMethods, isLinkSystem, isLinkValue, linkLimit } fr
 import type { LinkRow, LinkSystem } from './links.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 import { checkBundleSecret, createLegal } from './legalService.js';
+import { createPrivacy } from './privacyService.js';
+import type { PrivacyService } from './privacyService.js';
 import type { LegalService } from './legalService.js';
 import { VERSION } from './version.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
@@ -882,6 +884,14 @@ export interface Chatwarden {
     automation: AutomationFacade;
   };
   /**
+   * Privacy requests (0.2.0): find a person by an account id or a client key, export what the kit holds about them, and erase it (a receipt, a stated safety remainder
+   * that keeps a ban in force until retention removes it, a dry run). The adopter verifies the requester first; the kit never does, never tells the player and never
+   * judges a request. Owner-only in the HTTP layer and on no player route. Erase leaves the staff audit trail (its person refs read the receipt id) and any report held
+   * for legal reasons.
+   * @experimental
+   */
+  privacy: PrivacyService;
+  /**
    * Legal hold (0.2.0): hold a report so no retention purge and no erase reaches it or what hangs on it, release it, and produce its signed evidence bundle. A senior
    * holds and the owner releases and downloads in the HTTP layer; `hold` emits `report.escalated` (ids and a code, never text). The kit judges nothing and forwards
    * nothing: it keeps what it held.
@@ -1287,6 +1297,16 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     roster.seat(roomId, seatId, subject, handle, tags);
   };
 
+  /**
+   * One retention pass. When it finished an erase that had kept a remainder, this process forgets that person at once (the subject index catches up with the store).
+   * The timer and `cw.purge()` both run it.
+   */
+  const runPurge = async (policyNow: Partial<RetentionPolicy>): Promise<PurgeResult> => {
+    const result = await purge(store, clock.now(), policyNow);
+    if (result.erasuresFinished > 0 || result.strayRows > 0) await subjects.refresh();
+    return result;
+  };
+
   // The retention timer. `setInterval` is not a clock read, so Date.now() stays out of it; `unref` so it never
   // keeps a process alive.
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -1298,7 +1318,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     };
     timer = setInterval(() => {
       try {
-        purge(store, clock.now(), retentionPolicy).then(undefined, failed);
+        runPurge(retentionPolicy).then(undefined, failed);
       } catch (err) {
         failed(err);
       }
@@ -1446,6 +1466,33 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     subjects,
     rules,
     emit: (event) => bus.emit(event),
+  });
+
+  // Privacy requests. `forget` is what the kit holds in memory about an erased person; the store rows are the store's (see `PrivacyDeps.forget`).
+  const privacy = createPrivacy({
+    store,
+    clock,
+    subjects,
+    hasher,
+    logger,
+    audit: (input) => audit.record(input),
+    retention: () => retentionPolicy,
+    forget: (people, whole) => {
+      const reloaded = (what: string) => (err: unknown) => safeWarn(logger, 'chatwarden.privacy_failed', { error: err instanceof Error ? err.name : typeof err, what });
+      buffer.scrub(people);
+      chat.forgetPeople(people);
+      strikes.forgetPeople(people);
+      notices.forgetPeople(people);
+      signals.forgetPeople?.(people);
+      desk.forgetPeople(people);
+      // The sanction and mute indexes are read back from the store: a sanction the remainder keeps still applies, one that went stops at once.
+      sanctions.load(store, clock.now()).catch(reloaded('sanctions'));
+      mutes.load().catch(reloaded('mutes'));
+      if (whole) {
+        roster.forget(people);
+        subjects.forget(people);
+      }
+    },
   });
 
   return {
@@ -1762,6 +1809,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       accountIds: (subject) => (typeof subject === 'string' ? subjects.identifiersOf(subject).accounts : []),
       automation,
     },
+    privacy,
     legal: createLegal({
       store,
       clock,
@@ -1782,7 +1830,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       // A feed window longer than the signal retention could never be met: refuse the purge that would make it so, deleting nothing.
       const { kinds, feeds } = policy.profileNow().signals;
       checkSignalFeeds(feeds, kinds, { signalsMs: merged.signalsMs ?? RETENTION_DEFAULTS.signalsMs }, 'profile.signals.feeds');
-      return await purge(store, clock.now(), merged);
+      return await runPurge(merged);
     },
     ready: () => {
       try {

@@ -98,6 +98,24 @@ export const SUBJECTS_DELETE_SQL = `DELETE FROM kit_subjects WHERE id IN ${IN_AR
 export const EPOCH_BUMP_SQL = `INSERT INTO kit_meta (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1`;
 export const EPOCH_READ_SQL = 'SELECT value FROM kit_meta WHERE key = ?';
 
+// Stray rows: strikes, signals, notices and kept names whose subject has no subject row. The time variant binds the cut; the `only` variant binds a JSON list of ids.
+// A notice of a sanction group a hold protects stays. Each table has both, so the time variant can use the time index of the table.
+const NO_SUBJECT = 'NOT IN (SELECT id FROM kit_subjects)';
+const STRAY_TABLES: ReadonlyArray<readonly [string, string, string, string]> = [
+  ['STRIKES', 'kit_strikes', 'subject_id', 'at'],
+  ['SIGNALS', 'kit_signals', 'subject_id', 'at'],
+  ['NOTICES', 'kit_notices', 'subject_id', 'created_at'],
+  ['NAMES', 'kit_blocked_names', 'subject_id', 'at'],
+];
+const strayWhere = (table: string, col: string): string =>
+  `${col} ${NO_SUBJECT}${table === 'kit_notices' ? ` AND (group_id IS NULL OR group_id NOT IN ${HELD_GROUP_IDS})` : ''}`;
+export const STRAY_BEFORE_SQL: Readonly<Record<string, string>> = Object.fromEntries(
+  STRAY_TABLES.map(([k, table, col, time]) => [k, `DELETE FROM ${table} WHERE ${time} < ? AND ${strayWhere(table, col)}`]),
+);
+export const STRAY_ONLY_SQL: Readonly<Record<string, string>> = Object.fromEntries(
+  STRAY_TABLES.map(([k, table, col]) => [k, `DELETE FROM ${table} WHERE ${col} IN ${IN_ARG} AND ${strayWhere(table, col)}`]),
+);
+
 export const ERASURE_INSERT_SQL = 'INSERT INTO kit_erasures (id, at, mode, actor, counts_json, pending_subject) VALUES (?, ?, ?, ?, ?, ?)';
 export const ERASURES_PENDING_SQL = 'SELECT id, at, mode, actor, counts_json, pending_subject FROM kit_erasures WHERE pending_subject IS NOT NULL ORDER BY at, id';
 export const ERASURE_ONE_SQL = 'SELECT pending_subject FROM kit_erasures WHERE id = ?';
@@ -198,7 +216,7 @@ export function closure(db: DatabaseSync, subjects: readonly string[]): string[]
 /**
  * One erase, inside the caller's transaction. Reads, then deletes; counts rows removed or changed per category. The caller wraps it so a dry run can roll back.
  */
-function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[]): ErasureCounts {
+function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bump: () => void): ErasureCounts {
   const removed: ErasureRemoved = {};
   const setJ = j(set);
   // The store consults its own holds, whatever the caller passed: an erase can never reach a held report.
@@ -279,17 +297,19 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[]): E
     addCount(removed, 'subjects', num(db.prepare(SUBJECTS_DELETE_SQL).run(setJ).changes));
   }
   db.prepare(EPOCH_BUMP_SQL).run(EPOCH_KEY);
+  // The queue shows fewer reports and appeals: the change token moves with the erase (a dry run is rolled back with everything else).
+  bump();
   return { found: true, removed, kept: { identifiers: keepIdentifiers, sanctions: keptSanctionRows, heldReports: heldNaming }, pending };
 }
 
 /** `eraseSubjects` for the SQLite store: `transaction` is the store's own (a savepoint), so everything here commits together or not at all. */
-export function eraseSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) => T, plan: ErasePlan): ErasureCounts {
+export function eraseSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) => T, plan: ErasePlan, bump: () => void): ErasureCounts {
   const set = transaction(() => closure(db, plan.subjects));
   if (set.length === 0) return { found: false, removed: {}, kept: { identifiers: false, sanctions: 0, heldReports: 0 }, pending: null };
-  if (plan.dryRun !== true) return transaction(() => eraseInTransaction(db, plan, set));
+  if (plan.dryRun !== true) return transaction(() => eraseInTransaction(db, plan, set, bump));
   try {
     transaction(() => {
-      throw new DryRunRollback(eraseInTransaction(db, plan, set));
+      throw new DryRunRollback(eraseInTransaction(db, plan, set, bump));
     });
   } catch (err) {
     if (err instanceof DryRunRollback) return err.counts;
@@ -317,7 +337,7 @@ export function loadPendingErasures(db: DatabaseSync): ErasureRow[] {
   });
 }
 
-export function finishErasure(db: DatabaseSync, transaction: <T>(fn: () => T) => T, id: string): boolean {
+export function finishErasure(db: DatabaseSync, transaction: <T>(fn: () => T) => T, id: string, bump: () => void): boolean {
   return transaction(() => {
     const row = db.prepare(ERASURE_ONE_SQL).get(id);
     if (row === undefined || row.pending_subject === null) return false;
@@ -326,10 +346,24 @@ export function finishErasure(db: DatabaseSync, transaction: <T>(fn: () => T) =>
     if (set.length > 0 && db.prepare(SANCTION_ROWS_LEFT_SQL).get(j(set)) !== undefined) return false;
     // The remainder ends the way a `none` erase does: whatever still names the person (a kept notice, a row written since) goes with the subject, and the audit
     // refs read the receipt. That erase moves the epoch; with nothing left to erase the finish moves it itself.
-    if (set.length > 0) eraseInTransaction(db, { subjects: [pending], mode: 'none', heldReportIds: new Set(), receiptId: id, at: 0 }, set);
+    if (set.length > 0) eraseInTransaction(db, { subjects: [pending], mode: 'none', heldReportIds: new Set(), receiptId: id, at: 0 }, set, bump);
     else db.prepare(EPOCH_BUMP_SQL).run(EPOCH_KEY);
     db.prepare(ERASURE_CLEAR_SQL).run(id);
     return true;
+  });
+}
+
+/** Delete the stray rows (see the statements above). With `only`, exactly those subjects at any age; otherwise rows before `before`. Returns how many. */
+export function purgeStrayRows(db: DatabaseSync, transaction: <T>(fn: () => T) => T, before: number, only: readonly string[] | undefined): number {
+  return transaction(() => {
+    let n = 0;
+    if (only !== undefined) {
+      if (only.length === 0) return 0;
+      for (const sql of Object.values(STRAY_ONLY_SQL)) n += Number(db.prepare(sql).run(j(only)).changes);
+    } else {
+      for (const sql of Object.values(STRAY_BEFORE_SQL)) n += Number(db.prepare(sql).run(before).changes);
+    }
+    return n;
   });
 }
 

@@ -40,6 +40,8 @@ export interface Pacer {
   holdsText(): boolean;
   /** Forget every key of a room in one step. */
   dropRoom(roomId: string): void;
+  /** Forget the state of these people (the `who` of a key) in every room: used when a person is erased. */
+  forgetPeople(people: ReadonlySet<string>): void;
   /** Keys held. A diagnostic: it stays at or under {@link PACE_KEYS_MAX}. */
   size(): number;
 }
@@ -233,6 +235,16 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
       if (room === undefined) return;
       keys -= room.size;
       rooms.delete(roomId);
+    },
+
+    forgetPeople(people) {
+      if (people.size === 0) return;
+      for (const [roomId, room] of rooms) {
+        for (const who of people) {
+          if (room.delete(who)) keys -= 1;
+        }
+        if (room.size === 0) rooms.delete(roomId);
+      }
     },
 
     size: () => keys,

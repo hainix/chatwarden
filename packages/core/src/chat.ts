@@ -280,6 +280,12 @@ export class ChatService {
    */
   private memRestrictions = new Map<string, { until: number; subject: SubjectId | null }>();
 
+  /** Forget what this service holds about these people (their whole alias set): pacing state and automatic restrictions kept only in memory. Used when a person is erased. */
+  forgetPeople(people: ReadonlySet<SubjectId>): void {
+    this.pacer?.forgetPeople(people);
+    for (const [key, entry] of [...this.memRestrictions]) if (entry.subject !== null && people.has(entry.subject)) this.memRestrictions.delete(key);
+  }
+
   constructor(deps: ChatServiceDeps) {
     this.roster = deps.roster;
     this.buffer = deps.buffer;

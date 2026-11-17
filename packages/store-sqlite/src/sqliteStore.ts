@@ -100,6 +100,7 @@ import {
   finishErasure as finishErasureSql,
   insertErasure as insertErasureSql,
   loadPendingErasures as loadPendingErasuresSql,
+  purgeStrayRows as purgeStrayRowsSql,
 } from './privacy.js';
 
 /** A term-editor action name (`LiveTerms`) mapped to the audit union; the prefix is the row's subject type. */
@@ -2031,7 +2032,11 @@ export class SqliteStore implements Store, TermStore {
   }
 
   eraseSubjects(plan: ErasePlan): ErasureCounts {
-    return eraseSubjectsSql(this.db, (fn) => this.transaction(fn), plan);
+    return eraseSubjectsSql(this.db, (fn) => this.transaction(fn), plan, () => this.bump());
+  }
+
+  purgeStrayRows(before: number, only?: readonly SubjectId[]): number {
+    return purgeStrayRowsSql(this.db, (fn) => this.transaction(fn), before, only);
   }
 
   insertErasure(row: ErasureRow): void {
@@ -2043,7 +2048,7 @@ export class SqliteStore implements Store, TermStore {
   }
 
   finishErasure(id: string): boolean {
-    return finishErasureSql(this.db, (fn) => this.transaction(fn), id);
+    return finishErasureSql(this.db, (fn) => this.transaction(fn), id, () => this.bump());
   }
 
   erasureEpoch(): number {

@@ -248,7 +248,8 @@ class MemoryAppeals extends MemoryStore {
 
   /** Delete the appeals of the set, except those on a sanction group in `keepGroups` (a hold protects it). Returns how many. */
   privacyEraseAppeals(set: ReadonlySet<string>, keepGroups: ReadonlySet<string>): number {
-    const s = this.appealState();
+    if (this.ap === undefined) return 0;
+    const s = this.ap;
     const keep = [...s.rows.values()].filter((r) => !set.has(r.subject) || keepGroups.has(r.groupId));
     const n = s.rows.size - keep.length;
     if (n === 0) return 0;
@@ -263,7 +264,7 @@ class MemoryAppeals extends MemoryStore {
 
   /** An appeal that cited a deleted report no longer does. */
   privacyUnlinkAppealReports(reportIds: ReadonlySet<string>): void {
-    for (const row of this.appealState().rows.values()) {
+    for (const row of this.ap?.rows.values() ?? []) {
       if (row.reportId === null || !reportIds.has(row.reportId)) continue;
       const before = row.reportId;
       row.reportId = null;
@@ -275,7 +276,7 @@ class MemoryAppeals extends MemoryStore {
 
   /** The appeals of the set, newest first (time, then id, descending): the export's appeals. */
   privacyExportAppeals(set: ReadonlySet<string>): AppealRow[] {
-    return [...this.appealState().rows.values()]
+    return [...(this.ap?.rows.values() ?? [])]
       .filter((r) => set.has(r.subject))
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .map((r) => structuredClone(r));

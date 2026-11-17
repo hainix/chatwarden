@@ -106,6 +106,14 @@ export class StrikeService {
     }
   }
 
+  /** Forget the in-memory strikes of these people (their whole alias set): used when a person is erased. The stored rows go with the erase. */
+  forgetPeople(people: ReadonlySet<SubjectId>): void {
+    for (const p of people) {
+      this.tally.delete(p);
+      this.lastAutoStart.delete(p);
+    }
+  }
+
   /**
    * Record one strike and return the automatic restriction it triggers, if any. SYNCHRONOUS and never throws.
    *

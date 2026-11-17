@@ -5,6 +5,9 @@ import type { Store } from './types.js';
 
 const DAY_MS = 86_400_000;
 
+/** A row of a subject that does not exist is a stray only once it is this old (a subject row can trail its first row by a moment). */
+export const STRAY_AGE_MS = 10 * 60_000;
+
 /** How long each kind of row is kept. */
 export interface RetentionPolicy {
   /** A report is deleted once it is older than this. */
@@ -190,6 +193,10 @@ export interface PurgeResult {
   appealsClosed: number;
   /** Chat-filter hit counter rows deleted (`retention.filterHitsMs`). */
   filterHits: number;
+  /** Erasures that kept a remainder (a sanction in force) and were finished by this pass: the person's subject and identifier rows were deleted. */
+  erasuresFinished: number;
+  /** Strike, signal, notice and kept-name rows dropped because their subject has no subject row and they were older than ten minutes. */
+  strayRows: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -271,7 +278,7 @@ export async function purge(
     // Link rows (`cw.links`) are ids only and outlive the report they name by no useful time: the same clock as reports. Not counted in the result. A live row (an active EOS sanction, the EOS cursor) is kept by the store whatever its age.
     store.purgeLinks?.(now - p.reportsMs);
     const ai = store.purgeAi?.(now - p.reportsMs, now - p.aiOutcomesMs, now - p.aiExamplesMs) ?? { reads: 0, outcomes: 0 };
-    return {
+    const result: Omit<PurgeResult, 'erasuresFinished' | 'strayRows'> = {
       reports,
       sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
       strikes: store.purgeStrikes(now - p.strikesMs),
@@ -299,5 +306,12 @@ export async function purge(
       // Counter rows are keyed by UTC day: a day goes once it ended before the cutoff (strictly older than the day the cutoff falls in).
       filterHits: store.purgeFilterHits(Math.floor((now - p.filterHitsMs) / DAY_MS)),
     };
+    // Last: the finish of an erase that kept a remainder (a sanction in force) needs the sanction rows above to be gone, and the sweep of stray rows (a row whose person was
+    // erased, written by a process that had not yet heard) needs the persons' rows to be gone first. A stray younger than ten minutes is kept: a subject row can trail its first
+    // strike by a moment.
+    let erasuresFinished = 0;
+    for (const pending of store.loadPendingErasures()) if (store.finishErasure(pending.id)) erasuresFinished += 1;
+    const strayRows = store.purgeStrayRows(now - STRAY_AGE_MS);
+    return { ...result, erasuresFinished, strayRows };
   });
 }

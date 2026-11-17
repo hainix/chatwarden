@@ -41,6 +41,12 @@ export const ACTION_LABEL: Record<AuditAction, HubText> = {
   'ai.act': 'hub.audit.label.ai.act',
   'ai.acting': 'hub.audit.label.ai.acting',
   'ai.undo_all': 'hub.audit.label.ai.undoAll',
+  'privacy.find': 'hub.audit.label.privacy.find',
+  'privacy.export': 'hub.audit.label.privacy.export',
+  'privacy.erase': 'hub.audit.label.privacy.erase',
+  'legal.hold': 'hub.audit.label.legal.hold',
+  'legal.release': 'hub.audit.label.legal.release',
+  'legal.bundle': 'hub.audit.label.legal.bundle',
 };
 
 // A settings save or reset is one audit action for two screens. The row's detail names the sections it changed, so its words can say which

@@ -242,6 +242,8 @@ export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js'
 export { WEBHOOK_KEY_TTL_MS } from './types.js';
 export { HOLD_CODES, isHoldCode } from './legal.js';
 export type { HeldSet, HoldCode, HoldRow } from './legal.js';
+export { PRIVACY_DISCLAIMER } from './privacyService.js';
+export type { PrivacyRefusal, PrivacyService, PrivacyStatement } from './privacyService.js';
 export { BUNDLE_DISCLAIMER } from './legalService.js';
 export type { BundlePerson, EvidenceBundle, HoldResult, LegalService } from './legalService.js';
 export { CANONICALIZATION, canonicalJson, signBundle, verifyBundle } from './canonical.js';

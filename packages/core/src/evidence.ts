@@ -52,6 +52,9 @@ function copyLine(line: EvidenceLine): EvidenceLine {
   return { ...line, audience: line.audience === null ? null : [...line.audience] };
 }
 
+/** What stands in for an erased person's line (privacy.ts has the same constant; this module imports nothing from it to stay a leaf). */
+const ERASED_TEXT = '[erased]';
+
 export class EvidenceBuffer {
   private readonly maxLines: number;
   private readonly maxAgeMs: number;
@@ -91,6 +94,19 @@ export class EvidenceBuffer {
 
   drop(roomId: string): void {
     this.rooms.delete(roomId);
+  }
+
+  /**
+   * Erase the lines of these people (their whole alias set) from every room's buffer: a line keeps its place and id, and loses its text, the handle and the subject
+   * (a blocked line, which has no delivered text, keeps that null). Used by `cw.privacy.erase`.
+   */
+  scrub(subjects: ReadonlySet<SubjectId>): void {
+    if (subjects.size === 0) return;
+    for (const room of this.rooms.values()) {
+      room.lines = room.lines.map((l) =>
+        l.subject !== null && subjects.has(l.subject) ? { ...l, subject: null, handle: '', raw: ERASED_TEXT, delivered: l.delivered === null ? null : ERASED_TEXT } : l,
+      );
+    }
   }
 
   // Removes lines older than the window and returns the room (undefined when the room has
@@ -162,5 +178,13 @@ export class RoomRoster {
   /** Forget the room's seats and tags. */
   close(roomId: string): void {
     this.rooms.delete(roomId);
+  }
+
+  /** Turn the seats these people hold (their whole alias set) into guests: the seat and its handle stay, the person goes. Used by `cw.privacy.erase`. */
+  forget(subjects: ReadonlySet<SubjectId>): void {
+    if (subjects.size === 0) return;
+    for (const room of this.rooms.values()) {
+      for (const seat of room.seats.values()) if (seat.subject !== null && subjects.has(seat.subject)) seat.subject = null;
+    }
   }
 }

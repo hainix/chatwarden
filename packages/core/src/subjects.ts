@@ -13,6 +13,9 @@ import type {
 /** `last_seen` of an identifier is written to the store at most this often. */
 const LAST_SEEN_THROTTLE_MS = 3_600_000;
 
+/** How often a process looks at the store's erasure epoch (on its next subject lookup): at most once in this long. */
+export const EPOCH_CHECK_MS = 30_000;
+
 interface Owned {
   accounts: Set<string>;
   keys: Set<string>;
@@ -88,6 +91,12 @@ export class SubjectIndex {
 
   private tail: Promise<void> = Promise.resolve();
 
+  /** Subjects made in this process whose `saveSubject` has not finished: a reload must not mistake them for erased ones. */
+  private readonly unsaved = new Set<SubjectId>();
+  /** The store's erasure epoch when this process last looked, and when it looked (see `checkEpoch`). */
+  private epochSeen: number | null = null;
+  private epochCheckedAt = Number.NEGATIVE_INFINITY;
+
   constructor(store: Store, clock: Clock, opts?: { logger?: Logger }) {
     this.store = store;
     this.clock = clock;
@@ -134,6 +143,94 @@ export class SubjectIndex {
       }
       set.add(s.id);
     }
+    this.readEpoch();
+  }
+
+  /** Remember the store's erasure epoch as the one this process has caught up with. A read that fails is logged by class and leaves the last one. */
+  private readEpoch(): void {
+    try {
+      this.epochSeen = this.store.erasureEpoch();
+    } catch (err) {
+      safeWarn(this.logger, 'chatwarden.epoch_failed', { error: err instanceof Error ? err.name : typeof err });
+    }
+  }
+
+  /**
+   * Another process may have erased a person this one still has in memory. Look at the store's erasure epoch at most once every {@link EPOCH_CHECK_MS} (on the next
+   * lookup, on the injected clock); when it moved, forget the people the store no longer has (queued behind earlier writes, so a subject made here and not yet saved is
+   * kept). A write for a subject that is gone is a no-op in the store, so a stale index can never recreate a row. Never throws.
+   */
+  private checkEpoch(): void {
+    const now = this.clock.now();
+    if (now - this.epochCheckedAt < EPOCH_CHECK_MS) return;
+    this.epochCheckedAt = now;
+    try {
+      const epoch = this.store.erasureEpoch();
+      if (this.epochSeen === null) {
+        this.epochSeen = epoch;
+        return;
+      }
+      if (epoch === this.epochSeen) return;
+      this.epochSeen = epoch;
+      this.enqueue(() => this.reconcile());
+    } catch (err) {
+      safeWarn(this.logger, 'chatwarden.epoch_failed', { error: err instanceof Error ? err.name : typeof err });
+    }
+  }
+
+  /**
+   * Catch up with the store now: flush the queued writes, then forget the people it no longer has (see `checkEpoch`). The retention pass calls it after it finished an
+   * erase, so this process stops knowing the person at once instead of within 30 seconds.
+   */
+  async refresh(): Promise<void> {
+    await this.flush();
+    await this.reconcile();
+    this.readEpoch();
+  }
+
+  /** Drop every subject this index has that the store does not (and that is not waiting to be saved). */
+  private async reconcile(): Promise<void> {
+    const { subjects } = await this.store.loadSubjects();
+    const alive = new Set(subjects.map((s) => s.id));
+    const gone = new Set<SubjectId>();
+    for (const id of this.created.keys()) if (!alive.has(id) && !this.unsaved.has(id)) gone.add(id);
+    if (gone.size > 0) this.drop(gone);
+  }
+
+  /**
+   * Forget these people and everything merged into them: their ids, every key and account they held, their aliases. A key or account that returns makes a NEW,
+   * unlinked subject. Memory only (the store rows go with the erase). Used by `cw.privacy.erase`; the erasing process takes its own epoch as seen, so it does not
+   * reload for its own erase.
+   */
+  forget(subjects: Iterable<SubjectId>): void {
+    const set = new Set<SubjectId>();
+    for (const id of subjects) {
+      set.add(id);
+      for (const m of this.members.get(this.canonical(id)) ?? []) set.add(m);
+    }
+    this.drop(set);
+    this.readEpoch();
+  }
+
+  private drop(set: ReadonlySet<SubjectId>): void {
+    for (const id of set) {
+      const owned = this.owned.get(id);
+      for (const k of owned?.keys ?? []) if (this.keyOwner.get(k) === id) this.keyOwner.delete(k);
+      for (const a of owned?.accounts ?? []) if (this.accountOwner.get(a) === id) this.accountOwner.delete(a);
+      this.owned.delete(id);
+      this.created.delete(id);
+      this.parent.delete(id);
+      this.members.delete(id);
+      this.unsaved.delete(id);
+    }
+    for (const [child, parent] of [...this.parent]) if (set.has(child) || set.has(parent)) this.parent.delete(child);
+    for (const [root, members] of [...this.members]) {
+      for (const id of set) members.delete(id);
+      if (members.size === 0) this.members.delete(root);
+    }
+    const prefixes = [...set].map((id) => `${id}\u0000`);
+    for (const key of [...this.seen.keys()]) if (prefixes.some((p) => key.startsWith(p))) this.seen.delete(key);
+    for (const key of [...this.ipSeenAt.keys()]) if (prefixes.some((p) => key.startsWith(p))) this.ipSeenAt.delete(key);
   }
 
   /**
@@ -142,6 +239,7 @@ export class SubjectIndex {
    * finds a subject). The result is always a canonical (surviving) subject.
    */
   resolve(ids: Identifiers): SubjectId | null {
+    this.checkEpoch();
     const key = present(ids.clientKey);
     const account = present(ids.accountId);
     const ip = present(ids.ipHash);
@@ -187,6 +285,7 @@ export class SubjectIndex {
    * different subjects (not yet linked), the one a merge would keep (the older) is returned.
    */
   lookup(ids: Identifiers): SubjectId | null {
+    this.checkEpoch();
     const key = present(ids.clientKey);
     const account = present(ids.accountId);
     const keyOwner = key === null ? undefined : this.keyOwner.get(key);
@@ -288,7 +387,14 @@ export class SubjectIndex {
     this.created.set(id, now);
     this.owned.set(id, emptyOwned());
     this.members.set(id, new Set([id]));
-    this.enqueue(() => this.store.saveSubject({ id, createdAt: now, mergedInto: null }));
+    this.unsaved.add(id);
+    this.enqueue(async () => {
+      try {
+        await this.store.saveSubject({ id, createdAt: now, mergedInto: null });
+      } finally {
+        this.unsaved.delete(id);
+      }
+    });
     return id;
   }
 

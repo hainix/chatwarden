@@ -51,7 +51,10 @@ describe('@experimental on the 0.2.0 facade members', () => {
     expect(SOURCE.slice(end + 2, at).trim(), `${signature} has a doc block`).toBe('');
     return SOURCE.slice(start, end + 2);
   };
-  for (const [name, signature] of [['legal', 'legal: LegalService;']] as Array<[string, string]>) {
+  for (const [name, signature] of [
+    ['legal', 'legal: LegalService;'],
+    ['privacy', 'privacy: PrivacyService;'],
+  ] as Array<[string, string]>) {
     it(`${name} is tagged @experimental`, () => {
       expect(topDoc(signature)).toContain('@experimental');
     });

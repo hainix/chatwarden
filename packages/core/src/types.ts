@@ -1823,7 +1823,14 @@ export interface Store {
    */
   finishErasure(id: string): boolean;
 
-  /** A counter that moves on every erase and on nothing else; persists with the store and is shared by every process on the database. Starts at 0. */
+  /**
+   * Delete the strike, signal, notice and kept-name rows whose subject has no subject row (written by a process that had not yet learned the person was erased, or in
+   * the moment between a row and its subject): those with a time before `before`, or, with `only`, those of exactly those subjects at any age. A row of a subject that
+   * exists is never touched, nor the notice of a sanction group a hold protects. Returns how many rows went. One transaction; journaled.
+   */
+  purgeStrayRows(before: number, only?: readonly SubjectId[]): number;
+
+  /** A counter that moves on every erase (and the finish of one) and on nothing else; persists with the store and is shared by every process on the database. Starts at 0. */
   erasureEpoch(): number;
 
   // Legal hold (0.2.0). REQUIRED. `cw.legal` is the only caller. A hold protects one report and what hangs on it (see {@link HeldSet}): while it is open, EVERY purge

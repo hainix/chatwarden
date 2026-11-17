@@ -157,6 +157,17 @@ export class ViewingPresence {
     }
   }
 
+  /** Forget every beat on these people (their whole alias set): used when a person is erased. */
+  forgetPeople(people: ReadonlySet<SubjectId>): void {
+    for (const person of people) {
+      this.seen.delete(person);
+      for (const [actor, mine] of this.byActor) {
+        mine.delete(person);
+        if (mine.size === 0) this.byActor.delete(actor);
+      }
+    }
+  }
+
   private forget(person: SubjectId, actor: string): void {
     const who = this.seen.get(person);
     if (who === undefined) return;
@@ -499,6 +510,11 @@ export class CaseDesk {
   /** Who has the person's case open now, sorted, leaving `except` out. */
   viewers(person: SubjectId, except?: string): string[] {
     return this.presence.viewers(this.subjects.canonical(needPerson(person)), except);
+  }
+
+  /** Forget the viewing hints on these people (their whole alias set): used when a person is erased. The claims are store rows and go with the erase. */
+  forgetPeople(people: ReadonlySet<SubjectId>): void {
+    this.presence.forgetPeople(people);
   }
 
   /** {@link viewers} for several people at once; people nobody is viewing are absent. */

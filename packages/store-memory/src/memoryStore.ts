@@ -1321,6 +1321,8 @@ export class MemoryStore implements Store {
       add('subjects', subjectRows - this.subjects.size);
     }
     this.bumpEpoch();
+    // The queue shows fewer reports and appeals: the change token moves with the erase (a dry run is undone with everything else).
+    this.bump();
     return { found: true, removed, kept: { identifiers: keepIdentifiers, sanctions: keptSanctionRows, heldReports: heldNaming }, pending };
   }
 
@@ -1351,6 +1353,28 @@ export class MemoryStore implements Store {
     this.undoWith(() => {
       this.epoch -= 1;
     });
+  }
+
+  purgeStrayRows(before: number, only?: readonly SubjectId[]): number {
+    const exists = (id: string): boolean => this.subjects.has(id);
+    const onlySet = only === undefined ? null : new Set(only);
+    // With `only`: exactly those subjects, at any age. Otherwise: rows older than `before`. Either way a subject that exists is never touched.
+    const matches = (subject: string, at: number): boolean => !exists(subject) && (onlySet === null ? at < before : onlySet.has(subject));
+    if (onlySet !== null && onlySet.size === 0) return 0;
+    const hooks = this as unknown as Partial<PrivacyHooks>;
+    let n = 0;
+    const strikes = this.strikes;
+    const keptStrikes = strikes.filter((r) => !matches(r.subject, r.at));
+    n += strikes.length - keptStrikes.length;
+    if (keptStrikes.length !== strikes.length) this.swap(strikes, keptStrikes, (v) => (this.strikes = v));
+    const heldGroups = this.heldGroupIds();
+    const notices = this.notices;
+    const keptNotices = notices.filter((r) => !(matches(r.subject, r.createdAt) && (r.groupId === null || !heldGroups.has(r.groupId))));
+    n += notices.length - keptNotices.length;
+    if (keptNotices.length !== notices.length) this.swap(notices, keptNotices, (v) => (this.notices = v));
+    n += hooks.privacyPurgeStraySignals?.(exists, matches) ?? 0;
+    n += hooks.privacyPurgeStrayNames?.(exists, matches) ?? 0;
+    return n;
   }
 
   insertErasure(row: ErasureRow): void {
@@ -1626,6 +1650,8 @@ interface PrivacyHooks {
   privacyEraseNoAutomation(set: ReadonlySet<string>): number;
   privacyEraseAiActions(reportIds: ReadonlySet<string>): number;
   privacyExportNoAutomation(set: ReadonlySet<string>): string | null;
+  privacyPurgeStraySignals(exists: (id: string) => boolean, matches: (subject: string, at: number) => boolean): number;
+  privacyPurgeStrayNames(exists: (id: string) => boolean, matches: (subject: string, at: number) => boolean): number;
 }
 
 /** Thrown inside a dry run to undo it. */
