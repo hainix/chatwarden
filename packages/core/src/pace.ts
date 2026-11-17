@@ -5,7 +5,7 @@ import { ProfileError } from './profileError.js';
 // clock; the limiter that applies them is pacing.ts. Every setting is off until set, so a kit that sets none behaves as before.
 
 /** The reasons a line can be refused for pacing, in the order they are checked. */
-export const PACE_REASONS = ['slow_mode', 'flood', 'duplicate'] as const;
+export const PACE_REASONS = ['slow_mode', 'flood', 'duplicate', 'probation'] as const;
 export type PaceReason = (typeof PACE_REASONS)[number];
 
 /**

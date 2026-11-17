@@ -1722,7 +1722,8 @@ describe('createChatwarden: staff report queue', () => {
     const all = cw.reports.list();
     expect(all.items.map((x) => x.id)).toEqual([second.reportId, reportId]);
     expect(all.next).toBeNull();
-    expect(all.items[1]).toEqual(cw.reports.get(reportId));
+    // the case read adds the evidence pointer (and a surge hint when enabled); everything else is the listing's row
+    expect({ ...all.items[1], evidence: null }).toEqual(cw.reports.get(reportId));
     expect(cw.reports.list({ status: 'open' }).items).toHaveLength(2);
     expect(cw.reports.list({ status: 'actioned' }).items).toEqual([]);
     expect((await warnAlice(r)).ok).toBe(true);

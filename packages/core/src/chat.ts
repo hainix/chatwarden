@@ -175,6 +175,8 @@ export interface ChatServiceDeps {
    */
   pace?: {
     settings: (roomId: string) => ResolvedPace;
+    /** The longest probation floor in force (0 when probation is off), so the pacer keeps a probationer's state that long. */
+    floorMax?: () => number;
     canonical: (subject: SubjectId) => SubjectId;
     onFlood?: (info: { roomId: string; subject: SubjectId }) => void;
   };
@@ -216,6 +218,8 @@ export interface ChatServiceDeps {
 interface Paced {
   refusal: ChatResult | null;
   key: PaceKey | null;
+  /** The probation floor this line was checked with, to commit under the same one. */
+  floor?: number;
 }
 const NOT_PACED: Paced = Object.freeze({ refusal: null, key: null });
 
@@ -333,7 +337,7 @@ export class ChatService {
     this.counter = deps.counter;
     this.rooms = deps.rooms;
     this.filterWarn = new ThrottledWarn(deps.logger, deps.clock);
-    this.pacer = deps.pace === undefined ? undefined : createPacer({ clock: deps.clock, settings: deps.pace.settings });
+    this.pacer = deps.pace === undefined ? undefined : createPacer({ clock: deps.clock, settings: deps.pace.settings, ...(deps.pace.floorMax === undefined ? {} : { floorMax: deps.pace.floorMax }) });
     this.notices = deps.notices;
     this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
     this.maxLength = deps.limits?.maxLength ?? MAX_LEN;
@@ -494,7 +498,7 @@ export class ChatService {
       return refuse('rate');
     }
     // Past `rate` the line has happened as far as pacing is concerned (a blocked or profane line has spent its slot too).
-    if (this.pacer !== undefined && paced.key !== null) this.paceCommit(this.pacer, paced.key, trimmed);
+    if (this.pacer !== undefined && paced.key !== null) this.paceCommit(this.pacer, paced.key, trimmed, paced.floor);
 
     const audience = opts?.audience === undefined ? null : [...opts.audience];
 
@@ -574,10 +578,12 @@ export class ChatService {
    */
   private paceCheck(pacer: Pacer, roomId: string, seatId: string, subject: SubjectId | null, text: string): Paced {
     try {
-      if (!pacer.active(roomId)) return NOT_PACED;
+      // A probation floor (a new account's least gap between lines) paces a player even in a room whose own pace is off; it asks the account-age hook only while probation is on.
+      const floor = this.probationFloor(subject);
+      if (floor === undefined && !pacer.active(roomId)) return NOT_PACED;
       const key: PaceKey = { roomId, who: subject === null ? `seat:${seatId}` : (this.pace?.canonical(subject) ?? subject) };
-      const verdict = pacer.check(key, text);
-      if (verdict.ok) return { refusal: null, key };
+      const verdict = pacer.check(key, text, floor);
+      if (verdict.ok) return floor === undefined ? { refusal: null, key } : { refusal: null, key, floor };
       if (verdict.reason === 'flood' && verdict.signalFlood && subject !== null) this.tellFlood(roomId, key.who);
       return { refusal: refuse(verdict.reason, { retryAfterMs: verdict.retryAfterMs }), key: null };
     } catch (err) {
@@ -594,9 +600,19 @@ export class ChatService {
     }
   }
 
-  private paceCommit(pacer: Pacer, key: PaceKey, text: string): void {
+  /** A new account's probation pace: `rooms.probation.slowModeMs` while probation is on and the account is younger than `ageDays` (an unknown age follows `rooms.unknownAge`); else undefined. */
+  private probationFloor(subject: SubjectId | null): number | undefined {
+    if (this.rooms === undefined) return undefined;
+    const { probation, unknownAge } = this.rooms.settings();
+    if (!probation.enabled) return undefined;
+    const age = this.rooms.accountAge(subject);
+    const isNew = age === null ? unknownAge === 'treat_as_new' : age < probation.ageDays;
+    return isNew ? probation.slowModeMs : undefined;
+  }
+
+  private paceCommit(pacer: Pacer, key: PaceKey, text: string, floor?: number): void {
     try {
-      pacer.commit(key, text);
+      pacer.commit(key, text, floor);
     } catch (err) {
       this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) });
     }

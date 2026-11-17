@@ -244,6 +244,10 @@ export type {
 export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
 export { CaseWorkflow } from './caseWorkflow.js';
+export { evidenceLink } from './reporting.js';
+export { SURGE_MAX_REPORTERS, SURGE_MAX_REPORTS, surgeOf } from './surge.js';
+export type { ReportSurge } from './surge.js';
+export type { ReportEvidence } from './staffReports.js';
 export { computeInsights, INSIGHTS_DAYS, INSIGHTS_MIN_DECIDED, INSIGHTS_MIN_URGENT, INSIGHTS_ROW_CAP } from './insights.js';
 export type { InsightsBacklog, InsightsDays, InsightsResult } from './insights.js';
 export { COMMENT_MAX, CommentService, hasWorkflowMethods } from './commentService.js';
@@ -324,7 +328,7 @@ export type {
 export { KIT_EVENT_TYPES } from './events.js';
 export type { InsightsDigest, KitEvent, KitEventOf, KitListener, StaffRef, Subscribe } from './events.js';
 export { createChatwarden } from './chatwarden.js';
-export type { Chatwarden, ChatwardenOptions, GapRow } from './chatwarden.js';
+export type { Chatwarden, ChatwardenOptions, GapRow, PersonLinks } from './chatwarden.js';
 export {
   CATEGORY_TO_RULE,
   CommunityRules,

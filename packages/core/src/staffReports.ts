@@ -3,6 +3,7 @@ import { canonicalReasonId, isReasonId, reasonOfCategory } from './reporting.js'
 import type { ReportReason } from './reporting.js';
 import type { SubjectIndex } from './subjects.js';
 import { isOriginReport } from './types.js';
+import type { ReportSurge } from './surge.js';
 import type { ReportRecord, Store, SubjectId } from './types.js';
 
 /** The page size when `limit` is missing or not a number. */
@@ -58,6 +59,19 @@ export interface StaffReport extends ReportRecord {
   /** The canonical person who filed the report, or null for a report nobody filed (`origin` is set: a chat filter's flag). */
   reporterPerson: SubjectId | null;
   ownLineIds: Record<SubjectId, string[]>;
+  /**
+   * Set by `cw.reports.get` only (never by the queue listing): the game's evidence pointer as `{ ref, url }` (`url` is the owner's `reporting.evidenceUrl` with the ref filled in, or `null` with no
+   * usable template) or `null` for a report with no ref. @experimental
+   */
+  evidence?: ReportEvidence | null;
+  /** Set by `cw.reports.get` only, and only with `desk.surge` on and the person over its threshold: a hint, never a reason to set a report aside. @experimental */
+  surge?: ReportSurge;
+}
+
+/** The evidence pointer of a case: the game's opaque ref and the staff link built from `reporting.evidenceUrl`, when there is one. @experimental */
+export interface ReportEvidence {
+  ref: string;
+  url: string | null;
 }
 
 /** What `reports.list` takes. Every field is optional. */

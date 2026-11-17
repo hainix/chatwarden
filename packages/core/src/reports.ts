@@ -81,8 +81,8 @@ export interface ReportIntakeExtras {
   evidenceRef?: string | null;
 }
 
-/** An evidence ref the kit will store: 1 to 64 of `A-Z a-z 0-9 _ : -`. Anything else is dropped, never stored. */
-export const EVIDENCE_REF_RE = /^[A-Za-z0-9_:-]{1,64}$/;
+/** An evidence ref the kit will store: 1 to 128 of `A-Z a-z 0-9 _ : -` (no dot, no slash). Anything else is dropped, never stored. */
+export const EVIDENCE_REF_RE = /^[A-Za-z0-9_:-]{1,128}$/;
 
 export interface ReportInput {
   roomId: string;
@@ -104,6 +104,12 @@ export interface ReportInput {
   category?: string | null;
   note?: string;
   lineId?: string;
+  /**
+   * The game's own id for the evidence behind this report (a match, a replay): an opaque string of 1 to 128 of `A-Z a-z 0-9 _ : -` (no dot, no slash), given by the game's SERVER and never
+   * read from a player's request (the chat route takes it from `ChatMember.evidenceRef`, set in the `join` hook). An invalid value is dropped and logged by class, and the report is
+   * still taken. The kit never fetches it; staff see it as `evidence` with a link built from `reporting.evidenceUrl`. It is in no event, queue summary, webhook or Discord post. @experimental
+   */
+  evidenceRef?: string | null;
 }
 
 export type ReportResult =
@@ -554,7 +560,7 @@ export class ReportService {
         status: 'open',
         // A snapshot: the reason's flag as it is now, or the kit's own caller said so. Never from the player's input.
         urgent: (given.id !== null && findReason(this.reporting().reasons, given.id)?.urgent === true) || extras?.urgent === true,
-        evidenceRef: typeof extras?.evidenceRef === 'string' && EVIDENCE_REF_RE.test(extras.evidenceRef) ? extras.evidenceRef : null,
+        evidenceRef: this.cleanEvidenceRef(extras?.evidenceRef ?? input.evidenceRef),
       };
       const toStore = row;
       const written = this.store.transaction(() => this.store.insertReport(toStore));
@@ -639,6 +645,14 @@ export class ReportService {
     } catch (err) {
       this.warn('reports.on_report_failed', { error: errName(err) });
     }
+  }
+
+  /** The evidence ref to store: a valid one as it is, else null (a bad one, not a string, is logged by class only and never echoed). */
+  private cleanEvidenceRef(value: unknown): string | null {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'string' && EVIDENCE_REF_RE.test(value)) return value;
+    this.warn('reports.evidence_ref_dropped', { reason: 'invalid' });
+    return null;
   }
 
   private warn(event: string, detail: Record<string, string | number | boolean>): void {

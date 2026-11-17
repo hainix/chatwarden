@@ -5,6 +5,8 @@ import type { AuditPage, AuditQuery, AuditRecordInput, Role } from './audit.js';
 import { ChatService } from './chat.js';
 import { ChatCounter, utcDay } from './chatCounter.js';
 import { AccountAges } from './accountAge.js';
+import { surgeOf } from './surge.js';
+import type { ReportSurge } from './surge.js';
 import { RoomModes } from './roomModes.js';
 import type { RoomModeState } from './roomModes.js';
 import type { RoomMode } from './roomSettings.js';
@@ -59,6 +61,7 @@ import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
 import { ReportService } from './reports.js';
+import { evidenceLink } from './reporting.js';
 import type { ReportCounts, ReportDetailInput, ReportDetailResult, ReportInput, ReportResult, SystemReportInput, SystemReportResult } from './reports.js';
 import { checkLinkRow, hasLinkMethods, isLinkSystem, isLinkValue, linkLimit } from './links.js';
 import type { LinkRow, LinkSystem } from './links.js';
@@ -271,6 +274,21 @@ export interface ChatwardenOptions {
    * @experimental
    */
   bundleSecret?: string;
+}
+
+/**
+ * How a person is linked (`cw.people.links`): counts only, never an id, a key, a hash or an address.
+ * @experimental
+ */
+export interface PersonLinks {
+  /** Account ids the kit holds for the person, across their merged subjects. */
+  accounts: number;
+  /** Client keys (devices) the kit holds for them. */
+  devices: number;
+  /** Other subjects folded into them. */
+  merged: number;
+  /** Bans, area bans and chat restrictions in force that were placed on a merged subject rather than on the person's own. */
+  inForceOnLinked: { ban: number; area: number; chat: number };
 }
 
 /** The moderation kit as an adopter uses it. Nothing here returns an identifier meant for a player. */
@@ -985,6 +1003,12 @@ export interface Chatwarden {
      * @experimental
      */
     automation: AutomationFacade;
+    /**
+     * How a person is linked, as counts only: `accounts` (account ids the kit holds for them) and `devices` (client keys), `merged` (other subjects folded into them), and `inForceOnLinked`, how many
+     * bans, area bans and chat restrictions in force were placed on a merged subject rather than on the person's own. Never an id, a key, a hash or an address; the IP rows are not read; a guest and an
+     * unknown subject read zeros. A hint (a shared device can link two different people), not proof. A pure read. Staff only: it says who is linked to a person. @experimental
+     */
+    links(subject: SubjectId): PersonLinks;
   };
   /**
    * Privacy requests (0.2.0): find a person by an account id or a client key, export what the kit holds about them, and erase it (a receipt, a stated safety remainder
@@ -1296,6 +1320,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     pace: {
       settings: paceOf,
+      floorMax: () => (policy.profileNow().rooms.probation.enabled ? policy.profileNow().rooms.probation.slowModeMs : 0),
       canonical: (subject) => subjects.canonical(subject),
       // A flood trip records the built-in kind, deferred so the verdict is returned first. `flood` never throws and logs its own
       // refusals; a room id the signal rules do not accept is left out (the trip is then a day source, not dropped).
@@ -1532,6 +1557,44 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const reasonBook = new ReasonBook(store);
   const caseWorkflow = new CaseWorkflow({ store, clock, emit: (event) => bus.emit(event) });
   const commentService = new CommentService({ store, clock, enabled: () => policy.profileNow().desk.workflow, emit: (event) => bus.emit(event) });
+
+  // The case read (`reports.get`): the staff report plus the evidence pointer with its link and, when `desk.surge` is on and the person is over its threshold, the surge hint. Neither is stored, raised or
+  // used by anything else; a failure of the surge read leaves the case without the hint.
+  const caseOf = (report: StaffReport): StaffReport => {
+    const profile = policy.profileNow();
+    const evidence = report.evidenceRef === null ? null : { ref: report.evidenceRef, url: evidenceLink(profile.reporting, report.evidenceRef) };
+    let surge: ReportSurge | null = null;
+    try {
+      surge = surgeOf(report.targetPerson, clock.now(), profile.desk.surge, {
+        listReportsByPerson: (people, limit) => store.listReportsByPerson(people, limit),
+        aliasesOf: (subject) => subjects.aliasesOf(subject),
+        canonical: (subject) => subjects.canonical(subject),
+        ...(accountAges.enabled ? { ageOf: (subject: SubjectId) => accountAges.ageOf(subject) } : {}),
+      });
+    } catch (err) {
+      safeWarn(logger, 'chatwarden.surge_failed', { error: err instanceof Error ? err.name : typeof err });
+    }
+    return { ...report, evidence, ...(surge === null ? {} : { surge }) };
+  };
+  /** How a person is linked: counts only (see `people.links`). */
+  const personLinks = (subject: SubjectId): PersonLinks => {
+    const out: PersonLinks = { accounts: 0, devices: 0, merged: 0, inForceOnLinked: { ban: 0, area: 0, chat: 0 } };
+    if (typeof subject !== 'string' || subject === '') return out;
+    const root = subjects.canonical(subject);
+    const ids = subjects.identifiersOf(root);
+    const aliases = subjects.aliasesOf(root);
+    out.accounts = ids.accounts.length;
+    out.devices = ids.keys.length;
+    out.merged = Math.max(0, aliases.length - 1);
+    if (out.merged > 0) {
+      // Subject rows only (an address row is never listed), in force now, on a subject that is not the person's own.
+      for (const row of store.listSubjectSanctions({ subjects: aliases, activeAt: clock.now(), limit: 200 })) {
+        if (row.value === root) continue;
+        if (row.kind === 'ban' || row.kind === 'area' || row.kind === 'chat') out.inForceOnLinked[row.kind] += 1;
+      }
+    }
+    return out;
+  };
 
   // Insights: on with `desk.insights` and a store that can read the rows.
   const insightsOn = (): boolean => policy.profileNow().desk.insights && typeof store.insightRows === 'function';
@@ -1824,7 +1887,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       list: (q) => listStaffReports(store, subjects, q, policy.profileNow().reporting.reasons),
       get: (id) => {
         const record = typeof id === 'string' ? store.loadReport(id) : null;
-        return record === null ? null : staffReport(record, subjects);
+        return record === null ? null : caseOf(staffReport(record, subjects));
       },
       reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
       reporterAccuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
@@ -2058,6 +2121,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       aliases: (subject) => subjects.aliasesOf(subject),
       accountIds: (subject) => (typeof subject === 'string' ? subjects.identifiersOf(subject).accounts : []),
       automation,
+      links: (subject) => personLinks(subject),
     },
     privacy,
     legal: createLegal({

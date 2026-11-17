@@ -1,3 +1,4 @@
+import { httpsUrl } from './settingsCheck.js';
 import type { ReportCategory } from './types.js';
 import type { SafetyResource } from './safety.js';
 
@@ -306,4 +307,21 @@ export function fillReporting(value: unknown): unknown {
 /** {@link fillReporting} for settings already known to be valid: the typed result. */
 export function resolveReporting(settings: ReportingSettings | undefined): ResolvedReporting {
   return fillReporting(settings) as ResolvedReporting;
+}
+
+/**
+ * The link to the evidence behind a report: the owner's `reporting.evidenceUrl` template with `{ref}` replaced by `encodeURIComponent(ref)`, or `null` with no template. The template is
+ * checked again here (an `https` URL with a host, no credentials and exactly one `{ref}`, never in the host): one that is not, say a layer edited to `http` after it was saved, gives `null`.
+ * Pure; the kit fetches nothing. @experimental
+ */
+export function evidenceLink(settings: { evidenceUrl?: string | null }, ref: string): string | null {
+  const template = settings.evidenceUrl;
+  if (typeof template !== 'string' || template === '' || typeof ref !== 'string' || ref === '') return null;
+  try {
+    httpsUrl(template, 'reporting.evidenceUrl', REPORT_EVIDENCE_URL_MAX, true);
+  } catch {
+    return null;
+  }
+  const encoded = encodeURIComponent(ref);
+  return template.replace('{ref}', () => encoded);
 }

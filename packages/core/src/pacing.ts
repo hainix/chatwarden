@@ -28,10 +28,13 @@ export interface PaceKey {
 export type PaceVerdict = { ok: true } | { ok: false; reason: PaceReason; retryAfterMs: number; signalFlood: boolean };
 
 export interface Pacer {
-  /** Should this line be refused? Reads state, changes no timing state. Order: `slow_mode`, `flood`, `duplicate`. */
-  check(key: PaceKey, line: string): PaceVerdict;
-  /** Record that a line was accepted: it now counts toward the next check. A no-op while every check is off. */
-  commit(key: PaceKey, line: string): void;
+  /**
+   * Should this line be refused? Reads state, changes no timing state. Order: `slow_mode` (or `probation`), `flood`, `duplicate`. `floorMs` is a probation floor for THIS player: the least time
+   * between their lines, applied on top of the room's own slow mode (the stricter wins; the refusal is `probation` only when the floor is what is longer). Absent: none.
+   */
+  check(key: PaceKey, line: string, floorMs?: number): PaceVerdict;
+  /** Record that a line was accepted: it now counts toward the next check. A no-op while every check is off and there is no `floorMs` (pass the same one `check` got). */
+  commit(key: PaceKey, line: string, floorMs?: number): void;
   /** Is any check on for this room right now? When not, `check` and `commit` do nothing and the caller need not build a key. */
   active(roomId: string): boolean;
   /** The line `check` accepted will not be committed (the fixed rate refused it): drop the digest memo that holds its text. */
@@ -92,8 +95,16 @@ const touchedAt = (s: KeyState): number => (s.floodSignalAt !== null && s.floodS
  * `tap` is a test seam: it is handed the state (rooms by key) once, so a test can look at what a pacer holds. Nothing in the kit passes it.
  * @internal
  */
-export function createPacer(opts: { clock: Clock; settings: (roomId: string) => ResolvedPace; tap?: (rooms: ReadonlyMap<string, ReadonlyMap<string, Readonly<KeyState>>>) => void }): Pacer {
+export function createPacer(opts: { clock: Clock; settings: (roomId: string) => ResolvedPace; /** The longest probation floor in force (0 when probation is off): a room's state is kept at least that long. */ floorMax?: () => number; tap?: (rooms: ReadonlyMap<string, ReadonlyMap<string, Readonly<KeyState>>>) => void }): Pacer {
   const { clock, settings } = opts;
+  const floorMax = (): number => {
+    try {
+      const v = opts.floorMax?.() ?? 0;
+      return Number.isFinite(v) && v > 0 ? v : 0;
+    } catch {
+      return 0;
+    }
+  };
   const rooms = new Map<string, Map<string, KeyState>>();
   opts.tap?.(rooms);
   let keys = 0;
@@ -107,6 +118,7 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
       } catch {
         continue;
       }
+      longest = Math.max(longest, floorMax());
       if (longest === 0) {
         keys -= room.size;
         rooms.delete(roomId);
@@ -153,20 +165,23 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
   const pacer: Pacer = {
     active: (roomId) => !allOff(settings(roomId)),
 
-    check(key, line) {
+    check(key, line, floorMs) {
       const now = clock.now();
       memo = null;
       if (++calls % SWEEP_EVERY === 0) sweep(now);
       const pace = settings(key.roomId);
-      if (allOff(pace)) return OK;
+      const floor = floorMs !== undefined && Number.isFinite(floorMs) && floorMs > 0 ? floorMs : 0;
+      if (allOff(pace) && floor === 0) return OK;
       const state = rooms.get(key.roomId)?.get(key.who);
       if (state === undefined) return OK;
 
-      const { slowModeMs, burst, duplicateWindowMs } = pace;
+      const { burst, duplicateWindowMs } = pace;
+      // The room's slow mode and the player's probation floor: the longer wins, and it is called probation only when the floor is what is longer.
+      const slowModeMs = Math.max(pace.slowModeMs ?? 0, floor);
       // State stamped after `now` (the clock stepped back) is stale, not "in the future": it never refuses, so a step back cannot lock
       // a player out. The refusal clamp below is then a guard only.
-      if (slowModeMs !== null && state.lastAt <= now && now - state.lastAt < slowModeMs) {
-        return refusal('slow_mode', state.lastAt + slowModeMs - now, slowModeMs, false);
+      if (slowModeMs > 0 && state.lastAt <= now && now - state.lastAt < slowModeMs) {
+        return refusal(floor > (pace.slowModeMs ?? 0) ? 'probation' : 'slow_mode', state.lastAt + slowModeMs - now, slowModeMs, false);
       }
 
       if (burst !== null) {
@@ -192,10 +207,10 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
       return OK;
     },
 
-    commit(key, line) {
+    commit(key, line, floorMs) {
       const now = clock.now();
       const pace = settings(key.roomId);
-      if (allOff(pace)) return;
+      if (allOff(pace) && !(floorMs !== undefined && Number.isFinite(floorMs) && floorMs > 0)) return;
       let room = rooms.get(key.roomId);
       let state = room?.get(key.who);
       if (state === undefined) {

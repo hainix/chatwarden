@@ -655,7 +655,7 @@ describe('keys', () => {
 
 describe('the clock (review focus 2)', () => {
   const settings: ResolvedPace = { slowModeMs: 3000, burst: { lines: 3, windowMs: 7000 }, duplicateWindowMs: 11_000 };
-  const windowOf = { slow_mode: 3000, flood: 7000, duplicate: 11_000 } as const;
+  const windowOf = { slow_mode: 3000, flood: 7000, duplicate: 11_000, probation: 3000 } as const;
 
   const inRange = (v: PaceVerdict): void => {
     const r = refusal(v);

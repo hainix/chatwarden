@@ -30,6 +30,11 @@ export class AccountAges {
     this.d = deps;
   }
 
+  /** Is there a hook at all? Without one every age is unknown. */
+  get enabled(): boolean {
+    return this.d.hook !== undefined;
+  }
+
   /** The age in days, or `null` when it is not known. Never throws. */
   ageOf(subject: SubjectId | null): number | null {
     if (subject === null || this.d.hook === undefined) return null;

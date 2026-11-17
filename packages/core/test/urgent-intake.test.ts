@@ -101,13 +101,13 @@ describe('report.created and what is logged', () => {
 });
 
 describe('urgent only from the internal caller', () => {
-  it('a public submit with an urgent field is ignored', async () => {
+  it('a public submit with an urgent field is ignored; an evidence ref is for the game server to give, so it is taken', async () => {
     const w = await world();
     w.cw.rooms.seat('pub', 'p1', { clientKey: 'a' }, 'Rep');
     w.cw.rooms.seat('pub', 'p2', { clientKey: 'b' }, 'Tgt');
     const res = await w.cw.reports.submit({ roomId: 'pub', reporterSeat: 'p1', targetSeat: 'p2', reason: 'harassment', urgent: true, evidenceRef: 'x1' } as never);
     if (!res.ok) throw new Error('refused');
-    expect(w.store.loadReport(res.reportId)).toMatchObject({ urgent: false, evidenceRef: null });
+    expect(w.store.loadReport(res.reportId)).toMatchObject({ urgent: false, evidenceRef: 'x1' });
   });
 
   const service = () => {
@@ -132,7 +132,7 @@ describe('urgent only from the internal caller', () => {
     const ok = await a.reports.submit({ roomId: 'R1', reporterSeat: 'p1', targetSeat: 'p2', reason: 'harassment' }, { urgent: true, evidenceRef: 'match_42:t-9' });
     if (!ok.ok) throw new Error('refused');
     expect(a.store.loadReport(ok.reportId)).toMatchObject({ urgent: true, evidenceRef: 'match_42:t-9' });
-    for (const ref of ['has.dot', 'has/slash', 'has space', '', 'x'.repeat(65)]) {
+    for (const ref of ['has.dot', 'has/slash', 'has space', '', 'x'.repeat(129)]) {
       const b = service();
       const res = await b.reports.submit({ roomId: 'R1', reporterSeat: 'p1', targetSeat: 'p2' }, { evidenceRef: ref });
       if (!res.ok) throw new Error('refused');
