@@ -63,17 +63,38 @@ export interface EvaluateContext {
 
 const emptyVerdict = (): FilterVerdict => ({ hits: [], refuse: null, spans: [], softened: null, flags: [] });
 
-/** `text` with each ignore phrase replaced by spaces of the same length, so every offset still indexes the original line. */
+const isAlnumCode = (c: number): boolean => (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x7a) || c > 0x7f;
+
+/** Is the character at `i` of `lower` part of a longer name that touches an ignored phrase (a letter, digit, `-`, `_`, or a dot that goes on)? */
+function continuesName(lower: string, i: number, step: 1 | -1): boolean {
+  if (i < 0 || i >= lower.length) return false;
+  const c = lower.charCodeAt(i);
+  if (isAlnumCode(c) || c === 0x2d || c === 0x5f) return true;
+  if (c !== 0x2e) return false;
+  const n = i + step;
+  return n >= 0 && n < lower.length && isAlnumCode(lower.charCodeAt(n));
+}
+
+/**
+ * `text` with each ignore phrase replaced by spaces of the same length, so every offset still indexes the original line. A phrase is a
+ * whole token: where it starts or ends with a letter or digit, a longer name touching that end (`discord.gg/ours123` for `discord.gg/ours`)
+ * is not the phrase and stays readable.
+ */
 function blankIgnored(text: string, ignore: readonly string[]): string {
   if (ignore.length === 0) return text;
   const lower = lowerKeepLength(text);
   let out: string[] | null = null;
   for (const phrase of ignore) {
     if (phrase.length === 0) continue;
+    const wordFirst = isAlnumCode(phrase.charCodeAt(0));
+    const wordLast = isAlnumCode(phrase.charCodeAt(phrase.length - 1));
     let from = 0;
     for (;;) {
       const at = lower.indexOf(phrase, from);
       if (at < 0) break;
+      from = at + 1;
+      if (wordFirst && continuesName(lower, at - 1, -1)) continue;
+      if (wordLast && continuesName(lower, at + phrase.length, 1)) continue;
       out ??= text.split('');
       for (let i = at; i < at + phrase.length; i++) out[i] = ' ';
       from = at + phrase.length;

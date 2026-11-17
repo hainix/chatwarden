@@ -615,7 +615,7 @@ export function checkFilterRules(f: ResolvedFilters, isActive: (rule: number) =>
 export const FILTER_SUGGESTIONS: Readonly<Record<'relaxed' | 'standard' | 'strict' | 'rmt', FilterSettings>> = deepFreeze({
   relaxed: {},
   standard: { links: { action: 'flag' }, personalInfo: { action: 'mask' } },
-  strict: { links: { action: 'refuse', newAccountDays: 2 }, personalInfo: { action: 'mask' }, ratio: { action: 'mask' } },
+  strict: { links: { action: 'refuse' }, personalInfo: { action: 'mask' }, ratio: { action: 'mask' } },
   rmt: {
     phrases: [
       {

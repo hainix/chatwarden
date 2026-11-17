@@ -14,14 +14,29 @@ describe('fold', () => {
     ['g\u{f3}ld', 'gold'],
     ['\u{ff47}\u{ff4f}\u{ff4c}\u{ff44}', 'gold'],
     ['g\u{200b}o\u{200c}l\u{200d}d', 'gold'],
-    ['g\u{43e}ld', 'g\u{43e}ld'],
+    ['g\u{43e}ld', 'gold'],
+    ['\u{440}\u{430}yp\u{430}l', 'paypal'],
+    ['\u{3b1}pple', 'apple'],
+    ['\u{3bf}\u{3c1}\u{3b1}cle', 'opacle'],
     ['g0000ld', 'gold'],
     ['$old', 'sold'],
     ['b@ck', 'back'],
     ['l33t', 'leet'],
   ])('%s folds to %s', (input, want) => {
-    // The Cyrillic o row documents the limit: a look-alike letter from another script is not mapped to a Latin one.
+    // Cyrillic and Greek look-alikes of Latin letters are read as those letters.
     expect(words(input)).toEqual([want]);
+  });
+
+  it('the split reading treats a full stop and an asterisk as a boundary', () => {
+    expect(foldChunks('buy.gold', { split: true }).map((c) => c.folded)).toEqual(['buy', 'gold']);
+    expect(foldChunks('buy*gold g.o.l.d', { split: true }).map((c) => c.folded)).toEqual(['buy', 'gold', 'g', 'o', 'l', 'd']);
+    expect(foldChunks('buy.gold').map((c) => c.folded)).toEqual(['buygold']);
+  });
+
+  it('the bang reading keeps a ! or | between two letters as a letter', () => {
+    expect(foldChunks('f!sh f|sh', { bang: true }).map((c) => c.folded)).toEqual(['fish', 'flsh']);
+    expect(foldChunks('wow! look |x', { bang: true }).map((c) => c.folded)).toEqual(['wow', 'look', 'x']);
+    expect(foldChunks('f!sh').map((c) => c.folded)).toEqual(['f', 'sh']);
   });
 
   it('500 and 2000 stay numbers; a chunk with no letter is never leet-mapped', () => {

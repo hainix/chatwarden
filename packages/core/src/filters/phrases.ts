@@ -1,5 +1,5 @@
 import type { ResolvedPhraseRule } from '../filters.js';
-import { foldChunks, foldWord, letterCount } from './fold.js';
+import { foldChunks, foldWord, letterCount, mergeSpaced } from './fold.js';
 import type { Chunk, FilterSpan } from './fold.js';
 
 // Phrase rules: a list of patterns written in a fixed vocabulary (a word, `a|b` alternatives, `word*` a prefix, `*` one word of any
@@ -83,6 +83,11 @@ export function parsePattern(raw: unknown): ParsedPattern {
 export const PHRASE_LINE_CAP = 2000;
 /** At most this many matches are returned for one line. */
 export const PHRASE_MATCH_CAP = 50;
+/**
+ * At most this many comparisons are spent on one line (all readings together). An ordinary line costs a few hundred; this stops a line of
+ * one word, met by hundreds of patterns that start with it, at about a millisecond. A line that runs out keeps what was found before.
+ */
+export const PHRASE_STEP_BUDGET = 200_000;
 /** `~` stands for at most this many words. */
 const SKIP_MAX = 3;
 /** The longest first-word prefix that is looked up. */
@@ -93,7 +98,15 @@ export const __phraseSteps = { n: 0 };
 
 interface CompiledPattern {
   ruleId: string;
+  /** The tokens with every word in its skeleton form (`i` read as `l`), so `b1tcoin`, `bltcoin` and `bitcoin` are one word. */
   tokens: PatternToken[];
+}
+
+/** A folded word with `i` and `l` read as one letter: `1`, `!` and `|` imitate both, so both sides of a comparison use this form. */
+const skeleton = (word: string): string => (word.includes('i') ? word.split('i').join('l') : word);
+
+function skeletonTokens(tokens: readonly PatternToken[]): PatternToken[] {
+  return tokens.map((t) => (t.kind === 'alt' ? { kind: 'alt', alts: t.alts.map((a) => ({ word: skeleton(a.word), prefix: a.prefix })) } : t));
 }
 
 /** The patterns of a set of rules, indexed by the first word. */
@@ -133,11 +146,15 @@ export function compilePhrases(rules: readonly ResolvedPhraseRule[]): CompiledPh
         if (!parsed.ok) continue;
         const first = parsed.tokens[0];
         if (first === undefined || first.kind !== 'alt') continue;
-        const p: CompiledPattern = { ruleId: rule.id, tokens: parsed.tokens };
+        const tokens = skeletonTokens(parsed.tokens);
+        const p: CompiledPattern = { ruleId: rule.id, tokens };
         count++;
-        for (const alt of first.alts) {
+        const head = tokens[0];
+        if (head === undefined || head.kind !== 'alt') continue;
+        for (const alt of head.alts) {
           if (alt.prefix) {
-            bucket(prefix, alt.word, p);
+            // Looked up by at most its first 64 characters (the whole prefix is still compared once it is found).
+            bucket(prefix, alt.word.slice(0, PREFIX_LOOKUP_MAX), p);
             lens.add(Math.min(alt.word.length, PREFIX_LOOKUP_MAX));
           } else {
             bucket(exact, alt.word, p);
@@ -162,10 +179,10 @@ function altMatches(token: Extract<PatternToken, { kind: 'alt' }>, word: string)
 }
 
 /** The index just after the last word the pattern consumed when it matches starting at `pos`, or -1. At most 16 paths. */
-function matchFrom(tokens: readonly PatternToken[], ti: number, chunks: readonly Chunk[], pos: number): number {
+function matchFrom(tokens: readonly PatternToken[], ti: number, chunks: readonly string[], pos: number): number {
   if (ti === tokens.length) return pos;
   const t = tokens[ti]!;
-  if (t.kind === 'alt') return pos < chunks.length && altMatches(t, chunks[pos]!.folded) ? matchFrom(tokens, ti + 1, chunks, pos + 1) : -1;
+  if (t.kind === 'alt') return pos < chunks.length && altMatches(t, chunks[pos]!) ? matchFrom(tokens, ti + 1, chunks, pos + 1) : -1;
   if (t.kind === 'one') {
     __phraseSteps.n++;
     return pos < chunks.length ? matchFrom(tokens, ti + 1, chunks, pos + 1) : -1;
@@ -178,40 +195,67 @@ function matchFrom(tokens: readonly PatternToken[], ti: number, chunks: readonly
   return -1;
 }
 
+/** The readings of a line that are tried, the plain one first; each later one only adds what the earlier ones missed. */
+function readings(text: string): Chunk[][] {
+  const plain = foldChunks(text);
+  const views: Chunk[][] = [plain];
+  // `buy.gold` is two words; the plain reading joins it (`g.o.l.d` is one).
+  const split = text.includes('.') || text.includes('*') ? foldChunks(text, { split: true }) : plain;
+  if (split !== plain) views.push(split);
+  // `f!sh`: a bang or a bar inside a word is a letter.
+  if (text.includes('!') || text.includes('|')) views.push(foldChunks(text, { bang: true }));
+  // `g o l d`, `g_o_l_d`: single letters in a run.
+  const spaced = mergeSpaced(split);
+  if (spaced !== null) views.push(spaced);
+  return views;
+}
+
 /**
  * Every place a pattern of `compiled` matches in `text`, in text order, at most 50: the rule's id and the range of the matched words on
- * the original text. A line costs one lookup per word plus the tail comparisons of the patterns that share its first word. Reads at most
- * 2 000 characters. Never throws.
+ * the original text. A line is read in up to four ways (joined, split at full stops, with a bang as a letter, with spaced letters
+ * joined); a place found by more than one is one match. A line costs one lookup per word plus the tail comparisons of the patterns that
+ * share its first word. Reads at most 2 000 characters. Never throws.
  */
 export function matchPhrases(compiled: CompiledPhrases, text: string): Array<{ ruleId: string; span: FilterSpan }> {
   if (typeof text !== 'string' || text.length === 0 || compiled.count === 0) return [];
   try {
-    const chunks = foldChunks(text.length > PHRASE_LINE_CAP ? text.slice(0, PHRASE_LINE_CAP) : text);
     const out: Array<{ ruleId: string; span: FilterSpan }> = [];
-    const tryPatterns = (list: readonly CompiledPattern[] | undefined, idx: number, seen: Set<CompiledPattern>): void => {
-      if (list === undefined) return;
-      for (const p of list) {
-        if (out.length >= PHRASE_MATCH_CAP) return;
-        if (seen.has(p)) continue;
+    const known = new Set<string>();
+    const startSteps = __phraseSteps.n;
+    const spent = (): boolean => __phraseSteps.n - startSteps > PHRASE_STEP_BUDGET;
+    const views = readings(text.length > PHRASE_LINE_CAP ? text.slice(0, PHRASE_LINE_CAP) : text);
+    views.forEach((chunks, v) => {
+      const keys = chunks.map((c) => skeleton(c.folded));
+      const tryPatterns = (list: readonly CompiledPattern[] | undefined, idx: number, seen: Set<CompiledPattern>): void => {
+        if (list === undefined) return;
+        for (const p of list) {
+          if (out.length >= PHRASE_MATCH_CAP || spent()) return;
+          if (seen.has(p)) continue;
+          __phraseSteps.n++;
+          const end = matchFrom(p.tokens, 0, keys, idx);
+          if (end > idx) {
+            seen.add(p);
+            const span = { start: chunks[idx]!.start, end: chunks[end - 1]!.end };
+            // A later reading adds only a place no earlier reading found for the rule.
+            if (v > 0 && known.has(`${p.ruleId}:${span.start}:${span.end}`)) continue;
+            out.push({ ruleId: p.ruleId, span });
+          }
+        }
+      };
+      const before = out.length;
+      for (let idx = 0; idx < chunks.length && out.length < PHRASE_MATCH_CAP && !spent(); idx++) {
         __phraseSteps.n++;
-        const end = matchFrom(p.tokens, 0, chunks, idx);
-        if (end > idx) {
-          seen.add(p);
-          out.push({ ruleId: p.ruleId, span: { start: chunks[idx]!.start, end: chunks[end - 1]!.end } });
+        const word = keys[idx]!;
+        const seen = new Set<CompiledPattern>();
+        tryPatterns(compiled.exact.get(word), idx, seen);
+        for (const len of compiled.prefixLens) {
+          if (len > word.length) break;
+          tryPatterns(compiled.prefix.get(word.slice(0, len)), idx, seen);
         }
       }
-    };
-    for (let idx = 0; idx < chunks.length && out.length < PHRASE_MATCH_CAP; idx++) {
-      __phraseSteps.n++;
-      const word = chunks[idx]!.folded;
-      const seen = new Set<CompiledPattern>();
-      tryPatterns(compiled.exact.get(word), idx, seen);
-      for (const len of compiled.prefixLens) {
-        if (len > word.length) break;
-        tryPatterns(compiled.prefix.get(word.slice(0, len)), idx, seen);
-      }
-    }
-    return out;
+      for (let k = before; k < out.length; k++) known.add(`${out[k]!.ruleId}:${out[k]!.span.start}:${out[k]!.span.end}`);
+    });
+    return views.length > 1 ? out.sort((a, b) => a.span.start - b.span.start || a.span.end - b.span.end) : out;
   } catch {
     return [];
   }

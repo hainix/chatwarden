@@ -441,7 +441,12 @@ describe('suggestions', () => {
     expect(FILTER_SUGGESTIONS.relaxed).toEqual({});
     expect(resolveFilters(FILTER_SUGGESTIONS.standard).links?.action).toBe('flag');
     expect(resolveFilters(FILTER_SUGGESTIONS.standard).personalInfo?.action).toBe('mask');
-    expect(resolveFilters(FILTER_SUGGESTIONS.strict).links).toMatchObject({ action: 'refuse', newAccountDays: 2 });
+    expect(resolveFilters(FILTER_SUGGESTIONS.strict).links).toMatchObject({ action: 'refuse', unlisted: 'act', newAccountDays: null });
+    // No suggestion sets an account age that cannot act: `unlisted: 'act'` judges every unlisted link before the age is asked.
+    for (const [name, s] of Object.entries(FILTER_SUGGESTIONS)) {
+      const links = resolveFilters(s as FilterSettings).links;
+      if (links !== null) expect(links.newAccountDays === null || links.unlisted === 'allow', name).toBe(true);
+    }
     expect(resolveFilters(FILTER_SUGGESTIONS.strict).ratio?.action).toBe('mask');
     expect(resolveFilters(FILTER_SUGGESTIONS.rmt).phrases[0]).toMatchObject({ id: 'rmt', action: 'flag' });
     expect(filtersActive(resolveFilters(undefined))).toBe(false);

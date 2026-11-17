@@ -23,7 +23,43 @@ export const __foldSteps = { n: 0 };
 const SEPARATORS = '-_/\\|,;:!?()[]{}"~+=<>';
 
 /** The look-alikes, read only inside a word that holds a letter. */
-const LOOK_ALIKE: Readonly<Record<string, string>> = { '0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', $: 's' };
+const LOOK_ALIKE: Readonly<Record<string, string>> = { '0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', $: 's', '!': 'i', '|': 'l' };
+
+/**
+ * Lower case Cyrillic and Greek letters read as the Latin letter they look like: a small fixed table, applied after NFKC, so a rule for
+ * `gold` also catches the same word written with a Cyrillic o. A word written in those scripts folds the same way on both sides.
+ */
+const CONFUSABLE: Readonly<Record<string, string>> = {
+  '\u{430}': 'a', // Cyrillic a
+  '\u{432}': 'b', // ve
+  '\u{435}': 'e',
+  '\u{43a}': 'k',
+  '\u{43c}': 'm',
+  '\u{43d}': 'h', // en
+  '\u{43e}': 'o',
+  '\u{440}': 'p', // er
+  '\u{441}': 'c', // es
+  '\u{442}': 't', // te
+  '\u{443}': 'y', // u
+  '\u{445}': 'x', // ha
+  '\u{455}': 's', // dze
+  '\u{456}': 'i', // Byelorussian-Ukrainian i
+  '\u{458}': 'j',
+  '\u{4bb}': 'h', // shha
+  '\u{3b1}': 'a', // Greek alpha
+  '\u{3b2}': 'b', // beta
+  '\u{3b5}': 'e', // epsilon
+  '\u{3b7}': 'n', // eta
+  '\u{3b9}': 'i', // iota
+  '\u{3ba}': 'k', // kappa
+  '\u{3bc}': 'm', // mu
+  '\u{3bd}': 'v', // nu
+  '\u{3bf}': 'o', // omicron
+  '\u{3c1}': 'p', // rho
+  '\u{3c4}': 't', // tau
+  '\u{3c5}': 'u', // upsilon
+  '\u{3c7}': 'x', // chi
+};
 
 function isSpace(code: number): boolean {
   return code <= 0x20 || code === 0x85 || code === 0xa0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029 || code === 0x202f || code === 0x205f || code === 0x3000;
@@ -65,7 +101,10 @@ function isWordChar(ch: string): boolean {
 function foldPoint(ch: string): string {
   const c = ch.charCodeAt(0);
   if (c < 128) return c >= 65 && c <= 90 ? String.fromCharCode(c + 32) : ch;
-  return ch.normalize('NFKC').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  const plain = ch.normalize('NFKC').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  let out = '';
+  for (const p of plain) out += CONFUSABLE[p] ?? p;
+  return out;
 }
 
 interface Cell {
@@ -117,10 +156,22 @@ function foldRun(cells: Cell[]): Chunk | null {
 }
 
 /**
+ * Other readings of a line. The matcher tries the default one and these, and takes any hit:
+ * `split`: `.` and `*` end a word (`buy.gold` is two words; the default view joins `g.o.l.d` into one).
+ * `bang`: a `!` or `|` between two letters is the letter it imitates (`f!sh` is `fish`; the default view splits on it).
+ */
+export interface FoldOptions {
+  split?: boolean;
+  bang?: boolean;
+}
+
+/**
  * The words of `text`, folded, each with its range in `text`. Linear in the length of `text`; never throws. A word that folds to nothing
  * (punctuation alone) is left out.
  */
-export function foldChunks(text: string): Chunk[] {
+export function foldChunks(text: string, opts: FoldOptions = {}): Chunk[] {
+  const split = opts.split === true;
+  const bang = opts.bang === true;
   const chunks: Chunk[] = [];
   let cells: Cell[] = [];
   const flush = (): void => {
@@ -146,12 +197,50 @@ export function foldChunks(text: string): Chunk[] {
     // A folded code point can be several characters (a ligature) or none (a bare accent): each takes the original range.
     for (const ch of folded) {
       if (isSpace(ch.charCodeAt(0))) flush();
-      else if (SEPARATORS.includes(ch)) flush();
-      else cells.push({ ch, start, end: start + width });
+      else if (SEPARATORS.includes(ch) || (split && (ch === '.' || ch === '*'))) {
+        if (bang && (ch === '!' || ch === '|') && cells.length > 0 && isLetter(cells[cells.length - 1]!.ch) && at < text.length && isLetter(String.fromCodePoint(text.codePointAt(at)!))) cells.push({ ch, start, end: start + width });
+        else flush();
+      } else cells.push({ ch, start, end: start + width });
     }
   }
   flush();
   return chunks;
+}
+
+/**
+ * `chunks` with each run of three or more single-letter words joined into one (`g o l d`, `g_o_l_d`, `b-u-y`), or null when there is no
+ * such run. A reading of its own: the plain words stay as they are in the other views.
+ */
+export function mergeSpaced(chunks: readonly Chunk[]): Chunk[] | null {
+  const single = (c: Chunk): boolean => c.folded.length === 1 && isLetter(c.folded);
+  const out: Chunk[] = [];
+  let merged = false;
+  let i = 0;
+  while (i < chunks.length) {
+    __foldSteps.n++;
+    let j = i;
+    while (j < chunks.length && single(chunks[j]!)) j++;
+    if (j - i >= 3) {
+      // A lone `a` or `i` next to the run is most likely a word of its own ("i g o l d"), kept apart when three letters remain.
+      let lo = i;
+      let hi = j;
+      const lead = chunks[lo]!.folded === 'a' || chunks[lo]!.folded === 'i';
+      const tail = chunks[hi - 1]!.folded === 'a' || chunks[hi - 1]!.folded === 'i';
+      if (lead && hi - lo - 1 >= 3) out.push(chunks[lo++]!);
+      const peelTail = tail && hi - lo - 1 >= 3;
+      if (peelTail) hi--;
+      let folded = '';
+      for (let k = lo; k < hi; k++) folded += chunks[k]!.folded;
+      out.push({ folded, start: chunks[lo]!.start, end: chunks[hi - 1]!.end });
+      if (peelTail) out.push(chunks[hi]!);
+      merged = true;
+      i = j;
+    } else {
+      out.push(chunks[i]!);
+      i++;
+    }
+  }
+  return merged ? out : null;
 }
 
 /** The folded form of a single word, or null when it is not exactly one word (it holds a separator, or folds to nothing). */

@@ -1,5 +1,5 @@
 import type { ResolvedPersonalInfo } from '../filters.js';
-import { dotAt } from './chars.js';
+import { dotAt, isHiddenCode } from './chars.js';
 import type { FilterSpan } from './fold.js';
 import { CONTACT_LEADS, STREET_WORDS, STRONG_TLDS, WEAK_TLDS } from './lists.js';
 
@@ -401,24 +401,58 @@ function scanAddresses(t: string, toks: readonly Token[], out: PersonalMatch[]):
   }
 }
 
+/** The text a detector reads: no hidden characters, NFKC (full-width digits, `@` and dots read as the ASCII they imitate), and where each unit came from. */
+interface View {
+  text: string;
+  /** For each unit of `text`, the range of the code point it came from in the original line. */
+  from: number[];
+  to: number[];
+}
+
+/** Build the normalized view of `t`. A code point that folds to several characters (a ligature) gives each the original range; linear. */
+function normalizedView(t: string): View {
+  let text = '';
+  const from: number[] = [];
+  const to: number[] = [];
+  let at = 0;
+  while (at < t.length && text.length < PERSONAL_LINE_CAP) {
+    __personalSteps.n++;
+    const code = t.codePointAt(at)!;
+    const width = code > 0xffff ? 2 : 1;
+    const start = at;
+    at += width;
+    if (isHiddenCode(code)) continue;
+    const plain = code < 0x80 ? t.charAt(start) : t.slice(start, start + width).normalize('NFKC');
+    for (let k = 0; k < plain.length; k++) {
+      text += plain.charAt(k);
+      from.push(start);
+      to.push(start + width);
+    }
+  }
+  return { text, from, to };
+}
+
 /**
- * The personal details in `text` that the settings look for, in text order, at most 50: where each is, on the original text. `address` is
+ * The personal details in `text` that the settings look for, in text order, at most 50: where each is, on the original text (a detail
+ * written with a hidden character in it, or in full-width characters, is found, and its range covers all of it). `address` is
  * reported only when the settings turn it on; whether it may hide or refuse is the settings' rule (it may only count or flag), not this
  * scan's. Reads at most 2 000 characters. Never throws.
  */
 export function scanPersonal(text: string, cfg: ResolvedPersonalInfo): PersonalMatch[] {
   if (typeof text !== 'string' || text.length === 0) return [];
   try {
-    const t = text.length > PERSONAL_LINE_CAP ? text.slice(0, PERSONAL_LINE_CAP) : text;
-    const out: PersonalMatch[] = [];
-    if (cfg.kinds.includes('email')) scanEmails(t, out);
-    if (cfg.kinds.includes('phone')) scanPhones(t, cfg.phone, out);
-    if (cfg.kinds.includes('card')) scanCards(t, out);
+    const view = normalizedView(text.length > PERSONAL_LINE_CAP ? text.slice(0, PERSONAL_LINE_CAP) : text);
+    const t = view.text;
+    const found: PersonalMatch[] = [];
+    if (cfg.kinds.includes('email')) scanEmails(t, found);
+    if (cfg.kinds.includes('phone')) scanPhones(t, cfg.phone, found);
+    if (cfg.kinds.includes('card')) scanCards(t, found);
     if (cfg.kinds.includes('contact') || cfg.address !== null) {
       const toks = tokens(t);
-      if (cfg.kinds.includes('contact')) scanContacts(t, toks, out);
-      if (cfg.address !== null) scanAddresses(t, toks, out);
+      if (cfg.kinds.includes('contact')) scanContacts(t, toks, found);
+      if (cfg.address !== null) scanAddresses(t, toks, found);
     }
+    const out = found.map((m) => ({ detail: m.detail, span: { start: view.from[m.span.start]!, end: view.to[m.span.end - 1]! } }));
     out.sort((a, b) => a.span.start - b.span.start || a.span.end - b.span.end);
     return out.length > PERSONAL_MATCH_CAP ? out.slice(0, PERSONAL_MATCH_CAP) : out;
   } catch {

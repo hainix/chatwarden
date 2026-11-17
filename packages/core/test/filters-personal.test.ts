@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveFilters, type ResolvedPersonalInfo } from '../src/filters.js';
-import { scanPersonal } from '../src/filters/personal.js';
+import { maskSpans } from '../src/mask.js';
+import { __personalSteps, scanPersonal } from '../src/filters/personal.js';
 
 const cfg = (extra: Record<string, unknown> = {}): ResolvedPersonalInfo => resolveFilters({ personalInfo: { action: 'mask', ...extra } } as never).personalInfo!;
 const details = (text: string, c: ResolvedPersonalInfo = cfg()): string[] => scanPersonal(text, c).map((m) => m.detail);
@@ -175,5 +176,105 @@ describe('kinds', () => {
 
   it('only the first 2 000 characters are read', () => {
     expect(scanPersonal(`${'x '.repeat(1100)}a@b.com`, cfg())).toEqual([]);
+  });
+});
+
+describe('hidden characters and full-width forms (the scan reads a normalized view, the span covers the original)', () => {
+  const ZW = '\u{200b}';
+  const mask = (text: string, c: ResolvedPersonalInfo = cfg()): string => {
+    const spans = scanPersonal(text, c).map((m) => m.span);
+    return maskSpans(text, spans);
+  };
+
+  it('a zero-width character inside a phone does not hide it, and the mask covers the whole number', () => {
+    for (const hide of [ZW, '\u{200d}', '\u{feff}', '\u{2060}', '\u{ad}']) {
+      const text = `call 5${hide}55 010 9999 now`;
+      expect(hits(text, 'phone'), JSON.stringify(hide)).toBe(true);
+      expect(mask(text), JSON.stringify(hide)).toBe(`call ${'*'.repeat(13)} now`);
+    }
+  });
+
+  it('a zero-width character in every position of a phone', () => {
+    const phone = '555 010 9999';
+    for (let i = 1; i < phone.length; i++) {
+      const text = `x ${phone.slice(0, i)}${ZW}${phone.slice(i)} y`;
+      expect(mask(text), `at ${i}`).toBe(`x ${'*'.repeat(phone.length + 1)} y`);
+    }
+  });
+
+  it('full-width digits are a phone, and the mask stars them', () => {
+    const text = 'call \u{ff15}\u{ff15}\u{ff15} \u{ff10}\u{ff11}\u{ff10} \u{ff19}\u{ff19}\u{ff19}\u{ff19} now';
+    expect(hits(text, 'phone')).toBe(true);
+    expect(mask(text)).toBe('call ************ now');
+  });
+
+  it('a zero-width character inside a card number', () => {
+    const text = `pay 4111${ZW} 1111 1111${ZW}1111 ok`;
+    expect(details(text)).toEqual(['card']);
+    expect(mask(text)).toBe(`pay ${'*'.repeat(20)} ok`);
+  });
+
+  it('full-width digits are a card', () => {
+    const text = '\u{ff14}\u{ff11}\u{ff11}\u{ff11} 1111 1111 1111';
+    expect(details(text)).toEqual(['card']);
+  });
+
+  it('a zero-width character inside the local part and the domain of an email', () => {
+    const a = `mail bob${ZW}@mail.com please`;
+    const b = `mail bob@mail${ZW}.com please`;
+    const c = `mail b${ZW}ob@ma${ZW}il.c${ZW}om please`;
+    for (const text of [a, b, c]) {
+      expect(hits(text, 'email'), JSON.stringify(text)).toBe(true);
+      expect(mask(text), JSON.stringify(text)).toBe(`mail ${'*'.repeat(text.length - 'mail '.length - ' please'.length)} please`);
+    }
+  });
+
+  it('a full-width at sign and full-width dots are an email', () => {
+    expect(hits('bob\u{ff20}mail.com', 'email')).toBe(true);
+    expect(hits('bob@mail\u{ff0e}com', 'email')).toBe(true);
+    expect(mask('x bob\u{ff20}mail.com y')).toBe('x ************ y');
+  });
+
+  it('a defanged email with a zero-width character inside still matches, and the span covers it', () => {
+    const text = `bob${ZW} [at] mail [dot] com`;
+    expect(hits(text, 'email')).toBe(true);
+    expect(mask(text)).toBe('*'.repeat(text.length));
+  });
+
+  it('a contact line with a full-width letter or a hidden character is read', () => {
+    expect(hits(`sn${ZW}ap john_doe99`, 'contact')).toBe(true);
+    expect(hits(`snap jo${ZW}hn_doe99`, 'contact')).toBe(true);
+  });
+
+  it('controls: ordinary text with a hidden character or a full-width character is still no personal detail', () => {
+    expect(details(`hello${ZW} world ${ZW}`)).toEqual([]);
+    expect(details('it was \u{ff11}\u{ff12}\u{ff13} ok')).toEqual([]); // 3 digits
+    expect(details(`5${ZW}5 5${ZW}5`)).toEqual([]); // 4 digits
+    expect(details(`2024${ZW}-11-17`)).toEqual([]); // a date
+    expect(details(`100${ZW} 200 300 400`)).toEqual([]); // stepped
+    expect(details(`bob${ZW} at mail dot com`)).toEqual([]); // a bare "at" is never read
+    expect(details('bob\u{ff20} mail.com')).toEqual([]); // a space after the at sign
+    expect(details(`bob@${ZW}`)).toEqual([]);
+    expect(details(`A5${ZW}55-010-9999`)).toEqual([]); // glued to a letter
+  });
+
+  it('spans are in text order, on the original text, and never inside a surrogate pair', () => {
+    const text = `\u{1f600}${ZW} 555${ZW} 010 9999 \u{1f600} a${ZW}@b.com`;
+    const r = scanPersonal(text, cfg());
+    expect(r.map((m) => m.detail)).toEqual(['phone', 'email']);
+    for (const m of r) {
+      expect(m.span.start).toBeLessThan(m.span.end);
+      expect(text.slice(m.span.start, m.span.end)).toMatch(/\d|@/);
+    }
+  });
+
+  it('the work stays linear with hidden characters in the line', () => {
+    const line = (n: number): string => `5${ZW}55 `.repeat(n);
+    __personalSteps.n = 0;
+    scanPersonal(line(100), cfg());
+    const small = __personalSteps.n;
+    __personalSteps.n = 0;
+    scanPersonal(line(400), cfg());
+    expect(__personalSteps.n).toBeLessThanOrEqual(small * 5);
   });
 });

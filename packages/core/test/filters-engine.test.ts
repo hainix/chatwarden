@@ -239,6 +239,25 @@ describe('ignore', () => {
   it('every occurrence is blanked', () => {
     expect(keys(ev({ links: { action: 'count' }, ignore: ['zorbak.com'] }, 'zorbak.com and zorbak.com and ZORBAK.COM'))).toEqual([]);
   });
+
+  it('an ignored phrase is a whole token: a longer name that contains it is still read', () => {
+    const f: FilterSettings = { links: { action: 'count' }, ignore: ['discord.gg/ours'] };
+    expect(keys(ev(f, 'join discord.gg/ours now'))).toEqual([]);
+    expect(keys(ev(f, 'join https://discord.gg/ours now'))).toEqual([]);
+    expect(keys(ev(f, 'join discord.gg/ours, thanks'))).toEqual([]);
+    expect(keys(ev(f, 'join discord.gg/ours/extra now'))).toEqual([]);
+    expect(keys(ev(f, 'join discord.gg/ours123 now')), 'a longer invite code').toEqual(['link.invite']);
+    expect(keys(ev(f, 'join xdiscord.gg/ours now')), 'a longer host').toEqual(['link.unlisted']);
+    expect(keys(ev(f, 'join discord.gg/ours-evil now')), 'a hyphen continues the name').toEqual(['link.invite']);
+    expect(keys(ev(f, 'join discord.gg/ours_x now'))).toEqual(['link.invite']);
+    expect(keys(ev({ links: { action: 'count' }, ignore: ['ours.com'] }, 'see ours.com.evil.net now')), 'a dot and more name').toEqual(['link.unlisted']);
+    expect(keys(ev({ links: { action: 'count' }, ignore: ['ours.com'] }, 'see ours.com. now')), 'a sentence ending').toEqual([]);
+  });
+
+  it('a phrase that ends with a mark may be followed by anything', () => {
+    expect(keys(ev({ links: { action: 'count' }, ignore: ['e.g.'] }, 'see e.g.com or zorbak.com'))).toEqual(['link.unlisted']);
+    expect(keys(ev({ links: { action: 'count' }, ignore: ['zorbak.com/'] }, 'go zorbak.com/x'))).toEqual([]);
+  });
 });
 
 describe('limits', () => {
