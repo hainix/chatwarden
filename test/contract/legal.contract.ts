@@ -409,21 +409,22 @@ export function legalContract(name: string, make: () => Store): void {
       });
     });
 
-    describe('export lists the holds of the person', () => {
-      it('a held report about or by the person is listed with its id, time and code; a released one is not', async () => {
+    describe('export counts the holds of the person (and says nothing else about them)', () => {
+      it('a held report about or by the person is counted, with no id, time or code; a released one is not', async () => {
         const s = make();
         await build(s, 'rA', 's_a');
         await build(s, 'rB', 's_b');
         s.placeHold(hold('rA', { code: 'safety_review', heldAt: NOW - 7 }));
         s.placeHold(hold('rB'));
-        expect(s.exportSubjects(['s_a']).holds).toEqual([{ reportId: 'rA', at: NOW - 7, code: 'safety_review' }]);
+        expect(s.exportSubjects(['s_a']).holds).toEqual({ reports: 1 });
+        expect(JSON.stringify(s.exportSubjects(['s_a']).holds)).not.toContain('safety_review');
         s.releaseHold('rA', 'o', NOW);
-        expect(s.exportSubjects(['s_a']).holds).toEqual([]);
+        expect(s.exportSubjects(['s_a']).holds).toEqual({ reports: 0 });
         const filed = make();
         await filed.saveSubject({ id: 's_rep', createdAt: OLD, mergedInto: null });
         filed.insertReport(report('rF', 's_x', { reporterSubject: 's_rep' }));
         filed.placeHold(hold('rF'));
-        expect(filed.exportSubjects(['s_rep']).holds.map((h) => h.reportId)).toEqual(['rF']);
+        expect(filed.exportSubjects(['s_rep']).holds).toEqual({ reports: 1 });
       });
     });
   });

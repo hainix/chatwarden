@@ -61,11 +61,15 @@ class MemoryLinks extends MemoryStore {
 
   // Privacy (0.2.0): `MemoryStore.eraseSubjects` calls this when the wrapper is present. Not part of the Store interface.
 
-  /** Delete the Coop links that name one of these (deleted) reports. Returns how many. */
-  privacyEraseLinks(reportIds: ReadonlySet<string>): number {
+  /**
+   * Delete the Coop links that name one of these (deleted) reports, and the EOS sanction links keyed by one of these (deleted) sanction groups (`<group id>#<hash>`).
+   * An EOS report link is a hash of the report's own fields and stays. Returns how many.
+   */
+  privacyEraseLinks(reportIds: ReadonlySet<string>, goneGroups: ReadonlySet<string>): number {
     const rows = this.links;
     if (rows === undefined) return 0;
-    const keep = [...rows].filter(([, r]) => !(r.system === 'coop-report' && reportIds.has(r.ref)));
+    const eosGroup = (ref: string): string => ref.slice(0, Math.max(0, ref.indexOf('#')));
+    const keep = [...rows].filter(([, r]) => !((r.system === 'coop-report' && reportIds.has(r.ref)) || (r.system === 'eos-sanction' && goneGroups.has(eosGroup(r.ref)))));
     const n = rows.size - keep.length;
     if (n === 0) return 0;
     this.links = new Map(keep);

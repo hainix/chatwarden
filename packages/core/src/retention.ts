@@ -234,13 +234,21 @@ function checkWindow(name: string, ms: number): void {
  *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn. The four message kinds: seen, as a report outcome;
  *   unseen, kept until the longer of `noticesMs` and `appealsMs` (appeal outcomes) or of `noticesMs` and `auditMs` (a required rename).
  *
- * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are never touched. The in-memory
- * indexes need no update: they already ignore everything this removes.
+ * - erasures: a pending erase (one that kept a remainder for a sanction in force) is finished once nothing keeps the person: their sanction rows are gone, or
+ *   the only ones left are held by a legal hold and are not in force. Finishing deletes the person's subject and identifier rows. Rows of a subject that has no
+ *   subject row (written by a process that had not heard of an erase) are swept once they are older than ten minutes, unless `sweepStrays` is false.
+ *
+ * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are otherwise never touched (only the finish of an erase and the stray sweep delete
+ * subject-keyed rows). The in-memory indexes need no update: they already ignore everything this removes.
+ *
+ * `options.sweepStrays` (default true) is false when the caller knows a person made in its own process has not been written to the store yet (the save failed): the
+ * rows of that person look like strays until the subject row exists, so the sweep waits.
  */
 export async function purge(
   store: Store,
   now: number,
   policy: Partial<RetentionPolicy> = {},
+  options: { sweepStrays?: boolean } = {},
 ): Promise<PurgeResult> {
   const p: RetentionPolicy = {
     reportsMs: policy.reportsMs ?? RETENTION_DEFAULTS.reportsMs,
@@ -310,8 +318,8 @@ export async function purge(
     // erased, written by a process that had not yet heard) needs the persons' rows to be gone first. A stray younger than ten minutes is kept: a subject row can trail its first
     // strike by a moment.
     let erasuresFinished = 0;
-    for (const pending of store.loadPendingErasures()) if (store.finishErasure(pending.id)) erasuresFinished += 1;
-    const strayRows = store.purgeStrayRows(now - STRAY_AGE_MS);
+    for (const pending of store.loadPendingErasures()) if (store.finishErasure(pending.id, now)) erasuresFinished += 1;
+    const strayRows = options.sweepStrays === false ? 0 : store.purgeStrayRows(now - STRAY_AGE_MS);
     return { ...result, erasuresFinished, strayRows };
   });
 }

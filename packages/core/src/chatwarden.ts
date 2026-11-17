@@ -1306,7 +1306,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
    * The timer and `cw.purge()` both run it.
    */
   const runPurge = async (policyNow: Partial<RetentionPolicy>): Promise<PurgeResult> => {
-    const result = await purge(store, clock.now(), policyNow);
+    // A person made in this process whose save to the store failed has rows that look like strays: write them first (the index retries on a flush), and when one is
+    // still unsaved leave the sweep for the next pass rather than delete the rows of a person who is playing right now.
+    await subjects.flush();
+    const result = await purge(store, clock.now(), policyNow, { sweepStrays: !subjects.hasUnsaved() });
+    // The sweep is visible: a count and nothing else (no id, no line), so an integration that writes rows for people it never saved shows up in the log.
+    if (result.strayRows > 0) safeWarn(logger, 'chatwarden.stray_rows_swept', { count: result.strayRows });
     if (result.erasuresFinished > 0 || result.strayRows > 0) await subjects.refresh();
     return result;
   };
@@ -1472,6 +1477,22 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     emit: (event) => bus.emit(event),
   });
 
+  // What the kit holds in memory about erased people (not the subject index itself): evidence lines, caches, pacing, claims and the sanction and mute indexes, and with
+  // `whole` the room seats. The store rows are the store's.
+  const forgetInMemory = (people: ReadonlySet<SubjectId>, whole: boolean): void => {
+    const reloaded = (what: string) => (err: unknown) => safeWarn(logger, 'chatwarden.privacy_failed', { error: err instanceof Error ? err.name : typeof err, what });
+    buffer.scrub(people);
+    chat.forgetPeople(people);
+    strikes.forgetPeople(people);
+    notices.forgetPeople(people);
+    signals.forgetPeople?.(people);
+    desk.forgetPeople(people);
+    // The sanction and mute indexes are read back from the store: a sanction the remainder keeps still applies, one that went stops at once.
+    sanctions.load(store, clock.now()).catch(reloaded('sanctions'));
+    mutes.load().catch(reloaded('mutes'));
+    if (whole) roster.forget(people);
+  };
+
   // Privacy requests. `forget` is what the kit holds in memory about an erased person; the store rows are the store's (see `PrivacyDeps.forget`).
   const privacy = createPrivacy({
     store,
@@ -1482,22 +1503,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     audit: (input) => audit.record(input),
     retention: () => retentionPolicy,
     forget: (people, whole) => {
-      const reloaded = (what: string) => (err: unknown) => safeWarn(logger, 'chatwarden.privacy_failed', { error: err instanceof Error ? err.name : typeof err, what });
-      buffer.scrub(people);
-      chat.forgetPeople(people);
-      strikes.forgetPeople(people);
-      notices.forgetPeople(people);
-      signals.forgetPeople?.(people);
-      desk.forgetPeople(people);
-      // The sanction and mute indexes are read back from the store: a sanction the remainder keeps still applies, one that went stops at once.
-      sanctions.load(store, clock.now()).catch(reloaded('sanctions'));
-      mutes.load().catch(reloaded('mutes'));
-      if (whole) {
-        roster.forget(people);
-        subjects.forget(people);
-      }
+      forgetInMemory(people, whole);
+      if (whole) subjects.forget(people);
     },
   });
+  // The same fix-up for people the subject index learns are gone because ANOTHER process erased them (a reload after the epoch moved): their room seats become
+  // guests and every cache lets go, so a seat of an erased person never keeps writing rows under the dead id.
+  subjects.onGone = (gone) => forgetInMemory(gone, true);
 
   return {
     ai,

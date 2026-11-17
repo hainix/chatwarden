@@ -37,7 +37,7 @@ function bodyErase(body: Record<string, unknown>): { keep: 'safety' | 'none'; co
  *   not exactly `{ accountId }`. Audits `privacy.find` with no target (the account id is never recorded), best-effort.
  * - `GET /people/:ref/privacy/export`: everything the kit holds about the person (the canonical subject and every alias) as one JSON attachment (`content-disposition: attachment`),
  *   see `cw.privacy.export`. 404 `not_found` for a person the kit does not hold. Audits `privacy.export` on the person and the audit is REQUIRED: no audit, no export (500).
- * - `POST /people/:ref/privacy/erase { keep: 'safety' | 'none', confirm, dryRun? }`: erases the person, see `cw.privacy.erase`. `confirm` must equal the person's canonical ref (400
+ * - `POST /people/:ref/privacy/erase { keep: 'safety' | 'none', confirm, dryRun? }`: erases the person, see `cw.privacy.erase`. `confirm` must equal the person's ref (the one in the path, or the canonical one when that was merged away) (400
  *   `confirm_mismatch`); 400 `invalid_request` for a bad `keep` or any other key (an actor is never read from the body); 404 `not_found` for a person the kit does not hold. With
  *   `dryRun: true` the body is what would be removed and kept (`{ dryRun: true, mode, removed, kept }`) and nothing is written, audited or counted. Otherwise the body is the receipt
  *   (`{ id, at, mode, removed, kept, auditFailed? }`: counts and words, no subject, no line, no account). Core audits `privacy.erase` after the commit (the person's ref is the receipt id
@@ -71,7 +71,8 @@ export function privacyRoutes(ctx: AdminContext): RouteTable {
       requireOwner(c);
       const ref = c.params.ref as string;
       const ask = bodyErase(bodyObject(c.req));
-      if (ask.confirm !== cw.people.canonical(ref)) throw new HttpError('confirm_mismatch');
+      // The ref in the path may be an id that was merged away (a page opened on an alias), so the person's own ref is accepted as the confirm too; nobody else's is.
+      if (ask.confirm !== ref && ask.confirm !== cw.people.canonical(ref)) throw new HttpError('confirm_mismatch');
       const out = await cw.privacy.erase(ref, { keep: ask.keep, actor: c.authz.actor, ...(ask.dryRun ? { dryRun: true } : {}) });
       if ('ok' in out) {
         if (out.error === 'not_found') throw new NotFoundError();

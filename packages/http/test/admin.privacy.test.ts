@@ -163,6 +163,42 @@ describe('POST /people/:ref/privacy/erase', () => {
     expect(w.routeAudit().filter((x) => x.action === 'privacy.erase')).toEqual([]);
   });
 
+  it('a merged-away ref is accepted too: the page may be open on an alias, so the confirm may be the ref in the path or the canonical one; anything else is still refused', async () => {
+    const w = await world();
+    w.cw.rooms.seat('RM', 'p1', { clientKey: 'key-m1' }, 'M1');
+    w.cw.rooms.seat('RM', 'p2', { clientKey: 'key-m2', accountId: 'acct-m' }, 'M2');
+    await w.cw.flush();
+    const s1 = w.cw.rooms.subjectAt('RM', 'p1') as string;
+    const s2 = w.cw.rooms.subjectAt('RM', 'p2') as string;
+    expect(s1).not.toBe(s2);
+    // the first player now presents the second one's account: the kit merges the two subjects
+    w.cw.rooms.seat('RM', 'p1', { clientKey: 'key-m1', accountId: 'acct-m' }, 'M1');
+    await w.cw.flush();
+    const root = w.cw.people.canonical(s1);
+    expect(w.cw.people.canonical(s2)).toBe(root);
+    const alias = [s1, s2].find((id) => id !== root) as string;
+    expect(alias).toBeDefined();
+    // the confirm is the ref the owner opened (an alias) or the canonical one: both do for a dry run
+    for (const confirm of [alias, root]) {
+      const r = await w.call('POST', erasePath(alias), { ...OWNER, body: { keep: 'none', confirm, dryRun: true } });
+      expect(r.status, confirm).toBe(200);
+    }
+    // another person's ref, or a near miss, is not accepted
+    const other = await target(w);
+    for (const confirm of [other.target, `${alias}x`, '']) {
+      const r = await w.call('POST', erasePath(alias), { ...OWNER, body: { keep: 'none', confirm, dryRun: true } });
+      expect(r.status, confirm).toBe(400);
+      expect(errorOf(r)).toBe('confirm_mismatch');
+    }
+    // and the real erase with the alias as the confirm erases the whole person
+    const done = await w.call('POST', erasePath(alias), { ...OWNER, body: { keep: 'none', confirm: alias } });
+    expect(done.status).toBe(200);
+    const left = (await w.store.loadSubjects()).subjects.map((s) => s.id);
+    expect(left).not.toContain(s1);
+    expect(left).not.toContain(s2);
+    expect(left).toContain(other.target);
+  });
+
   it.each([
     ['a keep that is neither', { keep: 'some', confirm: 'REF' }],
     ['no keep', { confirm: 'REF' }],

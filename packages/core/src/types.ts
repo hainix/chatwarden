@@ -1817,11 +1817,12 @@ export interface Store {
   loadPendingErasures(): ErasureRow[];
 
   /**
-   * Finish a pending erase when the person has no sanction row left (any state): delete the subject and identifier rows, rewrite the audit refs to the receipt
-   * id, clear `pendingSubject` and move the erasure epoch. Returns true when this call finished it; false (nothing changed) for an unknown or already finished
-   * receipt or while a sanction row remains.
+   * Finish a pending erase when nothing keeps the person any more: no sanction row of theirs is left, except rows a legal hold keeps that are not in force at `at`
+   * (a held row that has ended or was revoked stays, and does not hold the erase back; one still in force does). Then delete the subject and identifier rows,
+   * rewrite the audit refs to the receipt id, clear `pendingSubject` and move the erasure epoch. Returns true when this call finished it; false (nothing changed)
+   * for an unknown or already finished receipt or while a sanction row keeps the person.
    */
-  finishErasure(id: string): boolean;
+  finishErasure(id: string, at: number): boolean;
 
   /**
    * Delete the strike, signal, notice and kept-name rows whose subject has no subject row (written by a process that had not yet learned the person was erased, or in

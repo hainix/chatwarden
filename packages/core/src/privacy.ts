@@ -63,6 +63,12 @@ export interface PrivacyRule {
   eraseNone: string;
   /** The clock the rows live on when nobody erases them. */
   retention: PrivacyClock;
+  /**
+   * The columns that hold a person INSIDE a JSON value (an id, a handle, a line, a sanction group), as `table.column`. A table can be claimed above and still hide a
+   * person in such a column (a decision's result names every player it sanctioned), so the completeness test lists every `_json` column of the database and fails
+   * for one that is neither here nor in {@link NO_PERSON_JSON_COLUMNS}; the erase rewrites each one named here.
+   */
+  jsonColumns: readonly string[];
 }
 
 /**
@@ -78,6 +84,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Kept only while a sanction is in force on the person; deleted otherwise.',
     eraseNone: 'Deleted.',
     retention: null,
+    jsonColumns: [],
   },
   {
     category: 'identifiers',
@@ -86,14 +93,16 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Kept (hashes and account ids) only while a sanction is in force on the person, so a ban still applies at the door; deleted otherwise.',
     eraseNone: 'Deleted.',
     retention: null,
+    jsonColumns: [],
   },
   {
     category: 'sanctions',
-    tables: ['kit_sanctions'],
+    tables: ['kit_sanctions', 'kit_webhook_keys'],
     export: 'Kind, rule, reason, times, reference code, source and whether it was revoked. Never which staff member.',
-    eraseSafety: 'A sanction in force is kept as stored; an ended or revoked one is deleted, with its address rows.',
-    eraseNone: 'Deleted, a sanction in force included: a ban the person is under stops applying.',
+    eraseSafety: 'A sanction in force is kept as stored; an ended or revoked one is deleted, with its address rows and the stored answer of a webhook that applied it.',
+    eraseNone: 'Deleted, a sanction in force included: a ban the person is under stops applying. The stored answer of a webhook that applied it is blanked.',
     retention: 'sanctionAfterEndMs',
+    jsonColumns: ['kit_webhook_keys.result_json'],
   },
   {
     category: 'notices',
@@ -102,6 +111,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'The notice of a sanction in force is kept with its quoted lines cleared; the others are deleted.',
     eraseNone: 'Deleted.',
     retention: 'noticesMs',
+    jsonColumns: ['kit_notices.excerpt_json'],
   },
   {
     category: 'reports_filed',
@@ -110,14 +120,16 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'The person is removed from the report (who, seat, name and note); the report stays for the player it is about.',
     eraseNone: 'The person is removed from the report; the report stays for the player it is about.',
     retention: 'reportsMs',
+    jsonColumns: [],
   },
   {
     category: 'reports_about',
     tables: ['kit_reports', 'kit_decisions'],
     export: 'Reports about the person: category, reason, time, status, outcome, and only the lines the person wrote.',
-    eraseSafety: 'Deleted, with their decisions, AI reads, outcomes and links, except a report held for legal reasons.',
-    eraseNone: 'Deleted, with their decisions, AI reads, outcomes and links, except a report held for legal reasons.',
+    eraseSafety: 'Deleted, with their decisions, AI reads, outcomes and links, except a report held for legal reasons. Where the decision of a report that stays names the person, that entry is removed.',
+    eraseNone: 'Deleted, with their decisions, AI reads, outcomes and links, except a report held for legal reasons. Where the decision of a report that stays names the person, that entry is removed.',
     retention: 'reportsMs',
+    jsonColumns: ['kit_decisions.result_json'],
   },
   {
     category: 'report_lines',
@@ -126,6 +138,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Lines of the person inside the reports of other players are replaced by a marker.',
     eraseNone: 'Lines of the person inside the reports of other players are replaced by a marker.',
     retention: 'reportsMs',
+    jsonColumns: ['kit_reports.people_json', 'kit_reports.excerpt_json'],
   },
   {
     category: 'strikes',
@@ -134,6 +147,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Deleted.',
     eraseNone: 'Deleted.',
     retention: 'strikesMs',
+    jsonColumns: [],
   },
   {
     category: 'mutes',
@@ -142,6 +156,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Deleted, in both directions.',
     eraseNone: 'Deleted, in both directions.',
     retention: null,
+    jsonColumns: [],
   },
   {
     category: 'blocked_names',
@@ -150,6 +165,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Deleted.',
     eraseNone: 'Deleted.',
     retention: 'blockedNamesMs',
+    jsonColumns: [],
   },
   {
     category: 'appeals',
@@ -158,6 +174,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Deleted, except an appeal on a sanction group held for legal reasons.',
     eraseNone: 'Deleted, except an appeal on a sanction group held for legal reasons.',
     retention: 'appealsMs',
+    jsonColumns: [],
   },
   {
     category: 'signals',
@@ -166,22 +183,25 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Deleted, the rows about the person and the rows the person caused.',
     eraseNone: 'Deleted, the rows about the person and the rows the person caused.',
     retention: 'signalsMs',
+    jsonColumns: [],
   },
   {
     category: 'ai',
     tables: ['kit_ai_reads', 'kit_ai_outcomes', 'kit_ai_actions', 'kit_ai_noauto'],
     export: 'Whether the person is marked "do not automate" (the code only), how many AI reads were made about their reports and the outcome codes.',
-    eraseSafety: 'Deleted with the reports they belong to; the mark is deleted.',
-    eraseNone: 'Deleted with the reports they belong to; the mark is deleted.',
+    eraseSafety: 'Deleted with the reports they belong to, and the reads of a report the person filed; the mark is deleted.',
+    eraseNone: 'Deleted with the reports they belong to, and the reads of a report the person filed; the mark is deleted.',
     retention: 'aiOutcomesMs',
+    jsonColumns: ['kit_ai_outcomes.example_json'],
   },
   {
     category: 'workflow',
     tables: ['kit_claims', 'kit_discord_threads', 'kit_links'],
     export: 'Not exported: these are staff workflow rows.',
-    eraseSafety: 'Deleted: a claim on the case, the Discord thread map entry and the links to deleted reports.',
-    eraseNone: 'Deleted: a claim on the case, the Discord thread map entry and the links to deleted reports.',
+    eraseSafety: 'Deleted: a claim on the case, the Discord thread map entry, the links to deleted reports and the EOS link of a deleted sanction. An EOS report link is only a hash of the report and stays until it ages out.',
+    eraseNone: 'Deleted: a claim on the case, the Discord thread map entry, the links to deleted reports and the EOS link of a deleted sanction. An EOS report link is only a hash of the report and stays until it ages out.',
     retention: null,
+    jsonColumns: [],
   },
   {
     category: 'audit',
@@ -190,14 +210,16 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Kept (ids and codes only). The reference to the person is replaced by the receipt id once nothing keeps the person.',
     eraseNone: 'Kept (ids and codes only). The reference to the person is replaced by the receipt id.',
     retention: 'auditMs',
+    jsonColumns: [],
   },
   {
     category: 'holds',
     tables: ['kit_legal_holds'],
-    export: 'Reports about or by the person that are held for legal reasons: id, time and code.',
-    eraseSafety: 'Kept whole: a hold is a legal duty the kit cannot weigh.',
-    eraseNone: 'Kept whole: a hold is a legal duty the kit cannot weigh.',
+    export: 'Only how many reports about or by the person are held, never why.',
+    eraseSafety: 'Kept whole: a hold the kit does not weigh.',
+    eraseNone: 'Kept whole: a hold the kit does not weigh.',
     retention: null,
+    jsonColumns: [],
   },
 ];
 
@@ -211,11 +233,28 @@ export const NO_PERSON_TABLES: Readonly<Record<string, string>> = {
   kit_term_exceptions: 'The own word exceptions of the adopter.',
   kit_policy_layer: 'The settings of the adopter.',
   kit_reasons: 'Saved decision reasons; staff wording.',
-  kit_webhook_keys: 'Idempotency keys of incoming webhooks; a key and a result code, removed after a day.',
   kit_filter_hits: 'Chat-filter counters by day, rule and action; never keyed by person, room or text.',
   kit_ai_acting: 'One row: the AI acting mode.',
   kit_ai_spend: 'Money ledger of AI calls; no person.',
   kit_erasures: 'Erasure receipts: counts only; the pending subject is cleared when an erase finishes.',
+};
+
+/**
+ * The `_json` columns that hold no person, with the reason: the counterpart of a rule's `jsonColumns`. The completeness test lists every `_json` column of every
+ * `kit_` table and fails for one that is in neither, and the data test checks that none of these holds a seeded person.
+ * @experimental
+ */
+export const NO_PERSON_JSON_COLUMNS: Readonly<Record<string, string>> = {
+  'kit_reports.tags_json': 'The room tags the game gave (mode, region): never a person.',
+  'kit_audit.before_json': 'The earlier value of a changed setting: settings only.',
+  'kit_audit.after_json': 'The new value of a changed setting: settings only.',
+  'kit_audit.detail_json': 'The sections and the reason of a settings change: settings only, never a person.',
+  'kit_policy_layer.layer_json': 'The settings of the adopter.',
+  'kit_ai_reads.evidence_json': 'Line numbers of the lines the AI cited: no person.',
+  'kit_ai_reads.rec_json': 'The AI verdict, severity, rule and line numbers: no person.',
+  'kit_ai_reads.signals_json': 'Counts the AI was shown (label, polarity, distinct and window): no person.',
+  'kit_ai_outcomes.detail_json': 'Booleans and counts of how a decision compared with the AI read: no person.',
+  'kit_erasures.counts_json': 'Counts per category of one erase: no person.',
 };
 
 // ---------------------------------------------------------------------------
@@ -254,6 +293,12 @@ export interface ErasureCounts {
   pending: SubjectId | null;
   /** False when no subject of the plan exists (nothing was done). */
   found: boolean;
+  /**
+   * The whole set the store worked on: the subjects of the plan and every subject merged into any of them, sorted (empty when nothing was found). The store's own
+   * view can be larger than a caller's (another process may have merged an alias in), so the facade forgets and sweeps this set, not the one it asked with. It never
+   * reaches a receipt.
+   */
+  closure: SubjectId[];
 }
 
 /**
@@ -339,7 +384,8 @@ export interface SubjectExport {
   mutes: { placed: number; received: number };
   ai: { noAutomation: string | null; reads: number; outcomes: Array<{ verdict: string; agreement: string }> };
   audit: Array<{ at: number; action: string }>;
-  holds: Array<{ reportId: string; at: number; code: string }>;
+  /** How many reports about or by the person are held. Only that something is held: never the reason (the code), the report or the time. */
+  holds: { reports: number };
   truncated: string[];
 }
 

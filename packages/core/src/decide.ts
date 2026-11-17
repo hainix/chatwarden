@@ -10,7 +10,11 @@ import { APPEALS_START_TOKEN, isInternalSource, SANCTION_KINDS, SANCTION_SOURCES
 import type { SanctionIndex } from './sanctions.js';
 import type { SubjectIndex } from './subjects.js';
 import { CONDUCT_LEVELS, isOriginReport } from './types.js';
+import { isNonPersonReporter } from './privacy.js';
 import type { AiOutcomeInsert, Clock, ConductLevel, Logger, ReportExcerptLine, ReportRecord, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
+
+/** True when someone filed the report and still is somebody: not a report a system filed, and not one whose reporter was erased (`erased:<id>`). */
+const hasPersonReporter = (report: ReportRecord): boolean => !isOriginReport(report) && !isNonPersonReporter(report.reporterSubject);
 
 // The one path every moderator decision on a report takes. A decision closes the report, writes each sanction and
 // its player notice, and records itself, all in ONE store transaction: it lands whole or not at all. The same
@@ -467,7 +471,7 @@ export class DecisionService {
     const target = this.subjects.canonical(report.targetSubject);
     // A decision acts only on people in the report: its target, its reporter (a report nobody filed, `origin`, has none), or someone who wrote in the excerpt.
     const scope = new Set<SubjectId>([target, ...report.people.map((p) => this.subjects.canonical(p))]);
-    if (!isOriginReport(report)) scope.add(this.subjects.canonical(report.reporterSubject));
+    if (hasPersonReporter(report)) scope.add(this.subjects.canonical(report.reporterSubject));
     // There is no reporter to blame for a report nobody filed.
     if (norm.verdict === 'bad_faith' && isOriginReport(report)) throw new Error('bad_faith needs a reporter');
 
@@ -505,7 +509,7 @@ export class DecisionService {
     const now = this.clock.now();
     const pending = this.index !== undefined && !this.index.isEnabled();
     const reporter = this.subjects.canonical(report.reporterSubject);
-    const reporterTold = !isOriginReport(report);
+    const reporterTold = hasPersonReporter(report);
     const status = isDismissal(norm.verdict) ? 'dismissed' : 'actioned';
     const outcome = this.outcomeFor(norm, report, now);
 

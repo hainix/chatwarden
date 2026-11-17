@@ -616,7 +616,7 @@ Optional, `@experimental` in 0.2.0, and used only when you or a staff owner call
 exports what the kit holds about them (`export`: one JSON-safe object, no hash, no other player, no reporter or staff reference, each section cut at 5 000 rows), erases them (`erase(person,
 { keep: 'safety' | 'none', actor, dryRun? })` in one store transaction, then in memory, with a receipt of counts and words) and says what the kit keeps (`statement()`, from the registry and the
 retention in force). With `keep: 'safety'` a person with a sanction in force keeps their subject, identifiers and that sanction until retention removes it, and `purge()` then finishes the erase
-by itself. Every table the kit has is in `PRIVACY_REGISTRY` or `NO_PERSON_TABLES`; a test fails when a migration adds one that is in neither. `cw.legal` holds one report (`hold` with one of five codes,
+by itself (a sanction row a legal hold keeps does not hold the finish back once it is no longer in force). Every table the kit has is in `PRIVACY_REGISTRY` or `NO_PERSON_TABLES`, and every `_json` column that can carry a person is named in a rule's `jsonColumns` (the rest are in `NO_PERSON_JSON_COLUMNS`); a test fails when a migration adds a table or a JSON column that is in neither. The export says only how many held reports there are (`holds: { reports }`), never why. `cw.legal` holds one report (`hold` with one of five codes,
 no free text), releases it, and produces its evidence bundle (`bundle`), signed with `bundleSecret` when you give one. A hold keeps the report and what hangs on it out of every retention purge and
 every erase and emits `report.escalated` (ids and the code, never text). `canonicalJson`, `signBundle` and `verifyBundle` let anyone check a bundle.
 
@@ -653,7 +653,7 @@ skipped by every purge. Several processes on one database: an erase moves an epo
 not throw. `AUDIT_ACTIONS` gains `privacy.find`, `privacy.export`, `privacy.erase`, `legal.hold`, `legal.release` and `legal.bundle`; `KIT_EVENT_TYPES` gains `report.escalated`; `PurgeResult` gains
 `erasuresFinished` and `strayRows`. SQLite migration 26 (shared by the whole release) adds `kit_legal_holds`, `kit_erasures`, the erasure epoch and four lookup indexes, and is one-way.
 
-**Experimental in 0.2.0:** `cw.privacy`, `cw.legal`, `PrivacyService`, `PrivacyStatement`, `PrivacyRefusal`, `PRIVACY_CATEGORIES`, `PRIVACY_REGISTRY`, `NO_PERSON_TABLES`, `PrivacyCategory`, `PrivacyRule`, `PrivacyClock`, `PrivacyExport`,
+**Experimental in 0.2.0:** `cw.privacy`, `cw.legal`, `PrivacyService`, `PrivacyStatement`, `PrivacyRefusal`, `PRIVACY_CATEGORIES`, `PRIVACY_REGISTRY`, `NO_PERSON_TABLES`, `NO_PERSON_JSON_COLUMNS`, `PrivacyCategory`, `PrivacyRule`, `PrivacyClock`, `PrivacyExport`,
 `SubjectExport`, `EraseMode`, `ErasePlan`, `ErasePreview`, `ErasureCounts`, `ErasureReceipt`, `ErasureRemoved`, `ErasureRow`, `PRIVACY_DISCLAIMER`, `ERASED_LINE`, `EXPORT_SECTION_MAX`, `erasedReporter`, `isNonPersonReporter`,
 `isRestrictingKind`, `LegalService`, `HoldCode`, `HOLD_CODES`, `isHoldCode`, `HoldRow`, `HeldSet`, `HoldResult`, `EvidenceBundle`, `BundlePerson`, `BundleIntegrity`, `BUNDLE_DISCLAIMER`, `CANONICALIZATION`,
 `canonicalJson`, `signBundle`, `verifyBundle`, the `bundleSecret` option, `retention`'s receipt clock, `PurgeResult.erasuresFinished` and `.strayRows`, the `report.escalated` event and the new required `Store` methods above.

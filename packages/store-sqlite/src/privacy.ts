@@ -27,9 +27,9 @@ export const HOLD_LIST_SQL = 'SELECT report_id, code, held_by, held_at, released
 export const SANCTION_GROUPS_OF_REPORT_SQL = 'SELECT group_id, MIN(rowid) AS first FROM kit_sanctions WHERE report_id = ? GROUP BY group_id ORDER BY first';
 export const HELD_SET_REPORTS_SQL = 'SELECT report_id FROM kit_legal_holds WHERE released_at IS NULL ORDER BY report_id';
 export const HELD_SET_GROUPS_SQL = `SELECT DISTINCT group_id FROM kit_sanctions WHERE report_id IN ${HELD_REPORT_IDS} ORDER BY group_id`;
-/** The held reports about or by the set, for an export. Binds: the set, the set, the limit. */
-export const EXPORT_HOLDS_SQL = `SELECT h.report_id, h.held_at, h.code FROM kit_legal_holds h JOIN kit_reports r ON r.id = h.report_id
-  WHERE h.released_at IS NULL AND (r.target_subject IN (SELECT value FROM json_each(?)) OR r.reporter_subject IN (SELECT value FROM json_each(?))) ORDER BY h.held_at, h.report_id LIMIT ?`;
+/** How many held reports are about or by the set, for an export: only that something is held, never which report, why or since when. Binds: the set, the set. */
+export const EXPORT_HOLDS_SQL = `SELECT COUNT(*) AS n FROM kit_legal_holds h JOIN kit_reports r ON r.id = h.report_id
+  WHERE h.released_at IS NULL AND (r.target_subject IN (SELECT value FROM json_each(?)) OR r.reporter_subject IN (SELECT value FROM json_each(?)))`;
 
 /** Every subject of the request and every subject merged into one of them (a recursive walk down `merged_into`). Binds: the request as a JSON array. */
 export const ERASE_CLOSURE_SQL = `WITH RECURSIVE c(id) AS (
@@ -68,6 +68,16 @@ export const AI_ACTIONS_DELETE_SQL = `DELETE FROM kit_ai_actions WHERE report_id
 export const AI_OUTCOME_EXAMPLES_CLEAR_SQL = `UPDATE kit_ai_outcomes SET example_json = NULL WHERE report_id IN ${IN_ARG} AND example_json IS NOT NULL`;
 /** A coop link names a report by id. Binds: the ids. */
 export const LINKS_DELETE_SQL = `DELETE FROM kit_links WHERE system = 'coop-report' AND ref IN ${IN_ARG}`;
+/** An EOS sanction link is keyed `<group id>#<hash of the product user id>`: it goes with the group. Binds: the deleted groups. */
+export const EOS_LINKS_DELETE_SQL = `DELETE FROM kit_links WHERE system = 'eos-sanction' AND substr(ref, 1, instr(ref, '#') - 1) IN ${IN_ARG}`;
+/** The decisions of reports that stay and still name someone of the set in their stored answer. Binds: the held ids, the set. */
+export const DECISIONS_NAMING_SQL = `SELECT key, result_json FROM kit_decisions WHERE report_id NOT IN ${IN_ARG}
+  AND EXISTS (SELECT 1 FROM json_each(?) s WHERE instr(kit_decisions.result_json, s.value) > 0)`;
+/** Rewrite the stored answer of one decision. Binds: the answer, the key. */
+export const DECISION_RESULT_SET_SQL = 'UPDATE kit_decisions SET result_json = ? WHERE key = ?';
+/** The replay answer of a webhook sanction names its group (and reference code): blank the ones of deleted groups. Binds: the deleted groups. */
+export const WEBHOOK_KEYS_BLANK_SQL = `UPDATE kit_webhook_keys SET result_json = '{"erased":true}'
+  WHERE state = 'done' AND CASE WHEN json_valid(result_json) THEN json_extract(result_json, '$.groupId') END IN ${IN_ARG}`;
 /** A sanction or an appeal that cited a deleted report no longer does. Binds: the ids. */
 export const SANCTIONS_UNLINK_SQL = `UPDATE kit_sanctions SET report_id = NULL WHERE report_id IN ${IN_ARG}`;
 export const APPEALS_UNLINK_SQL = `UPDATE kit_appeals SET report_id = NULL WHERE report_id IN ${IN_ARG}`;
@@ -121,8 +131,12 @@ export const ERASURES_PENDING_SQL = 'SELECT id, at, mode, actor, counts_json, pe
 export const ERASURE_ONE_SQL = 'SELECT pending_subject FROM kit_erasures WHERE id = ?';
 export const ERASURE_CLEAR_SQL = 'UPDATE kit_erasures SET pending_subject = NULL WHERE id = ?';
 export const ERASURES_PURGE_SQL = 'DELETE FROM kit_erasures WHERE at < ? AND pending_subject IS NULL';
-/** Any sanction row of the set, any state. Binds: the set. */
-export const SANCTION_ROWS_LEFT_SQL = `SELECT 1 AS x FROM kit_sanctions WHERE target_type = 'subject' AND target_value IN ${IN_ARG} LIMIT 1`;
+/**
+ * A sanction row of the set that keeps the erase pending: any row, except a row a legal hold keeps that is not in force now (ended or revoked, or a kind that restricts
+ * nothing). Binds: the set, the time.
+ */
+export const SANCTION_ROWS_LEFT_SQL = `SELECT 1 AS x FROM kit_sanctions WHERE target_type = 'subject' AND target_value IN ${IN_ARG}
+  AND (group_id NOT IN ${HELD_GROUP_IDS} OR (revoked_at IS NULL AND (ends_at IS NULL OR ends_at > ?) AND kind IN ('chat', 'area', 'ban'))) LIMIT 1`;
 
 // Export reads. Each takes the set as a JSON array (and a limit of one more than the cap, so a cut section can be told from a full one).
 export const EXPORT_SUBJECTS_SQL = `SELECT MIN(created_at) AS created, COUNT(*) AS n FROM kit_subjects WHERE id IN ${IN_ARG}`;
@@ -207,6 +221,27 @@ function parseJson<T>(text: unknown, fallback: T): T {
   }
 }
 
+/**
+ * The stored answer of a decision with the entries for the erased set removed (`{ groups: [{ subject, groupId, refCode, kind, noticeId }] }`), or null when nothing
+ * changes. An entry whose sanction group stays (a ban in force the erase keeps) stays too. An answer that is not JSON but names someone of the set is blanked.
+ */
+export function redactDecision(text: string, set: ReadonlySet<string>, keepGroups: ReadonlySet<string>): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    for (const id of set) if (text.includes(id)) return JSON.stringify({ groups: [] });
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as { groups?: unknown }).groups)) return null;
+  const groups = (parsed as { groups: unknown[] }).groups;
+  const kept = groups.filter((g) => {
+    const entry = g as { subject?: unknown; groupId?: unknown } | null;
+    return !(typeof entry?.subject === 'string' && set.has(entry.subject) && !(typeof entry.groupId === 'string' && keepGroups.has(entry.groupId)));
+  });
+  return kept.length === groups.length ? null : JSON.stringify({ ...(parsed as object), groups: kept });
+}
+
 /** The subjects of the request and everything merged into them, that exist. */
 export function closure(db: DatabaseSync, subjects: readonly string[]): string[] {
   if (subjects.length === 0) return [];
@@ -249,8 +284,16 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bu
     addCount(removed, 'reports_about', num(db.prepare(REPORTS_DELETE_SQL).run(ids).changes));
   }
 
+  // The person's name inside the decisions of the reports that stay (a decision can sanction anyone in its report: a speaker, the reporter): the entries for the set go,
+  // unless their sanction group stays. A held report's decision is never touched. An answer that cannot be read and names the person is blanked.
+  for (const d of db.prepare(DECISIONS_NAMING_SQL).all(held, setJ)) {
+    const next = redactDecision(String(d.result_json), setSet, keepGroups);
+    if (next !== null) db.prepare(DECISION_RESULT_SET_SQL).run(next, String(d.key));
+  }
+
   // The person's name inside the other reports that stay: a reporter becomes `erased:<id>`, a line becomes a marker.
   const scrubbed: string[] = [];
+  const readsGone: string[] = [];
   for (const r of db.prepare(REPORTS_NAMING_SQL).all(held, setJ, setJ)) {
     const id = String(r.id);
     const asReporter = setSet.has(String(r.reporter_subject));
@@ -268,15 +311,20 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bu
     if (asReporter) addCount(removed, 'reports_filed', 1);
     else addCount(removed, 'report_lines', 1);
     if (lines !== null) scrubbed.push(id);
+    // The AI's summary of a report can quote a line or the reporter's note (cleared above): the read goes with either.
+    if (lines !== null || asReporter) readsGone.push(id);
   }
-  if (scrubbed.length > 0) {
-    // The AI's summary of a report can quote a line, and a stored example holds the text: both go with the line.
-    const ids = j(scrubbed);
-    addCount(removed, 'ai', num(db.prepare(AI_READS_DELETE_SQL).run(ids).changes));
-    addCount(removed, 'ai', num(db.prepare(AI_OUTCOME_EXAMPLES_CLEAR_SQL).run(ids).changes));
-  }
+  if (readsGone.length > 0) addCount(removed, 'ai', num(db.prepare(AI_READS_DELETE_SQL).run(j(readsGone)).changes));
+  // A stored example holds the lines: it goes with a line of the person.
+  if (scrubbed.length > 0) addCount(removed, 'ai', num(db.prepare(AI_OUTCOME_EXAMPLES_CLEAR_SQL).run(j(scrubbed)).changes));
 
-  if (goneGroups.length > 0) addCount(removed, 'sanctions', num(db.prepare(SANCTIONS_DELETE_SQL).run(j(goneGroups)).changes));
+  if (goneGroups.length > 0) {
+    const gone = j(goneGroups);
+    addCount(removed, 'sanctions', num(db.prepare(SANCTIONS_DELETE_SQL).run(gone).changes));
+    // What names a deleted group: the replay answer of a webhook that applied it, and the EOS link that pushed it.
+    db.prepare(WEBHOOK_KEYS_BLANK_SQL).run(gone);
+    addCount(removed, 'workflow', num(db.prepare(EOS_LINKS_DELETE_SQL).run(gone).changes));
+  }
   addCount(removed, 'notices', num(db.prepare(NOTICES_DELETE_SQL).run(setJ, j(keepGroups)).changes));
   if (clearGroups.length > 0) addCount(removed, 'notices', num(db.prepare(NOTICES_CLEAR_SQL).run(setJ, j(clearGroups)).changes));
   addCount(removed, 'strikes', num(db.prepare(STRIKES_DELETE_SQL).run(setJ).changes));
@@ -299,13 +347,13 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bu
   db.prepare(EPOCH_BUMP_SQL).run(EPOCH_KEY);
   // The queue shows fewer reports and appeals: the change token moves with the erase (a dry run is rolled back with everything else).
   bump();
-  return { found: true, removed, kept: { identifiers: keepIdentifiers, sanctions: keptSanctionRows, heldReports: heldNaming }, pending };
+  return { found: true, removed, kept: { identifiers: keepIdentifiers, sanctions: keptSanctionRows, heldReports: heldNaming }, pending, closure: set };
 }
 
 /** `eraseSubjects` for the SQLite store: `transaction` is the store's own (a savepoint), so everything here commits together or not at all. */
 export function eraseSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) => T, plan: ErasePlan, bump: () => void): ErasureCounts {
   const set = transaction(() => closure(db, plan.subjects));
-  if (set.length === 0) return { found: false, removed: {}, kept: { identifiers: false, sanctions: 0, heldReports: 0 }, pending: null };
+  if (set.length === 0) return { found: false, removed: {}, kept: { identifiers: false, sanctions: 0, heldReports: 0 }, pending: null, closure: [] };
   if (plan.dryRun !== true) return transaction(() => eraseInTransaction(db, plan, set, bump));
   try {
     transaction(() => {
@@ -337,13 +385,13 @@ export function loadPendingErasures(db: DatabaseSync): ErasureRow[] {
   });
 }
 
-export function finishErasure(db: DatabaseSync, transaction: <T>(fn: () => T) => T, id: string, bump: () => void): boolean {
+export function finishErasure(db: DatabaseSync, transaction: <T>(fn: () => T) => T, id: string, at: number, bump: () => void): boolean {
   return transaction(() => {
     const row = db.prepare(ERASURE_ONE_SQL).get(id);
     if (row === undefined || row.pending_subject === null) return false;
     const pending = String(row.pending_subject);
     const set = closure(db, [pending]);
-    if (set.length > 0 && db.prepare(SANCTION_ROWS_LEFT_SQL).get(j(set)) !== undefined) return false;
+    if (set.length > 0 && db.prepare(SANCTION_ROWS_LEFT_SQL).get(j(set), at) !== undefined) return false;
     // The remainder ends the way a `none` erase does: whatever still names the person (a kept notice, a row written since) goes with the subject, and the audit
     // refs read the receipt. That erase moves the epoch; with nothing left to erase the finish moves it itself.
     if (set.length > 0) eraseInTransaction(db, { subjects: [pending], mode: 'none', heldReportIds: new Set(), receiptId: id, at: 0 }, set, bump);
@@ -392,7 +440,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
       mutes: { placed: 0, received: 0 },
       ai: { noAutomation: null, reads: 0, outcomes: [] },
       audit: [],
-      holds: [],
+      holds: { reports: 0 },
       truncated: [],
     };
     if (set.length === 0) return empty;
@@ -405,8 +453,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
       if (rows.length > EXPORT_SECTION_MAX) truncated.push(name);
       return rows.slice(0, EXPORT_SECTION_MAX).map(map);
     };
-    const holds = db.prepare(EXPORT_HOLDS_SQL).all(setJ, setJ, cap);
-    if (holds.length > EXPORT_SECTION_MAX) truncated.push('holds');
+    const holds = num(db.prepare(EXPORT_HOLDS_SQL).get(setJ, setJ)?.n);
     const head = db.prepare(EXPORT_SUBJECTS_SQL).get(setJ);
     const ids = db.prepare(EXPORT_IDENTIFIERS_SQL).get(setJ);
     const mutes = db.prepare(EXPORT_MUTES_SQL).get(setJ, setJ, setJ, setJ);
@@ -480,7 +527,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
         outcomes: outcomes.slice(0, EXPORT_SECTION_MAX).map((r) => ({ verdict: String(r.verdict), agreement: String(r.agreement) })),
       },
       audit: section('audit', EXPORT_AUDIT_SQL, (r) => ({ at: num(r.at), action: String(r.action) })),
-      holds: holds.slice(0, EXPORT_SECTION_MAX).map((r) => ({ reportId: String(r.report_id), at: num(r.held_at), code: String(r.code) })),
+      holds: { reports: holds },
       truncated,
     };
   });

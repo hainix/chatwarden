@@ -27,42 +27,49 @@ person's page. The lookup is audited as `privacy.find` with no target: the accou
 
 `cw.privacy.export(person)` (or "Export data..." on the person's page, or `GET /people/:ref/privacy/export`) returns everything the kit holds about the person as one JSON file: the
 account ids as your game gave them, counts of keys and addresses (a hash never leaves the store), their sanctions, notices, the reports they filed and the reports about them (only the
-lines they wrote), blocked lines, appeals, signals, mutes as counts, the "do not automate" mark, the staff actions about them (what and when, never who), and any report held for legal
-reasons. It never contains another player's id, name or lines, a reporter's identity or a staff reference. A section is cut at 5000 rows and named in `truncated`.
+lines they wrote), blocked lines, appeals, signals, mutes as counts, the "do not automate" mark, the staff actions about them (what and when, never who), and how many reports
+about or by them are held (`holds: { reports: n }`: only that something is held, never which report, why or since when). It never contains another player's id, name or lines, a reporter's identity or a staff reference. A section is cut at 5000 rows and named in `truncated`.
 
 The export is audited (`privacy.export`) before it is returned: if the audit row cannot be written, nothing is exported.
 
 ## 3. Erase
 
 `cw.privacy.erase(person, { keep, actor })` (or "Erase data..." on the person's page, or `POST /people/:ref/privacy/erase`). The hub's dialog counts first, in words, and asks for the word
-`ERASE`; over HTTP the body repeats the person's ref as `confirm`, and `dryRun: true` returns the same counts and writes nothing.
+`ERASE`; over HTTP the body repeats the person's ref as `confirm` (the ref in the path; for a person whose page was opened on a merged-away id, the canonical ref is accepted too), and `dryRun: true` returns the same counts and writes nothing.
 
 What goes, in one database transaction, then in memory:
 
 - The person's subject, accounts, keys and addresses, strikes, notices, mutes (both ways), blocked names, appeals, signals (about them and caused by them), AI marks and reads, claims,
   Discord thread entry.
-- Reports about them, with their decisions, AI rows and links. A report they filed stays for the person it is about, with their id, seat, name and note removed. Their lines inside other
-  players' reports become the marker `[erased]`.
+- Reports about them, with their decisions, AI rows and links. A report they filed stays for the person it is about, with their id, seat, name and note removed, and the AI's read of it
+  (which can quote the note) is deleted. Their lines inside other players' reports become the marker `[erased]`.
+- Their name inside what other records stored: the entry for them in the stored decision of a report that stays (a decision can sanction a speaker or the reporter), the stored answer of a
+  webhook that applied one of their sanctions (blanked), and the EOS link that pushed it. An EOS report link is only a hash of the report, names no person and ages out with the other links.
 - In memory: their seats become guests, their evidence lines lose text, name and subject, and every cache forgets them. A player who is still connected and speaks again makes a new,
   unlinked person, never a row under the old id.
 
 What stays:
 
 - The **staff audit trail** (ids and codes only). The person's reference in it is replaced by the receipt id once nothing keeps the person.
-- **Reports held for legal reasons**, whole (see "Legal hold" below). A hold is a duty the kit cannot weigh.
+- **Reports held for legal reasons**, whole (see "Legal hold" below). A hold is something the kit does not weigh.
 - With `keep: 'safety'` (the default), when the person has a sanction in force: their subject, their identifiers and that sanction with its notice (its quoted lines cleared). That is what
   lets a ban still refuse the same player at the door. This is the **safety remainder**, a mechanism with a stated meaning: enforce a sanction that is in force and honour a hold. It is not a
   legal conclusion. The erase **finishes itself**: when retention removes the sanction (by default 90 days after it ended or was revoked), the next `purge()` deletes the subject and the
-  identifiers and points the audit rows at the receipt. `keep: 'none'` deletes the sanctions too: a ban the person is under stops applying.
+  identifiers and points the audit rows at the receipt. A sanction row a legal hold keeps is never removed by retention, so it does not hold the finish back once it is no longer in force
+  (ended or revoked); the held row stays as it is. One still in force keeps the person's remainder in place until it ends. `keep: 'none'` deletes the sanctions too: a ban the person is under stops applying.
 
-The receipt (`{ id, at, mode, removed, kept }`) holds counts and words only: no subject, no line, no account. You can send it to the requester. It is kept on the audit clock (a year by
+The receipt (`{ id, at, mode, removed, kept }`) holds counts and words only: no subject, no line, no account, and no reason for a hold (`kept.heldReports` is only a count). You can send it to the requester. It is kept on the audit clock (a year by
 default). If the audit row of the erase could not be written, the receipt says `auditFailed: true`; the erase stands.
 
 ## 4. When several processes share a database
 
 Another process still has the person in memory. Every erase moves a counter in the database; each process reads it at most every 30 seconds, on its next lookup, and forgets people the database
-no longer has. A write that process makes for the erased person in the meantime does nothing (an identifier is only written for a subject that exists), and a strike or signal row it might add
+no longer has (their room seats become guests, and every cache lets go). A process that erases someone itself takes the counter as seen only when it moved by that one erase; if it moved further,
+another process erased too, and this one reconciles at once instead of waiting for the next check. A write that process makes for the erased person in the meantime does nothing (an identifier is only written for a subject that exists), and a strike or signal row it might add
 is removed by the next `purge()` (rows of a subject that does not exist, older than ten minutes). Plan for a window of up to 30 seconds.
+
+Each pass that removes such rows logs `chatwarden.stray_rows_swept` with the count (never an id or a line): a count that keeps showing up means an integration writes rows for people it never
+saved. A person this process made but could not write to the store (a failed save) is retried, and the sweep waits while one is still unsaved, so a store hiccup never costs that player their rows.
 
 ## 5. Legal hold
 

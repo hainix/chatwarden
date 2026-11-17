@@ -2049,8 +2049,8 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() => loadPendingErasuresSql(this.db));
   }
 
-  finishErasure(id: string): boolean {
-    return finishErasureSql(this.db, (fn) => this.transaction(fn), id, () => this.bump());
+  finishErasure(id: string, at: number): boolean {
+    return finishErasureSql(this.db, (fn) => this.transaction(fn), id, at, () => this.bump());
   }
 
   erasureEpoch(): number {

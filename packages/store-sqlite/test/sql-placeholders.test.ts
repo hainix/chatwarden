@@ -221,7 +221,12 @@ describe('the privacy statements bind exactly as many values as they have placeh
     HOLD_RELEASE_SQL: 3,
     HOLD_LOAD_SQL: 1,
     HOLD_LIST_SQL: 0,
-    EXPORT_HOLDS_SQL: 3,
+    EXPORT_HOLDS_SQL: 2,
+    SANCTION_ROWS_LEFT_SQL: 2,
+    DECISIONS_NAMING_SQL: 2,
+    DECISION_RESULT_SET_SQL: 2,
+    WEBHOOK_KEYS_BLANK_SQL: 1,
+    EOS_LINKS_DELETE_SQL: 1,
     AI_ACTION_PURGE_SQL: 1,
     AI_ACTION_NOTES_SQL: 1,
     IDENTIFIER_UPSERT_SQL: 6,
@@ -269,7 +274,7 @@ describe('the privacy statements bind exactly as many values as they have placeh
     store.eraseSubjects({ subjects: ['s_pp'], mode: 'safety', heldReportIds: new Set(['rHeld']), receiptId: 'e_spy', at: 1_800_000_000_000 });
     store.insertErasure({ id: 'e_spy', at: 1, mode: 'safety', actor: 'o', removed: {}, kept: { identifiers: true, sanctions: 0, heldReports: 0 }, pendingSubject: 's_pp' });
     store.loadPendingErasures();
-    store.finishErasure('e_spy');
+    store.finishErasure('e_spy', 1_800_000_000_000);
     store.purgeAudit(2);
     await store.saveIdentifier({ subjectId: 's_qq', kind: 'key', value: 'k2', firstSeen: 1, lastSeen: 2 });
     store.erasureEpoch();
@@ -277,5 +282,9 @@ describe('the privacy statements bind exactly as many values as they have placeh
     store.purgeStrayRows(0, ['s_gone']);
     expect(seen.size).toBeGreaterThan(20);
     expect(seen.has(IDENTIFIER_UPSERT_SQL)).toBe(true);
+    // the statements of the fix round ran too: the decision rewrite, the webhook blank, the EOS links and the finish with a hold in the way
+    for (const k of ['DECISIONS_NAMING_SQL', 'DECISION_RESULT_SET_SQL', 'WEBHOOK_KEYS_BLANK_SQL', 'EOS_LINKS_DELETE_SQL', 'SANCTION_ROWS_LEFT_SQL', 'EXPORT_HOLDS_SQL']) {
+      expect(seen.has(texts.get(k) ?? ''), k).toBe(true);
+    }
   });
 });

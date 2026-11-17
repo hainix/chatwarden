@@ -70,8 +70,20 @@ describe('one prepared statement per category, with the indexes the lookups need
 
   it('every statement prepares and, but for a short list, never scans a whole table by a person', () => {
     // A scan is allowed where no index can serve: the people list inside a report (json), the one appeal-by-report link, the foreign-key check of a deleted
-    // subject (merged_into has no index), and a table of receipts (tiny).
-    const scans = new Set(['REPORTS_NAMING_SQL', 'APPEALS_UNLINK_SQL', 'ERASURES_PURGE_SQL', 'ERASURE_INSERT_SQL', 'EPOCH_BUMP_SQL', 'SUBJECTS_DELETE_SQL']);
+    // subject (merged_into has no index), and a table of receipts (tiny). The decisions of reports that stay are read by the text of their stored answer (no index can
+    // serve a substring; the table holds one row per decision within the report window), the webhook keys by a JSON field (a day of keys), and the EOS links by the group
+    // in the front of a ref (one row per pushed sanction): an erase is rare and these three are bounded by their own retention.
+    const scans = new Set([
+      'REPORTS_NAMING_SQL',
+      'APPEALS_UNLINK_SQL',
+      'ERASURES_PURGE_SQL',
+      'ERASURE_INSERT_SQL',
+      'EPOCH_BUMP_SQL',
+      'SUBJECTS_DELETE_SQL',
+      'DECISIONS_NAMING_SQL',
+      'WEBHOOK_KEYS_BLANK_SQL',
+      'EOS_LINKS_DELETE_SQL',
+    ]);
     for (const [k, detail] of plans()) {
       if (scans.has(k)) continue;
       expect(detail, `${k}: ${detail}`).not.toMatch(/\bSCAN kit_/);

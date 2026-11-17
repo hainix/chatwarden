@@ -132,6 +132,8 @@ export interface WorldOptions {
   ban?: boolean;
   /** A report about the person that is held (with its decision, sanction group, notice, appeal and AI rows). */
   held?: boolean;
+  /** A report the person filed in which they wrote no line, with an AI read of it (the read can quote the note). */
+  reporterOnly?: boolean;
 }
 
 /** Builds the person under test (`s_pp`, merged with `s_pp2`) with one row of every kind, and a second person (`s_qq`) and a third (`s_xx`) whose rows must survive. */
@@ -173,8 +175,29 @@ export async function seedWorld(s: Store, o: WorldOptions = {}): Promise<void> {
       roomId: 'ROOM-f',
     }),
   );
-  s.insertDecision('d-about', 'rAbout', NOW - 4000, '{"ok":true}');
-  s.insertDecision('d-third', 'rThird', NOW - 4000, '{"ok":true}');
+  // Decisions as `decide` writes them: `{ groups: [{ subject, groupId, refCode, kind, noticeId }] }`. A decision may sanction anyone in the report's scope, so
+  // the person is named inside decisions of reports that STAY (rThird: a speaker; rFiled: the reporter, for bad faith).
+  const grp = (subject: string, groupId: string, refCode: string, noticeId: string, kind = 'chat') => ({ subject, groupId, refCode, kind, noticeId });
+  s.insertDecision('d-about', 'rAbout', NOW - 4000, JSON.stringify({ groups: [grp('s_qq', 'gQ', 'M-QQQQ', 'n-q'), grp('s_pp', 'gEnded', 'M-ENDED', 'n-ended')] }));
+  s.insertDecision(
+    'd-third',
+    'rThird',
+    NOW - 4000,
+    JSON.stringify({
+      groups: [
+        grp('s_xx', 'gX', 'M-XXXXX', 'n-x', 'warning'),
+        grp('s_pp', 'gThirdPP', 'M-THIRD', 'n-third-pp'),
+        grp('s_pp2', 'gThirdP2', 'M-THIRD2', 'n-third-p2'),
+        ...(o.ban === true ? [grp('s_pp2', 'gBan', 'M-BANNN', 'n-ban', 'ban')] : []),
+      ],
+    }),
+  );
+  s.insertDecision('d-filed', 'rFiled', NOW - 4000, JSON.stringify({ groups: [grp('s_pp', 'gFiledPP', 'M-FILED', 'n-filed-pp'), grp('s_qq', 'gFiledQQ', 'M-FILEDQ', 'n-filed-qq')] }));
+  // A webhook sanction's replay answer: the group id and the reference code. One names a group of the person, one a group of someone else.
+  for (const [key, groupId, refCode] of [['wk-pp', 'gEnded', 'M-ENDED'], ['wk-qq', 'gQ', 'M-QQQQ']] as const) {
+    s.reserveWebhookKey(key, NOW - 1000, NOW - DAY, `fp-${key}`);
+    s.completeWebhookKey(key, JSON.stringify({ groupId, refCode }));
+  }
 
   // Sanctions: an ended chat sanction (cites rAbout) on the person; qq has a chat sanction in force that also cites rAbout, so a deleted report shows as NULL.
   s.insertSanctionGroup(group('gEnded', 'M-ENDED', 's_pp', 'iphash-pp', { endsAt: NOW - 2 * DAY, startsAt: NOW - 3 * DAY, reportId: 'rAbout' }));
@@ -218,6 +241,10 @@ export async function seedWorld(s: Store, o: WorldOptions = {}): Promise<void> {
   s.putDiscordThread({ subject: 's_qq', threadId: '222', label: 'Case BBBBB', createdAt: NOW - DAY });
   x.putLink({ system: 'coop-report', ref: 'rAbout', external: 'ext-1', state: 'sent', at: NOW - DAY });
   x.putLink({ system: 'coop-report', ref: 'rThird', external: 'ext-2', state: 'sent', at: NOW - DAY });
+  // EOS: a pushed sanction is keyed by the group id and a hash of the product user id; a report seen is a hash of its own fields.
+  x.putLink({ system: 'eos-sanction', ref: 'gEnded#0123456789abcdef', external: 'eos-1', state: 'active', at: NOW - DAY });
+  x.putLink({ system: 'eos-sanction', ref: 'gQ#fedcba9876543210', external: 'eos-2', state: 'active', at: NOW - DAY });
+  x.putLink({ system: 'eos-report', ref: 'a1b2c3d4e5f60718', external: 'eos-3', state: 'seen', at: NOW - DAY });
 
   // AI rows: a read, an outcome and an action for rAbout (about the person) and for rThird (a report holding one of their lines).
   for (const id of ['rAbout', 'rThird']) {
@@ -286,13 +313,29 @@ export async function seedWorld(s: Store, o: WorldOptions = {}): Promise<void> {
     x.insertAiAction(action);
   }
 
+  if (o.reporterOnly === true) {
+    s.insertReport(report('rNoLines', 's_pp', 's_xx', { excerpt: [line(1, 0, 'XXHandle', 'plain xx line')], people: ['s_xx'], note: 'pp note on xx fenrisk', roomId: 'ROOM-nl' }));
+    const r = x.reserveAiRead({ reportId: 'rNoLines', inputHash: 'h-rNoLines', promptVersion: 1, adapter: 'fake:one' }, NOW + 60_000, NOW - 3000);
+    if (!r.reserved) throw new Error('expected a reservation');
+    x.completeAiRead(r.id, r.lease, {
+      model: 'fake',
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costMicros: 1,
+      latencyMs: 1,
+      read: { severity: 'rude', rule: 3, summary: 'the reporter says: pp note on xx fenrisk', evidence: ['L1'], confidence: 'high', injectionSuspected: false, recommendation: { verdict: 'unclear', severity: 'rude', rule: 3, evidence: ['L1'] } },
+    });
+  }
+
   s.insertAudit({ id: 'au1', at: NOW - 900, actor: 'mod_a', role: 'moderator', action: 'history.view', target: { type: 'person', ref: 's_pp' } });
   s.insertAudit({ id: 'au2', at: NOW - 800, actor: 'mod_a', role: 'moderator', action: 'report.view', target: { type: 'report', ref: 'rAbout' } });
   s.insertAudit({ id: 'au3', at: NOW - 700, actor: 'mod_a', role: 'moderator', action: 'history.view', target: { type: 'person', ref: 's_qq' } });
 
   if (o.held === true) {
     s.insertReport(report('rHeld', 's_qq', 's_pp', { excerpt: [line(1, 0, OTHER.handle, OTHER.line), line(2, 1, WHO.handle, WHO.line)], people: ['s_qq', 's_pp'], roomId: 'ROOM-h' }));
-    s.insertDecision('d-held', 'rHeld', NOW - 4000, '{"ok":true}');
+    s.insertDecision('d-held', 'rHeld', NOW - 4000, JSON.stringify({ groups: [grp('s_pp', 'gHeld', 'M-HELDD', 'n-held')] }));
     s.insertSanctionGroup(group('gHeld', 'M-HELDD', 's_pp', 'iphash-pp', { reportId: 'rHeld' }));
     s.insertNotice(notice('n-held', 's_pp', 'gHeld', { refCode: 'M-HELDD' }));
     x.insertAppeal(appeal('ap-held', 's_pp', 'gHeld'));
@@ -459,7 +502,7 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
           appeals: 1,
           signals: 2,
           ai: 6,
-          workflow: 3,
+          workflow: 4,
           audit: 1,
         });
       });
@@ -544,6 +587,202 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
       });
     });
 
+    describe('JSON columns that carry a person: decisions of reports that stay, webhook keys, links', () => {
+      const groupsOf = (s: Store, key: string): Array<{ subject: string; groupId: string }> =>
+        (JSON.parse(s.findDecision(key)?.resultJson ?? '{"groups":[]}') as { groups: Array<{ subject: string; groupId: string }> }).groups;
+
+      it('the decision of a report that stays no longer names the erased person (subject, group, reference code, notice), and keeps the entries of everyone else', async () => {
+        const s = make();
+        await seedWorld(s);
+        s.eraseSubjects(plan());
+        expect(groupsOf(s, 'd-third').map((g) => g.subject)).toEqual(['s_xx']);
+        expect(groupsOf(s, 'd-filed').map((g) => g.subject)).toEqual(['s_qq']);
+        for (const key of ['d-third', 'd-filed']) {
+          const text = s.findDecision(key)?.resultJson ?? '';
+          for (const needle of ['s_pp', 'gThirdPP', 'gThirdP2', 'M-THIRD', 'n-third-pp', 'gFiledPP', 'M-FILED"', 'n-filed-pp']) expect(text, `${key}: ${needle}`).not.toContain(needle);
+        }
+        expect(s.findDecision('d-third')?.resultJson).toContain('gX');
+        expect(s.findDecision('d-filed')?.resultJson).toContain('gFiledQQ');
+      });
+
+      it('the alias subject alone: only its entries go', async () => {
+        const s = make();
+        await seedWorld(s);
+        s.eraseSubjects(plan({ subjects: ['s_pp2'] }));
+        expect(groupsOf(s, 'd-third').map((g) => g.subject)).toEqual(['s_xx', 's_pp']);
+      });
+
+      it('a decision that names nobody of the set is left byte for byte as it was, a malformed one too; a malformed one that names the person is blanked', async () => {
+        const s = make();
+        await seedWorld(s);
+        s.insertDecision('d-odd', 'rFiled', NOW, 'not json at all');
+        s.insertDecision('d-odd2', 'rFiled', NOW, 'garbage s_pp');
+        const other = s.findDecision('d-about')?.resultJson;
+        s.eraseSubjects(plan({ subjects: ['s_xx'], receiptId: 'e_xx' }));
+        expect(s.findDecision('d-odd')?.resultJson).toBe('not json at all');
+        expect(s.findDecision('d-odd2')?.resultJson).toBe('garbage s_pp');
+        expect(s.findDecision('d-about')?.resultJson).toBe(other);
+        s.eraseSubjects(plan({ receiptId: 'e_pp' }));
+        expect(s.findDecision('d-odd')?.resultJson).toBe('not json at all');
+        expect(s.findDecision('d-odd2')?.resultJson).toBe('{"groups":[]}');
+      });
+
+      it('keep safety: an entry for a sanction group that stays (a ban in force) stays; the other entries of the person go', async () => {
+        const s = make();
+        await seedWorld(s, { ban: true });
+        s.eraseSubjects(plan({ mode: 'safety' }));
+        expect(groupsOf(s, 'd-third').map((g) => [g.subject, g.groupId])).toEqual([
+          ['s_xx', 'gX'],
+          ['s_pp2', 'gBan'],
+        ]);
+      });
+
+      it("a held report's decision is never rewritten", async () => {
+        const s = make();
+        await seedWorld(s, { held: true });
+        const held = s.findDecision('d-held')?.resultJson;
+        s.eraseSubjects(plan({ heldReportIds: new Set(['rHeld']) }));
+        expect(s.findDecision('d-held')?.resultJson).toBe(held);
+        expect(held).toContain('s_pp');
+      });
+
+      it('a dry run rewrites nothing', async () => {
+        const s = make();
+        await seedWorld(s);
+        const before = s.findDecision('d-third')?.resultJson;
+        s.eraseSubjects(plan({ dryRun: true }));
+        expect(s.findDecision('d-third')?.resultJson).toBe(before);
+      });
+
+      it("the replay answer of a webhook sanction on the person's group is blanked; another person's stays", async () => {
+        const s = make();
+        await seedWorld(s);
+        s.eraseSubjects(plan());
+        const gone = s.reserveWebhookKey('wk-pp', NOW, NOW - DAY, 'fp-wk-pp');
+        expect(gone.reserved).toBe(false);
+        if (gone.reserved) return;
+        expect(gone.state).toBe('done');
+        expect(gone.resultJson).not.toContain('gEnded');
+        expect(gone.resultJson).not.toContain('M-ENDED');
+        expect(() => JSON.parse(gone.resultJson ?? '')).not.toThrow();
+        const kept = s.reserveWebhookKey('wk-qq', NOW, NOW - DAY, 'fp-wk-qq');
+        expect(kept.reserved ? '' : kept.resultJson).toContain('gQ');
+      });
+
+      it('a pending webhook key is untouched', async () => {
+        const s = make();
+        await seedWorld(s);
+        s.reserveWebhookKey('wk-pending', NOW - 500, NOW - DAY, 'fp-pending');
+        s.eraseSubjects(plan());
+        const again = s.reserveWebhookKey('wk-pending', NOW, NOW - DAY, 'fp-pending');
+        expect(again).toMatchObject({ reserved: false, state: 'pending' });
+      });
+
+      it("an EOS sanction link keyed by the person's group goes; another group's and an EOS report link stay", async () => {
+        const s = make();
+        await seedWorld(s);
+        s.eraseSubjects(plan());
+        expect(opt(s).listLinks('eos-sanction', { limit: 10 }).map((r) => r.ref)).toEqual(['gQ#fedcba9876543210']);
+        expect(opt(s).listLinks('eos-report', { limit: 10 }).map((r) => r.ref)).toEqual(['a1b2c3d4e5f60718']);
+      });
+
+      it('an EOS link of a group that stays (a ban in force, keep safety) stays', async () => {
+        const s = make();
+        await seedWorld(s, { ban: true });
+        opt(s).putLink({ system: 'eos-sanction', ref: 'gBan#1111111111111111', external: 'eos-9', state: 'active', at: NOW - DAY });
+        s.eraseSubjects(plan({ mode: 'safety' }));
+        expect(opt(s).listLinks('eos-sanction', { limit: 10 }).map((r) => r.ref).sort()).toEqual(['gBan#1111111111111111', 'gQ#fedcba9876543210']);
+      });
+
+      it('the AI read of a report the person only filed (no line of theirs in it) goes, and the report stays without the note', async () => {
+        const s = make();
+        await seedWorld(s, { reporterOnly: true });
+        expect(s.loadAiRead?.('rNoLines')).not.toBeNull();
+        s.eraseSubjects(plan());
+        expect(s.loadAiRead?.('rNoLines')).toBeNull();
+        expect(s.loadReport('rNoLines')).toMatchObject({ reporterSubject: 'erased:rNoLines', note: null, targetSubject: 's_xx' });
+        if (dump !== undefined) expect(dump(s)).not.toContain('fenrisk');
+      });
+
+      it('control: erasing the person a report is ABOUT deletes it with its reads, as before', async () => {
+        const s = make();
+        await seedWorld(s, { reporterOnly: true });
+        s.eraseSubjects(plan({ subjects: ['s_xx'], receiptId: 'e_x2' }));
+        expect(s.loadReport('rNoLines')).toBeNull();
+        expect(s.loadAiRead?.('rNoLines')).toBeNull();
+      });
+    });
+
+    describe('what an erase reports about the set it erased', () => {
+      it('`closure` is the person and every subject merged into any of them, sorted; a dry run says the same; an unknown subject has none', async () => {
+        const s = make();
+        await seedWorld(s);
+        expect(s.eraseSubjects(plan({ dryRun: true })).closure).toEqual(['s_pp', 's_pp2']);
+        expect(s.eraseSubjects(plan({ subjects: ['s_pp2'], dryRun: true })).closure).toEqual(['s_pp2']);
+        expect(s.eraseSubjects(plan({ subjects: ['s_nobody'] })).closure).toEqual([]);
+        expect(s.eraseSubjects(plan()).closure).toEqual(['s_pp', 's_pp2']);
+      });
+
+      it('a subject merged into the person in the store alone is in the closure even when the caller never named it', async () => {
+        const s = make();
+        await seedWorld(s);
+        await s.saveSubject({ id: 's_late', createdAt: NOW, mergedInto: null });
+        await s.markMerged('s_late', 's_pp');
+        expect(s.eraseSubjects(plan()).closure).toEqual(['s_late', 's_pp', 's_pp2']);
+      });
+    });
+
+    describe('the finish when a hold keeps sanction rows', () => {
+      const hold = (s: Store) => s.placeHold({ reportId: 'rHeld', code: 'legal_proceeding', heldBy: 'senior_a', heldAt: NOW, releasedBy: null, releasedAt: null });
+      const pend = (s: Store, id: string, counts: ReturnType<Store['eraseSubjects']>) =>
+        s.insertErasure({ id, at: NOW, mode: 'safety', actor: 'owner_a', removed: counts.removed, kept: counts.kept, pendingSubject: counts.pending });
+
+      it('waits while the held sanction is still in force, then finishes once it has ended, and the held rows stay', async () => {
+        const s = make();
+        await seedWorld(s, { held: true });
+        hold(s);
+        const counts = s.eraseSubjects(plan({ mode: 'safety', receiptId: 'e_held', heldReportIds: new Set(['rHeld']) }));
+        expect(counts.pending).toBe('s_pp');
+        pend(s, 'e_held', counts);
+        // the held chat sanction runs until NOW + 1 day: the person is still under it
+        expect(s.finishErasure('e_held', NOW)).toBe(false);
+        expect(s.loadPendingErasures().length).toBe(1);
+        // once it has ended only held rows are left: the erase finishes, the held rows stay
+        const epoch = s.erasureEpoch();
+        expect(s.finishErasure('e_held', NOW + 2 * DAY)).toBe(true);
+        expect(s.erasureEpoch()).toBe(epoch + 1);
+        expect(s.loadPendingErasures()).toEqual([]);
+        expect((await s.loadSubjects()).subjects.map((r) => r.id).sort()).toEqual(['s_qq', 's_xx']);
+        expect(s.sanctionRefCode('gHeld')).not.toBeNull();
+        expect(s.loadReport('rHeld')).not.toBeNull();
+        expect(s.finishErasure('e_held', NOW + 2 * DAY)).toBe(false);
+      });
+
+      it('a revoked held sanction does not block either', async () => {
+        const s = make();
+        await seedWorld(s, { held: true });
+        hold(s);
+        const counts = s.eraseSubjects(plan({ mode: 'safety', receiptId: 'e_held2', heldReportIds: new Set(['rHeld']) }));
+        pend(s, 'e_held2', counts);
+        s.revokeSanctionGroup('gHeld', 'mod_a', NOW, 'oops');
+        expect(s.finishErasure('e_held2', NOW)).toBe(true);
+        expect(s.sanctionRefCode('gHeld')).not.toBeNull();
+      });
+
+      it('a sanction row that is NOT held still blocks the finish, held rows or not', async () => {
+        const s = make();
+        await seedWorld(s, { held: true, ban: true });
+        hold(s);
+        const counts = s.eraseSubjects(plan({ mode: 'safety', receiptId: 'e_held3', heldReportIds: new Set(['rHeld']) }));
+        pend(s, 'e_held3', counts);
+        expect(s.finishErasure('e_held3', NOW + 2 * DAY)).toBe(false);
+        s.revokeSanctionGroup('gBan', 'mod_a', NOW, 'ended');
+        s.purgeSanctions(NOW + 1000 * DAY);
+        expect(s.finishErasure('e_held3', NOW + 2 * DAY)).toBe(true);
+        expect(s.sanctionRefCode('gHeld')).not.toBeNull();
+      });
+    });
+
     describe('held reports', () => {
       it('held report ids passed in are untouched, with their excerpt lines, decisions, sanction groups, notices, appeals and AI rows, under none', async () => {
         const s = make();
@@ -582,7 +821,7 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
         const before = dump?.(s);
         const epoch = s.erasureEpoch();
         const counts = s.eraseSubjects(plan({ subjects: ['s_nobody'] }));
-        expect(counts).toEqual({ found: false, removed: {}, kept: { identifiers: false, sanctions: 0, heldReports: 0 }, pending: null });
+        expect(counts).toEqual({ found: false, removed: {}, kept: { identifiers: false, sanctions: 0, heldReports: 0 }, pending: null, closure: [] });
         expect(s.erasureEpoch()).toBe(epoch);
         if (dump !== undefined) expect(dump(s)).toBe(before);
       });
@@ -656,20 +895,20 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
         await seedWorld(s, { ban: true });
         const counts = s.eraseSubjects(plan({ mode: 'safety', receiptId: 'e_fin' }));
         s.insertErasure({ id: 'e_fin', at: NOW, mode: 'safety', actor: 'owner_a', removed: counts.removed, kept: counts.kept, pendingSubject: counts.pending });
-        expect(s.finishErasure('e_fin')).toBe(false);
+        expect(s.finishErasure('e_fin', NOW)).toBe(false);
         expect(s.loadPendingErasures().length).toBe(1);
         s.revokeSanctionGroup('gBan', 'mod_a', NOW, 'ended');
         // a revoked row is still a row: the finish waits for the retention pass to remove it
-        expect(s.finishErasure('e_fin')).toBe(false);
+        expect(s.finishErasure('e_fin', NOW)).toBe(false);
         s.purgeSanctions(NOW + 1000 * DAY);
         const epoch = s.erasureEpoch();
-        expect(s.finishErasure('e_fin')).toBe(true);
+        expect(s.finishErasure('e_fin', NOW)).toBe(true);
         expect(s.erasureEpoch()).toBe(epoch + 1);
         expect(s.loadPendingErasures()).toEqual([]);
         expect((await s.loadSubjects()).subjects.map((r) => r.id).sort()).toEqual(['s_qq', 's_xx']);
         expect(s.listAudit({ limit: 50 }).find((r) => r.id === 'au1')?.target).toEqual({ type: 'person', ref: 'e_fin' });
-        expect(s.finishErasure('e_fin')).toBe(false);
-        expect(s.finishErasure('e_nobody')).toBe(false);
+        expect(s.finishErasure('e_fin', NOW)).toBe(false);
+        expect(s.finishErasure('e_nobody', NOW)).toBe(false);
         if (dump !== undefined) for (const needle of [...WHO.ids, ...WHO.accounts, ...WHO.secrets]) expect(dump(s), needle).not.toContain(needle);
       });
 
@@ -804,12 +1043,24 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
         expect(out.mutes).toEqual({ placed: 1, received: 1 });
         expect(out.ai).toEqual({ noAutomation: 'streamer', reads: 2, outcomes: [{ verdict: 'upheld', agreement: 'agree' }, { verdict: 'upheld', agreement: 'none' }] });
         expect(out.audit).toEqual([{ at: NOW - 900, action: 'history.view' }]);
-        expect(out.holds).toEqual([]);
+        expect(out.holds).toEqual({ reports: 0 });
         expect(out.truncated).toEqual([]);
         const text = JSON.stringify(out);
         for (const bad of ['keyhash', 'iphash', 's_qq', 's_xx', 's_pp', OTHER.account, OTHER.handle, OTHER.line, 'qq statement', 'mod_a', 'senior_a', 'filter:', 'plain xx line']) {
           expect(text, bad).not.toContain(bad);
         }
+      });
+
+      it('says only that something is held, never why: a count, no code, no report id, no time', async () => {
+        const s = make();
+        await seedWorld(s, { held: true });
+        s.placeHold({ reportId: 'rHeld', code: 'law_enforcement_request', heldBy: 'senior_a', heldAt: NOW, releasedBy: null, releasedAt: null });
+        const out = s.exportSubjects(['s_pp', 's_pp2']);
+        expect(out.holds).toEqual({ reports: 1 });
+        const text = JSON.stringify(out);
+        for (const bad of ['law_enforcement', 'legal_proceeding', 'rHeld', 'senior_a']) expect(text, bad).not.toContain(bad);
+        s.releaseHold('rHeld', 'senior_a', NOW + 1);
+        expect(s.exportSubjects(['s_pp']).holds).toEqual({ reports: 0 });
       });
 
       it('a person with no subject is not found; a person with nothing else has empty sections', async () => {

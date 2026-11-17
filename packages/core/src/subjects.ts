@@ -16,6 +16,9 @@ const LAST_SEEN_THROTTLE_MS = 3_600_000;
 /** How often a process looks at the store's erasure epoch (on its next subject lookup): at most once in this long. */
 export const EPOCH_CHECK_MS = 30_000;
 
+/** A subject whose first save failed is saved again at most this often (on the injected clock), on the next flush or lookup after this long. */
+export const SAVE_RETRY_MS = 5_000;
+
 interface Owned {
   accounts: Set<string>;
   keys: Set<string>;
@@ -91,8 +94,16 @@ export class SubjectIndex {
 
   private tail: Promise<void> = Promise.resolve();
 
-  /** Subjects made in this process whose `saveSubject` has not finished: a reload must not mistake them for erased ones. */
+  /** Subjects made in this process whose `saveSubject` has not finished, or failed: a reload must not mistake them for erased ones. */
   private readonly unsaved = new Set<SubjectId>();
+  /** The subset of `unsaved` whose save threw. They are tried again (see `retryFailed`), with the identifiers and the merge that waited behind them. */
+  private readonly failedSaves = new Set<SubjectId>();
+  private lastSaveAttemptAt = Number.NEGATIVE_INFINITY;
+  /**
+   * Called with the people a reload found the store no longer has (erased by another process), after the index dropped them. The facade forgets what else it holds
+   * for them (room seats, evidence, caches), so a seat of an erased person never keeps writing under the dead id.
+   */
+  onGone: ((gone: ReadonlySet<SubjectId>) => void) | undefined = undefined;
   /** The store's erasure epoch when this process last looked, and when it looked (see `checkEpoch`). */
   private epochSeen: number | null = null;
   private epochCheckedAt = Number.NEGATIVE_INFINITY;
@@ -171,11 +182,21 @@ export class SubjectIndex {
         return;
       }
       if (epoch === this.epochSeen) return;
-      this.epochSeen = epoch;
-      this.enqueue(() => this.reconcile());
+      this.catchUp(epoch);
     } catch (err) {
       safeWarn(this.logger, 'chatwarden.epoch_failed', { error: err instanceof Error ? err.name : typeof err });
     }
+  }
+
+  /**
+   * Reconcile with the store (queued behind the earlier writes) and only then call the epoch `epoch` seen. Reading the epoch BEFORE the reload means an erase that lands
+   * in between is caught by the next check; a reload that fails leaves the old epoch, so the next check tries again instead of forgetting that it owes one.
+   */
+  private catchUp(epoch: number): void {
+    this.enqueue(async () => {
+      await this.reconcile();
+      this.epochSeen = epoch;
+    });
   }
 
   /**
@@ -184,8 +205,19 @@ export class SubjectIndex {
    */
   async refresh(): Promise<void> {
     await this.flush();
+    let epoch: number | null = null;
+    try {
+      epoch = this.store.erasureEpoch();
+    } catch (err) {
+      safeWarn(this.logger, 'chatwarden.epoch_failed', { error: err instanceof Error ? err.name : typeof err });
+    }
     await this.reconcile();
-    this.readEpoch();
+    if (epoch !== null) this.epochSeen = epoch;
+  }
+
+  /** True while a subject made here has not been written to the store (its save is in flight, or failed and waits for a retry). */
+  hasUnsaved(): boolean {
+    return this.unsaved.size > 0;
   }
 
   /** Drop every subject this index has that the store does not (and that is not waiting to be saved). */
@@ -194,13 +226,20 @@ export class SubjectIndex {
     const alive = new Set(subjects.map((s) => s.id));
     const gone = new Set<SubjectId>();
     for (const id of this.created.keys()) if (!alive.has(id) && !this.unsaved.has(id)) gone.add(id);
-    if (gone.size > 0) this.drop(gone);
+    if (gone.size === 0) return;
+    this.drop(gone);
+    try {
+      this.onGone?.(gone);
+    } catch (err) {
+      safeWarn(this.logger, 'subjects.gone_failed', { error: err instanceof Error ? err.name : typeof err });
+    }
   }
 
   /**
    * Forget these people and everything merged into them: their ids, every key and account they held, their aliases. A key or account that returns makes a NEW,
-   * unlinked subject. Memory only (the store rows go with the erase). Used by `cw.privacy.erase`; the erasing process takes its own epoch as seen, so it does not
-   * reload for its own erase.
+   * unlinked subject. Memory only (the store rows go with the erase). Used by `cw.privacy.erase`. The erasing process takes the epoch as seen only when it moved by
+   * exactly the one step this erase made; when it moved further, another process erased too and this one has not heard of it, so it reconciles now (a plain "take
+   * the current epoch" would swallow that erase for good).
    */
   forget(subjects: Iterable<SubjectId>): void {
     const set = new Set<SubjectId>();
@@ -209,7 +248,13 @@ export class SubjectIndex {
       for (const m of this.members.get(this.canonical(id)) ?? []) set.add(m);
     }
     this.drop(set);
-    this.readEpoch();
+    try {
+      const epoch = this.store.erasureEpoch();
+      if (this.epochSeen === null || epoch === this.epochSeen + 1) this.epochSeen = epoch;
+      else if (epoch !== this.epochSeen) this.catchUp(epoch);
+    } catch (err) {
+      safeWarn(this.logger, 'chatwarden.epoch_failed', { error: err instanceof Error ? err.name : typeof err });
+    }
   }
 
   private drop(set: ReadonlySet<SubjectId>): void {
@@ -222,6 +267,7 @@ export class SubjectIndex {
       this.parent.delete(id);
       this.members.delete(id);
       this.unsaved.delete(id);
+      this.failedSaves.delete(id);
     }
     for (const [child, parent] of [...this.parent]) if (set.has(child) || set.has(parent)) this.parent.delete(child);
     for (const [root, members] of [...this.members]) {
@@ -240,6 +286,7 @@ export class SubjectIndex {
    */
   resolve(ids: Identifiers): SubjectId | null {
     this.checkEpoch();
+    this.retryFailed();
     const key = present(ids.clientKey);
     const account = present(ids.accountId);
     const ip = present(ids.ipHash);
@@ -373,6 +420,7 @@ export class SubjectIndex {
 
   /** Resolves once every store write queued so far has been attempted. Never rejects. */
   async flush(): Promise<void> {
+    this.retryFailed();
     let t: Promise<void>;
     do {
       t = this.tail;
@@ -388,14 +436,71 @@ export class SubjectIndex {
     this.owned.set(id, emptyOwned());
     this.members.set(id, new Set([id]));
     this.unsaved.add(id);
-    this.enqueue(async () => {
-      try {
-        await this.store.saveSubject({ id, createdAt: now, mergedInto: null });
-      } finally {
-        this.unsaved.delete(id);
-      }
-    });
+    this.enqueue(() => this.saveNew([id]));
     return id;
+  }
+
+  /** Queue a retry of the subjects whose save failed, at most once every {@link SAVE_RETRY_MS}. */
+  private retryFailed(): void {
+    if (this.failedSaves.size === 0) return;
+    const now = this.clock.now();
+    if (now - this.lastSaveAttemptAt < SAVE_RETRY_MS) return;
+    this.lastSaveAttemptAt = now;
+    const ids = [...this.failedSaves];
+    this.enqueue(() => this.saveNew(ids));
+  }
+
+  /**
+   * Write these subjects. A subject whose save fails stays in `unsaved` (a reload never drops it, the stray-row sweep is told) and in `failedSaves`, to be tried again.
+   * A write for a subject with no row is a no-op in the store, so when a subject that had failed is finally saved its identifiers and its place in a merge, which
+   * waited behind it, are written again.
+   */
+  private async saveNew(ids: readonly SubjectId[]): Promise<void> {
+    this.lastSaveAttemptAt = this.clock.now();
+    const saved: Array<{ id: SubjectId; again: boolean }> = [];
+    for (const id of ids) {
+      const createdAt = this.created.get(id);
+      if (createdAt === undefined) {
+        this.unsaved.delete(id);
+        this.failedSaves.delete(id);
+        continue;
+      }
+      try {
+        await this.store.saveSubject({ id, createdAt, mergedInto: null });
+        saved.push({ id, again: this.failedSaves.has(id) });
+      } catch (err) {
+        this.failedSaves.add(id);
+        this.logFailure(err);
+      }
+    }
+    for (const { id, again } of saved) {
+      if (!again) {
+        this.unsaved.delete(id);
+        continue;
+      }
+      try {
+        await this.rewrite(id);
+        this.failedSaves.delete(id);
+        this.unsaved.delete(id);
+      } catch (err) {
+        this.logFailure(err);
+      }
+    }
+  }
+
+  /** Write the identifiers of a subject again, and its merge into another subject. Every write is idempotent. */
+  private async rewrite(id: SubjectId): Promise<void> {
+    const prefix = `${id}\u0000`;
+    for (const [key, seen] of [...this.seen]) {
+      if (!key.startsWith(prefix)) continue;
+      const rest = key.slice(prefix.length);
+      const cut = rest.indexOf('\u0000');
+      const kind = rest.slice(0, cut) as SubjectIdKind;
+      const value = rest.slice(cut + 1);
+      await this.store.saveIdentifier({ subjectId: id, kind, value, firstSeen: seen.firstSeen, lastSeen: seen.lastSeen });
+    }
+    const parent = this.parent.get(id);
+    if (parent !== undefined) await this.store.markMerged(id, parent);
   }
 
   /** Merge two distinct roots. The older survives; on a tie the smaller id. Returns the survivor. */

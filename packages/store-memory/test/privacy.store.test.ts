@@ -23,7 +23,7 @@ describe('the wrappers added in any order erase and export the same', () => {
     const preview = s.eraseSubjects(plan({ dryRun: true }));
     const counts = s.eraseSubjects(plan());
     expect(counts).toEqual(preview);
-    expect(counts.removed).toMatchObject({ signals: 2, appeals: 1, blocked_names: 1, workflow: 3 });
+    expect(counts.removed).toMatchObject({ signals: 2, appeals: 1, blocked_names: 1, workflow: 4 });
     for (const needle of ['s_pp', 'acct-pp', 'zorbak pp', 'ppname_vlemmo', 'pp appeal statement']) expect(dump(s), needle).not.toContain(needle);
     expect(dump(s)).toContain('s_qq');
   });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ERASED_LINE,
+  NO_PERSON_JSON_COLUMNS,
   NO_PERSON_TABLES,
   PRIVACY_CATEGORIES,
   PRIVACY_REGISTRY,
@@ -39,6 +40,15 @@ describe('registry: every PRIVACY_CATEGORIES entry has an export and an erase ru
     for (const r of PRIVACY_REGISTRY) if (r.retention !== null) expect(Object.keys(RETENTION_DEFAULTS), r.category).toContain(r.retention);
   });
 
+  it('the words never call a hold a legal duty, and the holds export says only that something is held', () => {
+    const rule = (c: string) => PRIVACY_REGISTRY.find((r) => r.category === c)!;
+    const all = PRIVACY_REGISTRY.flatMap((r) => [r.export, r.eraseSafety, r.eraseNone]).join(' ').toLowerCase();
+    expect(all).not.toContain('legal duty');
+    expect(rule('holds').eraseSafety.toLowerCase()).toContain('does not weigh');
+    expect(rule('holds').export.toLowerCase()).toContain('how many');
+    for (const bad of ['code', 'reason:', 'law enforcement', 'time']) expect(rule('holds').export.toLowerCase(), bad).not.toContain(bad);
+  });
+
   it('the audit trail is kept in both modes and a hold is kept whole: the two rules that must not drift', () => {
     const rule = (c: string) => PRIVACY_REGISTRY.find((r) => r.category === c)!;
     expect(rule('audit').eraseSafety.toLowerCase()).toContain('kept');
@@ -69,6 +79,45 @@ describe('tables: every table is claimed once by the registry or listed as holdi
     expect(PRIVACY_REGISTRY.find((r) => r.category === 'holds')?.tables).toEqual(['kit_legal_holds']);
     // kit_reports is claimed by three categories (filed, about, lines): origin and origin_key hold no person, and a filter report's reporter is `filter:<id>`
     expect(PRIVACY_REGISTRY.filter((r) => r.tables.includes('kit_reports')).map((r) => r.category)).toEqual(['reports_filed', 'reports_about', 'report_lines']);
+  });
+});
+
+describe('JSON columns: a column that holds a person inside a JSON value is declared', () => {
+  const declared = PRIVACY_REGISTRY.flatMap((r) => r.tables.length > 0 ? r.jsonColumns.map((c) => [r.category, c] as const) : []);
+
+  it('every rule has a jsonColumns list; each entry is table.column_json of a table the rule claims', () => {
+    for (const r of PRIVACY_REGISTRY) {
+      expect(Array.isArray(r.jsonColumns), r.category).toBe(true);
+      for (const c of r.jsonColumns) {
+        expect(c, r.category).toMatch(/^kit_[a-z_]+\.[a-z_]+_json$/);
+        expect(r.tables, `${r.category}: ${c}`).toContain(c.split('.')[0]);
+      }
+    }
+  });
+
+  it('names the columns that carry people: decisions of reports that stay, the people and lines of a report, the quoted lines of a notice, a webhook key answer, an AI example', () => {
+    const names = declared.map(([, c]) => c);
+    for (const c of ['kit_decisions.result_json', 'kit_reports.people_json', 'kit_reports.excerpt_json', 'kit_notices.excerpt_json', 'kit_webhook_keys.result_json', 'kit_ai_outcomes.example_json']) {
+      expect(names, c).toContain(c);
+    }
+  });
+
+  it('a JSON column is declared once, and never both declared and listed as holding no person', () => {
+    const names = declared.map(([, c]) => c);
+    expect(new Set(names).size).toBe(names.length);
+    for (const c of Object.keys(NO_PERSON_JSON_COLUMNS)) expect(names, c).not.toContain(c);
+  });
+
+  it('every "holds no person" JSON column has a reason and a name of the form table.column_json', () => {
+    for (const [c, reason] of Object.entries(NO_PERSON_JSON_COLUMNS)) {
+      expect(c).toMatch(/^kit_[a-z_]+\.[a-z_]+_json$/);
+      expect(reason.trim().length, c).toBeGreaterThan(10);
+    }
+  });
+
+  it('kit_webhook_keys is claimed by a category (its answer names a sanction group), not listed as holding no person', () => {
+    expect(NO_PERSON_TABLES['kit_webhook_keys']).toBeUndefined();
+    expect(PRIVACY_REGISTRY.some((r) => r.tables.includes('kit_webhook_keys'))).toBe(true);
   });
 });
 

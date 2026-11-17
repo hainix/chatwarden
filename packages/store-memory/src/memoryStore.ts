@@ -1148,7 +1148,7 @@ export class MemoryStore implements Store {
 
   eraseSubjects(plan: ErasePlan): ErasureCounts {
     const set = this.closure(plan.subjects);
-    if (set.size === 0) return { found: false, removed: {}, kept: { identifiers: false, sanctions: 0, heldReports: 0 }, pending: null };
+    if (set.size === 0) return { found: false, removed: {}, kept: { identifiers: false, sanctions: 0, heldReports: 0 }, pending: null, closure: [] };
     if (plan.dryRun !== true) return this.transaction(() => this.eraseNow(plan, set));
     let counts: ErasureCounts | null = null;
     try {
@@ -1213,7 +1213,6 @@ export class MemoryStore implements Store {
       add('ai', outcomes.size - keptOutcomes.size);
       this.swap(outcomes, keptOutcomes, (v) => (this.aiOutcomes = v));
       add('ai', hooks.privacyEraseAiActions?.(about) ?? 0);
-      add('workflow', hooks.privacyEraseLinks?.(about) ?? 0);
       for (const r of this.sanctions) {
         if (r.reportId == null || !about.has(r.reportId)) continue;
         const before = r.reportId;
@@ -1228,8 +1227,19 @@ export class MemoryStore implements Store {
       this.swap(this.reports, kept, (v) => (this.reports = v));
     }
 
+    // The person's name inside the decisions of the reports that stay (a decision can sanction anyone in its report: a speaker, the reporter): the entries for the set
+    // go, unless their sanction group stays. A held report's decision is never touched. An answer that cannot be read and names the person is blanked.
+    const redacted = new Map<string, DecisionRow>();
+    for (const d of this.decisions.values()) {
+      if (held.has(d.reportId)) continue;
+      const next = redactDecision(d.resultJson, set, keepGroups);
+      if (next !== null) redacted.set(d.key, { ...d, resultJson: next });
+    }
+    if (redacted.size > 0) this.swap(this.decisions, new Map([...this.decisions].map(([k, d]) => [k, redacted.get(k) ?? d] as [string, DecisionRow])), (v) => (this.decisions = v));
+
     // The person's name inside the other reports that stay: a reporter becomes `erased:<id>`, a line becomes a marker.
     const scrubbed = new Set<string>();
+    const readsGone = new Set<string>();
     const reports = this.reports.map((r) => {
       if (held.has(r.id)) return r;
       const asReporter = set.has(r.reporterSubject);
@@ -1238,6 +1248,8 @@ export class MemoryStore implements Store {
       if (asReporter) add('reports_filed', 1);
       else add('report_lines', 1);
       if (lines !== null) scrubbed.add(r.id);
+      // The AI's summary of a report can quote a line or the reporter's note (cleared below): the read goes with either.
+      if (lines !== null || asReporter) readsGone.add(r.id);
       return {
         ...r,
         ...(asReporter ? { reporterSubject: `erased:${r.id}`, reporterSeat: '', reporterHandle: '', note: null } : {}),
@@ -1245,12 +1257,14 @@ export class MemoryStore implements Store {
       };
     });
     if (reports.some((r, i) => r !== this.reports[i])) this.swap(this.reports, reports, (v) => (this.reports = v));
-    if (scrubbed.size > 0) {
-      // The AI's summary of a report can quote a line, and a stored example holds the text: both go with the line.
+    if (readsGone.size > 0) {
       const reads = this.aiReads;
-      const keptReads = reads.filter((r) => !scrubbed.has(r.reportId));
+      const keptReads = reads.filter((r) => !readsGone.has(r.reportId));
       add('ai', reads.length - keptReads.length);
       this.swap(reads, keptReads, (v) => (this.aiReads = v));
+    }
+    if (scrubbed.size > 0) {
+      // A stored example holds the lines: it goes with a line of the person.
       const outcomes = this.aiOutcomes;
       const next = new Map(outcomes);
       for (const [id, o] of outcomes) {
@@ -1269,7 +1283,16 @@ export class MemoryStore implements Store {
       const holders = new Set(kept.map((r) => r.refCode));
       this.swap(rows, kept, (v) => (this.sanctions = v));
       this.swap(owners, new Map([...owners].filter(([code]) => holders.has(code))), (v) => (this.refOwners = v));
+      // What names a deleted group: the replay answer of a webhook that applied it (blanked), and the EOS link that pushed it.
+      const keys = this.webhookKeys;
+      const blanked = new Map(keys);
+      for (const [k, v] of keys) {
+        if (v.state === 'done' && v.resultJson !== null && goneGroups.has(groupIdOf(v.resultJson))) blanked.set(k, { ...v, resultJson: '{"erased":true}' });
+      }
+      if ([...blanked].some(([k, v]) => v !== keys.get(k))) this.swap(keys, blanked, (v) => (this.webhookKeys = v));
     }
+    // The links: Coop links of the deleted reports, and EOS links of the deleted sanction groups.
+    add('workflow', hooks.privacyEraseLinks?.(about, goneGroups) ?? 0);
 
     const notices = this.notices;
     let cleared = 0;
@@ -1323,7 +1346,7 @@ export class MemoryStore implements Store {
     this.bumpEpoch();
     // The queue shows fewer reports and appeals: the change token moves with the erase (a dry run is undone with everything else).
     this.bump();
-    return { found: true, removed, kept: { identifiers: keepIdentifiers, sanctions: keptSanctionRows, heldReports: heldNaming }, pending };
+    return { found: true, removed, kept: { identifiers: keepIdentifiers, sanctions: keptSanctionRows, heldReports: heldNaming }, pending, closure: [...set].sort(compare) };
   }
 
   /** Point the audit rows that name the set at the receipt. Returns how many rows changed. */
@@ -1392,11 +1415,14 @@ export class MemoryStore implements Store {
       .map((r) => structuredClone(r));
   }
 
-  finishErasure(id: string): boolean {
+  finishErasure(id: string, at: number): boolean {
     const row = this.erasures.find((r) => r.id === id);
     if (row === undefined || row.pendingSubject === null) return false;
     const set = this.closure([row.pendingSubject]);
-    if (set.size > 0 && this.sanctions.some((r) => r.targetType === 'subject' && set.has(r.value))) return false;
+    // A sanction row keeps the erase pending, except a row a hold keeps that is not in force now (ended, revoked, or a kind that restricts nothing).
+    const heldGroups = this.heldGroupIds();
+    const inForce = (r: StoredSanction): boolean => r.revokedAt === null && (r.endsAt === null || r.endsAt > at) && (r.kind === 'chat' || r.kind === 'area' || r.kind === 'ban');
+    if (set.size > 0 && this.sanctions.some((r) => r.targetType === 'subject' && set.has(r.value) && (!heldGroups.has(r.groupId) || inForce(r)))) return false;
     this.transaction(() => {
       // The remainder ends the way a `none` erase does: whatever still names the person (a kept notice, a row written since) goes with the subject, and the audit
       // refs read the receipt. That erase moves the epoch; with nothing left to erase the finish moves it itself.
@@ -1497,7 +1523,7 @@ export class MemoryStore implements Store {
         mutes: { placed: 0, received: 0 },
         ai: { noAutomation: null, reads: 0, outcomes: [] },
         audit: [],
-        holds: [],
+        holds: { reports: 0 },
         truncated,
       };
     }
@@ -1598,10 +1624,8 @@ export class MemoryStore implements Store {
           .sort((a, b) => a.at - b.at || compare(a.id, b.id))
           .map((r) => ({ at: r.at, action: r.action })),
       ),
-      holds: this.listHolds()
-        .filter((h) => this.reports.some((r) => r.id === h.reportId && (set.has(r.targetSubject) || set.has(r.reporterSubject))))
-        .slice(0, EXPORT_CAP)
-        .map((h) => ({ reportId: h.reportId, at: h.heldAt, code: h.code })),
+      // Only that something is held: a count, never which report, why or since when.
+      holds: { reports: this.listHolds().filter((h) => this.reports.some((r) => r.id === h.reportId && (set.has(r.targetSubject) || set.has(r.reporterSubject)))).length },
       truncated,
     };
   }
@@ -1646,7 +1670,7 @@ interface PrivacyHooks {
   privacyExportAppeals(set: ReadonlySet<string>): AppealRow[];
   privacyEraseBlockedNames(set: ReadonlySet<string>): number;
   privacyExportBlockedNames(set: ReadonlySet<string>): BlockedNameRow[];
-  privacyEraseLinks(reportIds: ReadonlySet<string>): number;
+  privacyEraseLinks(reportIds: ReadonlySet<string>, goneGroups: ReadonlySet<string>): number;
   privacyEraseNoAutomation(set: ReadonlySet<string>): number;
   privacyEraseAiActions(reportIds: ReadonlySet<string>): number;
   privacyExportNoAutomation(set: ReadonlySet<string>): string | null;
@@ -1661,6 +1685,38 @@ class DryRunRollback extends Error {}
 const EXPORT_CAP = 5000;
 /** What stands in for an erased person's line in another player's report (core's `ERASED_LINE`). */
 const ERASED_LINE = '[erased]';
+
+/** The group id a webhook key's stored answer names (`{ groupId, refCode }`), or '' when it cannot be read. */
+function groupIdOf(resultJson: string): string {
+  try {
+    const g = (JSON.parse(resultJson) as { groupId?: unknown } | null)?.groupId;
+    return typeof g === 'string' ? g : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The stored answer of a decision with the entries for the erased set removed (`{ groups: [{ subject, groupId, ... }] }`), or null when nothing changes. An entry
+ * whose sanction group stays (a ban in force the erase keeps) stays too. An answer that is not JSON but names someone of the set is blanked. The SQLite store has the
+ * same function.
+ */
+function redactDecision(text: string, set: ReadonlySet<string>, keepGroups: ReadonlySet<string>): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    for (const id of set) if (text.includes(id)) return JSON.stringify({ groups: [] });
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as { groups?: unknown }).groups)) return null;
+  const groups = (parsed as { groups: unknown[] }).groups;
+  const kept = groups.filter((g) => {
+    const entry = g as { subject?: unknown; groupId?: unknown } | null;
+    return !(typeof entry?.subject === 'string' && set.has(entry.subject) && !(typeof entry.groupId === 'string' && keepGroups.has(entry.groupId)));
+  });
+  return kept.length === groups.length ? null : JSON.stringify({ ...(parsed as object), groups: kept });
+}
 
 /** The lines the set wrote in a report's excerpt, by the report's `people` list; null when nobody of the set is in it. The SQLite store has the same function. */
 function scrubExcerpt(

@@ -251,6 +251,7 @@ export type { BundleIntegrity } from './canonical.js';
 export {
   ERASED_LINE,
   EXPORT_SECTION_MAX,
+  NO_PERSON_JSON_COLUMNS,
   NO_PERSON_TABLES,
   PRIVACY_CATEGORIES,
   PRIVACY_REGISTRY,

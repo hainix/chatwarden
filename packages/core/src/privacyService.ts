@@ -145,12 +145,13 @@ export function createPrivacy(deps: PrivacyDeps): PrivacyService {
       });
       if (!counts.found) return { ok: false, error: 'not_found' };
 
-      // 5. after the commit: forget in memory, then flush and sweep once more (a write queued for the person cannot resurrect a row)
-      const people = new Set(set);
+      // 5. after the commit: forget in memory, then flush and sweep once more (a write queued for the person cannot resurrect a row). The set is the one the STORE
+      // erased (its closure over `merged_into`), which can be larger than this process's view when another process merged an alias in.
+      const people = new Set([...set, ...counts.closure]);
       const whole = counts.pending === null;
       deps.forget(people, whole);
       await subjects.flush();
-      if (whole) store.transaction(() => store.purgeStrayRows(Number.MAX_SAFE_INTEGER, set));
+      if (whole) store.transaction(() => store.purgeStrayRows(Number.MAX_SAFE_INTEGER, [...people]));
 
       // 6. the audit row, after the commit: a failure is returned in the receipt and never undoes the erase. While a remainder stands the row names the person (the finish
       // rewrites it to the receipt); once nothing keeps the person it names the receipt.
