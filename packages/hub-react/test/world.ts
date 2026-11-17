@@ -96,8 +96,9 @@ export async function hubWorld(opts: WorldOptions = {}) {
   const live = new LiveTerms({ store: new MemoryTermStore(), pack: syntheticTermPack(), clock });
   live.loadSync();
   const adapter: FakeModerationAI | undefined = opts.ai === undefined ? undefined : createFakeModerationAI(opts.ai.script ?? []);
+  const store: Store = opts.store ?? withMemoryAi(new MemoryStore());
   const cw: Chatwarden = await createChatwarden({
-    store: opts.store ?? withMemoryAi(new MemoryStore()),
+    store,
     matcher: live,
     secret: 'hub-react-test-secret-0000-not-real',
     platform: { identify: (ctx) => ctx as RawWho },
@@ -247,6 +248,43 @@ export async function hubWorld(opts: WorldOptions = {}) {
   };
 
   /**
+   * A sanction the AI actor wrote (source ai, automated). The public `cw.sanctions.apply` refuses source ai (design 6.1: only the kit's own actor
+   * writes one), so the row goes into the store directly, the way the actor will write it.
+   */
+  let aiN = 0;
+  const aiSanction = (person: string, over: { kind?: 'warning' | 'chat'; durationMs?: number | null; rule?: number; reason?: string } = {}) => {
+    aiN += 1;
+    const kind = over.kind ?? 'warning';
+    const groupId = `ai-group-${aiN}`;
+    const refCode = `M-AAAA${'BCDEFGHJKM'[aiN % 10]}`;
+    const startsAt = clock.now();
+    const durationMs = kind === 'warning' ? null : (over.durationMs ?? 3_600_000);
+    store.insertSanctionGroup([
+      {
+        id: `ai-row-${aiN}`,
+        groupId,
+        refCode,
+        kind,
+        targetType: 'subject',
+        value: person,
+        startsAt,
+        endsAt: durationMs === null ? null : startsAt + durationMs,
+        reason: over.reason ?? 'ai private',
+        rule: String(over.rule ?? 1),
+        gapNote: null,
+        gapStatus: null,
+        roomId: null,
+        actor: 'ai:fake',
+        source: 'ai',
+        automated: true,
+        pending: false,
+      },
+    ]);
+    clock.t += 1000;
+    return { groupId, refCode };
+  };
+
+  /**
    * A player types a line the term list refuses (a synthetic term such as zorbak): the kit records a blocked attempt. Returns the
    * room and the newest blocked item (its person is the staff ref).
    */
@@ -268,7 +306,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     for (let i = 0; i < 5; i += 1) await cw.ai.idle();
   };
 
-  return { cw, clock, adapter, aiIdle, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, blockLine, raw, live, community, now: () => clock.t };
+  return { cw, clock, adapter, aiIdle, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, aiSanction, blockLine, raw, live, community, now: () => clock.t };
 }
 
 export type HubWorld = Awaited<ReturnType<typeof hubWorld>>;

@@ -191,7 +191,8 @@ describe('built dist', () => {
   // KB and CSS 5.0 KB with the hand-built console. The hub alone is most of the growth (its own README budgets it at about 140 KB
   // gzip with React). React itself stays in the first-load chunk, shared. Budgets leave about 7% room.
   const DEMO_JS_GZ = 190 * 1024;
-  const DEMO_CSS_GZ = 16 * 1024;
+  // Raised to 18 KB at 0.1.13 (same rule: raised generously, never trimmed): measured 16,495 bytes, the gate table and the do-not-automate line, and the global `.cw-scroll` rule.
+  const DEMO_CSS_GZ = 18 * 1024;
 
   const STAFF_AND_CLIENT_MARKERS = ['GET /changes', 'POST /cases/next', 'POST /reports/:id/decide', 'GET /policy/profile', 'POST /terms/check', '/cases/:ref/claim', 'HubError', 'The server answered with something the hub cannot read.'];
 

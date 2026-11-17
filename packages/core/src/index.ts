@@ -1,4 +1,4 @@
-export const VERSION = '0.1.12';
+export const VERSION = '0.1.13';
 
 export type {
   Clock,
@@ -16,6 +16,7 @@ export type {
   WebhookKeyReservation,
   DecisionRow,
   DiscordThreadRow,
+  NoAutomationRow,
   ReportCategory,
   ReportExcerptLine,
   ReportListQuery,
@@ -29,6 +30,7 @@ export type {
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
+  AiGateRow,
   AiOutcomeDetail,
   AiOutcomeInsert,
   AiOutcomeRow,
@@ -178,6 +180,8 @@ export {
   isSanctionActive,
   sanctionGroupView,
 } from './staffViews.js';
+export { AUTOMATION_CODES } from './automation.js';
+export type { AutomationCode, AutomationFacade, AutomationMark } from './automation.js';
 export { BULK_DISMISS_MAX, BULK_REPORTER_SCAN_MAX } from './dismissMany.js';
 export type { DismissManyInput, DismissManyResult, DismissScope } from './dismissMany.js';
 export {
@@ -403,7 +407,7 @@ export type { AbortSignalLike, AIExample, AIExampleInput, AIPerson, AIRead, AIRe
 export { AI_OUTPUT_SCHEMA } from './ai/schema.js';
 export { validateAIOutput } from './ai/validate.js';
 export type { AIValidation, AIValidationContext } from './ai/validate.js';
-export { AI_MAX_KIND, AI_MAX_PREFILL_MS, AICeilingError, assertWithinCeilings, automationAllowed, isAllowedKind } from './ai/ceilings.js';
+export { AI_ACT_KINDS, AI_MAX_KIND, AI_MAX_PREFILL_MS, AICeilingError, assertWithinCeilings, automationAllowed, isAllowedKind, stepWithinActCeilings } from './ai/ceilings.js';
 export { redactNote, redactText } from './ai/redact.js';
 export { chooseLines, redactReportNote } from './ai/lines.js';
 export type { ChosenLine, ChosenLines } from './ai/lines.js';
@@ -413,9 +417,15 @@ export { inputHash } from './ai/hash.js';
 export { looksLikeInjection } from './ai/injection.js';
 export { aiActorOf, AiService, READ_AGAIN_PER_MINUTE, SWEEP_BATCH, SWEEP_EVERY_MS } from './ai/service.js';
 export { createInertAi } from './ai/inert.js';
+export { AI_ACT_CAP_DEFAULTS, AI_GATE_BANDS, AI_GATE_DEFAULTS, AI_RECENT_DAYS, checkGateConfig, evaluateCell, wilsonLower, wilsonUpper } from './ai/gates.js';
+export type { AiAppealFacts, AiCellCounts, AiCellGate, AiCellVerdict, AiGateCheck, AiGateConfig, AiGateName } from './ai/gates.js';
+export { reachOf } from './ai/reach.js';
+export type { AiReach, ReachSuggest } from './ai/reach.js';
 export type {
   AiBrief,
   AiFacade,
+  AiGateCell,
+  AiGatesView,
   AiOptions,
   AiReadAgain,
   AiReadView,

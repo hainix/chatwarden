@@ -40,6 +40,23 @@ export class SanctionError extends Error {
 /** Every source a sanction can come from. */
 export const SANCTION_SOURCES: readonly Source[] = ['moderator', 'auto_filter', 'coop', 'api', 'ai'];
 
+/**
+ * True for a source only the kit's own AI actor may write (design 6.1): `'ai'`. A caller of `cw.decide` or `cw.sanctions.apply` that passes it is refused
+ * (`invalid`, a sanction error). Private to core: it is not exported from `index.ts`, so no adopter code can ask whether a source is internal or reuse the
+ * check to let one through.
+ * @internal
+ */
+export function isInternalSource(source: unknown): boolean {
+  return source === 'ai';
+}
+
+/**
+ * The key to the internal source `ai` (`SanctionInput.sourceToken`). Exported from this module only, never from the package index, so only the kit's own
+ * AI actor can hold it; every other caller that passes `source: 'ai'` to `applySanction`, `writeSanction` or `validateSanctionInput` is refused.
+ * @internal
+ */
+export const AI_SOURCE_TOKEN: unique symbol = Symbol('chatwarden.ai.source');
+
 /** An IP row never outlives 24 h: addresses are shared (NAT, cafes) and rotate. */
 const IP_MAX_MS = 24 * 3_600_000;
 
@@ -117,6 +134,8 @@ export interface SanctionInput {
   startsAt?: number;
   /** @internal The key to `startsAt` and `reportId`: {@link APPEALS_START_TOKEN}. */
   startsAtToken?: symbol;
+  /** @internal The key to the internal source `ai`: {@link AI_SOURCE_TOKEN}. Anyone else passing `source: 'ai'` is refused. */
+  sourceToken?: symbol;
 }
 
 /** What `active` tells the chat path. No reason, rule, actor or identifier. */
@@ -154,6 +173,8 @@ export function refCode(): string {
  * is what is stored even for an object with getters or an inherited property.
  */
 interface Checked {
+  /** The source, read once by `validate`: the writer stores this value, never a second read of the input. */
+  source: Source;
   rule: string;
   gapNote: string | null;
   start: number | undefined;
@@ -176,6 +197,10 @@ function validate(input: SanctionInput, now?: number): Checked {
   const start: unknown = input.startsAt;
   const report: unknown = input.reportId;
   const token: unknown = input.startsAtToken;
+  // The source is read ONCE too, and the internal one (`ai`) is for the kit's own AI actor only (design 6.1): any other caller is refused here, in the
+  // one place every writer shares, whatever the entry point. The writer stores this read.
+  const source: unknown = input.source;
+  if (isInternalSource(source) && input.sourceToken !== AI_SOURCE_TOKEN) throw new SanctionError('applySanction: invalid source');
   if ((start !== undefined || report !== undefined) && token !== APPEALS_START_TOKEN) {
     throw new RangeError('applySanction: startsAt and reportId are not accepted');
   }
@@ -197,7 +222,7 @@ function validate(input: SanctionInput, now?: number): Checked {
     throw new SanctionError('applySanction: duration is over the 365 day limit');
   }
   if (!SANCTION_KINDS.includes(input.kind)) throw new SanctionError('applySanction: invalid kind');
-  if (!SANCTION_SOURCES.includes(input.source)) throw new SanctionError('applySanction: invalid source');
+  if (!SANCTION_SOURCES.includes(source as Source)) throw new SanctionError('applySanction: invalid source');
   if (typeof input.subject !== 'string' || input.subject === '') throw new SanctionError('applySanction: missing subject');
   const room: unknown = input.roomId;
   if (room !== undefined && room !== null && (typeof room !== 'string' || room === '')) {
@@ -209,19 +234,19 @@ function validate(input: SanctionInput, now?: number): Checked {
   if (ref !== 'uncovered' && !numbered) throw new SanctionError('applySanction: invalid rule');
 
   const note: unknown = input.gapNote;
-  if (ref === 'uncovered' && input.source === 'moderator') {
+  if (ref === 'uncovered' && source === 'moderator') {
     const trimmed = typeof note === 'string' ? note.trim() : '';
     // The kit's own writers (the decision, the appeals service: `token`) may leave the note out: a replacement under no rule has its gap
     // recorded on the sanction it replaces, so it does not open a second one.
     if (trimmed === '' && token === APPEALS_START_TOKEN && note === undefined) {
-      return { rule: 'uncovered', gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
+      return { source: source as Source, rule: 'uncovered', gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
     }
     if (trimmed === '') throw new SanctionError('applySanction: a rule-gap note is required when no rule is cited');
     if (trimmed.length > GAP_NOTE_MAX) throw new SanctionError('applySanction: the rule-gap note is too long');
-    return { rule: 'uncovered', gapNote: trimmed, start: start as number | undefined, reportId: report as string | undefined };
+    return { source: source as Source, rule: 'uncovered', gapNote: trimmed, start: start as number | undefined, reportId: report as string | undefined };
   }
   if (note !== undefined) throw new SanctionError('applySanction: a rule-gap note is only for an uncovered moderator sanction');
-  return { rule: String(ref), gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
+  return { source: source as Source, rule: String(ref), gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
 }
 
 /** What {@link writeSanction} wrote: the group's handle and the rows, for the caller to hand to the index. */
@@ -240,7 +265,7 @@ function applyNow(
   now: number,
   pending: boolean,
 ): WrittenSanction {
-  const { rule, gapNote, start: given, reportId } = validate(input, now);
+  const { source, rule, gapNote, start: given, reportId } = validate(input, now);
   const subject = subjects.canonical(input.subject);
   // The start is "now" unless the appeals service gave the original one (validate has refused anyone else).
   const start = given ?? now;
@@ -260,7 +285,7 @@ function applyNow(
       rule,
       roomId: input.roomId ?? null,
       actor: input.actor,
-      source: input.source,
+      source,
       automated: input.automated,
       pending,
     };

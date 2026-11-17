@@ -19,6 +19,8 @@ import { historyOf, suggest } from './ladder.js';
 import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
 import { resolveLimits } from './limits.js';
 import type { Limits, LimitsInput } from './limits.js';
+import { createAutomation } from './automation.js';
+import type { AutomationFacade } from './automation.js';
 import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
@@ -46,7 +48,7 @@ import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js'
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
-import { applySanction, normalizeRefCode, SanctionIndex } from './sanctions.js';
+import { applySanction, isInternalSource, normalizeRefCode, SanctionError, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
 import {
@@ -813,6 +815,12 @@ export interface Chatwarden {
      * @experimental
      */
     accountIds(subject: SubjectId): string[];
+    /**
+     * The "do not automate" mark (AI levels 3 and 4, design 6.4): a senior marks a person so the AI never acts on them. Staff only (`automation.write` in
+     * the HTTP layer). Reads and drafts are still produced for a marked person. Follows a merge. A store without the methods answers `unsupported`.
+     * @experimental
+     */
+    automation: AutomationFacade;
   };
   /**
    * The Discord feed's thread map (`@chatwarden/discord`): the forum thread kept per person (`kit_discord_threads`). A
@@ -1202,6 +1210,16 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           // The counts about the reported person the feed allows (`feeds.ai`), as label, polarity, distinct and window: nothing else leaves.
           // The rules cautioned for by the appeals the moderators lost (revokes only), as bands and rule numbers: never a rate, a count or a person.
           cautions: () => appealService.cautions(),
+          // The appeals side of the gate dashboard (revokes only; a reduce is carried apart and never counts). Read live from the appeals service, never from
+          // the AI: with appeals absent or disabled every cell reads "not available". Nothing yet records an AI action, so no revoke of one is known.
+          appealFacts: (cells) => {
+            if (!appealService.enabled()) return cells.map(() => ({ available: false, ruleSanctions: 0, ruleRevokes: 0, ruleReduces: 0, actRevokeAt: null }));
+            const byRule = new Map(appealService.stats({ days: 90 }).perRule.flatMap((r) => (typeof r.rule === 'number' ? [[r.rule, r] as const] : [])));
+            return cells.map((c) => {
+              const r = byRule.get(c.rule);
+              return { available: true, ruleSanctions: r?.sanctions ?? 0, ruleRevokes: r?.granted ?? 0, ruleReduces: r?.lightened ?? 0, actRevokeAt: null };
+            });
+          },
           signals: (subject) => signals.forAi(subject).map((c) => ({ label: c.label, polarity: c.polarity, distinct: c.distinct, windowDays: c.windowDays })),
         });
   aiRef.service = aiService;
@@ -1376,6 +1394,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
       apply: async (input) => {
+        // The AI's own source is not for a caller (design 6.1): refused before the clock, the store or the index is touched.
+        if (isInternalSource(input.source)) throw new SanctionError('applySanction: invalid source');
         const now = clock.now();
         const done = await applySanction(store, subjects, input, now, sanctions);
         try {
@@ -1551,6 +1571,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       canonical: (subject) => subjects.canonical(subject),
       aliases: (subject) => subjects.aliasesOf(subject),
       accountIds: (subject) => (typeof subject === 'string' ? subjects.identifiersOf(subject).accounts : []),
+      automation: createAutomation({ store, subjects, clock, logger }),
     },
     discordThreads: {
       get: (subject) => store.transaction(() => store.getDiscordThread(subject)),

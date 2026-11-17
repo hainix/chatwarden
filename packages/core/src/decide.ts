@@ -6,7 +6,7 @@ import { safeWarn } from './log.js';
 import { ownLines } from './notices.js';
 import type { NoticeService } from './notices.js';
 import type { CommunityRules, RuleRef } from './rules.js';
-import { APPEALS_START_TOKEN, SANCTION_KINDS, SANCTION_SOURCES, validateSanctionInput, writeSanction } from './sanctions.js';
+import { APPEALS_START_TOKEN, isInternalSource, SANCTION_KINDS, SANCTION_SOURCES, validateSanctionInput, writeSanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
 import type { SubjectIndex } from './subjects.js';
 import { CONDUCT_LEVELS } from './types.js';
@@ -277,7 +277,8 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
     return bad();
   }
   const source: unknown = input.source === undefined ? 'moderator' : input.source;
-  if (!SANCTION_SOURCES.includes(source as Source)) return bad();
+  // `ai` is the kit's own AI actor's (design 6.1): a caller cannot decide as the AI, so the decision is refused before anything is keyed or written.
+  if (!SANCTION_SOURCES.includes(source as Source) || isInternalSource(source)) return bad();
 
   const actions: NormalAction[] = input.actions.map((a) => {
     if (typeof a !== 'object' || a === null) return bad();
@@ -606,6 +607,8 @@ export class DecisionService {
         verdict: norm.verdict,
         actions: norm.actions.map((a) => ({ subject: a.subject, kind: a.kind, durationMs: a.durationMs, rule: a.rule, lineIds: a.lineIds })),
         ai: { readId: norm.ai.readId, accepted: norm.ai.accepted, severity: norm.ai.severity },
+        actor: norm.actor,
+        source: norm.source,
         now,
       });
     } catch (err) {

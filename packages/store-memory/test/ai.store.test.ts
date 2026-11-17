@@ -40,6 +40,7 @@ const outcomeRow = (): AiOutcomeInsert => ({
   detail: { verdict: true, rule: true, lines: 1, outcome: 'same', oneClick: false },
   badFaith: false,
   example: { rule: 2, severity: 'rude', verdict: 'noted', lines: [{ who: 'P1', text: 'zorbak' }] },
+  aiRule: null, aiSeverity: null, aiConfidence: null, decidedBy: null, source: 'human',
 });
 
 describe('MemoryStore AI rows are copies', () => {

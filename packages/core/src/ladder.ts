@@ -16,6 +16,15 @@ const DAY_MS = 24 * HOUR_MS;
 export const HISTORY_LOOKBACK_MS = 90 * DAY_MS;
 
 /** One prior action in a person's history. Derived from a sanction row; carries no identifier. */
+/**
+ * The four fixed sample records a preview is computed for (the hub's policy preview and the AI's reach preview): a clean record, one warning, a 24 hour
+ * chat restriction and a 7 day ban, each started an hour before `now`. Fresh objects each call.
+ */
+export function sampleRecords(now: number): Record<'clean' | 'oneWarning' | 'chat24h' | 'ban7d', ActionRecord[]> {
+  const one = (kind: ActionRecord['kind'], durationMs: number | null): ActionRecord[] => [{ kind, durationMs, startsAt: now - HOUR_MS, revoked: false, automated: false, roomId: null }];
+  return { clean: [], oneWarning: one('warning', null), chat24h: one('chat', DAY_MS), ban7d: one('ban', 7 * DAY_MS) };
+}
+
 export interface ActionRecord {
   kind: SanctionKind;
   /** `endsAt - startsAt`; null when permanent. A warning is recognised by `kind`, not by this. */

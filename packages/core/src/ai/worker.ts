@@ -23,8 +23,12 @@ const RACE_RETRY_MS = 60_000;
 /** What one call is counted as costing while it is in flight, until a real cost is known: 0.1 cent. */
 const DEFAULT_ESTIMATE_MICROS = 1000;
 
-/** The store with the AI methods present (checked once, at creation). */
-export type AiStore = Store &
+/**
+ * The store as the AI module sees it: the AI methods (present, checked once at creation) and the two report reads it needs and the optional gate query, and nothing else.
+ * It has none of the writers of a sanction, a decision, a notice, a strike or a mute (design 6.1; `store-narrow.test.ts` pins it), so the module
+ * cannot reach one even before the lint rule looks. Narrower than `Store` on purpose: a method the module needs is added here, in view.
+ */
+export type AiStore = Pick<Store, 'loadReport' | 'listReports' | 'aiGateRows'> &
   Required<
     Pick<
       Store,

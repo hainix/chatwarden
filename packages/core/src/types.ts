@@ -1,6 +1,7 @@
 // Core types for @chatwarden/core. Organized by section; later tasks append
 // their own sections below.
 
+import type { AiCellCounts } from './ai/gates.js';
 import type { AIExample, AIRead, AISignal } from './ai/types.js';
 import type { AppealStatus } from './appeals.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
@@ -462,6 +463,23 @@ export interface AiOutcomeInsert {
   badFaith: boolean;
   /** Up to 6 pseudonymised lines, or null for none. A store stores null for a `badFaith` row: it can never teach. */
   example: AIExample | null;
+  /**
+   * The rule the AI's own recommendation named (`'3'`, `'uncovered'`), or null. The gates' cell is `(aiRule, aiSeverity)`, not the human's `rule` and
+   * `severity` above: the read is purged at 90 days and the outcome lives 365, so the AI's side is kept on the row. Private; staff only.
+   */
+  aiRule: string | null;
+  /** The conduct level the AI's recommendation named, or null. */
+  aiSeverity: ConductLevel | null;
+  /** The AI's confidence in the read, or null: a read flagged as an injection leaves it out, so the row can never qualify for a gate. */
+  aiConfidence: 'low' | 'medium' | 'high' | null;
+  /** The staff ref of the moderator who decided the report (an audit-class identifier), or null for none. Never returned by a player route. */
+  decidedBy: string | null;
+  /**
+   * Where the decision came from: `human` (a person decided with the AI's read in front of them), `holdback` (a case the AI would have acted on and
+   * a person decided instead), `review` (a person confirming an action the AI took), `service` (an integration decided: the api, the coop bridge or the
+   * auto filter; there is no deciding moderator). The earn gates read `human` and `holdback` only.
+   */
+  source: 'human' | 'holdback' | 'review' | 'service';
 }
 
 /** A stored outcome: what was inserted, and the two marks a later action sets. */
@@ -475,6 +493,16 @@ export interface AiOutcomeRow extends AiOutcomeInsert {
   corrective: boolean;
   /** A senior's mark. Excludes the row from examples. */
   dontTeach: boolean;
+}
+
+/**
+ * One cell of the gate query: the AI's own rule (`'3'`; never a number the client sent) and conduct level, with the counts of the qualifying
+ * decisions (see {@link Store.aiGateRows}). No identifier and no text.
+ */
+export interface AiGateRow {
+  rule: string;
+  severity: ConductLevel;
+  counts: AiCellCounts;
 }
 
 /** One teachable casebook example, newest first from {@link Store.aiExamples}. The human's final decision is the label. */
@@ -572,6 +600,19 @@ export interface StrikeRow {
 // ---------------------------------------------------------------------------
 // Reports (storage shapes)
 // ---------------------------------------------------------------------------
+
+/**
+ * A "do not automate" mark as stored (AI levels 3 and 4, design 6.4). `setBy` is the senior's staff ref (audit-class: staff channels only, never a player).
+ * @experimental
+ */
+export interface NoAutomationRow {
+  subject: string;
+  /** One of the closed codes (`AUTOMATION_CODES`). */
+  code: string;
+  setBy: string;
+  /** Epoch ms. */
+  setAt: number;
+}
 
 /**
  * A Discord forum thread kept for one person by `@chatwarden/discord`. `label` is the neutral name the thread was
@@ -1257,6 +1298,18 @@ export interface Store {
   markAiOutcome?(reportId: string, patch: { reversed?: true; dontTeach?: true; corrective?: true }): boolean;
 
   /**
+   * OPTIONAL. The gate counts (AI levels 3 and 4, design 5.1): one row for every cell `(aiRule, aiSeverity)` that has at least one QUALIFYING
+   * outcome decided at or after `since`, in one indexed read. Qualifying: `aiVerdict` `upheld`, `aiConfidence` `high`, `agreement` not `none`,
+   * `source` `human` or `holdback` (never `review`), not bad faith, and both `aiRule` and `aiSeverity` present. Of those, a clean agree is
+   * `agreement` `agree` with the same rule (`detail.rule`), not a milder step (`detail.outcome`), and not reversed; a hard override is a dismissal
+   * (`override` with verdict `no_action`) or a row reversed by a revoke (`reversed` and `corrective`); reduced is reversed without `corrective`
+   * and not a hard override. `recent` counts the same rows decided at or after `recentSince` (30 days before now: the store has no clock).
+   * `reviewed` is all zero until the acting release. Rows are ordered by rule (numbers by number, then other text) then conduct level, mildest first.
+   * Returns copies. Does not move the change token.
+   */
+  aiGateRows?(since: number, recentSince: number): AiGateRow[];
+
+  /**
    * OPTIONAL. Teachable examples with this human rule (`'3'`, `'uncovered'`) and conduct level, decided at or after `since`, newest
    * first (`decidedAt` descending, then `reportId` descending), at most `limit`. Teachable: an example is
    * stored, the AI recommended something (`agree` or `override`, not `none`), and the row is not `reversed`, `dontTeach` or `badFaith`.
@@ -1282,6 +1335,16 @@ export interface Store {
    * entries made before `readsBefore` go with the reads. Returns how many reads and outcomes were deleted. `purgeReports` deletes the reads of the reports it deletes itself.
    */
   purgeAi?(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number };
+
+  /**
+   * OPTIONAL. Set (a row) or clear (`null`) the "do not automate" mark of one person (AI levels 3 and 4, design 6.4). One row per subject: a second
+   * set replaces it, clearing a person with no mark is not an error. `code` is one of the closed codes the service checks; the store keeps what it
+   * is given. Not purged by `purge()`: a mark lives until it is cleared. Does not move the change token.
+   */
+  setNoAutomation?(subject: string, mark: { code: string; setBy: string; setAt: number } | null): void;
+
+  /** OPTIONAL. The "do not automate" mark of this subject (a copy), or null. A store reads only the subject it is given; the service asks for each alias. */
+  loadNoAutomation?(subject: string): NoAutomationRow | null;
 
   // Signals (flood control and signals, design 5.8). OPTIONAL: a store without them cannot keep signals, and `createChatwarden` refuses a
   // profile that declares kinds or feeds with one. SYNCHRONOUS on purpose (like claims); they run inside `transaction`. They do not move

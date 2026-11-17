@@ -1022,6 +1022,7 @@ export const en = {
   'hub.audit.label.term.share': 'Offered a term to the community list',
   'hub.audit.label.community.apply': 'Applied a community list release',
   'hub.audit.label.term.report': 'Reported a problem with a community term',
+  'hub.audit.label.person.automation': 'Changed the "do not automate" mark on a person',
   'hub.audit.label.sanction.apply': 'Applied a sanction',
   'hub.audit.label.sanction.revoke': 'Revoked a sanction',
   'hub.audit.label.gap.close': 'Closed a rule gap',

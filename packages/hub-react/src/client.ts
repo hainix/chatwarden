@@ -6,6 +6,8 @@ import type {
   AppealDetail,
   AppealRow,
   AppealStats,
+  AutomationInput,
+  AiGatesView,
   AiStatusView,
   BlockedDays,
   BlockedLine,
@@ -168,6 +170,11 @@ export interface HubClient {
   readAgain(id: string): Promise<AiReadAgainResult>;
   /** `GET /ai/status` (needs `policy.read`, audited like the settings): the state, today's reads and spend, and the casebook counts. @experimental */
   aiStatus(): Promise<AiStatusView>;
+  /**
+   * `GET /ai/gates` (needs `policy.read`, audited like the settings): the gate table's data. Read it when the table is opened, not on a timer. 404 from a server
+   * before 0.1.13. Nothing in the answer lets the AI act: acting does not exist in this release. @experimental
+   */
+  aiGates(): Promise<AiGatesView>;
   /** `POST /reports/:id/ai/dont-teach` (needs `reasons.write`): the decided case's example text is never used to teach the AI again. 404 when it has none. @experimental */
   dontTeach(id: string): Promise<{ ok: true }>;
 
@@ -200,6 +207,11 @@ export interface HubClient {
    * and kept by the audit trail only. Rejects with `pending_rename` (409) while one is waiting, `claimed` (409) like a sanction. @experimental
    */
   rename(ref: string, input: { reason: string; rule?: number; takeOver?: boolean }): Promise<{ ok: true }>;
+  /**
+   * `PUT /people/:id/automation` (needs `automation.write`, a senior's by default): mark a person "do not automate" with one of the closed reason codes, or clear the mark.
+   * Rejects with 403 below the role, 400 for a code the server does not know, 404 for an unknown person or a store that cannot keep the mark. @experimental
+   */
+  setAutomation(person: string, input: AutomationInput): Promise<{ ok: true }>;
 
   // Rule gaps
   /** `GET /gaps`. */
@@ -316,6 +328,7 @@ export function createHubClient(transport: Transport): HubClient {
     dismissOpen: (input, options = {}) => post<DismissOpenResult>('/reports/dismiss-open', input, options),
     readAgain: (id) => post<AiReadAgainResult>(`/reports/${enc(id)}/ai/read`, undefined),
     aiStatus: () => get<AiStatusView>('/ai/status'),
+    aiGates: () => get<AiGatesView>('/ai/gates'),
     dontTeach: (id) => post<{ ok: true }>(`/reports/${enc(id)}/ai/dont-teach`, undefined),
 
     appeals: (query = {}) => get<Page<AppealRow>>('/appeals', q({ status: query.status, cursor: query.cursor, limit: query.limit })),
@@ -323,6 +336,7 @@ export function createHubClient(transport: Transport): HubClient {
     decideAppeal: (id, input) => post<AppealDecided>(`/appeals/${enc(id)}/decide`, input),
     appealStats: (options = {}) => get<AppealStats>('/appeals/stats', q({ days: options.days })),
     rename: (ref, input) => post<{ ok: true }>(`/people/${enc(ref)}/rename`, input),
+    setAutomation: (person, input) => call<{ ok: true }>({ method: 'PUT', path: `/people/${enc(person)}/automation`, body: input }),
 
     personHistory: (ref, options = {}) => get<PersonHistory>(`/people/${enc(ref)}/history`, q({ limit: options.limit })),
     listSanctions: (query = {}) => get<Page<SanctionRow>>('/sanctions', q({ cursor: query.cursor, limit: query.limit, source: query.source })),

@@ -2,6 +2,7 @@ import { Component, Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { CommandBarProps } from './shell/CommandBar.js';
 import type { AiPartsProps } from './case/AiParts.js';
+import type { PersonAutomationProps } from './person/Automation.js';
 import type { ReportTermProps } from './terms/ReportTerm.js';
 import type { ShareTermProps } from './terms/ShareTerm.js';
 import type { UsePolicy } from './policyHooks.js';
@@ -63,6 +64,7 @@ export const partLoaders: {
   appealList: () => Promise<ComponentType<{ selected: string | null }>>;
   shareTerm: () => Promise<ComponentType<ShareTermProps>>;
   reportTerm: () => Promise<ComponentType<ReportTermProps>>;
+  personAutomation: () => Promise<ComponentType<PersonAutomationProps>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
@@ -77,6 +79,7 @@ export const partLoaders: {
   appealList: () => import('./appeals/AppealList.js').then((m) => m.AppealList),
   shareTerm: () => import('./terms/ShareTerm.js').then((m) => m.ShareTerm),
   reportTerm: () => import('./terms/ReportTerm.js').then((m) => m.ReportTerm),
+  personAutomation: () => import('./person/Automation.js').then((m) => m.PersonAutomation),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -141,6 +144,7 @@ const namePanel = lazyPart(() => partLoaders.namePanel());
 const appealList = lazyPart(() => partLoaders.appealList());
 const shareTerm = lazyPart(() => partLoaders.shareTerm(), true);
 const reportTerm = lazyPart(() => partLoaders.reportTerm(), true);
+const personAutomation = lazyPart(() => partLoaders.personAutomation(), true);
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;
@@ -175,6 +179,9 @@ export const LazyShareTerm = shareTerm.Part;
 /** The report disclosure in the term editor: loaded when an editor opens on a row the shared list added; an optional extra, never an error. */
 export const LazyReportTerm = reportTerm.Part;
 
+/** The Person page's "do not automate" mark and its `...` item: loaded when a senior opens a person, or the person is marked; an optional extra, never an error. */
+export const LazyPersonAutomation = personAutomation.Part;
+
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
@@ -190,6 +197,7 @@ export function resetLazyParts(): void {
   appealList.reset();
   shareTerm.reset();
   reportTerm.reset();
+  personAutomation.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

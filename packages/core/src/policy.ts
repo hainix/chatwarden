@@ -1,6 +1,5 @@
 import { isValidAuditActor, AUDIT_REASON_MAX } from './audit.js';
-import { suggest } from './ladder.js';
-import type { ActionRecord } from './ladder.js';
+import { sampleRecords, suggest } from './ladder.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
 import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
 import { playerReporting } from './reporting.js';
@@ -114,17 +113,6 @@ export interface PreviewOutcome {
 export type PolicyPreview =
   | { ok: true; samples: Record<PreviewSample, Record<ConductLevel, PreviewOutcome>>; /** What players would read of the candidate's reporting settings (the enabled reasons, the flow and the thank-you). */ reporting: PlayerReporting }
   | { ok: false; error: 'invalid'; path: string };
-
-const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
-
-/** The records behind the samples, as of `now`: a clean record, one warning, a 24 hour chat restriction, a 7 day ban. */
-function sampleRecords(now: number): Record<PreviewSample, ActionRecord[]> {
-  const one = (kind: ActionRecord['kind'], durationMs: number | null): ActionRecord[] => [
-    { kind, durationMs, startsAt: now - HOUR_MS, revoked: false, automated: false, roomId: null },
-  ];
-  return { clean: [], oneWarning: one('warning', null), chat24h: one('chat', DAY_MS), ban7d: one('ban', 7 * DAY_MS) };
-}
 
 const isRuleRef = (v: unknown): v is RuleRef => v === 'uncovered' || (typeof v === 'number' && Number.isSafeInteger(v) && v >= 1);
 

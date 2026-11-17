@@ -247,13 +247,21 @@ describe('the AI methods: reads, outcomes, spend, examples, stats and purge', ()
           detail: { verdict: agreement === 'agree', rule: i % 3 === 0, lines: i % 4, outcome: (['same', 'milder', 'harsher', 'none'] as const)[i % 4]!, oneClick: i % 2 === 0 },
           badFaith: i % 11 === 0,
           example: i % 4 === 3 ? null : { rule: (i % 12) + 1, severity: 'hostile', verdict: v, lines: [{ who: 'P1', text: `zorbak ${i}` }] },
+          aiRule: i % 8 === 0 ? null : String((i % 3) + 1),
+          aiSeverity: i % 10 === 0 ? null : (['rude', 'hostile', 'severe'] as const)[i % 3]!,
+          aiConfidence: i % 6 === 1 ? null : (['high', 'high', 'medium'] as const)[i % 3]!,
+          decidedBy: i % 5 === 2 ? null : `mod_${i % 3}`,
+          source: (['human', 'human', 'holdback', 'review'] as const)[i % 4]!,
         }),
       );
     }
+    log('gate rows', s.aiGateRows!(NOW - 400 * DAY, NOW - 90 * DAY));
+    log('gate rows, a narrow window', s.aiGateRows!(NOW - 60 * DAY, NOW - 20 * DAY));
     log('outcome twice', s.insertAiOutcome!({ ...(s.loadAiOutcome!('o3') as object), reportId: 'o3' } as never));
     for (const [id, patch] of [['o1', { reversed: true }], ['o2', { dontTeach: true }], ['o5', { reversed: true, dontTeach: true }], ['nope', { reversed: true }]] as const) {
       log(`mark ${id}`, s.markAiOutcome!(id, patch));
     }
+    log('gate rows after the marks', s.aiGateRows!(NOW - 400 * DAY, NOW - 90 * DAY));
     log('token moved', s.changeToken().length > 0);
     for (const id of ['o0', 'o1', 'o2', 'o3', 'o5', 'o9', 'nope']) log(`loadAiOutcome ${id}`, s.loadAiOutcome!(id));
     for (const [rule, sev] of [['1', 'hostile'], ['2', 'rude'], ['2', 'hostile'], ['3', 'rude'], ['uncovered', 'hostile'], ['99', 'rude']] as const) {

@@ -182,7 +182,8 @@ const summarize = (
  *   (`SignalCount[]`, `[]` when none qualifies); with the feed off the key is absent.
  *   Two more keys, each only while its feature is on or there is something to show (else the body is what 0.1.7 sent): `appeals`, the
  *   person's appeals as the core's `AppealSummary`s, newest first, with no statement (only for a caller who holds `appeals.read`), and `renames`,
- *   `{ at, pending }` for each time a rename was required (no reason, no actor).
+ *   `{ at, pending }` for each time a rename was required (no reason, no actor). A third, `automation: { code, at }`, only while a senior has marked the
+ *   person "do not automate" (the closed reason code and when; never who).
  * - Handle flags: beside a handle the matcher flags, while `names.maskInHub` is on (the default), a body carries `true` under `targetHandleFlagged` /
  *   `reporterHandleFlagged` (a queue row, and the report in `GET /reports/:id`), `handleFlagged` on each excerpt line of that report and on the
  *   history's `handle`. Otherwise the key is absent, so an unflagged body is what 0.1.7 sent. It is the matcher's reading only
@@ -394,6 +395,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const appeals = mayReadAppeals ? cw.appeals.forPerson(ref) : [];
       const showAppeals = mayReadAppeals && (appeals.length > 0 || cw.appeals.enabled());
       const renames = cw.names.renamesOf(ref);
+      // The "do not automate" mark (AI levels 3 and 4): only while there is one, as its closed code and when it was set; never who set it.
+      const mark = cw.people.automation.get(ref);
       const showRenames = renames.length > 0 || cw.names.renamesEnabled();
       c.audit('history.view', { type: 'person', ref });
       return {
@@ -408,6 +411,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
           ...(signals === undefined ? {} : { signals }),
           ...(showAppeals ? { appeals } : {}),
           ...(showRenames ? { renames } : {}),
+          ...(mark.allowed ? {} : { automation: { code: mark.code, at: mark.at } }),
         },
       };
     }),

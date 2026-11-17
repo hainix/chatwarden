@@ -14,6 +14,7 @@ import type {
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
+  AiGateRow,
   AiOutcomeInsert,
   AiOutcomeRow,
   AiReadDone,
@@ -31,6 +32,7 @@ import type {
   ClaimRow,
   DecisionRow,
   MuteRow,
+  NoAutomationRow,
   NoticeKind,
   NoticeRow,
   OpenReportQuery,
@@ -401,6 +403,11 @@ function aiOutcomeFromRow(r: Record<string, unknown>): AiOutcomeRow {
     reversed: Number(r.reversed) === 1,
     corrective: Number(r.corrective) === 1,
     dontTeach: Number(r.dont_teach) === 1,
+    aiRule: nullableText(r.ai_rule),
+    aiSeverity: nullableText(r.ai_severity) as AiOutcomeRow['aiSeverity'],
+    aiConfidence: nullableText(r.ai_confidence) as AiOutcomeRow['aiConfidence'],
+    decidedBy: nullableText(r.decided_by),
+    source: String(r.source) as AiOutcomeRow['source'],
   };
 }
 
@@ -415,6 +422,33 @@ function compareRules(a: string | null, b: string | null): number {
   if (rank !== 0 || a === null || b === null) return rank;
   if (/^\d+$/.test(a) && /^\d+$/.test(b)) return Number(a) - Number(b);
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * The gate query (design 5.1): one aggregate over the casebook, grouped by the AI's own cell, over the by-cell index. Plain `?` placeholders, bound in order by
+ * `aiGateRowsArgs`: the start of the window, then the start of the recent window twice (Node 22.13's `node:sqlite` refuses a surplus or a reused number). The counting rules are the contract's (`Store.aiGateRows`); the in-memory store repeats them.
+ */
+export const AI_GATE_ROWS_SQL = `
+WITH q AS (
+  SELECT ai_rule, ai_severity, decided_by, decided_at,
+         CASE WHEN agreement = 'agree' AND reversed = 0 AND json_valid(detail_json) AND json_extract(detail_json, '$.rule') = 1
+                   AND COALESCE(json_extract(detail_json, '$.outcome'), '') <> 'milder' THEN 1 ELSE 0 END AS clean,
+         CASE WHEN (agreement = 'override' AND verdict = 'no_action') OR (reversed = 1 AND corrective = 1) THEN 1 ELSE 0 END AS hard,
+         CASE WHEN reversed = 1 AND corrective = 0 THEN 1 ELSE 0 END AS reduced
+  FROM kit_ai_outcomes
+  WHERE ai_rule IS NOT NULL AND decided_at >= ? AND ai_severity IS NOT NULL AND ai_verdict = 'upheld' AND ai_confidence = 'high'
+    AND agreement <> 'none' AND source IN ('human', 'holdback') AND bad_faith = 0
+)
+SELECT ai_rule AS rule, ai_severity AS severity, COUNT(*) AS qualifying, SUM(clean) AS clean, SUM(hard) AS hard,
+       SUM(CASE WHEN reduced = 1 AND hard = 0 THEN 1 ELSE 0 END) AS reduced,
+       COUNT(DISTINCT decided_by) AS deciders, MIN(decided_at) AS first_at, MAX(decided_at) AS last_at,
+       SUM(CASE WHEN decided_at >= ? THEN 1 ELSE 0 END) AS recent_n,
+       SUM(CASE WHEN decided_at >= ? AND clean = 1 THEN 1 ELSE 0 END) AS recent_clean
+FROM q GROUP BY ai_rule, ai_severity`;
+
+/** The values `AI_GATE_ROWS_SQL` binds, one for each `?`, in the order they appear. */
+export function aiGateRowsArgs(since: number, recentSince: number): [number, number, number] {
+  return [since, recentSince, recentSince];
 }
 
 /** What makes an outcome a teachable example (everything but the rule, severity and time). One text, used by two queries. */
@@ -1020,8 +1054,9 @@ export class SqliteStore implements Store, TermStore {
           this.db
             .prepare(
               `INSERT INTO kit_ai_outcomes
-                 (report_id, read_id, decided_at, level, verdict, rule, severity, ai_verdict, agreement, detail_json, bad_faith, example_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 (report_id, read_id, decided_at, level, verdict, rule, severity, ai_verdict, agreement, detail_json, bad_faith, example_json,
+                  ai_rule, ai_severity, ai_confidence, decided_by, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (report_id) DO NOTHING`,
             )
             .run(
@@ -1038,6 +1073,11 @@ export class SqliteStore implements Store, TermStore {
               row.badFaith ? 1 : 0,
               // A bad-faith row can never teach, so its chat text is not kept.
               row.example === null || row.badFaith ? null : JSON.stringify(row.example),
+              row.aiRule,
+              row.aiSeverity,
+              row.aiConfidence,
+              row.decidedBy,
+              row.source,
             ).changes,
         ) > 0,
     );
@@ -1140,6 +1180,29 @@ export class SqliteStore implements Store, TermStore {
       .sort((a, b) => compareRules(a.rule, b.rule));
   }
 
+  aiGateRows(since: number, recentSince: number): AiGateRow[] {
+    const rows = this.transaction(() => this.db.prepare(AI_GATE_ROWS_SQL).all(...aiGateRowsArgs(since, recentSince)));
+    return rows
+      .map(
+        (r): AiGateRow => ({
+          rule: String(r.rule),
+          severity: String(r.severity) as AiGateRow['severity'],
+          counts: {
+            qualifying: Number(r.qualifying),
+            cleanAgree: Number(r.clean),
+            hardOverride: Number(r.hard),
+            reduced: Number(r.reduced),
+            deciders: Number(r.deciders),
+            firstAt: Number(r.first_at),
+            lastAt: Number(r.last_at),
+            recent: { n: Number(r.recent_n), cleanAgree: Number(r.recent_clean) },
+            reviewed: { n: 0, confirmed: 0, hardUndo: 0, lastHardUndoAt: null, secondLastHardUndoAt: null },
+          },
+        }),
+      )
+      .sort((a, b) => compareRules(a.rule, b.rule) || CONDUCT_LEVELS.indexOf(a.severity) - CONDUCT_LEVELS.indexOf(b.severity));
+  }
+
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
     return this.transaction(() => {
       const reads = Number(this.db.prepare('DELETE FROM kit_ai_reads WHERE created_at < ?').run(readsBefore).changes);
@@ -1148,6 +1211,30 @@ export class SqliteStore implements Store, TermStore {
       // The only chat text that outlives a report goes on its own, shorter clock; the row keeps its counts.
       this.db.prepare('UPDATE kit_ai_outcomes SET example_json = NULL WHERE decided_at < ? AND example_json IS NOT NULL').run(examplesBefore);
       return { reads, outcomes };
+    });
+  }
+
+  // "Do not automate" (AI levels 3 and 4, migration 24). One row per person; no retention of its own.
+
+  setNoAutomation(subject: string, mark: { code: string; setBy: string; setAt: number } | null): void {
+    this.transaction(() => {
+      if (mark === null) {
+        this.db.prepare('DELETE FROM kit_ai_noauto WHERE subject_id = ?').run(subject);
+        return;
+      }
+      this.db
+        .prepare(
+          `INSERT INTO kit_ai_noauto (subject_id, code, set_by, set_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT (subject_id) DO UPDATE SET code = excluded.code, set_by = excluded.set_by, set_at = excluded.set_at`,
+        )
+        .run(subject, mark.code, mark.setBy, mark.setAt);
+    });
+  }
+
+  loadNoAutomation(subject: string): NoAutomationRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT subject_id, code, set_by, set_at FROM kit_ai_noauto WHERE subject_id = ?').get(subject);
+      return r === undefined ? null : { subject: String(r.subject_id), code: String(r.code), setBy: String(r.set_by), setAt: Number(r.set_at) };
     });
   }
 

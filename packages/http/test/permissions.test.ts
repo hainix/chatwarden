@@ -51,7 +51,36 @@ describe('PERMISSIONS defaults', () => {
       settings: 'owner',
       'appeals.read': 'moderator',
       'appeals.decide': 'senior',
+      'ai.review': 'moderator',
+      'ai.pause': 'senior',
+      'automation.write': 'senior',
     });
+  });
+
+  // AI levels 3 and 4 (0.1.13): the three keys are added once, together, appended last. `ai.review` and `ai.pause` are unused until the acting releases;
+  // they are in the lock now so the permission lock changes once. They are lowerable like every other key (the owner-fixed ones are not keys at all).
+  it('ai.review defaults to moderator, ai.pause and automation.write to senior, appended last in that order', () => {
+    expect(PERMISSIONS['ai.review']).toBe('moderator');
+    expect(PERMISSIONS['ai.pause']).toBe('senior');
+    expect(PERMISSIONS['automation.write']).toBe('senior');
+    expect(PERMISSION_KEYS.slice(-3)).toEqual(['ai.review', 'ai.pause', 'automation.write']);
+    expect(PERMISSION_KEYS.slice(0, -3).at(-1)).toBe('appeals.decide');
+    expect(roleAtLeast('moderator', PERMISSIONS['automation.write'])).toBe(false);
+    expect(roleAtLeast('senior', PERMISSIONS['automation.write'])).toBe(true);
+    expect(roleAtLeast('moderator', PERMISSIONS['ai.review'])).toBe(true);
+    expect(roleAtLeast('moderator', PERMISSIONS['ai.pause'])).toBe(false);
+  });
+
+  it('the permissions option lowers or raises each of the three, and refuses a bad role or a near-miss key', () => {
+    expect(resolvePermissions({ 'automation.write': 'moderator' })['automation.write']).toBe('moderator');
+    expect(resolvePermissions({ 'ai.pause': 'moderator' })['ai.pause']).toBe('moderator');
+    expect(resolvePermissions({ 'ai.review': 'owner' })['ai.review']).toBe('owner');
+    expect(resolvePermissions({ 'ai.review': 'owner' })['automation.write']).toBe('senior');
+    expect(() => resolvePermissions({ 'automation.writes': 'owner' } as never)).toThrow(/"automation\.writes"/);
+    expect(() => resolvePermissions({ 'ai.act': 'owner' } as never)).toThrow(/"ai\.act"/);
+    expect(() => resolvePermissions({ 'automation.write': 'admin' as Role })).toThrow(/automation\.write/);
+    // the ceilings are not permissions: nothing named for them can be set
+    for (const key of ['ai.start', 'ai.shadow', 'ai.acting', 'ai.undo_all']) expect(() => resolvePermissions({ [key]: 'moderator' } as never), key).toThrow(RangeError);
   });
 
   it('appeals.read defaults to moderator and appeals.decide to senior', () => {
@@ -60,7 +89,7 @@ describe('PERMISSIONS defaults', () => {
     expect(roleAtLeast('moderator', PERMISSIONS['appeals.read'])).toBe(true);
     expect(roleAtLeast('moderator', PERMISSIONS['appeals.decide'])).toBe(false);
     expect(roleAtLeast('senior', PERMISSIONS['appeals.decide'])).toBe(true);
-    expect(PERMISSION_KEYS.slice(-2)).toEqual(['appeals.read', 'appeals.decide']);
+    expect(PERMISSION_KEYS.slice(-5, -3)).toEqual(['appeals.read', 'appeals.decide']);
   });
 
   it('is frozen', () => {

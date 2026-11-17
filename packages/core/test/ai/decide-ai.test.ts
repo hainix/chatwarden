@@ -24,6 +24,11 @@ const recommends =
     }),
   });
 
+/** The same, at high confidence (the only confidence a gate counts). */
+const highUpheld = (input: AIReadInput): FakeStep => ({
+  output: fakeRead(input, { severity: 'rude', rule: RULE, evidence: [ownRef(input)], confidence: 'high', recommendation: { verdict: 'upheld', severity: 'rude', rule: RULE, evidence: [ownRef(input)] } }),
+});
+
 const store = (w: AiWorld): MemoryAiStore => w.store as MemoryAiStore;
 
 /** A decision by moderator `mod_ann`, with the echo of the read. */
@@ -520,5 +525,162 @@ describe('the casebook never keeps an injection', () => {
     await w.idle();
     await w.cw.decide(decision(w, r, { ai: { readId: w.cw.ai.read(r.id)?.id ?? 'x', accepted: false, role: 'moderator', severity: 'hostile' } }));
     expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'override', severity: 'hostile', example: null });
+  });
+});
+
+// The gates (design 5.1) read the casebook row's own columns, because the read is purged at 90 days and the outcome lives 365: the rule, the
+// conduct level and the confidence the AI itself gave, the deciding moderator's ref, and where the decision came from. All computed on the server.
+describe('the casebook row carries what the gates need', () => {
+  it("the casebook row records the AI's own rule, conduct level and confidence, and the deciding moderator's ref", async () => {
+    const w = await aiWorld({ level: 2, script: recommends('upheld', 'rude') });
+    const r = await w.report();
+    await w.idle();
+    // The human settles on another rule (4) and another conduct level (severe) than the AI named (2, rude): the human's go in rule/severity.
+    const res = await w.cw.decide(
+      decision(w, r, {
+        actions: [{ subject: r.target, kind: 'warning', durationMs: null, rule: 4, lineIds: store(w).loadAiRead(r.id)?.read?.recommendation?.evidence ?? [] }],
+        actor: 'mod_ann',
+        ai: { readId: w.cw.ai.read(r.id)?.id ?? 'none', accepted: false, role: 'moderator', severity: 'severe' },
+      }),
+    );
+    expect(res.ok).toBe(true);
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({
+      rule: '4',
+      severity: 'severe',
+      aiRule: String(RULE),
+      aiSeverity: 'rude',
+      aiConfidence: 'medium', // the fake's default read
+      decidedBy: 'mod_ann',
+      source: 'human',
+    });
+  });
+
+  it('a decision with no echo still fills ai_rule and decided_by', async () => {
+    const w = await aiWorld({ level: 2, script: recommends('upheld', 'hostile') });
+    const r = await w.report();
+    await w.idle();
+    const input = decision(w, r, { actor: 'mod_bea' });
+    delete input.ai;
+    await w.cw.decide(input);
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ aiRule: String(RULE), aiSeverity: 'hostile', aiConfidence: 'medium', decidedBy: 'mod_bea', source: 'human', agreement: 'agree' });
+  });
+
+  it('the deciding moderator is the actor of the decision, trimmed, whoever the echo says it was', async () => {
+    const w = await aiWorld({ level: 2, script: recommends('upheld') });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r, { actor: '  mod_cy  ', ai: { readId: w.cw.ai.read(r.id)?.id ?? 'none', accepted: false, role: 'owner' } }));
+    expect(store(w).loadAiOutcome(r.id)?.decidedBy).toBe('mod_cy');
+  });
+
+  // Review R1a M4: only a person at the desk is a "human" decision. An integration's decision (the api, the coop bridge, the auto filter) still files its
+  // row, but as `service`, with no deciding moderator, so it never earns trust and never counts toward the breadth of distinct deciders.
+  it.each(['api', 'coop', 'auto_filter'] as const)('a decision with source %s files a service row: no deciding moderator, and the gates do not count it', async (source) => {
+    const w = await aiWorld({ level: 2, script: highUpheld });
+    const r = await w.report();
+    await w.idle();
+    const res = await w.cw.decide(decision(w, r, { source, actor: 'svc_bot' }));
+    expect(res.ok).toBe(true);
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ source: 'service', decidedBy: null, agreement: 'agree', aiRule: String(RULE) });
+    expect(store(w).aiGateRows(0, 0)).toEqual([]);
+  });
+
+  it('a moderator decision still files a human row and counts (the control)', async () => {
+    const w = await aiWorld({ level: 2, script: highUpheld });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r, { source: 'moderator', actor: 'mod_ann' }));
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ source: 'human', decidedBy: 'mod_ann' });
+    expect(store(w).aiGateRows(0, 0)).toHaveLength(1);
+  });
+
+  it('three service actors and one moderator make one decider, not four', async () => {
+    const w = await aiWorld({ level: 2, script: highUpheld });
+    const files: Array<[string, 'api' | 'coop' | 'auto_filter' | 'moderator']> = [['svc_a', 'api'], ['svc_b', 'coop'], ['svc_c', 'auto_filter'], ['mod_ann', 'moderator']];
+    for (const [actor, source] of files) {
+      const r = await w.report();
+      await w.idle();
+      await w.cw.decide(decision(w, r, { source, actor }));
+    }
+    const cell = store(w).aiGateRows(0, 0)[0];
+    expect(cell?.counts).toMatchObject({ qualifying: 1, deciders: 1 });
+  });
+
+  it('a dismissal is filled the same way, and the AI columns keep what the AI said, not the dismissal', async () => {
+    const w = await aiWorld({ level: 2, script: recommends('upheld', 'severe') });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r, { verdict: 'no_action', actions: [], actor: 'mod_di' }));
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ verdict: 'no_action', agreement: 'override', aiVerdict: 'upheld', aiRule: String(RULE), aiSeverity: 'severe', decidedBy: 'mod_di', source: 'human' });
+  });
+
+  it('a bad-faith dismissal is flagged bad faith (the gates leave it out) and still records the AI columns', async () => {
+    const w = await aiWorld({ level: 2, script: recommends('upheld') });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r, { verdict: 'bad_faith', actions: [], evidence: 'filed the same false report three times about vlemmo' }));
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ badFaith: true, aiRule: String(RULE), decidedBy: 'mod_ann' });
+  });
+
+  it('level 1 fills them too (the recommendation was not shown, so the row is agreement none and never qualifies)', async () => {
+    const w = await aiWorld({ level: 1, script: recommends('upheld', 'hostile') });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r));
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'none', aiVerdict: null, aiRule: String(RULE), aiSeverity: 'hostile', decidedBy: 'mod_ann', source: 'human' });
+  });
+
+  it('a read the model flagged as an injection leaves the confidence out, so the row can never qualify', async () => {
+    const w = await aiWorld({
+      level: 2,
+      script: (input) => ({
+        output: fakeRead(input, {
+          severity: 'hostile',
+          rule: RULE,
+          evidence: [ownRef(input)],
+          confidence: 'high',
+          injectionSuspected: true,
+          recommendation: { verdict: 'upheld', severity: 'hostile', rule: RULE, evidence: [ownRef(input)] },
+        }),
+      }),
+    });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r));
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ aiRule: String(RULE), aiSeverity: 'hostile', aiConfidence: null });
+  });
+
+  it('a high-confidence upheld read is recorded as high, and shows in the gate query for its own cell', async () => {
+    const w = await aiWorld({
+      level: 2,
+      script: (input) => ({ output: fakeRead(input, { severity: 'rude', rule: RULE, evidence: [ownRef(input)], confidence: 'high', recommendation: { verdict: 'upheld', severity: 'rude', rule: RULE, evidence: [ownRef(input)] } }) }),
+    });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r, { actor: 'mod_ann' }));
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ aiConfidence: 'high' });
+    const rows = store(w).aiGateRows(0, 0);
+    expect(rows.map((c) => [c.rule, c.severity, c.counts.qualifying, c.counts.cleanAgree, c.counts.deciders])).toEqual([[String(RULE), 'rude', 1, 1, 1]]);
+  });
+
+  it('decided_by is never returned by a player route: nothing a player (or the reporter) can read carries the moderator ref or the AI columns', async () => {
+    const w = await aiWorld({ level: 2, script: recommends('upheld') });
+    // Our own table, so the raw keys are known: the player routes are asked with them.
+    const t = w.table({ reporter: 'key-rep-visible', target: 'key-tgt-visible' });
+    w.cw.chat.accept(t.room, 'p2', 'you are trash');
+    w.clock.t += 1_000;
+    const filed = await w.submit(t.room);
+    if (!filed.ok) throw new Error('refused');
+    await w.idle();
+    const r = { id: filed.reportId, target: t.target };
+    const ACTOR = 'mod_distinct_qz7';
+    await w.cw.decide(decision(w, r, { actor: ACTOR }));
+    expect(store(w).loadAiOutcome(r.id)?.decidedBy).toBe(ACTOR);
+    const target = { clientKey: 'key-tgt-visible' };
+    const reporter = { clientKey: 'key-rep-visible' };
+    const seen = JSON.stringify([w.cw.notices.pending(target), w.cw.notices.record(target), w.cw.notices.pending(reporter), w.cw.notices.record(reporter), w.cw.appeals.mine(target), w.cw.appeals.mine(reporter)]);
+    expect(seen).not.toContain(ACTOR);
+    expect(seen).not.toContain(filed.reportId);
+    for (const field of ['decidedBy', 'decided_by', 'aiRule', 'ai_rule', 'aiConfidence', 'aiSeverity']) expect(seen).not.toContain(field);
   });
 });

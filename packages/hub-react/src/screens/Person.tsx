@@ -4,7 +4,7 @@ import { ReporterStanding, ReporterTotals } from '../case/ReporterStanding.js';
 import { useHub } from '../context.js';
 import { useHubData } from '../hooks.js';
 import { categoryLabel, groupName, kindLabel } from '../labels.js';
-import { LazySignalLines } from '../lazyParts.js';
+import { LazyPersonAutomation, LazySignalLines } from '../lazyParts.js';
 import { LocalReveal, NameToggle, NameValue } from '../names.js';
 import { Revoke } from '../person/Revoke.js';
 import { SanctionForm } from '../person/SanctionForm.js';
@@ -115,6 +115,8 @@ export function Person({ person }: { person: string }) {
         <Fetched state={history} what={t('hub.state.what.history')}>
           {(h) => (
             <PersonBody
+              person={person}
+              onMarked={wrote}
               history={h}
               revoking={revoking}
               setRevoking={setRevoking}
@@ -130,13 +132,16 @@ export function Person({ person }: { person: string }) {
   );
 }
 
-function PersonBody({ history, revoking, setRevoking, onRevoked }: { history: PersonHistory; revoking: string | null; setRevoking: (id: string | null) => void; onRevoked: () => void }) {
+function PersonBody({ person, onMarked, history, revoking, setRevoking, onRevoked }: { person: string; onMarked: () => void; history: PersonHistory; revoking: string | null; setRevoking: (id: string | null) => void; onRevoked: () => void }) {
   const { t, can } = useHub();
   const standing = history.sanctions.filter((s) => s.active && s.revokedAt === null);
   const entries = useMemo(() => timelineOf(history), [history]);
   const canRevoke = can('sanctions.revoke');
+  // "Do not automate" (AI levels 3 and 4): a quiet line while the person is marked, and a `...` item for a senior. Its code is its own chunk, fetched only when one of the two applies.
+  const automation = can('automation.write') || history.automation !== undefined ? <LazyPersonAutomation person={person} mark={history.automation ?? null} canWrite={can('automation.write')} onChanged={onMarked} /> : null;
   return (
     <>
+      {automation}
       <Panel title={t('hub.person.inForce.title')}>
         {standing.length === 0 ? (
           <Empty>{t('hub.person.inForce.none')}</Empty>

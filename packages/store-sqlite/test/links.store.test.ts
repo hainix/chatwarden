@@ -9,6 +9,7 @@ import { MIGRATIONS, openStore } from '../src/index.js';
 const NOW = 1_800_000_000_000;
 const DAY = 86_400_000;
 const UP_TO_22 = MIGRATIONS.slice(0, 22);
+const UP_TO_23 = MIGRATIONS.slice(0, 23);
 const M23 = MIGRATIONS.find((m) => m.version === 23);
 
 const dbs: DatabaseSync[] = [];
@@ -78,7 +79,8 @@ describe('migration 23: kit_links', () => {
     const audit = dump(db, 'kit_audit', 'id');
     const tables = names(db, 'table');
     const indexes = names(db, 'index');
-    const store = openStore({ db });
+    // This file tests migration 23: it upgrades to 23 and stops (later migrations have their own files).
+    const store = openStore({ db, migrations: UP_TO_23 });
     expect(store.schemaVersion()).toBe(23);
     expect(names(db, 'table')).toEqual([...tables, 'kit_links'].sort());
     expect(names(db, 'index')).toEqual([...indexes, 'kit_links_by_state'].sort());
@@ -103,7 +105,7 @@ describe('migration 23: kit_links', () => {
     const db = memDb();
     openStore({ db }).putLink(link());
     const again = openStore({ db });
-    expect(again.schemaVersion()).toBe(23);
+    expect(again.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(again.getLink('coop-report', 'r1')).toEqual(link());
   });
 
@@ -115,7 +117,7 @@ describe('migration 23: kit_links', () => {
     expect(openStore({ db, migrations: UP_TO_22 }).schemaVersion()).toBe(22);
     expect(names(db, 'table')).not.toContain('kit_links');
     expect(names(db, 'index')).not.toContain('kit_links_by_state');
-    expect(openStore({ db }).schemaVersion()).toBe(23);
+    expect(openStore({ db }).schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(names(db, 'table')).toContain('kit_links');
   });
 

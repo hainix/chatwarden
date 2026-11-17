@@ -1,5 +1,5 @@
 import type { RuleRef } from '../rules.js';
-import type { AiOutcomeInsert, ConductLevel, ReportRecord, SanctionKind, SubjectId } from '../types.js';
+import type { AiOutcomeInsert, ConductLevel, ReportRecord, SanctionKind, Source, SubjectId } from '../types.js';
 import { compareSteps } from './agreement.js';
 import type { StepLike } from './agreement.js';
 import type { ChosenLines } from './lines.js';
@@ -68,6 +68,10 @@ export interface AiOutcomeArgs {
   actions: ReadonlyArray<{ subject: SubjectId; kind: SanctionKind; durationMs: number | null; rule: RuleRef; lineIds: readonly string[] }>;
   /** The echo of the decision, or all-empty (`readId` null, not accepted, no severity) when it carried none. */
   ai: { readId: string | null; accepted: boolean; severity: ConductLevel | null };
+  /** The deciding moderator's staff ref (the decision's actor), kept on the row for the gates' breadth check. Only a `moderator` decision keeps it. */
+  actor: string;
+  /** Where the decision came from. Only `moderator` (a person at the desk) is a human decision; an integration's is filed as `service` with no deciding moderator. */
+  source: Source;
   now: number;
 }
 

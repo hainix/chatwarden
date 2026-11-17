@@ -494,6 +494,8 @@
 
 /* A table that scrolls inside its own box instead of widening the page. */
 .cw-hub .cw-scroll {
+  /* The containing block of the screen-reader-only words inside (they are absolutely placed): without it a wide table's hidden words lie outside the box and widen the page. */
+  position: relative;
   max-width: 100%;
   overflow: auto;
   border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
@@ -3786,9 +3788,69 @@
 }
 .cw-hub .cw-ai-advanced {
   justify-items: start;
+  /* A wide table inside (the gate table) scrolls in its own box instead of widening the page. */
+  grid-template-columns: minmax(0, 1fr);
 }
 .cw-hub .cw-ai-advanced > div {
   justify-self: stretch;
+}
+/* Settings > AI > Advanced > Where the AI may act (read-only). Neutral tokens only: a tick or a cross is a word for a reader and a mark for the eye, never a colour. */
+.cw-hub .cw-gates {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-gates > * {
+  min-width: 0;
+}
+.cw-hub .cw-gates h3,
+.cw-hub .cw-gates p {
+  margin: 0;
+}
+.cw-hub .cw-gate-table th,
+.cw-hub .cw-gate-table td {
+  vertical-align: top;
+  min-width: 9rem;
+}
+.cw-hub .cw-gate-table th[scope='row'] {
+  min-width: 12rem;
+  text-align: start;
+}
+.cw-hub .cw-gate-reach,
+.cw-hub .cw-gate-cooling {
+  display: block;
+}
+.cw-hub .cw-gate-never {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+}
+.cw-hub .cw-gate-never ul {
+  margin: 0;
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+}
+/* The Person page: the quiet "do not automate" line and its "..." item. */
+.cw-hub .cw-person-automation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-person-automation-line {
+  margin: 0;
+}
+.cw-hub .cw-person-automation-group {
+  display: grid;
+  flex-basis: 100%;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  justify-items: start;
+  min-width: 0;
+  margin: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
 }
 .cw-hub .cw-ai-facts-list {
   display: grid;

@@ -26,7 +26,7 @@ async function busy(): Promise<{ w: HubWorld; person: string }> {
   await w.sanction(f.person, 'ban', 3, 7 * DAY);
   await w.clientFor('bea@example.test').revokeSanction(old.groupId, 'a misread');
   await w.cw.sanctions.apply({ kind: 'chat', subject: f.person, includeIp: false, durationMs: HOUR, reason: 'auto', actor: 'system', source: 'auto_filter', automated: true, rule: 1 });
-  await w.cw.sanctions.apply({ kind: 'warning', subject: f.person, includeIp: false, durationMs: null, reason: 'ai', actor: 'ai', source: 'ai', automated: false, rule: 1 });
+  w.aiSanction(f.person, { reason: 'ai' });
   w.clock.t += 3 * HOUR;
   return { w, person: f.person };
 }

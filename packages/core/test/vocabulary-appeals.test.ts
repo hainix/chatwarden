@@ -27,10 +27,10 @@ describe('audit actions', () => {
   it('the three actions follow the AI ones in AUDIT_ACTIONS (the 0.1.11 community actions are appended after them)', () => {
     const at = AUDIT_ACTIONS.indexOf('appeal.view');
     expect(AUDIT_ACTIONS.slice(at, at + 3)).toEqual(['appeal.view', 'appeal.decide', 'name.rename_required']);
-    expect(AUDIT_ACTIONS.slice(-3)).toEqual(['term.share', 'community.apply', 'term.report']);
+    expect(AUDIT_ACTIONS.slice(-4, -1)).toEqual(['term.share', 'community.apply', 'term.report']);
     // nothing before them moved: the 0.1.7 list is a prefix
     expect(AUDIT_ACTIONS.slice(AUDIT_ACTIONS.indexOf('ai.read'), AUDIT_ACTIONS.indexOf('ai.read') + 3)).toEqual(['ai.read', 'ai.rerun', 'ai.outcome']);
-    expect(AUDIT_ACTIONS).toHaveLength(32);
+    expect(AUDIT_ACTIONS).toHaveLength(33); // 0.1.13 appended person.automation
     expect(new Set(AUDIT_ACTIONS).size).toBe(AUDIT_ACTIONS.length);
     expectTypeOf<'appeal.view'>().toExtend<AuditAction>();
     expectTypeOf<'appeal.decide'>().toExtend<AuditAction>();

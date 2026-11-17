@@ -186,6 +186,7 @@ describe('query plans use the indexes of migration 20', () => {
         detail: { verdict: true, rule: true, lines: 1, outcome: 'same', oneClick: false },
         badFaith: false,
         example: { rule: i % 12, severity: 'hostile', verdict: 'upheld', lines: [{ who: 'P1', text: 'zorbak' }] },
+        aiRule: null, aiSeverity: null, aiConfidence: null, decidedBy: null, source: 'human',
       });
     }
     const seen = record(db, () => store.aiExamples('3', 'hostile', 2, 0));
@@ -364,6 +365,7 @@ describe('rows damaged by hand never break a read', () => {
       detail: { verdict: true, rule: true, lines: 1, outcome: 'same', oneClick: false },
       badFaith: false,
       example: { rule: 3, severity: 'hostile', verdict: 'upheld', lines: [{ who: 'P1', text: 'zorbak' }] },
+      aiRule: null, aiSeverity: null, aiConfidence: null, decidedBy: null, source: 'human',
     });
     db.prepare("UPDATE kit_ai_outcomes SET detail_json = '{{', example_json = '[1' WHERE report_id = 'o1'").run();
     expect(store.loadAiOutcome('o1')).toMatchObject({ detail: { verdict: false, rule: false, lines: 0, outcome: 'none', oneClick: false }, example: null, verdict: 'upheld' });

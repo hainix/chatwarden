@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AI_SOURCE_TOKEN,
   applySanction,
   refCode,
   revokeSanction,
@@ -976,10 +977,12 @@ describe('applySanction: the rule-gap note', () => {
     'is refused for the non-moderator source %s, which needs none',
     async (source) => {
       const { store, subjects, s1 } = await person();
+      // `ai` is the kit's own actor's source: it needs the internal token to get as far as the note check at all.
+      const key = source === 'ai' ? { sourceToken: AI_SOURCE_TOKEN } : {};
       await expect(
-        applySanction(store, subjects, input(s1, { source, rule: 'uncovered', gapNote: GAP }), NOW),
+        applySanction(store, subjects, { ...input(s1, { source, rule: 'uncovered', gapNote: GAP }), ...key }, NOW),
       ).rejects.toBeInstanceOf(SanctionError);
-      await applySanction(store, subjects, bare(s1, { source }), NOW);
+      await applySanction(store, subjects, { ...bare(s1, { source }), ...key }, NOW);
       expect(rows(store)).toHaveLength(1);
     },
   );

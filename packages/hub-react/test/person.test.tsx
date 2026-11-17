@@ -259,7 +259,7 @@ describe('the timeline', () => {
     const f = await w.file();
     await w.cw.sanctions.apply({ kind: 'chat', subject: f.person, includeIp: false, durationMs: HOUR, reason: 'auto', actor: 'system', source: 'auto_filter', automated: true, rule: 1 });
     w.clock.t += 1000;
-    await w.cw.sanctions.apply({ kind: 'warning', subject: f.person, includeIp: false, durationMs: null, reason: 'ai read', actor: 'ai-reader', source: 'ai', automated: false, rule: 1 });
+    w.aiSanction(f.person, { reason: 'ai read' });
     w.clock.t += 1000;
     await w.sanction(f.person, 'note', 3);
     await open(w, f.person);

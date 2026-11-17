@@ -235,15 +235,15 @@ describe('events: decide', () => {
     const res = await r.cw.decide({
       reportId: r.reportId,
       verdict: 'upheld',
-      actor: 'ai-agent',
+      actor: 'api-agent',
       reason: SECRET_TEXT.reason,
-      source: 'ai',
+      source: 'api',
       actions: [{ subject: r.a, kind: 'warning', durationMs: null, rule: 'uncovered' }],
     });
     expect(res.ok).toBe(true);
     expect(r.cw.gaps.list()).toEqual([]);
     expect(types(r.events)).toEqual(['report.closed', 'sanction.applied']);
-    expect(r.events[1]).toMatchObject({ source: 'ai', rule: 'uncovered', automated: false });
+    expect(r.events[1]).toMatchObject({ source: 'api', rule: 'uncovered', automated: false });
   });
 
   it('emits for the canonical target', async () => {

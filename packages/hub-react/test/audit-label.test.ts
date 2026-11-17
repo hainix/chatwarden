@@ -64,6 +64,12 @@ describe('ACTION_LABEL', () => {
     }
   });
 
+  it('the hub labels person.automation in plain words, without the code or an action name', () => {
+    expect(ACTION_LABEL['person.automation']).toBe('hub.audit.label.person.automation');
+    expect(en['hub.audit.label.person.automation']).toBe('Changed the "do not automate" mark on a person');
+    expect(en['hub.audit.label.person.automation']).not.toMatch(/person\./);
+  });
+
   it('an appeal target has words of its own', () => {
     expect(en['hub.audit.target.appeal']).toBe('Appeal {tag}');
   });

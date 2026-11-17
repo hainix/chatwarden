@@ -220,6 +220,10 @@ describe('every staff route has a client method', () => {
         () => c.rename(renamed.person, { reason: 'Please choose another name.' }),
         { method: 'POST', path: `/people/${renamed.person}/rename`, body: { reason: 'Please choose another name.' } },
       ],
+      // AI levels 3 and 4, release 1: the gate table's data and the "do not automate" mark (the encoded id, the body as given).
+      ['aiGates', () => c.aiGates(), { method: 'GET', path: '/ai/gates' }],
+      ['setAutomation mark', () => c.setAutomation(renamed.person, { allowed: false, code: 'vulnerable' }), { method: 'PUT', path: `/people/${renamed.person}/automation`, body: { allowed: false, code: 'vulnerable' } }],
+      ['setAutomation clear', () => c.setAutomation(renamed.person, { allowed: true }), { method: 'PUT', path: `/people/${renamed.person}/automation`, body: { allowed: true } }],
     ];
     expect(aiRead).not.toBeNull();
     const results: unknown[] = [];

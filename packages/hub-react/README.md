@@ -351,8 +351,8 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
 - the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked`, `usePerson` and `usePolicy`, and the types `HubRead`,
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
-  includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh`, `HubControllerOptions.host`, `HubClient.dismissOpen`,
-  `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss`, `ReporterRecord.accuracy`, the signal and pace fields `PersonHistory.signals`, `PolicyLayer.appeals`, `PolicyLayer.names`, `PolicyLayer.pace`, `PolicyLayer.signals`, `ReportSummary.boosted` and `Suggestion.signals`, the AI methods `HubClient.readAgain`, `HubClient.aiStatus` and `HubClient.dontTeach`, and the appeals and names fields and methods `Changes.appeals`, `PersonHistory.appeals`, `PersonHistory.renames`, `HubClient.appeals`, `HubClient.appeal`, `HubClient.decideAppeal`, `HubClient.appealStats`, `HubClient.rename` and `HubClient.listBlockedNames`. The names are the same declarations the main entry re-exports (`createHubClient`,
+  includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh`, `HubControllerOptions.host`, `HubClient.dismissOpen`, `HubClient.aiGates`, `HubClient.setAutomation`,
+  `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss`, `ReporterRecord.accuracy`, the signal and pace fields `PersonHistory.signals`, `PersonHistory.automation`, `PolicyLayer.appeals`, `PolicyLayer.names`, `PolicyLayer.pace`, `PolicyLayer.signals`, `ReportSummary.boosted` and `Suggestion.signals`, the AI methods `HubClient.readAgain`, `HubClient.aiStatus` and `HubClient.dontTeach`, and the appeals and names fields and methods `Changes.appeals`, `PersonHistory.appeals`, `PersonHistory.renames`, `HubClient.appeals`, `HubClient.appeal`, `HubClient.decideAppeal`, `HubClient.appealStats`, `HubClient.rename` and `HubClient.listBlockedNames`. The names are the same declarations the main entry re-exports (`createHubClient`,
   `fetchTransport`, `HubError`, the staff types and so on), so they are experimental there too. The kit's own types that `/headless` passes through
   (`Role`, `Me`, `StaffReport` and the other types declared in `@chatwarden/core` and `@chatwarden/http`) follow those packages.
   - functions, values and classes:
@@ -365,8 +365,8 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `CLAIM_BEAT_MS`, `QUEUE_MAX_PAGES`, `QUEUE_PAGE`, `SESSION_REPORTERS_MAX`, `SESSION_TTL_MS`, `TAKE_COOLDOWN_MS`,
     `TOAST_ERROR_MS`, `TOAST_HELD_MAX`, `TOAST_MAX`, `TOAST_MS`, `UNDO_MS`, `VIEWING_BEAT_MS`
   - types:
-    `ActionResult`, `ActionState`, `ActionStore`, `AiReadAgainResult`, `AiStatusView`, `AppealDecided`, `AppealDecisionInput`, `AppealDetail`, `AppealOutcome`,
-    `AppealRow`, `AppealRuleStats`, `AppealStats`, `AppealStatus`, `AppealSummary`, `BlockedDays`, `BlockedLine`, `BlockedName`, `CaseStore`, `CaseStoreOptions`, `Changes`, `Claim`,
+    `ActionResult`, `ActionState`, `ActionStore`, `AiGateCell`, `AiGatesView`, `AiReadAgainResult`, `AiStatusView`, `AppealDecided`, `AppealDecisionInput`, `AppealDetail`, `AppealOutcome`,
+    `AppealRow`, `AppealRuleStats`, `AppealStats`, `AppealStatus`, `AppealSummary`, `AutomationCode`, `AutomationInput`, `BlockedDays`, `BlockedLine`, `BlockedName`, `CaseStore`, `CaseStoreOptions`, `Changes`, `Claim`,
     `ClaimResult`, `CloseGapInput`, `CommunityApplied`, `CommunityStatus`, `CommunitySummary`, `Connection`, `ContinueOutcome`, `DecideCommand`, `DecideInput`, `DecideOptions`, `DecideResult`,
     `DecisionEntry`, `DecisionForm`, `DecisionHost`, `DecisionOutcome`, `DecisionState`, `DecisionStore`, `DecisionStoreOptions`,
     `DismissOpenInput`, `DismissOpenOutcome`, `DismissOpenRequest`, `DismissOpenResult`,
@@ -826,6 +826,10 @@ no longer sent (a dismissal with no reason sends none).
   `reports.decide.bulk` in `can` simply hides the bulk window.
 - **A key does nothing.** See "Guards on the act keys" above: a case that has just appeared, one still loading, an open window, a field
   with focus and a case someone else holds all ignore the act keys on purpose, and none of them says so.
+
+## AI levels 3 and 4, release 1 (0.1.13)
+
+`@experimental` until 0.2, and read-only: **nothing in this release lets the AI act.** Settings > AI > Advanced gains "Where the AI may act", a table of what `GET /ai/gates` says: a row for each rule and conduct level the profile could ever act on, each gate shown as a tick or a cross with its number against the need, what the ladder gives for a clean record, and any cooling date. Cells the AI can never act on (the step is over what it may ever apply) are collapsed under "Never acted on by the AI" with the reason. The hub computes no gate; it shows what the server sent. The page says "Acting is not available in this version", offers no Act option, and adds nothing to Simple mode, the case card or the queue. On the Person page a senior (`automation.write`) gets a `...` item "Do not automate" with a reason picker, and everyone who can read the page sees a quiet line while the person is marked. The client gains `aiGates()` and `setAutomation(person, input)`, the types `AiGatesView`, `AiGateCell`, `AutomationCode` and `AutomationInput`, and `PersonHistory.automation`. A server older than 0.1.13 answers the gate table with "This server does not have the gate view yet". The new words are in the AI catalog (`aiEn`, loaded with `loadAiWords()`), and the audit label for `person.automation` is in the hub's catalog. `@chatwarden/hub-react` now peers on `@chatwarden/core` and `@chatwarden/http` `^0.1.13`.
 
 ## Theming
 

@@ -35,6 +35,7 @@ const outcome = (n: number, over: Partial<AiOutcomeInsert> = {}): AiOutcomeInser
   detail: { verdict: true, rule: true, lines: 1, outcome: 'same', oneClick: false },
   badFaith: false,
   example: example(n),
+  aiRule: null, aiSeverity: null, aiConfidence: null, decidedBy: null, source: 'human',
   ...over,
 });
 const seed = (w: AiWorld, count: number, over: (n: number) => Partial<AiOutcomeInsert> = () => ({})): void => {
