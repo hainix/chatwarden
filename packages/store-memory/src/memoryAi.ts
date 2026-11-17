@@ -64,6 +64,7 @@ export type MemoryAiMethods = Required<
     | 'aiActionsOnSubjects'
     | 'aiUnreviewed'
     | 'purgeAi'
+    | 'purgeAiActions'
   >
 >;
 
@@ -523,6 +524,21 @@ class MemoryAi extends MemoryStore {
     const active = this.actions().filter((r) => r.state === 'active');
     const times = active.flatMap((r) => (r.actedAt === null ? [] : [r.actedAt]));
     return { n: active.length, oldestActedAt: times.length === 0 ? null : Math.min(...times) };
+  }
+
+  purgeAiActions(before: number, undoNotesBefore: number): number {
+    // In place, so the journal of an earlier write in the same transaction still points at this list.
+    const rows = this.actions();
+    const snapshot = [...rows];
+    const kept = snapshot.filter((r) => r.createdAt >= before);
+    const noted = kept.filter((r) => r.createdAt < undoNotesBefore && r.undoNote !== null).map((r) => [r, r.undoNote] as const);
+    for (const [r] of noted) r.undoNote = null;
+    rows.splice(0, rows.length, ...kept);
+    this.undoWith(() => {
+      rows.splice(0, rows.length, ...snapshot);
+      for (const [r, note] of noted) r.undoNote = note;
+    });
+    return snapshot.length - kept.length;
   }
 
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {

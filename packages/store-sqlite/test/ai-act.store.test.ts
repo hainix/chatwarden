@@ -108,6 +108,11 @@ describe('the plans', () => {
     expect(due).toMatch(/kit_ai_actions_by_state/);
     const unreviewed = plan(db, "SELECT COUNT(*) AS n, MIN(acted_at) AS oldest FROM kit_ai_actions WHERE state = 'active'");
     expect(unreviewed).toMatch(/kit_ai_actions_by_(state|review)/);
+    // retention: the purge reads rows by age through an index of its own, not the whole table
+    const purge = plan(db, 'DELETE FROM kit_ai_actions WHERE created_at < ?', 1);
+    expect(purge).toMatch(/kit_ai_actions_by_created/);
+    const notes = plan(db, 'UPDATE kit_ai_actions SET undo_note = NULL WHERE created_at < ? AND undo_note IS NOT NULL', 1);
+    expect(notes).toMatch(/kit_ai_actions_by_created/);
     const byReport = plan(db, 'SELECT * FROM kit_ai_actions WHERE report_id = ?', 'r1');
     expect(byReport).toMatch(/sqlite_autoindex_kit_ai_actions|USING (COVERING )?INDEX/);
     db.close();

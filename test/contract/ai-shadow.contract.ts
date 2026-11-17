@@ -304,6 +304,59 @@ export function aiShadowContract(name: string, make: () => Store): void {
         expect('surprise' in after).toBe(false);
       });
 
+      describe('purgeAiActions', () => {
+        type PurgeStore = ActionStore & Required<Pick<Store, 'purgeAiActions'>>;
+        const purger = (s: Store): PurgeStore => {
+          if (s.purgeAiActions === undefined) throw new Error('this store has no purgeAiActions');
+          return actions(s) as PurgeStore;
+        };
+        const DAY = 86_400_000;
+        const at = (id: string, createdAt: number, over: Partial<AiActionRow> = {}): AiActionRow => row(id, { createdAt, ...over });
+
+        it('deletes the rows created before the cutoff, in every state, keeps one on the line, and says how many', () => {
+          const s = purger(make());
+          const states = ['queued', 'shadow', 'active', 'confirmed', 'undone', 'refused', 'held_back'] as const;
+          states.forEach((state, i) => expect(s.insertAiAction(at(`old${i}`, T - 400 * DAY + i, { state })), state).toBe(true));
+          s.insertAiAction(at('edge', T - 365 * DAY));
+          s.insertAiAction(at('new', T - 10 * DAY));
+          expect(s.purgeAiActions(T - 365 * DAY, T - 90 * DAY)).toBe(7);
+          expect(states.map((_, i) => s.loadAiAction(`old${i}`))).toEqual(states.map(() => null));
+          expect(s.loadAiAction('edge')).not.toBeNull();
+          expect(s.loadAiAction('new')).not.toBeNull();
+          // run again: nothing left to delete
+          expect(s.purgeAiActions(T - 365 * DAY, T - 90 * DAY)).toBe(0);
+        });
+
+        it('clears the reviewer private note with the report window and keeps the row', () => {
+          const s = purger(make());
+          s.insertAiAction(at('noted-old', T - 120 * DAY, { state: 'undone', undoCode: 'wrong_rule', undoNote: 'private words', reviewedAt: T - 119 * DAY, reviewedBy: 'sen_bo' }));
+          s.insertAiAction(at('noted-new', T - 10 * DAY, { state: 'undone', undoCode: 'wrong_rule', undoNote: 'recent words', reviewedAt: T - 9 * DAY, reviewedBy: 'sen_bo' }));
+          expect(s.purgeAiActions(T - 365 * DAY, T - 90 * DAY)).toBe(0);
+          expect(s.loadAiAction('noted-old')).toMatchObject({ undoNote: null, undoCode: 'wrong_rule', state: 'undone', reviewedBy: 'sen_bo' });
+          expect(s.loadAiAction('noted-new')?.undoNote).toBe('recent words');
+        });
+
+        it('an empty store counts none, and a cutoff before every row deletes none', () => {
+          const s = purger(make());
+          expect(s.purgeAiActions(T, T)).toBe(0);
+          s.insertAiAction(at('a', T - DAY));
+          expect(s.purgeAiActions(T - 2 * DAY, T - 2 * DAY)).toBe(0);
+          expect(s.loadAiAction('a')).not.toBeNull();
+        });
+
+        it('is undone with a rolled-back transaction', () => {
+          const s = purger(make());
+          s.insertAiAction(at('a', T - 400 * DAY, { undoNote: 'words' }));
+          expect(() =>
+            s.transaction(() => {
+              expect(s.purgeAiActions(T - 365 * DAY, T - 90 * DAY)).toBe(1);
+              throw new Error('rollback');
+            }),
+          ).toThrow('rollback');
+          expect(s.loadAiAction('a')).toMatchObject({ undoNote: 'words' });
+        });
+      });
+
       it('is undone with a rolled-back transaction, insert and transition alike', () => {
         const s = actions(make());
         const r = row('r1');

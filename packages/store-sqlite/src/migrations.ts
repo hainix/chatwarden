@@ -769,6 +769,7 @@ CREATE INDEX kit_ai_actions_by_state ON kit_ai_actions (state, not_before);
 CREATE INDEX kit_ai_actions_by_review ON kit_ai_actions (state, review_due_at);
 CREATE INDEX kit_ai_actions_by_cell ON kit_ai_actions (rule, severity, created_at);
 CREATE INDEX kit_ai_actions_by_group ON kit_ai_actions (group_id);
+CREATE INDEX kit_ai_actions_by_created ON kit_ai_actions (created_at);
 `,
   },
 ];

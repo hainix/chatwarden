@@ -499,6 +499,9 @@ export const aiActionListSql = (states: number, cursor: boolean): string =>
     cursor ? ' AND (created_at < ? OR (created_at = ? AND id < ?))' : ''
   } ORDER BY created_at DESC, id DESC LIMIT ?`;
 /** Rows created at or after a time, counted by state and refusal code. */
+/** Retention of the action rows (`retention.aiActionsMs`): by age through `kit_ai_actions_by_created`; a reviewer's private note goes with the report window. */
+export const AI_ACTION_PURGE_SQL = 'DELETE FROM kit_ai_actions WHERE created_at < ?';
+export const AI_ACTION_NOTES_SQL = 'UPDATE kit_ai_actions SET undo_note = NULL WHERE created_at < ? AND undo_note IS NOT NULL';
 export const AI_ACTION_COUNTS_SQL = 'SELECT state, refused_code, COUNT(*) AS n FROM kit_ai_actions WHERE created_at >= ? GROUP BY state, refused_code';
 /** The states in which an action acted (or, in shadow, would have). */
 const AI_ACTED_STATES = "('shadow', 'active', 'confirmed', 'undone')";
@@ -1329,6 +1332,14 @@ export class SqliteStore implements Store, TermStore {
             .run(...fields.map((f) => (patch as Record<string, unknown>)[f] as string | number | null), id, ...from).changes,
         ) > 0,
     );
+  }
+
+  purgeAiActions(before: number, undoNotesBefore: number): number {
+    return this.transaction(() => {
+      const gone = Number(this.db.prepare(AI_ACTION_PURGE_SQL).run(before).changes);
+      this.db.prepare(AI_ACTION_NOTES_SQL).run(undoNotesBefore);
+      return gone;
+    });
   }
 
   dueAiActions(now: number, limit: number | undefined): AiActionRow[] {

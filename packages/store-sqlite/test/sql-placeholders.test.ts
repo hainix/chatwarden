@@ -4,6 +4,8 @@ import {
   AI_ACTION_COUNTS_SQL,
   AI_ACTION_DUE_SQL,
   AI_ACTION_INSERT_SQL,
+  AI_ACTION_NOTES_SQL,
+  AI_ACTION_PURGE_SQL,
   AI_GATE_ROWS_SQL,
   AI_UNREVIEWED_SQL,
   aiActionInsertArgs,
@@ -61,6 +63,12 @@ describe('the action statements (migration 25) bind exactly as many values as th
     for (const [columns, states] of [[['state'], 1], [['state', 'refused_code', 'acted_at'], 3], [['kind', 'duration_ms'], 7]] as const) {
       expect(placeholders(aiActionTransitionSql(columns, states))).toBe(columns.length + 1 + states);
     }
+  });
+
+  it('the retention statements take one cutoff each, as plain ?', () => {
+    expect(placeholders(AI_ACTION_PURGE_SQL)).toBe(1);
+    expect(placeholders(AI_ACTION_NOTES_SQL)).toBe(1);
+    expect(AI_ACTION_PURGE_SQL + AI_ACTION_NOTES_SQL).not.toMatch(/\?\d/);
   });
 
   it('the due, counts, acted-count and unreviewed statements', () => {

@@ -36,6 +36,11 @@ export interface RetentionPolicy {
    */
   aiExamplesMs: number;
   /**
+   * An AI action row (what the AI did or, in shadow, would have done: ids, the rule and conduct level, a state, a closed code and times; no chat text) is kept this long after it was
+   * made. At least 90 days: the gates read 90 days of actions. A reviewer's private note on it is cleared with the report (`reportsMs`), and the row stays.
+   */
+  aiActionsMs: number;
+  /**
    * A signal row (what a game recorded about a player, `flood_triggered` included) is deleted once it is older than this. At least 14
    * days: a counting window needs at least two weeks of rows. A feed window longer than this is refused.
    */
@@ -65,6 +70,7 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   auditMs: 365 * DAY_MS,
   aiOutcomesMs: 365 * DAY_MS,
   aiExamplesMs: 180 * DAY_MS,
+  aiActionsMs: 365 * DAY_MS,
   signalsMs: 90 * DAY_MS,
   appealStatementsMs: 90 * DAY_MS,
   appealsMs: 365 * DAY_MS,
@@ -74,7 +80,7 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
 
-const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs'] as const;
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'aiActionsMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs'] as const;
 
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
@@ -85,6 +91,7 @@ const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'ba
  * - `auditMs` at least 90 days: the staff trail is how a community answers "who did that"
  * - `aiOutcomesMs` at least 90 days: the agree-or-override record is the data the AI's later gates read
  * - `aiExamplesMs` at least 0 (0 keeps no example text at all)
+ * - `aiActionsMs` at least 90 days: the gates read 90 days of the AI's actions
  * - `signalsMs` at least 14 days: a counting window needs at least two weeks of rows
  * - `appealsMs` at least 90 days: the per-rule appeal counts read that far back
  * - `appealStatementsMs` and `blockedNamesMs` at least 0 (0 keeps the text only until the next purge)
@@ -118,6 +125,9 @@ export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWi
   }
   if (below(policy.aiOutcomesMs, RECORD_FLOOR_MS)) {
     throw new ProfileError('retention.aiOutcomesMs', 'must be at least 90 days: it is the record of how often the AI and the moderators agreed');
+  }
+  if (below(policy.aiActionsMs, RECORD_FLOOR_MS)) {
+    throw new ProfileError('retention.aiActionsMs', 'must be at least 90 days: the gates read the last 90 days of what the AI did');
   }
   if (below(policy.aiExamplesMs, 0)) {
     throw new ProfileError('retention.aiExamplesMs', 'must be 0 or more: 0 keeps no example text at all');
@@ -156,6 +166,8 @@ export interface PurgeResult {
   aiReads: number;
   /** AI casebook outcomes deleted. 0 for a store without the AI methods. */
   aiOutcomes: number;
+  /** AI action rows deleted (`retention.aiActionsMs`). 0 for a store without the action rows. */
+  aiActions: number;
   /** Signal rows deleted (flood_triggered included). 0 for a store without the signal methods. */
   signals: number;
   /** Decided appeal rows deleted. 0 for a store without the appeal methods. */
@@ -188,7 +200,8 @@ function checkWindow(name: string, ms: number): void {
  * - mutes: `createdAt < now - 180 days`, the mute TTL (a mute past it is already ignored)
  * - AI reads: `createdAt < now - reportsMs` (a read also goes with its report, in `purgeReports`); AI outcomes (agree-or-override
  *   record, no chat text): `decidedAt < now - aiOutcomesMs`; the pseudonymised example kept with an outcome:
- *   `decidedAt < now - aiExamplesMs`, the row stays with its counts. A store without the AI methods has none of these.
+ *   `decidedAt < now - aiExamplesMs`, the row stays with its counts. AI action rows: `createdAt < now - aiActionsMs` (365 days by default, never less than 90), and a reviewer's note
+ *   on a row older than `reportsMs` is cleared. A store without the AI methods has none of these.
  * - signals: `at < now - signalsMs` (90 days by default, never less than 14); a store without the signal methods has none
  * - appeals: the statement of an appeal decided (or closed) before `now - appealStatementsMs` is set to nothing, the row stays; then a
  *   decided row with `decidedAt < now - appealsMs` is deleted (365 days by default, never less than 90), EXCEPT one whose sanction is
@@ -218,6 +231,7 @@ export async function purge(
     auditMs: policy.auditMs ?? RETENTION_DEFAULTS.auditMs,
     aiOutcomesMs: policy.aiOutcomesMs ?? RETENTION_DEFAULTS.aiOutcomesMs,
     aiExamplesMs: policy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
+    aiActionsMs: policy.aiActionsMs ?? RETENTION_DEFAULTS.aiActionsMs,
     signalsMs: policy.signalsMs ?? RETENTION_DEFAULTS.signalsMs,
     appealStatementsMs: policy.appealStatementsMs ?? RETENTION_DEFAULTS.appealStatementsMs,
     appealsMs: policy.appealsMs ?? RETENTION_DEFAULTS.appealsMs,
@@ -232,6 +246,7 @@ export async function purge(
   checkWindow('auditMs', p.auditMs);
   checkWindow('aiOutcomesMs', p.aiOutcomesMs);
   checkWindow('aiExamplesMs', p.aiExamplesMs);
+  checkWindow('aiActionsMs', p.aiActionsMs);
   checkWindow('signalsMs', p.signalsMs);
   checkWindow('appealStatementsMs', p.appealStatementsMs);
   checkWindow('appealsMs', p.appealsMs);
@@ -256,6 +271,8 @@ export async function purge(
       webhookKeys: store.purgeWebhookKeys(now - WEBHOOK_KEY_TTL_MS),
       aiReads: ai.reads,
       aiOutcomes: ai.outcomes,
+      // Action rows by their own clock; a reviewer's private note goes with the report window and the row stays.
+      aiActions: store.purgeAiActions?.(now - p.aiActionsMs, now - p.reportsMs) ?? 0,
       signals: store.purgeSignals?.(now - p.signalsMs) ?? 0,
       // An open appeal whose sanction rows were just removed can never be decided (`gone`): moot it, so it leaves the inbox and its statement
       // goes on the decided clock (cleared at once when `appealStatementsMs` is 0).

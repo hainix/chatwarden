@@ -258,6 +258,19 @@ describe('retention fields for the AI', () => {
     expect(() => checkRetentionFloors({}, 30 * DAY)).not.toThrow();
   });
 
+  it('retention: aiActionsMs defaults to 365 days, and below 90 days throws a ProfileError naming the field (the gates read 90 days of actions)', () => {
+    expect(RETENTION_DEFAULTS.aiActionsMs).toBe(365 * DAY);
+    for (const ms of [0, 1, 89 * DAY, 90 * DAY - 1, -1]) {
+      expect(pathOf(() => checkRetentionFloors({ aiActionsMs: ms }, 30 * DAY)), String(ms)).toBe('retention.aiActionsMs');
+    }
+    expect(() => checkRetentionFloors({ aiActionsMs: 90 * DAY }, 30 * DAY)).not.toThrow();
+    expect(() => checkRetentionFloors({ aiActionsMs: 5 * 365 * DAY }, 30 * DAY)).not.toThrow();
+    // not a number: refused as a field that must be finite
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, '365', null]) {
+      expect(pathOf(() => checkRetentionFloors({ aiActionsMs: bad } as never, 30 * DAY)), String(bad)).toBe('retention.aiActionsMs');
+    }
+  });
+
   it('retention: aiOutcomesMs below 90 days throws a ProfileError naming the field', () => {
     for (const ms of [0, 1, 89 * DAY, 90 * DAY - 1]) {
       expect(pathOf(() => checkRetentionFloors({ aiOutcomesMs: ms }, 30 * DAY))).toBe('retention.aiOutcomesMs');

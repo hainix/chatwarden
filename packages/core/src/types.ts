@@ -1388,6 +1388,12 @@ export interface Store {
   purgeAi?(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number };
 
   /**
+   * OPTIONAL. Retention for the action rows (AI levels 3 and 4, design 6.5), strict (`<`): every row created before `before` is deleted, in whatever state; a reviewer's private
+   * `undo_note` on a row created before `undoNotesBefore` is set to none and the row stays. Returns how many rows were deleted.
+   */
+  purgeAiActions?(before: number, undoNotesBefore: number): number;
+
+  /**
    * OPTIONAL. Set (a row) or clear (`null`) the "do not automate" mark of one person (AI levels 3 and 4, design 6.4). One row per subject: a second
    * set replaces it, clearing a person with no mark is not an error. `code` is one of the closed codes the service checks; the store keeps what it
    * is given. Not purged by `purge()`: a mark lives until it is cleared. Does not move the change token.

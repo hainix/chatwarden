@@ -55,6 +55,14 @@ describe('migration 25: shadow mode', () => {
     expect([...sql.matchAll(/\bCREATE TABLE\s+(kit_\w+)/gi)].map((m) => m[1]).sort()).toEqual(['kit_ai_acting', 'kit_ai_actions']);
   });
 
+  it('adds an index on the creation time, so the retention purge reads action rows by age', () => {
+    const db = memDb();
+    openStore({ db }).close();
+    const idx = db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'kit_ai_actions' AND name = 'kit_ai_actions_by_created'").get();
+    expect(idx).toBeDefined();
+    expect(String(idx?.sql)).toContain('(created_at)');
+  });
+
   it('existing reads become purpose read; the new tables are empty; no other column of a read moves', () => {
     const db = memDb();
     openAt24(db);
@@ -104,7 +112,7 @@ describe('migration 25: shadow mode', () => {
     for (const ok of ['off', 'shadow', 'on']) expect(() => db.prepare('UPDATE kit_ai_acting SET mode = ? WHERE id = 1').run(ok)).not.toThrow();
   });
 
-  it('kit_ai_actions is one row per report, with closed states and undo codes, and its four indexes', () => {
+  it('kit_ai_actions is one row per report, with closed states and undo codes, and its five indexes', () => {
     const db = memDb();
     openStore({ db }).close();
     const put = (id: string, report: string, state: string, extra = ''): void =>
@@ -118,6 +126,7 @@ describe('migration 25: shadow mode', () => {
     expect(() => put('ubad', 'rubad', 'undone', 'because')).toThrow(/CHECK/);
     expect(names(db, 'index').filter((n) => n.startsWith('kit_ai_actions_'))).toEqual([
       'kit_ai_actions_by_cell',
+      'kit_ai_actions_by_created',
       'kit_ai_actions_by_group',
       'kit_ai_actions_by_review',
       'kit_ai_actions_by_state',
