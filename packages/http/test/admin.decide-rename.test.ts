@@ -239,6 +239,82 @@ describe('rename on decide: faults and claims', () => {
   });
 });
 
+describe('a replay does not ask again once the player has renamed', () => {
+  const renames = (w: W) => writtenKinds(w).filter((k) => k === 'rename_required').length;
+
+  it('asked, the player renames, then the same body again: replay true, no second notice, no second audit row, nothing pending', async () => {
+    const w = await renameWorld();
+    const f = await w.file();
+    expect(answer(await decide(w, f.id, body())).rename).toEqual({ status: 'asked' });
+    expect(w.cw.names.renamed({ clientKey: f.key })).toBe(true);
+    w.clock.t += 60_000;
+    const again = await decide(w, f.id, body());
+    expect(again.status).toBe(200);
+    expect(answer(again)).toMatchObject({ ok: true, replay: true, rename: { status: 'already' } });
+    expect(renames(w)).toBe(1);
+    expect(w.cw.names.pendingRename({ clientKey: f.key })).toBe(false);
+    expect(w.cw.notices.pending({ clientKey: f.key }).map((n) => n.kind)).not.toContain('rename_required');
+    expect(actionsOf(w).filter((a) => a === 'name.rename_required')).toHaveLength(1);
+    expect(w.cw.names.renamesOf(f.target)).toHaveLength(1);
+  });
+
+  it('with a sanction beside the rename, a retry after the rename writes no second rename and no second sanction', async () => {
+    const w = await renameWorld();
+    const f = await w.file();
+    await decide(w, f.id, body({ actions: [warning(f.target)] }));
+    w.cw.names.renamed({ clientKey: f.key });
+    const again = await decide(w, f.id, body({ actions: [warning(f.target)] }));
+    expect(answer(again)).toMatchObject({ replay: true, rename: { status: 'already' } });
+    expect(renames(w)).toBe(1);
+    expect(writtenKinds(w).filter((k) => k === 'warning')).toHaveLength(1);
+  });
+
+  it('several replays in a row stay the same', async () => {
+    const w = await renameWorld();
+    const f = await w.file();
+    await decide(w, f.id, body());
+    w.cw.names.renamed({ clientKey: f.key });
+    for (let i = 0; i < 3; i++) expect(answer(await decide(w, f.id, body())).rename).toEqual({ status: 'already' });
+    expect(renames(w)).toBe(1);
+  });
+
+  it('control: the decision is not a replay and the player had renamed for an earlier request: a rename is asked', async () => {
+    const w = await renameWorld();
+    const first = await w.file();
+    // An earlier request, from the Person page, that the player has since obeyed; then a new decision for the same person.
+    expect((await w.call('POST', `/people/${first.target}/rename`, { role: 'senior', actor: 'ann', body: { reason: REASON, rule: 7 } })).status).toBe(200);
+    w.cw.names.renamed({ clientKey: first.key });
+    w.clock.t += 60_000;
+    const second = await w.fileAgainst(first, 'x');
+    const res = await decide(w, second.id, body());
+    expect(answer(res)).toMatchObject({ replay: false, rename: { status: 'asked' } });
+    expect(renames(w)).toBe(2);
+  });
+
+  it('control: a replay whose first call carried no rename asks for it (the earlier request predates the decision)', async () => {
+    const w = await renameWorld();
+    const first = await w.file();
+    await w.call('POST', `/people/${first.target}/rename`, { role: 'senior', actor: 'ann', body: { reason: REASON, rule: 7 } });
+    w.cw.names.renamed({ clientKey: first.key });
+    w.clock.t += 60_000;
+    const second = await w.fileAgainst(first, 'x');
+    const plain = { ...body(), rename: undefined };
+    expect(Object.keys((await decide(w, second.id, plain)).body as object).sort()).toEqual(['groups', 'ok', 'replay']);
+    w.clock.t += 60_000;
+    const again = await decide(w, second.id, body());
+    expect(answer(again)).toMatchObject({ replay: true, rename: { status: 'asked' } });
+    expect(renames(w)).toBe(2);
+  });
+
+  it('control: still waiting on the rename, the replay answers already and writes nothing', async () => {
+    const w = await renameWorld();
+    const f = await w.file();
+    await decide(w, f.id, body());
+    expect(answer(await decide(w, f.id, body())).rename).toEqual({ status: 'already' });
+    expect(renames(w)).toBe(1);
+  });
+});
+
 describe('the shared decision parser stays strict', () => {
   it('a decision body that carries rename is refused by parseDecision (the webhook and decideAs callers send none)', () => {
     expect(() => parseDecision({ verdict: 'upheld', actions: [], reason: 'x', rename: { rule: 7 } })).toThrow();

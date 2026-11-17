@@ -171,7 +171,8 @@ const summarize = (
  *   choose a new name (an upheld verdict, actions only on that person, `sanctions.apply`, renames on; else 400, 403 or 404 before anything is
  *   written). It is asked after the decision is written, with the decision's reason, and the answer gains `rename: { status: 'asked' | 'already' |
  *   'failed', error? }` (`error` is `off`, `not_found` or `invalid` for a refusal; a throw is `failed` with none; the decision stands either way).
- *   A rename that was asked is audited as `name.rename_required` after the decision's own row.
+ *   A rename that was asked is audited as `name.rename_required` after the decision's own row. A replay never asks a second time: once a rename was
+ *   asked of the person at or after the decision was written (even if they have renamed since), the replay answers `rename: { status: 'already' }`.
  * - `POST /reports/dismiss-open { scope: 'person' | 'reporter', ref, takeOver?, dryRun? }`: "nothing wrong here" for every open report about a person
  *   (their case) or from a reporter, in one call (`reports.decide.bulk`, and `reports.decide`): at most 200, `more: true` when there are
  *   more. 200 `{ ok, dryRun, open, dismissed, replayed, skipped: { claimed, decided }, more }`: counts only, no ids. Each report is
@@ -363,6 +364,11 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // The claim was gated once, above; the rename follows the decision and never undoes it: a refusal or a throw here is the answer's `failed`.
       let answer: { status: 'asked' | 'already' | 'failed'; error?: 'off' | 'not_found' | 'invalid' };
       try {
+        // A replay is the same request again: once a rename was asked since the decision was written (and the player has perhaps obeyed it
+        // already, so none waits), it is not asked a second time. A request from before the decision is not this one.
+        if (result.replay && askedSince(cw, reported.targetPerson, cw.reports.get(id)?.actionedAt ?? null)) {
+          return { status: 200, body: { ok: true, replay: true, groups: result.groups, rename: { status: 'already' } } };
+        }
         const asked = cw.names.requireRename({ subject: reported.targetPerson, actor: c.authz.actor, reason: decision.reason ?? '', rule: rename.rule });
         if (asked.ok) answer = { status: 'asked' };
         else if (asked.error === 'pending') answer = { status: 'already' };
@@ -460,4 +466,14 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       };
     }),
   };
+}
+
+/** Whether a rename was asked of this person at or after `since` (the time the report's decision was written); false for no time or a fault. */
+function askedSince(cw: Chatwarden, person: string, since: number | null): boolean {
+  if (since === null) return false;
+  try {
+    return cw.names.renamesOf(person).some((r) => r.at >= since);
+  } catch {
+    return false;
+  }
 }
