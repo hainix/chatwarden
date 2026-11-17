@@ -30,7 +30,7 @@ import { checkFilterRules, resolveFilters } from './filters.js';
 import type { FilterSettings } from './filters.js';
 import { FilterHits } from './filters/counters.js';
 import type { FilterStats } from './filters/counters.js';
-import { checkLines, createFilterEngine, testLine } from './filters/engine.js';
+import { checkLines, createFilterEngine, shiftTestSpans, testLine } from './filters/engine.js';
 import type { FilterCheckResult, FilterTestResult } from './filters/engine.js';
 import { checkPace, mergePace } from './pace.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
@@ -1126,24 +1126,28 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       count: (hit) => filterHits.count(hit),
     },
     // A `flag` files a report with no reporter (see `reports.fileSystem`) and counts by what came of it: `flag` when one was filed, `flag_capped`
-    // when the daily cap stopped it, `count` when one was already open, the speaker is a guest or anything went wrong. The chat path never waits.
+    // when the daily cap stopped it, `count` when one was already open, the speaker is a guest or anything went wrong. The chat path never waits:
+    // the verdict is already decided, so the report (a snapshot, a cap count and an insert in one store transaction) is filed on a microtask,
+    // after `accept` has returned, not inside it.
     onFilterFlag: ({ roomId, subject, lineId, hit }) => {
-      void (async () => {
-        let outcome: Awaited<ReturnType<typeof reports.fileSystem>> = 'off';
-        try {
-          outcome = await reports.fileSystem({
-            origin: 'filter',
-            originKey: hit.key,
-            roomId,
-            target: subject,
-            lineId,
-            reportedReason: hit.kind === 'personal_info' ? 'personal_info' : 'spam',
-          });
-        } catch {
-          // fileSystem never rejects; a failure to even ask counts as a plain count
-        }
-        filterHits.count({ key: hit.key, action: outcome === 'filed' ? 'flag' : outcome === 'capped' ? 'flag_capped' : 'count' });
-      })();
+      queueMicrotask(() => {
+        void (async () => {
+          let outcome: Awaited<ReturnType<typeof reports.fileSystem>> = 'off';
+          try {
+            outcome = await reports.fileSystem({
+              origin: 'filter',
+              originKey: hit.key,
+              roomId,
+              target: subject,
+              lineId,
+              reportedReason: hit.kind === 'personal_info' ? 'personal_info' : 'spam',
+            });
+          } catch {
+            // fileSystem never rejects; a failure to even ask counts as a plain count
+          }
+          filterHits.count({ key: hit.key, action: outcome === 'filed' ? 'flag' : outcome === 'capped' ? 'flag_capped' : 'count' });
+        })();
+      });
     },
     pace: {
       settings: paceOf,
@@ -1547,7 +1551,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       test: (text, candidate) => {
         if (typeof text !== 'string') throw new TypeError('filters.test: text must be a string');
         const settings = candidate === undefined ? policy.profileNow().filters : resolveFilters(candidate, 'candidate');
-        return testLine(filterEngine.evaluateWith(settings, text.trim(), { subject: null }), text.trim());
+        // The line is read as chat reads it (trimmed), but the ranges are given on the text as it was handed in, so a screen that shows the text as
+        // typed marks the right characters. `delivered` is the trimmed line, as it would be sent.
+        const line = text.trim();
+        const result = testLine(filterEngine.evaluateWith(settings, line, { subject: null }), line);
+        return line.length === 0 || line.length === text.length ? result : shiftTestSpans(result, text.length - text.trimStart().length);
       },
       check: (candidate, lines) => checkLines(filterEngine, resolveFilters(candidate, 'candidate'), lines),
     },

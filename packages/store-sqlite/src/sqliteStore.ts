@@ -182,7 +182,9 @@ export const FILTER_HITS_LIST_SQL = 'SELECT day, key, action, hits FROM kit_filt
 export const FILTER_HITS_PURGE_SQL = 'DELETE FROM kit_filter_hits WHERE day < ?';
 
 /** A reporter value that can be a person. A filter's report names `filter:<report id>`, which no tally or outcome is ever kept under. */
-const isPersonReporter = (reporter: string): boolean => !reporter.startsWith('filter:');
+// A report a system filed (`origin` set) carries the reporter value `<origin>:<id>`, which is never a person: the reporter readers leave it out
+// (the memory store leaves out by `origin`; the columns the covering index of reporterOutcomes holds do not include it, so the value is read).
+const isPersonReporter = (reporter: string): boolean => !reporter.startsWith('filter:') && !reporter.startsWith('watch:');
 
 /** Upsert one identifier row, only for a subject that exists. Binds: subject, kind, value, first seen, last seen, subject (the existence check). */
 export const IDENTIFIER_UPSERT_SQL = `INSERT INTO kit_subject_ids (subject_id, kind, value, first_seen, last_seen)
@@ -2568,7 +2570,7 @@ export class SqliteStore implements Store, TermStore {
       this.db
         .prepare(
           `SELECT reporter_subject, target_subject, room_id, created_at FROM kit_reports
-           WHERE created_at >= ? ORDER BY created_at, rowid`,
+           WHERE created_at >= ? AND origin IS NULL ORDER BY created_at, rowid`,
         )
         .all(since)
         .map((r) => ({

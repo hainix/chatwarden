@@ -20,6 +20,14 @@ export function peopleOf(report: StaffReport): string[] {
   return [...new Set([report.targetPerson, ...(report.reporterPerson === null ? [] : [report.reporterPerson]), ...report.people])];
 }
 
+/**
+ * The ids a decision or a suggestion may name for a report: the people it shows and the ids it was filed under (a stale ref after a merge
+ * still replays). A report nobody filed has a reporter value (`filter:<id>`) that is not a person: it is never named.
+ */
+export function namedIn(report: StaffReport): Set<string> {
+  return new Set([...peopleOf(report), report.targetSubject, ...((report.origin ?? null) === null ? [report.reporterSubject] : [])]);
+}
+
 /** A decision as the staff body carries it, checked for shape. */
 export interface ParsedDecision {
   verdict: DecisionInput['verdict'];
@@ -112,7 +120,7 @@ export async function applyDecision(
   if (report === null) throw new NotFoundError();
   // The staff refs the report shows, or the ids it was filed under (the facade makes them canonical, so a ref gone
   // stale through a later merge still replays).
-  const named = new Set([...peopleOf(report), report.targetSubject, report.reporterSubject]);
+  const named = namedIn(report);
   if (!decision.actions.every((a) => named.has(a.subject))) throw new ValidationError();
 
   const result = await cw.decide({

@@ -10,6 +10,9 @@ const ROOM = 'RFF';
 const DAY = 86_400_000;
 const LINK = 'see vlemmo.com now';
 
+/** A flag files its report on a microtask after `chat.accept` returns; this lets it finish. */
+const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 const sit = (w: World, room = ROOM, key = 'k-speaker'): void => {
   w.cw.rooms.seat(room, 'p1', { clientKey: key }, 'Spk');
   w.cw.rooms.seat(room, 'p2', { clientKey: `${key}-other` }, 'Oth');
@@ -23,6 +26,7 @@ describe('a flag files a report with no reporter', () => {
     sit(w);
     const r = w.cw.chat.accept(ROOM, 'p1', LINK);
     expect(r).toMatchObject({ deliver: { text: LINK } });
+    await flush();
     const [one, ...rest] = w.cw.reports.list({ status: 'open' }).items;
     expect(rest).toEqual([]);
     expect(one).toMatchObject({ origin: 'filter', originKey: 'link.unlisted', reportedReason: 'spam', reporterPerson: null, lineId: (r as { deliver: { lineId: string } }).deliver.lineId });
@@ -35,6 +39,7 @@ describe('a flag files a report with no reporter', () => {
     const w = await world({ overrides: { filters: { personalInfo: { action: 'flag' } } } });
     sit(w);
     w.cw.chat.accept(ROOM, 'p1', 'mail me at a@b.com');
+    await flush();
     expect(w.cw.reports.list({}).items[0]).toMatchObject({ reportedReason: 'personal_info', originKey: 'personal_info.email' });
     await w.cw.close();
   });
@@ -62,13 +67,55 @@ describe('a flag files a report with no reporter', () => {
   });
 });
 
+describe('the chat path does not write the store for a flag', () => {
+  it('chat.accept returns before the report is stored: no insert and no cap count inside the call, one insert right after', async () => {
+    const store = new MemoryStore();
+    const calls: string[] = [];
+    const insert = store.insertReport.bind(store);
+    store.insertReport = ((row: Parameters<typeof insert>[0]) => {
+      calls.push('insert');
+      return insert(row);
+    }) as typeof store.insertReport;
+    const count = store.countOriginReports.bind(store);
+    store.countOriginReports = ((origin: Parameters<typeof count>[0], since: number) => {
+      calls.push('count');
+      return count(origin, since);
+    }) as typeof store.countOriginReports;
+    const w = await flagWorld({}, store);
+    sit(w);
+    const r = w.cw.chat.accept(ROOM, 'p1', LINK);
+    expect(r).toMatchObject({ deliver: { text: LINK } });
+    expect(calls, 'nothing is written inside accept').toEqual([]);
+    expect(w.cw.reports.list({}).items).toHaveLength(0);
+    await flush();
+    expect(calls).toEqual(['count', 'insert']);
+    expect(w.cw.reports.list({}).items).toHaveLength(1);
+    await w.cw.close();
+  });
+
+  it('a burst of flagged lines from one person still files one report and counts the rest as plain counts', async () => {
+    const w = await flagWorld();
+    sit(w);
+    for (let i = 0; i < 4; i++) {
+      w.cw.chat.accept(ROOM, 'p1', LINK);
+      w.clock.t += 10_000;
+    }
+    await flush();
+    expect((await w.cw.filters.stats({ days: 7 })).keys['link.unlisted']).toEqual({ count: 3, flag: 1, mask: 0, refuse: 0, flag_capped: 0 });
+    expect(w.cw.reports.list({}).items).toHaveLength(1);
+    await w.cw.close();
+  });
+});
+
 describe('what the counters say', () => {
   it('a second flag while one is open counts as a plain count and files nothing', async () => {
     const w = await flagWorld();
     sit(w);
     w.cw.chat.accept(ROOM, 'p1', LINK);
+    await flush();
     w.clock.t += 10_000;
     w.cw.chat.accept(ROOM, 'p1', LINK);
+    await flush();
     expect(w.cw.reports.list({}).items).toHaveLength(1);
     expect((await w.cw.filters.stats({ days: 7 })).keys['link.unlisted']).toEqual({ count: 1, flag: 1, mask: 0, refuse: 0, flag_capped: 0 });
     await w.cw.close();
@@ -81,10 +128,12 @@ describe('what the counters say', () => {
     sit(w, 'B', 'kb');
     w.cw.chat.accept('A', 'p1', LINK);
     w.cw.chat.accept('B', 'p1', LINK);
+    await flush();
     expect(w.cw.reports.list({}).items).toHaveLength(1);
     expect((await w.cw.filters.stats({ days: 7 })).keys['link.unlisted']).toEqual({ count: 0, flag: 1, mask: 0, refuse: 0, flag_capped: 1 });
     w.clock.t += DAY;
     w.cw.chat.accept('B', 'p1', 'see zorbakk.com ok');
+    await flush();
     expect(w.cw.reports.list({}).items).toHaveLength(2);
     await w.cw.close();
   });
@@ -106,6 +155,7 @@ describe('what the counters say', () => {
       throw new RangeError('boom vlemmo.com');
     };
     expect(w.cw.chat.accept(ROOM, 'p1', LINK)).toMatchObject({ deliver: { text: LINK } });
+    await flush();
     expect((await w.cw.filters.stats({ days: 7 })).keys['link.unlisted']).toMatchObject({ count: 1, flag: 0 });
     expect(JSON.stringify(w.logged)).not.toContain('vlemmo');
     await w.cw.close();
@@ -117,6 +167,7 @@ describe('what the counters say', () => {
     sit(w);
     on = false;
     w.cw.chat.accept(ROOM, 'p1', LINK);
+    await flush();
     on = true;
     expect(w.cw.reports.list({}).items).toEqual([]);
     expect((await w.cw.filters.stats({ days: 7 })).keys['link.unlisted']).toMatchObject({ count: 1, flag: 0 });

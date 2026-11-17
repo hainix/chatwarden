@@ -141,6 +141,18 @@ describe('POST /filters/test', () => {
     expect(clean.verdict.hits).toHaveLength(1);
   });
 
+  it('the spans index the text as it was sent: a leading space or a new line does not shift them', async () => {
+    const w = await world({ overrides: live });
+    for (const text of [' mail a@b.com please', '\nmail a@b.com please', '\n \nmail a@b.com please\n']) {
+      const res = await w.call('POST', '/filters/test', post({ text }));
+      const body = res.body as { verdict: { hits: Array<{ spans: Array<{ start: number; end: number }> }>; spans: Array<{ start: number; end: number }> }; delivered: string };
+      const [span] = body.verdict.hits[0]!.spans;
+      expect(text.slice(span!.start, span!.end), JSON.stringify(text)).toBe('a@b.com');
+      expect(body.verdict.spans).toEqual(body.verdict.hits[0]!.spans);
+      expect(body.delivered).toBe('mail ******* please');
+    }
+  });
+
   it('a candidate is tried instead of the live settings, and is not saved', async () => {
     const w = await world();
     const none = (await w.call('POST', '/filters/test', post({ text: LINK }))).body as { verdict: { hits: unknown[] } };

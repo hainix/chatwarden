@@ -193,6 +193,29 @@ export function filtersContract(name: string, make: () => Store): void {
         expect(s.reporterOutcomes?.(['filter:f1'], 0) ?? []).toEqual([]);
         expect(s.loadReporterDecisions?.(['filter:f1']) ?? []).toEqual([]);
       });
+
+      it('the same holds for any origin, by the reporter value `<origin>:<id>` (a watch report)', () => {
+        const s = make();
+        s.insertReport(report('w1', { origin: 'watch', originKey: 'ai.watch', reporterSubject: 'watch:w1' }));
+        expect(s.reporterTally(['watch:w1'])).toEqual({ open: 0, actioned: 0, dismissed: 0, badFaith: 0 });
+        expect(s.listOpenReportsByReporter?.(['watch:w1'], 10) ?? []).toEqual([]);
+        s.closeReport('w1', 'dismissed', false, 'mod', NOW + 1, 'n');
+        expect(s.reporterTally(['watch:w1'])).toEqual({ open: 0, actioned: 0, dismissed: 0, badFaith: 0 });
+        expect(s.reporterOutcomes?.(['watch:w1'], 0) ?? []).toEqual([]);
+        expect(s.loadReporterDecisions?.(['watch:w1']) ?? []).toEqual([]);
+      });
+
+      it('loadReportActivity (the reports a person filed or was reported in) leaves every origin report out, in every store', () => {
+        const s = make();
+        s.insertReport(ordinary('o1', { createdAt: NOW }));
+        s.insertReport(report('f1', { createdAt: NOW + 1 }));
+        s.insertReport(report('w1', { createdAt: NOW + 2, origin: 'watch', originKey: 'ai.watch', reporterSubject: 'watch:w1' }));
+        s.insertReport(ordinary('o2', { createdAt: NOW + 3 }));
+        expect(s.loadReportActivity(0).map((a) => [a.reporter, a.createdAt])).toEqual([
+          ['s_rep_o1', NOW],
+          ['s_rep_o2', NOW + 3],
+        ]);
+      });
     });
   });
 }

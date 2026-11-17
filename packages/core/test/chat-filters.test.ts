@@ -350,10 +350,19 @@ describe('cw.filters (the facade)', () => {
 
   it('test: the verdict with spans for the live settings, and the line as it would be delivered', async () => {
     const { cw } = await world({ overrides: { filters: { links: { action: 'mask' } } } });
-    const r = cw.filters.test('  see vlemmo.com now ');
+    const typed = '  see vlemmo.com now ';
+    const r = cw.filters.test(typed);
     expect(r.delivered).toBe('see ********** now');
     expect(r.verdict.hits.map((h) => h.key)).toEqual(['link.unlisted']);
-    expect(r.verdict.spans).toEqual([{ start: 4, end: 14 }]);
+    // The ranges index the text as it was given, so a screen that shows the text as typed marks the right characters.
+    expect(r.verdict.spans).toEqual([{ start: 6, end: 16 }]);
+    expect(r.verdict.hits[0]!.spans).toEqual([{ start: 6, end: 16 }]);
+    expect(typed.slice(6, 16)).toBe('vlemmo.com');
+    for (const lead of ['', ' ', '\n', '\n\t  ']) {
+      const text = `${lead}see vlemmo.com now\n`;
+      const hit = cw.filters.test(text).verdict.hits[0]!.spans[0]!;
+      expect(text.slice(hit.start, hit.end), JSON.stringify(lead)).toBe('vlemmo.com');
+    }
     expect(cw.filters.test('good game').delivered).toBe('good game');
     expect(cw.filters.test('good game').verdict.hits).toEqual([]);
     await cw.close();

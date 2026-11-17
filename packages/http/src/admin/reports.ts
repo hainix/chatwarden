@@ -4,7 +4,7 @@ import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { roleAtLeast } from '../permissions.js';
 import { flagKey, handleFlags } from './handles.js';
-import { parseDecision, peopleOf } from './apply.js';
+import { namedIn, parseDecision, peopleOf } from './apply.js';
 import type { AdminCall, AdminContext } from './context.js';
 import { gateCase } from './claims.js';
 import { decideAs } from './decideAs.js';
@@ -353,7 +353,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (rule !== undefined && !cw.rules.isCitable(rule)) throw new ValidationError();
       const report = load(id);
       // Only the people the report names: this is not a way to look up anyone's record.
-      const named = new Set([...peopleOf(report), report.targetSubject, report.reporterSubject]);
+      const named = namedIn(report);
       if (person !== undefined && !named.has(person)) throw new ValidationError();
       const suggestion = cw.suggest(person ?? report.targetPerson, level, rule ?? ruleOf(cw, report), {
         roomId: roomOf(report),

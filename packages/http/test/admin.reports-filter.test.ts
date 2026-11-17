@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { world } from './world.js';
 import type { Logged } from './world.js';
 
@@ -109,6 +109,33 @@ describe('a filter report in the staff reads', () => {
     expect(ok.status).toBe(200);
     expect(w.cw.reports.get(f.id)!.status).toBe('actioned');
     expect(w.cw.sanctions.forPerson(f.subject)).toHaveLength(1);
+  });
+
+  it('the filter report\'s own reporter value is never a person: suggest and decide refuse it, and the target still works', async () => {
+    const w = await world();
+    const f = await flagged(w);
+    const stray = `filter:${f.id}`;
+    const suggest = vi.spyOn(w.cw, 'suggest');
+    const decide = vi.spyOn(w.cw, 'decide');
+    const suggestStray = await w.call('POST', `/reports/${f.id}/suggest`, { role: 'moderator', body: { person: stray, level: 'rude' } });
+    expect(suggestStray.status).toBe(400);
+    expect(suggest, 'the check is at the door, not left to core').not.toHaveBeenCalled();
+    const suggestOk = await w.call('POST', `/reports/${f.id}/suggest`, { role: 'moderator', body: { person: f.subject, level: 'rude' } });
+    expect(suggestOk.status).toBe(200);
+    const decideStray = await w.call('POST', `/reports/${f.id}/decide`, {
+      role: 'moderator',
+      body: { verdict: 'upheld', actions: [{ subject: stray, kind: 'warning', durationMs: null, rule: 4 }], reason: 'x' },
+    });
+    expect(decideStray.status).toBe(400);
+    expect(decide).not.toHaveBeenCalled();
+    expect(w.cw.reports.get(f.id)!.status).toBe('open');
+  });
+
+  it('an ordinary report\'s reporter is still a person the moderator may name', async () => {
+    const w = await world();
+    const o = await w.file();
+    const res = await w.call('POST', `/reports/${o.id}/suggest`, { role: 'moderator', body: { person: o.reporter, level: 'rude' } });
+    expect(res.status).toBe(200);
   });
 
   it('a person\'s history lists the filter report with a null reporter', async () => {

@@ -357,4 +357,18 @@ describe('what staff and the event see', () => {
     expect(told[0]!.origin).toBe('filter');
     await w.cw.close();
   });
+
+  it('the "reports this week" counts handed to onReport leave filter reports out: two filter reports about one person count 0', async () => {
+    const counts: Array<{ reports7d: number; rooms7d: number }> = [];
+    const w = await world({ onReport: (_r, c) => void counts.push({ reports7d: c.reports7d, rooms7d: c.rooms7d }) });
+    const a = seat(w, 'RA');
+    const b = seat(w, 'RB');
+    expect(await w.cw.reports.fileSystem(input(a))).toBe('filed');
+    expect(await w.cw.reports.fileSystem(input({ ...a, room: 'RB', subject: b.subject, lineId: b.lineId }))).toBe('filed');
+    expect(counts).toEqual([
+      { reports7d: 0, rooms7d: 0 },
+      { reports7d: 0, rooms7d: 0 },
+    ]);
+    await w.cw.close();
+  });
 });

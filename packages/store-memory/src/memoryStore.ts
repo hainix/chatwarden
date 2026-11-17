@@ -920,7 +920,7 @@ export class MemoryStore implements Store {
   loadReportActivity(since: number): ReportActivity[] {
     // Oldest first, ties in write order (the sort is stable).
     return this.reports
-      .filter((r) => r.createdAt >= since)
+      .filter((r) => r.createdAt >= since && (r.origin ?? null) === null)
       .sort((a, b) => a.createdAt - b.createdAt)
       .map((r) => ({ reporter: r.reporterSubject, target: r.targetSubject, roomId: r.roomId, createdAt: r.createdAt }));
   }

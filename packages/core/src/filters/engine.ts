@@ -233,6 +233,14 @@ export function testLine(verdict: FilterVerdict, text: string): FilterTestResult
   return { verdict, delivered: verdict.refuse !== null ? null : (verdict.softened ?? maskSpans(text, verdict.spans)) };
 }
 
+/** `result` with every range moved `by` characters on: the same verdict, its ranges on a longer text that has `by` characters in front. */
+export function shiftTestSpans(result: FilterTestResult, by: number): FilterTestResult {
+  if (by === 0) return result;
+  const shift = (s: FilterSpan): FilterSpan => ({ start: s.start + by, end: s.end + by });
+  const v = result.verdict;
+  return { ...result, verdict: { ...v, hits: v.hits.map((h) => ({ ...h, spans: h.spans.map(shift) })), spans: v.spans.map(shift), flags: v.flags.map((h) => ({ ...h, spans: h.spans.map(shift) })) } };
+}
+
 /** The most lines `check` reads, and the most sample lines it keeps per counter key. */
 export const CHECK_LINES_MAX = 5000;
 export const CHECK_SAMPLES_MAX = 20;
