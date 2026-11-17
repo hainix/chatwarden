@@ -1,4 +1,4 @@
-export const VERSION = '0.1.13';
+export const VERSION = '0.1.14';
 
 export { Hub } from './Hub.js';
 export type { HubProps } from './Hub.js';

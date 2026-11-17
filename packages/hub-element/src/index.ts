@@ -1,4 +1,4 @@
-export const VERSION = '0.1.13';
+export const VERSION = '0.1.14';
 
 import { ChatwardenHubElement } from './element.js';
 
