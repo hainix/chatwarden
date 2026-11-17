@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parsePattern, type PatternToken } from '../src/filters/phrases.js';
+import { resolveFilters, type ResolvedPhraseRule } from '../src/filters.js';
+import { __phraseSteps, compilePhrases, matchPhrases, parsePattern, type PatternToken } from '../src/filters/phrases.js';
 
 const ok = (p: string): PatternToken[] => {
   const r = parsePattern(p);
@@ -81,5 +82,164 @@ describe('pattern grammar', () => {
 
   it('never throws on hostile input', () => {
     for (const p of ['\u0000', 'a'.repeat(100_000), '|'.repeat(1000), '~ '.repeat(1000), '\ud800', 'x\u{200b}'.repeat(40)]) expect(() => parsePattern(p)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Matching
+
+const rules = (...defs: Array<[id: string, ...patterns: string[]]>): ResolvedPhraseRule[] =>
+  resolveFilters({ phrases: defs.map(([id, ...phrases]) => ({ id, action: 'count', phrases })) } as never).phrases;
+const find = (patterns: string[], text: string): string[] => {
+  const c = compilePhrases(rules(['r', ...patterns]));
+  return matchPhrases(c, text).map((m) => text.slice(m.span.start, m.span.end));
+};
+const hit = (patterns: string[], text: string): boolean => find(patterns, text).length > 0;
+
+describe('pattern matching', () => {
+  it('a whole word', () => {
+    expect(hit(['gold'], 'buy gold now')).toBe(true);
+    expect(hit(['gold'], 'goldfish')).toBe(false);
+    expect(hit(['gold'], 'marigold')).toBe(false);
+    expect(hit(['gold'], 'GOLD!')).toBe(true);
+    expect(find(['gold'], 'a gold, b gold')).toEqual(['gold', 'gold']);
+  });
+
+  it('folded words: g0ld, g.o.l.d, goooold, accents and full-width letters all match gold', () => {
+    for (const t of ['g0ld', 'g.o.l.d', 'goooold', 'g\u{f6}ld', '\u{ff47}\u{ff4f}\u{ff4c}\u{ff44}', 'G0LD']) expect(hit(['gold'], `buy ${t} now`), t).toBe(true);
+    expect(hit(['gold'], 'g o l d')).toBe(false);
+  });
+
+  it('alternation', () => {
+    expect(find(['buy|sell|selling gold'], 'we sell gold and selling gold')).toEqual(['sell gold', 'selling gold']);
+    expect(hit(['buy|sell gold'], 'borrow gold')).toBe(false);
+  });
+
+  it('a prefix with *', () => {
+    expect(hit(['gold*'], 'goldfarm')).toBe(true);
+    expect(hit(['gold*'], 'golds')).toBe(true);
+    expect(hit(['gold*'], 'gold')).toBe(true);
+    expect(hit(['gold*'], 'golf')).toBe(false);
+    expect(hit(['zorbak gold*'], 'zorbak goldfarm')).toBe(true);
+  });
+
+  it('a lone * is exactly one word of any kind', () => {
+    expect(hit(['buy * gold'], 'buy cheap gold')).toBe(true);
+    expect(hit(['buy * gold'], 'buy gold')).toBe(false);
+    expect(hit(['buy * gold'], 'buy some cheap gold')).toBe(false);
+  });
+
+  it('~ is zero to three words of any kind', () => {
+    const p = ['buy ~ gold'];
+    for (const t of ['buy gold', 'buy some gold', 'buy lots of cheap gold']) expect(hit(p, t), t).toBe(true);
+    expect(hit(p, 'buy a very very cheap gold')).toBe(false);
+    expect(find(p, 'x buy lots of cheap gold y')).toEqual(['buy lots of cheap gold']);
+  });
+
+  it('two ~ at most, each zero to three', () => {
+    expect(hit(['zorbak ~ vlemmo ~ quissel'], 'zorbak a b vlemmo c quissel')).toBe(true);
+    expect(hit(['zorbak ~ vlemmo ~ quissel'], 'zorbak vlemmo quissel')).toBe(true);
+    expect(hit(['zorbak ~ vlemmo ~ quissel'], 'zorbak a b c d vlemmo quissel')).toBe(false);
+  });
+
+  it('a trailing ~ matches with nothing after it', () => {
+    expect(find(['buy ~'], 'buy gold now')).toEqual(['buy']);
+  });
+
+  it('the order of words matters', () => {
+    expect(hit(['buy gold'], 'gold buy')).toBe(false);
+    expect(hit(['buy ~ gold'], 'gold then buy')).toBe(false);
+  });
+
+  it('punctuation between words is a boundary: "buy, gold" and "buy-gold" read as two words', () => {
+    expect(hit(['buy gold'], 'buy, gold')).toBe(true);
+    expect(hit(['buy gold'], 'buy-gold')).toBe(true);
+    expect(hit(['buy gold'], 'buy/gold!')).toBe(true);
+  });
+
+  it('numbers are words: "buy 500 gold" matches "buy * gold", and 500 stays 500', () => {
+    expect(hit(['buy * gold'], 'buy 500 gold')).toBe(true);
+    expect(hit(['buy 500 gold'], 'buy 500 gold')).toBe(true);
+    expect(hit(['buy 500 gold'], 'buy soo gold')).toBe(false);
+  });
+
+  it('the span covers the matched words on the original text, including stripped characters', () => {
+    const text = 'x  buy  g\u{200b}0ld! y';
+    expect(find(['buy gold'], text)).toEqual(['buy  g\u{200b}0ld']);
+  });
+
+  it('a rule id comes back with each match, in text order, and rules do not mix', () => {
+    const c = compilePhrases(rules(['ads', 'free gold'], ['links', 'visit site'], ['both', 'gold']));
+    const text = 'visit site for free gold';
+    expect(matchPhrases(c, text).map((m) => [m.ruleId, text.slice(m.span.start, m.span.end)])).toEqual([
+      ['links', 'visit site'],
+      ['ads', 'free gold'],
+      ['both', 'gold'],
+    ]);
+  });
+
+  it('a bad pattern in a rule is skipped, never thrown on', () => {
+    const bad = [{ id: 'x', label: 'x', action: 'count', rule: 4, phrases: ['[nope]', 'fine word', '* nope'] }] as ResolvedPhraseRule[];
+    const c = compilePhrases(bad);
+    expect(matchPhrases(c, 'a fine word b').map((m) => m.ruleId)).toEqual(['x']);
+    expect(matchPhrases(c, '[nope] nope')).toEqual([]);
+  });
+
+  it('compiling is cached by the settings (the same rules give the same compiled object), and a change is a new one', () => {
+    const r = rules(['a', 'zorbak vlemmo']);
+    expect(compilePhrases(r)).toBe(compilePhrases(r));
+    expect(compilePhrases(rules(['a', 'zorbak vlemmo']))).not.toBe(compilePhrases(r));
+  });
+
+  it('no rules, an empty line and a non-string give nothing', () => {
+    expect(matchPhrases(compilePhrases([]), 'buy gold')).toEqual([]);
+    expect(matchPhrases(compilePhrases(rules(['a', 'buy gold'])), '')).toEqual([]);
+    expect(matchPhrases(compilePhrases(rules(['a', 'buy gold'])), undefined as never)).toEqual([]);
+  });
+
+  it('only the first 2 000 characters are read', () => {
+    const c = compilePhrases(rules(['a', 'buy gold']));
+    expect(matchPhrases(c, `${'x '.repeat(1100)}buy gold`)).toEqual([]);
+  });
+});
+
+describe('phrase performance', () => {
+  const many = (n: number): ResolvedPhraseRule[] => {
+    const patterns = Array.from({ length: n }, (_, i) => `w${i.toString(36).padStart(4, 'q')}word tail${i % 7} end`);
+    return resolveFilters({ phrases: Array.from({ length: Math.ceil(n / 100) }, (_, k) => ({ id: `r${k}`, action: 'count', phrases: patterns.slice(k * 100, k * 100 + 100) })) } as never).phrases;
+  };
+
+  it('500 patterns, a 200 character line: steps bounded and independent of the pattern count beyond the first-word bucket', () => {
+    const line = 'hello there how are you doing today my friend i hope that you are well and that the game is going nicely for you all';
+    expect(line.length).toBeLessThanOrEqual(200);
+    const few = compilePhrases(many(5));
+    const lots = compilePhrases(many(500));
+    __phraseSteps.n = 0;
+    matchPhrases(few, line);
+    const small = __phraseSteps.n;
+    __phraseSteps.n = 0;
+    matchPhrases(lots, line);
+    const big = __phraseSteps.n;
+    expect(small).toBeGreaterThan(0);
+    expect(big).toBeLessThanOrEqual(small + 5);
+  });
+
+  it('patterns that share a first word cost only their own bucket', () => {
+    const shared = resolveFilters({ phrases: [{ id: 'a', action: 'count', phrases: Array.from({ length: 100 }, (_, i) => `zorbak t${i} end`) }] } as never).phrases;
+    const c = compilePhrases(shared);
+    __phraseSteps.n = 0;
+    matchPhrases(c, 'zorbak t5 end and zorbak t99 end');
+    expect(__phraseSteps.n).toBeLessThan(1000);
+    expect(matchPhrases(c, 'zorbak t5 end and zorbak t99 end')).toHaveLength(2);
+  });
+
+  it('a line made of one bucket word repeated stays linear', () => {
+    const c = compilePhrases(rules(['a', 'zorbak ~ ~ vlemmo', 'zorbak ~ vlemmo ~ quissel']));
+    __phraseSteps.n = 0;
+    matchPhrases(c, 'zorbak '.repeat(100));
+    const small = __phraseSteps.n;
+    __phraseSteps.n = 0;
+    matchPhrases(c, 'zorbak '.repeat(200));
+    expect(__phraseSteps.n).toBeLessThanOrEqual(small * 2.5);
   });
 });

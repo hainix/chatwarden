@@ -35,6 +35,10 @@ const REVIEWED: readonly string[] = [
   '/\\p{M}/gu', // combining marks, removed after NFD
   // links.ts
   '/^[\\p{L}\\p{N}\\p{M}]$/u', // one character of a host label outside ASCII
+  // personal.ts
+  '/^\\p{L}$/u', // one character outside ASCII is a letter
+  // ratio.ts
+  '/\\p{Extended_Pictographic}/u', // one character is an emoji or a pictograph
   // phrases.ts
   '/^[\\p{L}\\p{N}\\p{M}@$.\'\\u{ad}\\u{200b}-\\u{200f}\\u{2060}-\\u{2064}\\u{feff}]+$/u', // what a pattern word may be written with
   '/\\s+/u', // the words of a pattern

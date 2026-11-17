@@ -10,6 +10,12 @@ export interface Chunk {
   end: number;
 }
 
+/** A range of a line, for masking: `start` inclusive, `end` exclusive (UTF-16 code units of the original text). */
+export interface FilterSpan {
+  start: number;
+  end: number;
+}
+
 /** Test hook: how many characters the fold has looked at, so a test can show the work is linear. */
 export const __foldSteps = { n: 0 };
 
