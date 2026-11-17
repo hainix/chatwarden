@@ -22,6 +22,13 @@ export function Steps() {
           <h2 id="add-it-title">{ADD_IT.title}</h2>
           <p className="section-lead">{ADD_IT.lead}</p>
         </div>
+        <div className="step steps-init" data-init-step>
+          <div className="step-text">
+            <h3>{ADD_IT.init.title}</h3>
+            <p>{ADD_IT.init.body}</p>
+          </div>
+          <CodeBlock code={ADD_IT.init.code} lang={ADD_IT.init.lang} title={ADD_IT.init.file} copyLabel={ADD_IT.init.copyLabel} />
+        </div>
         <ol className="steps">
           {STEPS.map((s, i) => (
             <li key={s.id} className="step">

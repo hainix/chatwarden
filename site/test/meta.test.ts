@@ -191,11 +191,46 @@ describe('llms.txt', () => {
   });
   it('has the proposal’s summary: what it is, that it moderates an existing chat, and what it is not', () => {
     expect(txt()).toContain(
-      "> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one case per player by default). TypeScript for Node 22.13 or newer. Pre-release (0.1.x), Apache-2.0, provided as-is. It moderates an existing chat; it is not a chat system. Not a child-safety tool.",
+      "> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one case per player by default). It moderates the chat you already have, and has an optional moderated chat box for a game with none. TypeScript for Node 22.13 or newer. Pre-release (0.1.x), Apache-2.0, provided as-is. Not a child-safety tool.",
     );
     expect(txt()).toContain('one case per player by default');
     expect(txt()).not.toMatch(/Simple mode of one card per case|one card per report|one tap|fair ladder|dodge simple filters|\brefuses?\b/i);
     expect(txt()).toContain('and `@chatwarden/http` for the routes');
+  });
+  it('no longer says it is not a chat system', () => {
+    expect(txt()).not.toMatch(/not a chat system/i);
+    expect(txt()).toContain('has an optional moderated chat box for a game with none');
+  });
+  it('has an "Adopt fast" section with the init command copied from the http README, and no timing claim', () => {
+    const section = (txt().split('\n## Adopt fast\n')[1] ?? '').split('\n## ')[0] ?? '';
+    expect(section.length).toBeGreaterThan(200);
+    const readme = readFileSync(join(repo, 'packages', 'http', 'README.md'), 'utf8').split('\r\n').join('\n');
+    for (const cmd of ['npm install @chatwarden/http @chatwarden/core', 'npx chatwarden init', 'npx -p @chatwarden/http chatwarden init']) {
+      expect(section, cmd).toContain(cmd);
+      expect(readme, cmd).toContain(cmd);
+    }
+    expect(section).toContain('Express, Fastify, Next.js');
+    expect(section).toContain('never overwrites');
+    expect(section).toContain('experimental until 0.2');
+    expect(txt()).not.toMatch(/minutes|in about 15/i);
+  });
+  it('links every recipe in docs/recipes (and each link resolves to a real file)', () => {
+    const recipes = readdirSync(join(repo, 'docs', 'recipes')).filter((f) => f.endsWith('.md'));
+    expect(recipes.length).toBeGreaterThanOrEqual(5);
+    for (const f of recipes) {
+      const url = `https://github.com/hainix/chatwarden/blob/main/docs/recipes/${f}`;
+      expect(urls(), f).toContain(url);
+      expect(existsSync(join(repo, 'docs', 'recipes', f)), f).toBe(true);
+    }
+  });
+  it('says only what the READMEs say about what shipped since 0.1.5: experimental names, opt-in, and an AI that never acts on its own', () => {
+    const t = txt();
+    expect(t).toMatch(/AI/);
+    expect(t).toMatch(/never acts on its own yet/);
+    expect(t).toMatch(/shadow mode/i);
+    expect(t).toContain('experimental until 0.2');
+    expect(t).not.toMatch(/accura|guarantee|automatic(ally)? (ban|sanction)|replaces? (your )?moderators/i);
+    expect(t.toLowerCase()).not.toContain('moxgate');
   });
   it('is honest: pre-release, and no promises the site would not make', () => {
     expect(txt()).toMatch(/pre-release/i);

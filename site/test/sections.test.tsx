@@ -151,6 +151,20 @@ describe('Steps', () => {
     expect(items[4]?.textContent).toMatch(/optional/i);
     expect(items[3]?.hasAttribute('data-hub-step')).toBe(true);
   });
+  it("opens with the setup command before the numbered steps: the README's two lines, copyable, with the by-hand path named", () => {
+    const { container } = render(<Steps />);
+    const init = container.querySelector('[data-init-step]') as HTMLElement;
+    expect(init).toBeTruthy();
+    expect(init.querySelector('h3')?.textContent).toBe('Start with the setup command');
+    expect(init.querySelector('pre')?.textContent).toBe(['npm install @chatwarden/http @chatwarden/core', 'npx chatwarden init'].join('\n'));
+    expect(within(init).getByRole('button', { name: 'Copy the setup command' })).toBeTruthy();
+    expect(init.textContent).toContain('npx -p @chatwarden/http chatwarden init');
+    expect(init.textContent).toContain('by hand');
+    // it comes before the ordered list, and is not one of its items
+    const list = container.querySelector('ol') as HTMLElement;
+    expect(init.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(list.contains(init)).toBe(false);
+  });
   it('has the proposal’s heading and lead', () => {
     const { container } = render(<Steps />);
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Add it to your game');
@@ -267,7 +281,7 @@ describe('Steps', () => {
   it('names each scrollable code block as a region (aria-label alone is not allowed on a bare pre)', () => {
     const { container } = render(<Steps />);
     const pres = [...container.querySelectorAll('pre')];
-    expect(pres).toHaveLength(8); // steps 1 to 3, the server's install and mount, then the React tab's install line, client and drop-in
+    expect(pres).toHaveLength(9); // the setup command, steps 1 to 3, the server's install and mount, then the React tab's install line, client and drop-in
     for (const pre of pres) {
       expect(pre.getAttribute('role')).toBe('region');
       expect(pre.getAttribute('aria-label')).toBeTruthy();

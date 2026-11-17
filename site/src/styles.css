@@ -959,6 +959,9 @@ li {
   border-radius: 8px;
   box-shadow: 3px 3px 0 var(--edge-shadow);
 }
+.steps-init {
+  margin-bottom: 36px;
+}
 .steps-more {
   margin-top: 36px;
   color: var(--muted);
