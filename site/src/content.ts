@@ -1,6 +1,7 @@
 // All the words on the page, as data. Honest copy only (the source is docs/design/2026-11-11-site-copy-rewrite.md, section 3):
 //   - code snippets and install commands come from the READMEs (test/content.test.ts checks them against the repo);
-//   - nothing that is not built is promised (no chat box, no AI, no shared word list);
+//   - nothing that is not built is promised (no acting AI, no published shared word list, no service for non-Node servers);
+//   - no timing claim (no "in minutes", no "about 15 minutes") until the timing record in docs/status.md exists;
 //   - the only demo words are the invented ones from @chatwarden/matcher/fixtures.
 
 export const REPO_URL = 'https://github.com/hainix/chatwarden';
@@ -90,9 +91,21 @@ export const PLAYER_REACT_URL = `${TREE_URL}/player-react`;
 const MATCHER_README_URL = `${TREE_URL}/matcher#readme`;
 const PROFANITY_URL = `${TREE_URL}/profanity`;
 
+const INIT_ALTERNATIVE = 'npx -p @chatwarden/http chatwarden init';
+
 export const ADD_IT = {
   title: 'Add it to your game',
   lead: "Chatwarden needs three things from your server: who's talking, each message before it's sent, and a page for your moderators. It runs on Node 22.13 or newer, with any framework.",
+  /** The setup command, first in the section: the two lines are copied from the @chatwarden/http README (test/content.test.ts checks them). */
+  init: {
+    title: 'Start with the setup command',
+    body: `It writes the wiring for Express, Fastify, Next.js or anything on Web Request and Response, and asks only what it cannot detect. It never overwrites a file, and it is experimental until 0.2. With nothing installed yet, run ${INIT_ALTERNATIVE}. Or write it by hand, in the steps below.`,
+    lang: 'sh',
+    file: 'terminal',
+    copyLabel: 'Copy the setup command',
+    code: ['npm install @chatwarden/http @chatwarden/core', 'npx chatwarden init'].join('\n'),
+    alternative: INIT_ALTERNATIVE,
+  },
   closing:
     'Every package has a README with the full setup, options and security notes. For a complete chat server wired up end to end, see examples/tiny-chat in the repo.',
 } as const;
@@ -312,18 +325,18 @@ const FAQ_BASE: FaqItem[] = [
   {
     id: 'chat',
     q: 'Does Chatwarden give my game a chat?',
-    a: 'No. It moderates the chat you already have. Your server still sends the messages; it asks Chatwarden first.',
+    a: 'Not by default. It moderates the chat you already have: your server still sends the messages, and asks Chatwarden first. A game with no chat can add the moderated chat box from @chatwarden/player-react (experimental).',
   },
   {
     id: 'server',
     q: 'Will it work with my game server?',
-    a: "If your server runs Node 22.13 or newer, yes, with any framework: the check is one function call. The moderator routes come with an Express adapter, and any other framework can use createRouter, which turns the routes into one plain request-to-response function. If your server is written in another language, there's no ready-made bridge yet.",
+    a: "If your server runs Node 22.13 or newer, yes, with any framework: the check is one function call. The setup command, npx chatwarden init, writes the wiring for Express, Fastify and Next.js, and anything on Web Request and Response uses toFetch. Any other framework can use createRouter, which turns the routes into one plain request-to-response function. If your server is written in another language, a service API for it is planned and not built.",
   },
   {
     id: 'words',
     q: 'Which words does it block?',
     links: [{ label: '@chatwarden/profanity', href: PROFANITY_URL }],
-    a: "Slurs from a word list you provide. There's no shared list yet, so you bring your own, and moderators can edit it from the hub while the game runs. Ordinary swearing uses the optional @chatwarden/profanity package, with a built-in English list that you can allow, star or block. Words with spaces between the letters are not caught, on purpose, because that would block innocent messages. Players can report those.",
+    a: "Slurs from a word list you provide. There's no shared list yet, so you bring your own, and moderators can edit it from the hub while the game runs. The kit can load a signed community list once one is published (experimental); nothing is on by default. Ordinary swearing uses the optional @chatwarden/profanity package, with a built-in English list that you can allow, star or block. Words with spaces between the letters are not caught, on purpose, because that would block innocent messages. Players can report those.",
   },
   {
     id: 'signin',
@@ -348,7 +361,7 @@ const FAQ_BASE: FaqItem[] = [
   {
     id: 'discord',
     q: 'Can reports go to Discord?',
-    a: 'Yes. Each reported player gets a thread in a Discord forum, with a link back to the hub.',
+    a: 'Yes. Each reported player gets a thread in a Discord forum, with a link back to the hub. An optional bot (experimental) can also let a moderator decide from Discord, after a confirm step.',
   },
   {
     id: 'child-safety',
@@ -364,17 +377,16 @@ const FAQ_BASE: FaqItem[] = [
   },
 ];
 /**
- * AI levels 1 and 2 ship in 0.1.7. The wording that says so is below, written and tested, and NOT shown: this stays false until the release is on
- * npm and has run in a real game for a while (design question 10, docs/plans/follow-ups.md). Flipping it replaces the "planned" answer in place and makes
- * `AI_SECTION_PREPARED` ready for a section; then the site is deployed by hand (site/README.md).
+ * AI levels 1 and 2 shipped in 0.1.7 and are on npm, so this is true and the FAQ shows the available answer in place of the old "planned" one (kept
+ * below for the false case). `AI_SECTION_PREPARED` is still not rendered. The site is deployed by hand (site/README.md).
  */
-export const AI_LEVELS_AVAILABLE = false;
+export const AI_LEVELS_AVAILABLE = true;
 
-/** The answer once levels 1 and 2 are available: it takes the place of the "planned" answer, in the same position. */
+/** The answer now that levels 1 and 2 are available: it takes the place of the "planned" answer, in the same position. */
 export const AI_FAQ_PREPARED: FaqItem = {
   id: 'ai',
   q: "Does an AI read my players' chat?",
-  a: 'Only if you turn it on. Levels are per game and off by default. Only the chat lines of a report, with names replaced, go to the AI provider you choose.',
+  a: 'Only if you turn it on. It is off by default, and you set the level for your game. It reads reports, not all chat: only the chat lines of a report, with names replaced, go to the AI provider you choose. It can summarise a report and suggest a mild decision; a moderator makes every decision. It never acts on its own yet.',
 };
 
 /** The words of a section about the optional AI, for when it comes back as a section (docs/plans/follow-ups.md). Not rendered yet. */

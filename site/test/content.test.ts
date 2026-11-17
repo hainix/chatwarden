@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  ADD_IT,
   AI_FAQ_PREPARED,
   AI_LEVELS_AVAILABLE,
   AI_SECTION_PREPARED,
@@ -112,20 +113,43 @@ describe('the steps, panels and questions', () => {
       'How do my moderators sign in?',
       'Where is player data stored?',
       'What does it cost?',
-      'Does it use AI?',
+      "Does an AI read my players' chat?",
       'Can reports go to Discord?',
       'Is it a child-safety tool?',
     ]);
   });
-  it('the FAQ is honest about the limits: no chat, Node only, bring your own word list, spaced letters, AI not built', () => {
+  it('the FAQ is honest about the limits: the chat box is optional, Node only, bring your own word list, spaced letters, the AI advises', () => {
     const a = (id: string) => FAQ.find((f) => f.id === id)?.a ?? '';
-    expect(a('chat')).toMatch(/^No\. It moderates the chat you already have\./);
+    expect(a('chat')).toMatch(/^Not by default\. It moderates the chat you already have/);
+    expect(a('chat')).toMatch(/experimental/);
     expect(a('server')).toMatch(/Node 22\.13 or newer/);
-    expect(a('server')).toMatch(/no ready-made bridge yet/);
     expect(a('words')).toMatch(/There's no shared list yet, so you bring your own/);
+    expect(a('words')).toMatch(/nothing is on by default/);
     expect(a('words')).toMatch(/Words with spaces between the letters are not caught, on purpose/);
-    expect(a('ai')).toMatch(/It isn't built yet\.$/);
+    expect(a('ai')).toMatch(/a moderator makes every decision/i);
+    expect(a('ai')).toMatch(/never acts on its own yet/);
     expect(a('data')).toMatch(/Chatwarden runs no servers and collects nothing, and this site has no analytics\./);
+  });
+  it("the FAQ answer on other languages names Express, Fastify, Next.js and toFetch, says a service API is planned and not built, and promises no speed", () => {
+    const a = FAQ.find((f) => f.id === 'server')?.a ?? '';
+    for (const name of ['Express', 'Fastify', 'Next.js', 'toFetch', 'createRouter']) expect(a, name).toContain(name);
+    expect(a).toContain('npx chatwarden init');
+    expect(a).toMatch(/another language/);
+    expect(a).toMatch(/service API/);
+    expect(a).toMatch(/planned and not built/);
+    expect(a).not.toMatch(/no ready-made bridge/);
+    expect(a).not.toMatch(/minutes?|seconds?|\bfast(er|est)?\b|quick|instant|\beasy|\beasily|no time/i);
+  });
+  it('the Discord answer keeps to the README: the thread feed, and an experimental bot with a confirm step', () => {
+    const a = FAQ.find((f) => f.id === 'discord')?.a ?? '';
+    expect(a).toMatch(/^Yes\. Each reported player gets a thread in a Discord forum, with a link back to the hub\./);
+    expect(a).toMatch(/experimental/);
+    expect(a).toMatch(/confirm/);
+  });
+  it('no page copy puts "minutes" near "install" (no timing claim: the timing record does not exist)', () => {
+    const copy = JSON.stringify([HERO, HERO_CHAT, HOW_PANELS, RULES_STRIP, FAQ, OPEN_SOURCE, ADD_IT, STEPS, HUB_STEP, PLAYER_STEP]);
+    expect(copy).not.toMatch(/install[^.]{0,120}minutes|minutes[^.]{0,120}install/i);
+    expect(copy).not.toMatch(/\b15 minutes\b|about 15|in minutes/i);
   });
   it('the page prose avoids the jargon the proposal retired (outside code samples)', () => {
     const prose = JSON.stringify([
@@ -150,13 +174,41 @@ describe('the steps, panels and questions', () => {
   it('"case" is defined once, where the hub is first described (the hero), and the tour uses it the same way', () => {
     expect(HERO.lead).toContain('each player with open reports is a case');
   });
-  it('the AI answer promises nothing about who decides (levels 3 and 4 are planned to act on clear cases)', () => {
-    expect(FAQ.find((f) => f.id === 'ai')?.a).toBe("No. Optional AI help that reads reports and suggests a decision is planned. It isn't built yet.");
+  it('the AI answer says it is off by default, that a moderator decides, and promises no accuracy', () => {
+    const a = FAQ.find((f) => f.id === 'ai')?.a ?? '';
+    expect(a).toMatch(/^Only if you turn it on\./);
+    expect(a).toMatch(/off by default/i);
+    expect(a).not.toMatch(/accura|always right|replace(s)? your moderators|isn't built|is planned/i);
   });
   it('invents no customers, counts or stats', () => {
     const text = JSON.stringify([HOW_PANELS, FAQ, OPEN_SOURCE]);
     expect(text).not.toMatch(/\b\d[\d,.]*\s?[kKmM]?\+?\s+(users|customers|studios|games|downloads|stars|developers)\b/);
     expect(text).not.toMatch(/trusted by|moxgate/i);
+  });
+});
+
+describe('the init command in the lead', () => {
+  const httpReadme = () => readFileSync(join(repo, 'packages', 'http', 'README.md'), 'utf8').replace(/\r\n/g, '\n');
+  it("the init command in the lead equals the README's", () => {
+    const section = httpReadme().split('## The init command')[1] ?? '';
+    const block = /```sh\n([\s\S]*?)\n```/.exec(section)?.[1];
+    expect(block).toBe('npm install @chatwarden/http @chatwarden/core\nnpx chatwarden init');
+    expect(ADD_IT.init.code).toBe(block);
+    expect(ADD_IT.init.lang).toBe('sh');
+  });
+  it("each line of the init block is also in the repository README, and the no-install form is the README's", () => {
+    const root = readFileSync(join(repo, 'README.md'), 'utf8');
+    for (const line of ADD_IT.init.code.split('\n')) expect(root, line).toContain(line);
+    expect(httpReadme()).toContain(ADD_IT.init.alternative);
+    expect(ADD_IT.init.alternative).toBe('npx -p @chatwarden/http chatwarden init');
+  });
+  it('the words around it say what it writes, that it never overwrites, that it is experimental, and offer the by-hand path', () => {
+    expect(ADD_IT.init.title).toBe('Start with the setup command');
+    expect(ADD_IT.init.body).toMatch(/Express, Fastify, Next\.js/);
+    expect(ADD_IT.init.body).toMatch(/never overwrites/);
+    expect(ADD_IT.init.body).toMatch(/experimental/);
+    expect(ADD_IT.init.body).toMatch(/by hand/);
+    expect(ADD_IT.init.body).not.toMatch(/minutes?|seconds?|\bfast(er|est)?\b|quick|instant|\beasy/i);
   });
 });
 
@@ -235,23 +287,23 @@ describe('the words of the proposal (docs/design/2026-11-11-site-copy-rewrite.md
   });
 });
 
-// AI levels 1 and 2 (0.1.7): the wording that says they are available is written and tested, but not shown. The page still says "planned" (the tests
-// above) until the release is on npm and Moxgate has run it (design question 10); then AI_LEVELS_AVAILABLE becomes true, the "unflipped" tests below
-// are replaced by the flipped ones, and the site is deployed by hand. Until then nothing in the built page changes.
-describe('the wording for AI levels 1 and 2 is prepared and not shown (unflipped)', () => {
-  it('the switch is off, and the page shows the "planned" answer and no AI section', () => {
-    expect(AI_LEVELS_AVAILABLE).toBe(false);
-    expect(FAQ.find((f) => f.id === 'ai')?.q).toBe('Does it use AI?');
-    expect(FAQ).toEqual(buildFaq(false));
-    const shown = JSON.stringify([HERO, HERO_CHAT, HOW_PANELS, RULES_STRIP, FAQ, OPEN_SOURCE, STEPS, HUB_STEP, PLAYER_STEP]);
-    for (const line of [AI_FAQ_PREPARED.q, AI_FAQ_PREPARED.a, AI_SECTION_PREPARED.title, AI_SECTION_PREPARED.ceilingsIntro]) expect(shown).not.toContain(line);
+// AI levels 1 and 2 (0.1.7) are on npm, so the switch is on and the FAQ answer says what they do (the page deploy is by hand, site/README.md). The
+// section's wording stays written and tested, and is not rendered.
+describe('the wording for AI levels 1 and 2 (the switch is on)', () => {
+  it('the switch is on, and the page shows the available answer and no AI section', () => {
+    expect(AI_LEVELS_AVAILABLE).toBe(true);
+    expect(FAQ.find((f) => f.id === 'ai')?.q).toBe("Does an AI read my players' chat?");
+    expect(FAQ).toEqual(buildFaq(true));
+    const shown = JSON.stringify([HERO, HERO_CHAT, HOW_PANELS, RULES_STRIP, OPEN_SOURCE, STEPS, HUB_STEP, PLAYER_STEP]);
+    for (const line of [AI_SECTION_PREPARED.title, AI_SECTION_PREPARED.ceilingsIntro]) expect(shown).not.toContain(line);
+    expect(JSON.stringify(FAQ)).toContain(AI_FAQ_PREPARED.a);
   });
 
-  it('the prepared FAQ answer is the agreed one, word for word', () => {
+  it('the FAQ answer is the agreed one, word for word', () => {
     expect(AI_FAQ_PREPARED.id).toBe('ai');
     expect(AI_FAQ_PREPARED.q).toBe("Does an AI read my players' chat?");
     expect(AI_FAQ_PREPARED.a).toBe(
-      'Only if you turn it on. Levels are per game and off by default. Only the chat lines of a report, with names replaced, go to the AI provider you choose.',
+      'Only if you turn it on. It is off by default, and you set the level for your game. It reads reports, not all chat: only the chat lines of a report, with names replaced, go to the AI provider you choose. It can summarise a report and suggest a mild decision; a moderator makes every decision. It never acts on its own yet.',
     );
   });
 
@@ -262,7 +314,8 @@ describe('the wording for AI levels 1 and 2 is prepared and not shown (unflipped
     expect(after.map((f) => f.id)).toEqual(before.map((f) => f.id));
     expect(after.find((f) => f.id === 'ai')).toEqual(AI_FAQ_PREPARED);
     for (const f of before) if (f.id !== 'ai') expect(after.find((g) => g.id === f.id)).toEqual(f);
-    expect(JSON.stringify(after)).not.toMatch(/isn't built yet|is planned/);
+    expect(JSON.stringify(after.find((f) => f.id === 'ai'))).not.toMatch(/isn't built yet|is planned/);
+    expect(JSON.stringify(before.find((f) => f.id === 'ai'))).toMatch(/isn't built yet/); // the old answer is kept for a false switch
   });
 
   it('the prepared copy tells the truth about this release: advice only, a person decides, off by default, the ceilings in code', () => {
@@ -281,7 +334,7 @@ describe('the wording for AI levels 1 and 2 is prepared and not shown (unflipped
   });
 
   it('the prepared copy promises nothing it cannot keep: no accuracy, no replacing moderators, no acting alone, no default-on', () => {
-    const text = JSON.stringify([AI_FAQ_PREPARED, AI_SECTION_PREPARED]);
+    const text = JSON.stringify([AI_FAQ_PREPARED, AI_SECTION_PREPARED]).replace('It never acts on its own yet.', ''); // the one sentence that denies it
     expect(text).not.toMatch(/accura|always right|replace(s)? your moderators|on its own|automatic|acts alone|free|no cost|private|never leaves|nothing leaves/i);
     // Words the page does not use for the reader (the glossary rule), outside the section title that names the feature.
     expect(JSON.stringify([AI_FAQ_PREPARED.a, AI_SECTION_PREPARED.lead, AI_SECTION_PREPARED.levels, AI_SECTION_PREPARED.ceilings])).not.toMatch(/\bladder\b|\bseats?\b|\bheadless\b|\bpreset\b/i);

@@ -1,34 +1,58 @@
 # Chatwarden
 
-> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one case per player by default). TypeScript for Node 22.13 or newer. Pre-release (0.1.x), Apache-2.0, provided as-is. It moderates an existing chat; it is not a chat system. Not a child-safety tool.
+> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one case per player by default). It moderates the chat you already have, and has an optional moderated chat box for a game with none. TypeScript for Node 22.13 or newer. Pre-release (0.1.x), Apache-2.0, provided as-is. Not a child-safety tool.
 
 The packages are small and independent. Start with the repository README, then install `@chatwarden/core`, `@chatwarden/store-sqlite` and `@chatwarden/matcher`. For a moderator screen add `@chatwarden/hub-react` (or `@chatwarden/hub-element`) and `@chatwarden/http` for the routes it reads, and `@chatwarden/player-react` for what players see. Every code sample on https://chatwarden.dev/ is copied from these READMEs.
+
+## Adopt fast
+
+In your project folder, run `npm install @chatwarden/http @chatwarden/core`, then `npx chatwarden init`. With nothing installed yet, `npx -p @chatwarden/http chatwarden init` runs the same command. It asks only what it cannot detect, then writes the kit (engine, store and matcher), the mount for Express, Fastify, Next.js route handlers or anything on Web `Request` and `Response` (`toFetch`), three starter hooks and a synthetic term pack. It can also write the chat box, the moderator hub and a Discord feed. It never overwrites a file and never writes a secret. The starter hooks carry `TODO(auth)`, `TODO(identity)` and `TODO(terms)` markers, and `npx chatwarden init --check` lists what is left. The command and its result are experimental until 0.2. A service API for a game server in another language is planned and not built.
+
+- [Recipe: Express](https://github.com/hainix/chatwarden/blob/main/docs/recipes/express.md): the files init writes for an Express server, and the one line you add.
+- [Recipe: Fastify](https://github.com/hainix/chatwarden/blob/main/docs/recipes/fastify.md): the files init writes for a Fastify server.
+- [Recipe: Next.js](https://github.com/hainix/chatwarden/blob/main/docs/recipes/nextjs.md): the route handlers init writes for Next.js, and how any server on Web `Request` uses them.
+- [Recipe: Socket.IO](https://github.com/hainix/chatwarden/blob/main/docs/recipes/socketio.md): the chat box on a Socket.IO server, with every line still going through the chat check.
+- [Recipe: Colyseus](https://github.com/hainix/chatwarden/blob/main/docs/recipes/colyseus.md): a recipe written by hand for a Colyseus room; init does not write it.
+
+## What is in it
+
+Everything below is optional, and the new names are experimental until 0.2.
+
+- Chat box: for a game with no chat, `<ChatBox>` from `@chatwarden/player-react/chat` is a moderated chat for one room, served by `createRoomBroadcaster` and `chatRoutes` in `@chatwarden/http`.
+- Pacing: slow mode, a burst limit and a repeat limit for each room and player, off until you set them. Signals are facts your game records about a player, shown where a profile rule says so; a signal never acts on its own.
+- Appeals and names: a player can ask for a second look at a sanction (off until you turn it on), and a moderator decides. A name check can keep a blocked name as evidence and ask a player for a new name; the hub hides names the word list flags until shown.
+- AI help: off until you give it an adapter. It reads each report after the player has been told it arrived and shows what it found. At level 2 it pre-fills a mild suggestion that a moderator accepts or edits. It never writes a sanction, a strike, a mute or a notice: it never acts on its own yet.
+- AI gate dashboard and shadow mode: a read-only table in the hub shows the numbers that would decide whether the AI may act. Shadow mode lets it decide what it would have done and records that in a table of its own; nothing is written to a player.
+- Community term list: a loader for a signed, versioned list that servers can opt in to (`@chatwarden/matcher/corpus`). The package ships no terms and nothing is on by default.
+- Integrations: a Discord bot for lookups and, after a confirm step, decisions (`@chatwarden/http/discord`); Coop review jobs (`@chatwarden/http/coop`); Epic Online Services sanctions and reports (`@chatwarden/http/eos`).
+- Test kit: `@chatwarden/store-memory/testing` has a fake clock and a scripted chat simulator to test your own rules, for tests only.
 
 ## Docs (README per package)
 
 - [Repository README](https://github.com/hainix/chatwarden/blob/main/README.md): what the kit is, the package list and which packages to install for which job.
-- [@chatwarden/core](https://github.com/hainix/chatwarden/blob/main/packages/core/README.md): the moderation engine (chat verdicts, reports, decisions, notices); no runtime dependencies. Start here.
-- [@chatwarden/matcher](https://github.com/hainix/chatwarden/blob/main/packages/matcher/README.md): the slur matcher that resists Unicode and leetspeak evasion without blocking innocent words; includes invented test words.
+- [@chatwarden/core](https://github.com/hainix/chatwarden/blob/main/packages/core/README.md): the moderation engine (chat verdicts, reports, decisions, notices, pacing, appeals, the optional AI); no runtime dependencies. Start here.
+- [@chatwarden/matcher](https://github.com/hainix/chatwarden/blob/main/packages/matcher/README.md): the slur matcher that resists Unicode and leetspeak evasion without blocking innocent words, and the loader for the community term list; includes invented test words.
 - [@chatwarden/store-sqlite](https://github.com/hainix/chatwarden/blob/main/packages/store-sqlite/README.md): the SQLite store for reports, sanctions, notices and the audit trail, on the SQLite built into Node.
-- [@chatwarden/store-memory](https://github.com/hainix/chatwarden/blob/main/packages/store-memory/README.md): an in-memory store for tests, demos and single-process prototypes; everything is lost on restart.
-- [@chatwarden/http](https://github.com/hainix/chatwarden/blob/main/packages/http/README.md): HTTP routes for staff and players, signed webhooks and an Express adapter.
+- [@chatwarden/store-memory](https://github.com/hainix/chatwarden/blob/main/packages/store-memory/README.md): an in-memory store for tests, demos and single-process prototypes, with a test kit; everything is lost on restart.
+- [@chatwarden/http](https://github.com/hainix/chatwarden/blob/main/packages/http/README.md): HTTP routes for staff and players, signed webhooks, Express and Web fetch adapters, the `chatwarden init` command, chat routes, and the Discord bot, Coop and EOS integrations.
 - [@chatwarden/profanity](https://github.com/hainix/chatwarden/blob/main/packages/profanity/README.md): an optional filter for ordinary swearing that a game can allow, star or block.
 - [@chatwarden/discord](https://github.com/hainix/chatwarden/blob/main/packages/discord/README.md): posts the staff review queue into a Discord forum through a channel webhook.
 - [@chatwarden/hub-react](https://github.com/hainix/chatwarden/blob/main/packages/hub-react/README.md): the moderator hub, a React workbench for a team of moderators with one case per player by default, editable steps and reporting, over the staff routes; adopt it as a drop-in `<Hub>`, as pieces, as hooks or headless.
-- [@chatwarden/player-react](https://github.com/hainix/chatwarden/blob/main/packages/player-react/README.md): the player side, React components for notices, a player's record, the rules and a report dialog (one step by default).
+- [@chatwarden/player-react](https://github.com/hainix/chatwarden/blob/main/packages/player-react/README.md): the player side, React components for notices, a player's record, the rules and a report dialog (one step by default), and the moderated chat box.
 - [@chatwarden/hub-element](https://github.com/hainix/chatwarden/blob/main/packages/hub-element/README.md): the moderator hub as one custom element, `<chatwarden-hub>`, in a single script tag with no React or build step on the page.
+- [Community term list](https://github.com/hainix/chatwarden/blob/main/docs/community-list.md): how a moderator suggests a word, and the rules for what the list accepts.
 
 ## npm packages
 
 - [@chatwarden/core on npm](https://www.npmjs.com/package/@chatwarden/core): the engine; install this first.
 - [@chatwarden/matcher on npm](https://www.npmjs.com/package/@chatwarden/matcher): the slur matcher.
 - [@chatwarden/store-sqlite on npm](https://www.npmjs.com/package/@chatwarden/store-sqlite): the SQLite store.
-- [@chatwarden/store-memory on npm](https://www.npmjs.com/package/@chatwarden/store-memory): the in-memory store.
-- [@chatwarden/http on npm](https://www.npmjs.com/package/@chatwarden/http): the HTTP routes and Express adapter.
+- [@chatwarden/store-memory on npm](https://www.npmjs.com/package/@chatwarden/store-memory): the in-memory store and test kit.
+- [@chatwarden/http on npm](https://www.npmjs.com/package/@chatwarden/http): the HTTP routes, adapters and the `chatwarden` command.
 - [@chatwarden/profanity on npm](https://www.npmjs.com/package/@chatwarden/profanity): the optional profanity filter.
 - [@chatwarden/discord on npm](https://www.npmjs.com/package/@chatwarden/discord): the Discord review-queue feed.
 - [@chatwarden/hub-react on npm](https://www.npmjs.com/package/@chatwarden/hub-react): the moderator hub for React.
-- [@chatwarden/player-react on npm](https://www.npmjs.com/package/@chatwarden/player-react): the player notices and report dialog for React.
+- [@chatwarden/player-react on npm](https://www.npmjs.com/package/@chatwarden/player-react): the player notices, report dialog and chat box for React.
 - [@chatwarden/hub-element on npm](https://www.npmjs.com/package/@chatwarden/hub-element): the moderator hub as `<chatwarden-hub>`.
 
 ## Optional
