@@ -10,9 +10,11 @@ import { DAY, privacyWorld } from './privacyWorld.js';
 const SIX = ['privacy.find', 'privacy.export', 'privacy.erase', 'legal.hold', 'legal.release', 'legal.bundle'] as const;
 
 describe('the six audit actions', () => {
-  it('are in AUDIT_ACTIONS, each once, and are the last six; every earlier action is still there', () => {
+  it('are in AUDIT_ACTIONS, each once, contiguous and in order after the AI acting actions (the urgent-lane actions follow); every earlier action is still there', () => {
     for (const a of SIX) expect(AUDIT_ACTIONS.filter((x) => x === a).length).toBe(1);
-    expect(AUDIT_ACTIONS.slice(-6)).toEqual([...SIX]);
+    const at = AUDIT_ACTIONS.indexOf('privacy.find');
+    expect(AUDIT_ACTIONS.slice(at, at + 6)).toEqual([...SIX]);
+    expect(AUDIT_ACTIONS[at - 1]).toBe('ai.undo_all');
     for (const old of ['report.view', 'report.decide', 'ai.undo_all', 'person.automation', 'policy.update']) expect(AUDIT_ACTIONS).toContain(old);
   });
 

@@ -459,8 +459,15 @@ The minimum role for each action. These are defaults; override any of them with 
 | `ai.review` | moderator | `@experimental`, new in 0.1.13, used from 0.1.14 by `GET /ai/actions`. Confirming or undoing what the AI did arrives with the acting release. |
 | `ai.pause` | senior | `@experimental`, new in 0.1.13, used from 0.1.14. `POST /ai/acting/pause`: pausing the AI's acting. The owner's steps (`shadow`, `start`, `resume`, `off`) are not a permission: they are fixed in code. |
 | `automation.write` | senior | `@experimental`, new in 0.1.13. `PUT /people/:id/automation`: mark a person "do not automate", or clear the mark. A small team lowers it with `permissions`. |
-| `legal.hold` | senior | `@experimental`, new in 0.2.0. `PUT /reports/:id/hold`: hold one report for legal reasons. Releasing a hold, downloading an evidence bundle and finding, exporting and erasing a person's data are the owner's, fixed in code like the AI's acting steps: they are not permissions, so no override can lower them. |
 | `filters.read` | moderator | `@experimental`, new in 0.2.0. `GET /filters/stats`, `POST /filters/test`, `POST /filters/check`: the filters' counts, the test box and the dry run. They read and try, never write. Editing the filters is `policy.write`. |
+| `legal.hold` | senior | `@experimental`, new in 0.2.0. `PUT /reports/:id/hold`: hold one report for legal reasons. Releasing a hold, downloading an evidence bundle and finding, exporting and erasing a person's data are the owner's, fixed in code like the AI's acting steps: they are not permissions, so no override can lower them. |
+| `reports.urgent` | moderator | `@experimental`, new in 0.2.0. `POST /reports/:id/urgent`: mark a report urgent or not urgent. Urgent is a snapshot kept on the report; the reason's flag sets it at filing. |
+| `reports.handoff` | moderator | `@experimental`, new in 0.2.0. `POST /reports/:id/handoff`: mark a case as passed to the game's safety team. A note for colleagues and for the game's own process (it emits `report.handoff`, ids and a time only); it contacts no one. |
+| `reports.comment` | moderator | `@experimental`, new in 0.2.0. The staff comment thread on a report (with `desk.workflow` on; otherwise the routes are 404). A moderator removes their own comment, a senior any. |
+| `reports.escalate` | moderator | `@experimental`, new in 0.2.0. Ask a senior or the owner for a second look at a report (with `desk.workflow` on). A flag and a thread entry: it does not change the claim or the queue. |
+| `insights.read` | moderator | `@experimental`, new in 0.2.0. `GET /insights`: team numbers (with `desk.insights` on; otherwise 404). No per-person figure. |
+| `rooms.read` | moderator | `@experimental`, new in 0.2.0. `GET /rooms`: the rooms the process knows and each one's mode. |
+| `rooms.manage` | moderator | `@experimental`, new in 0.2.0. Lock a room or start an emergency (it always expires), and take a line back for everyone. A team that wants this to be a senior's sets `permissions: { 'rooms.manage': 'senior' }`. |
 
 ```ts
 adminRoutes(cw, { authorize, permissions: { 'sanctions.apply.ban_permanent': 'owner', 'audit.read': 'moderator' } });

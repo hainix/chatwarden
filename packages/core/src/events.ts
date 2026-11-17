@@ -1,6 +1,7 @@
 import { safeWarn } from './log.js';
 import type { AppealOutcome } from './appeals.js';
 import type { HoldCode } from './legal.js';
+import type { RoomMode } from './roomSettings.js';
 import type { RuleRef } from './rules.js';
 import type { Logger, ReportCategory, SanctionKind, Source, SubjectId } from './types.js';
 
@@ -27,8 +28,10 @@ export type KitEvent =
       createdAt: number;
       /** The 0.1.1 category the report is kept under (derived from the reason; `'other'` when none). */
       category: ReportCategory;
-      /** The reason id the reporter gave, or null when they gave none. A hint, never the truth. Never the note. Always set by the kit from 0.1.2; optional in the type so an event built by 0.1.1 code still type-checks. */
-      reportedReason?: string | null;
+      /** The reason id the reporter gave, or null when they gave none. A hint, never the truth. Never the note. */
+      reportedReason: string | null;
+      /** The report is urgent (its reason is flagged urgent, or a system filter said so): a snapshot taken when it was filed. A boolean only: never the reason's words, a note or a handle. */
+      urgent: boolean;
       /** Present only for a report nobody filed: `'filter'` for a chat filter's flag (`'watch'` later). Absent for a player's report. An id-class field, never text. */
       origin?: 'filter' | 'watch';
       roomTags: Readonly<Record<string, string>>;
@@ -96,7 +99,53 @@ export type KitEvent =
    * `cw.people.accountIds(target)` or a webhook that opted in to accounts. It is emitted once, after the hold is stored, and never for a refusal or a release.
    * Carries subject ids: staff channels only, never send to a player. @experimental
    */
-  | { type: 'report.escalated'; reportId: string; at: number; code: HoldCode; target: StaffRef };
+  | { type: 'report.escalated'; reportId: string; at: number; code: HoldCode; target: StaffRef }
+  /**
+   * A moderator marked a report as passed to the game's safety team (once per report, never for a repeat): a note for colleagues and for the game's own process. It carries the
+   * report id and the time and nothing else, no staff id and no text; the kit contacts no one. @experimental
+   */
+  | { type: 'report.handoff'; reportId: string; at: number }
+  /**
+   * A moderator asked for a second look at a report (a senior's or the owner's): the desk escalation, not the legal hold (`report.escalated`). Ids, the target role and a time only;
+   * the note stays in the staff thread. @experimental
+   */
+  | { type: 'case.escalated'; reportId: string; to: 'senior' | 'owner'; at: number }
+  /**
+   * A room's mode changed (a lock, an emergency, or back to normal), or expired (`expired: true`, noticed on the next line or read). `until` is when it ends, or null for normal. Who
+   * changed it is in the audit row, not here. Raised inside the chat path when it is an expiry, so listeners must be cheap. @experimental
+   */
+  | { type: 'room.mode'; roomId: string; mode: RoomMode; until: number | null; expired?: true; at: number }
+  /**
+   * Lines were taken back for everyone (`cw.rooms.retract`). The ids are the room's own line ids; no text, no author. The room broadcaster and a game's own socket listen to it. @experimental
+   */
+  | { type: 'line.retracted'; roomId: string; lineIds: readonly string[]; at: number }
+  /**
+   * The Insights digest, raised by `cw.insights.emitDigest()`: counts and times only, no names and no text. @experimental
+   */
+  | { type: 'insights.digest'; at: number; digest: InsightsDigest };
+
+/**
+ * The numbers of an Insights digest: counts and times in milliseconds (`null` where there are too few reports for a figure). Nothing else.
+ * @experimental
+ */
+export interface InsightsDigest {
+  /** The window length in days, and its ends (epoch ms). */
+  days: number;
+  from: number;
+  to: number;
+  /** Reports filed and decided in the window, and how many are open now. */
+  filed: number;
+  decided: number;
+  open: number;
+  /** Urgent reports filed in the window, and how many are open now. */
+  urgentFiled: number;
+  urgentOpen: number;
+  /** The team's time to a decision: the median and the 90th percentile; `null` below five decided reports. */
+  medianMs: number | null;
+  p90Ms: number | null;
+  /** The longest wait of a report still open. */
+  longestOpenMs: number;
+}
 
 /** Every event type, for checking a subscription. */
 export const KIT_EVENT_TYPES: readonly KitEvent['type'][] = [
@@ -110,6 +159,11 @@ export const KIT_EVENT_TYPES: readonly KitEvent['type'][] = [
   'appeal.decided',
   'rename.required',
   'report.escalated',
+  'report.handoff',
+  'case.escalated',
+  'room.mode',
+  'line.retracted',
+  'insights.digest',
 ];
 
 /** The event of a type. */
@@ -144,6 +198,8 @@ interface Entry {
 /** Freeze an event, and the tag map inside it, so no listener can change what the next one sees. */
 function freezeEvent<E extends KitEvent>(event: E): E {
   if (event.type === 'report.created') Object.freeze(event.roomTags);
+  if (event.type === 'line.retracted') Object.freeze(event.lineIds);
+  if (event.type === 'insights.digest') Object.freeze(event.digest);
   return Object.freeze(event);
 }
 

@@ -52,6 +52,8 @@ function Target({ item }: { item: AuditItem }) {
       return <span>{t('hub.audit.target.appeal', { tag })}</span>;
     case 'release':
       return <span>{t('hub.audit.target.release', { version: target.ref })}</span>;
+    case 'room':
+      return <span>{t('hub.audit.target.room', { room: target.ref })}</span>;
     default:
       return <span className="cw-hint">{t('hub.audit.target.none')}</span>;
   }

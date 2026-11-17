@@ -8,8 +8,8 @@ import { EventBus } from '../src/events.js';
 // The vocabulary the legal-hold feature adds: one event type, appended last, and a closed list of codes.
 
 describe('report.escalated is the event of a hold', () => {
-  it('is last in KIT_EVENT_TYPES (the list only grows at the end), appearing once', () => {
-    expect(KIT_EVENT_TYPES.at(-1)).toBe('report.escalated');
+  it('follows the appeal events in KIT_EVENT_TYPES (the list only grows at the end; the urgent-lane events come after it), appearing once', () => {
+    expect(KIT_EVENT_TYPES.indexOf('report.escalated')).toBe(KIT_EVENT_TYPES.indexOf('rename.required') + 1);
     expect(KIT_EVENT_TYPES.filter((t) => t === 'report.escalated').length).toBe(1);
     // order-lock by set membership: every earlier type is still there
     for (const t of ['report.created', 'report.closed', 'sanction.applied', 'sanction.revoked', 'gap.created', 'auto.restricted', 'appeal.created', 'appeal.decided', 'rename.required']) {
@@ -30,7 +30,9 @@ describe('report.escalated is the event of a hold', () => {
   });
 
   it('is a different name from the desk\'s escalation: the legal event never reads as "ask a senior"', () => {
-    expect(KIT_EVENT_TYPES).not.toContain('case.escalated');
+    // both exist, apart: the legal hold is `report.escalated`, the desk's second look is `case.escalated`
+    expect(KIT_EVENT_TYPES).toContain('case.escalated');
+    expect(KIT_EVENT_TYPES).toContain('report.escalated');
     expect('report.escalated').not.toBe('case.escalated');
   });
 });

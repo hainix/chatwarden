@@ -28,6 +28,10 @@ export interface ProbationSettings {
   slowModeMs?: number;
 }
 
+/** The modes of a room: ordinary, locked (read-only except staff) and emergency (slower, new accounts read-only). Every non-normal mode expires. @experimental */
+export const ROOM_MODES = ['normal', 'locked', 'emergency'] as const;
+export type RoomMode = (typeof ROOM_MODES)[number];
+
 /** What an account whose age is unknown is treated as by probation and emergency. @experimental */
 export type UnknownAge = 'allow' | 'treat_as_new';
 

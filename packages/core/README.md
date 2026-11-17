@@ -312,6 +312,10 @@ Also `@experimental` in 0.2.0: the `desk`, `safety` and `rooms` profile sections
 `ResolvedSafety`, `SafetyResource`, `SafetyResourceInput`, `resolveSafety`, `DEFAULT_SAFETY_GUIDANCE`, `RoomsSettings`, `ResolvedRooms`, `resolveRooms`, `EmergencySettings`,
 `ProbationSettings`, `UnknownAge`), the reporting reason fields `urgent`, `thanks` and `showResources`, `reporting.evidenceUrl`, the default `welfare` reason (switched off;
 `threat` is urgent by default), and the retention fields `welfareReportsMs` (30 days, never less than 1 day) and `chatCountsMs` (400 days, never less than 31).
+The vocabulary of this release is `@experimental` too: the audit actions `report.urgent`, `report.handoff`, `report.comment`, `report.comment_remove`, `report.escalate`, `room.mode`,
+`room.retract` and `insights.view`, the `room` audit target and `roomAuditRef` (a room id that is not a valid audit ref is recorded as `h-` and a keyed hash), and the events
+`report.handoff`, `case.escalated` (the desk's second look; the legal hold stays `report.escalated`), `room.mode`, `line.retracted` and `insights.digest` (`InsightsDigest`, `RoomMode`,
+`ROOM_MODES`). `report.created` now carries `urgent` and always a `reportedReason` (`string | null`).
 
 ## Slow mode and flood control
 

@@ -10,10 +10,11 @@ const rec = (role: 'moderator' | 'senior' | 'owner' = 'moderator') => ({ role })
 const post = (body: unknown, role: 'moderator' | 'senior' | 'owner' = 'moderator') => ({ role, body });
 
 describe('permission boundaries', () => {
-  it("filters.read is a moderator's, appended after the keys of the earlier releases (legal.hold follows it)", () => {
+  it("filters.read is a moderator's, appended after the keys of the earlier releases (legal.hold follows it, then the urgent-lane keys)", () => {
     expect(PERMISSIONS['filters.read']).toBe('moderator');
-    expect(PERMISSION_KEYS.at(-2)).toBe('filters.read');
-    expect(PERMISSION_KEYS.at(-1)).toBe('legal.hold');
+    const at = PERMISSION_KEYS.indexOf('filters.read');
+    expect(PERMISSION_KEYS[at - 1]).toBe('automation.write');
+    expect(PERMISSION_KEYS[at + 1]).toBe('legal.hold');
   });
 
   it('permission boundaries at moderator, senior and owner; filters.read lowered or raised by the permissions option works; an unknown key is still refused', async () => {

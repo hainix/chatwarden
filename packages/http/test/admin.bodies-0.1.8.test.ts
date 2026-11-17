@@ -32,6 +32,7 @@ function withoutNewPermissions(bodies: Record<string, unknown>): Record<string, 
       delete can['automation.write'];
       delete can['filters.read'];
       delete can['legal.hold'];
+      for (const key of ['reports.urgent', 'reports.handoff', 'reports.comment', 'reports.escalate', 'insights.read', 'rooms.read', 'rooms.manage']) delete can[key];
     }
   }
   // 0.2.0 adds `noticeText` to each own excerpt line of GET /reports/:id, the one other deliberate difference here.

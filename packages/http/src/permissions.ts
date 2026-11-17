@@ -29,6 +29,13 @@ export const PERMISSION_KEYS = [
   'automation.write',
   'filters.read',
   'legal.hold',
+  'reports.urgent',
+  'reports.handoff',
+  'reports.comment',
+  'reports.escalate',
+  'insights.read',
+  'rooms.read',
+  'rooms.manage',
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -49,6 +56,9 @@ export type Permissions = Readonly<Record<PermissionKey, Role>>;
  * Legal hold (0.2.0): `legal.hold` (hold one report so no purge and no erase reaches it) is `senior`. Releasing a hold, downloading an evidence bundle, and finding, exporting and
  * erasing a person's data are the owner's, fixed in code like the AI's acting steps: they are not keys, so no override can lower them.
  * Chat filters (0.2.0): `filters.read` (the counts, the test box and the dry run over recent lines: reads and tries, never writes) is `moderator`. Editing the filters is the profile's `policy.write`, the owner's.
+ * The urgent lane, the desk and the rooms (0.2.0): `reports.urgent` (mark a report urgent or not), `reports.handoff` (mark it passed to the game's safety team), `reports.comment`
+ * (the staff thread), `reports.escalate` (ask for a second look), `insights.read` (the Insights page), `rooms.read` (the rooms list) and `rooms.manage` (lock a room, take a line
+ * back) are all `moderator`. Raise any of them with the `permissions` option; a team that wants room control to be a senior's sets `{ 'rooms.manage': 'senior' }`.
  */
 export const PERMISSIONS: Permissions = Object.freeze({
   'reports.read': 'moderator',
@@ -77,6 +87,13 @@ export const PERMISSIONS: Permissions = Object.freeze({
   'automation.write': 'senior',
   'filters.read': 'moderator',
   'legal.hold': 'senior',
+  'reports.urgent': 'moderator',
+  'reports.handoff': 'moderator',
+  'reports.comment': 'moderator',
+  'reports.escalate': 'moderator',
+  'insights.read': 'moderator',
+  'rooms.read': 'moderator',
+  'rooms.manage': 'moderator',
 });
 
 const isRole = (v: unknown): v is Role => typeof v === 'string' && (ROLES as readonly string[]).includes(v);

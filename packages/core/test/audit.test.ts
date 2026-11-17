@@ -71,6 +71,14 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'legal.hold',
       'legal.release',
       'legal.bundle',
+      'report.urgent',
+      'report.handoff',
+      'report.comment',
+      'report.comment_remove',
+      'report.escalate',
+      'room.mode',
+      'room.retract',
+      'insights.view',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -119,16 +127,18 @@ describe('cw.audit.record and list', () => {
           ? { target: { type: 'appeal', ref: 'ap1' } }
           : action === 'name.rename_required' || action === 'person.automation' || action === 'privacy.export' || action === 'privacy.erase'
             ? { target: { type: 'person', ref: 's_a1' } }
-            : action.startsWith('legal.')
+            : action.startsWith('legal.') || ['report.urgent', 'report.handoff', 'report.comment', 'report.comment_remove', 'report.escalate'].includes(action)
               ? { target: { type: 'report', ref: 'r1' } }
-              : {};
+              : action.startsWith('room.')
+                ? { target: { type: 'room', ref: 'lobby' } }
+                : {};
       expect(rec(cw, { action, ...detail, ...ai, ...own, ...who })).toBe(true);
     }
     for (const role of ROLES) expect(rec(cw, { role })).toBe(true);
-    for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal', 'release']) {
+    for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal', 'release', 'room']) {
       expect(rec(cw, { target: { type, ref: 'x1' } })).toBe(true);
     }
-    expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 8);
+    expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 9);
   });
 
   it('person.automation (0.1.13, appended last) needs a person target, carries no detail, and is a name of its own', async () => {

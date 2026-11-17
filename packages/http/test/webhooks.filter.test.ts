@@ -68,9 +68,9 @@ describe('report.created webhooks and a filter report', () => {
     const kit = { on: (_t: string, fn: (e: KitEvent) => unknown) => (listeners.add(fn), () => void listeners.delete(fn)), reports: { get: () => null }, people: { accountIds: () => [] } } as unknown as Pick<Chatwarden, 'on' | 'reports' | 'people'>;
     const f = fakeFetch();
     webhooksOut(kit, { endpoints: [endpoint()], fetch: f.fetch, clock: { now: () => NOW } });
-    const e: KitEvent = { type: 'report.created', reportId: 'r1', createdAt: NOW, category: 'spam', reportedReason: 'spam', origin: 'filter', roomTags: { mode: 'ranked' } };
+    const e: KitEvent = { type: 'report.created', reportId: 'r1', createdAt: NOW, category: 'spam', reportedReason: 'spam', urgent: false, origin: 'filter', roomTags: { mode: 'ranked' } };
     [...listeners].forEach((l) => void l(e));
     await vi.waitFor(() => expect(f.calls.length).toBe(1));
-    expect(bodyOf(f.calls[0]!).data).toEqual({ type: 'report.created', reportId: 'r1', createdAt: NOW, category: 'spam', reportedReason: 'spam', origin: 'filter', roomTags: { mode: 'ranked' } });
+    expect(bodyOf(f.calls[0]!).data).toEqual({ type: 'report.created', reportId: 'r1', createdAt: NOW, category: 'spam', reportedReason: 'spam', urgent: false, origin: 'filter', roomTags: { mode: 'ranked' } });
   });
 });

@@ -221,6 +221,7 @@ export {
   AUDIT_TARGET_TYPES,
   AuditQueryError,
   isValidAuditActor,
+  roomAuditRef,
   ROLES,
 } from './audit.js';
 export type {
@@ -254,8 +255,8 @@ export {
   SAFETY_URL_MAX,
 } from './safety.js';
 export type { ResolvedSafety, SafetyResource, SafetyResourceInput, SafetySettings } from './safety.js';
-export { resolveRooms } from './roomSettings.js';
-export type { EmergencySettings, ProbationSettings, ResolvedRooms, RoomsSettings, UnknownAge } from './roomSettings.js';
+export { ROOM_MODES, resolveRooms } from './roomSettings.js';
+export type { EmergencySettings, ProbationSettings, ResolvedRooms, RoomMode, RoomsSettings, UnknownAge } from './roomSettings.js';
 export { WEBHOOK_KEY_TTL_MS } from './types.js';
 export { HOLD_CODES, isHoldCode } from './legal.js';
 export type { HeldSet, HoldCode, HoldRow } from './legal.js';
@@ -310,7 +311,7 @@ export type {
   SanctionNoticeInput,
 } from './notices.js';
 export { KIT_EVENT_TYPES } from './events.js';
-export type { KitEvent, KitEventOf, KitListener, StaffRef, Subscribe } from './events.js';
+export type { InsightsDigest, KitEvent, KitEventOf, KitListener, StaffRef, Subscribe } from './events.js';
 export { createChatwarden } from './chatwarden.js';
 export type { Chatwarden, ChatwardenOptions, GapRow } from './chatwarden.js';
 export {

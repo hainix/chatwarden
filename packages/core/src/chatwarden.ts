@@ -1287,7 +1287,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         reportId: stored.id,
         createdAt: stored.createdAt,
         category: stored.category,
-        reportedReason: stored.reportedReason,
+        reportedReason: stored.reportedReason ?? null,
+        // Read from the stored report once the store keeps it (U3); a report is not urgent until then.
+        urgent: false,
         ...(stored.origin === null || stored.origin === undefined ? {} : { origin: stored.origin }),
         roomTags: { ...stored.tags },
       });

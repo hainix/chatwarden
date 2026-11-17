@@ -3,7 +3,7 @@ import { POLICY_SECTIONS } from './profile.js';
 import type { PolicySection } from './profile.js';
 import { safeWarn } from './log.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
-import type { Clock, Logger, Store } from './types.js';
+import type { Clock, Hasher, Logger, Store } from './types.js';
 
 /** What a staff member may do. Ordered from least to most. */
 export const ROLES = ['moderator', 'senior', 'owner'] as const;
@@ -38,6 +38,11 @@ export type Role = (typeof ROLES)[number];
  * The three AI acting actions (0.1.14, appended last): `ai.act` is the AI's own row (an `ai:` actor, no role) when it applied an action, or, in shadow mode, recorded one; it targets the
  * `report` and carries no detail (the state is in the action row, not the trail). `ai.acting` is the owner or a senior moving the acting state (shadow, acting, pause, resume,
  * off) and `ai.undo_all` the owner undoing every AI action since a time; both carry a detail with the sections `['ai']` and the reason, and no target.
+ *
+ * The eight urgent-lane, desk and room actions (0.2.0, appended last): `report.urgent` (a moderator marking a report urgent or not), `report.handoff` (marking it passed to
+ * the game's safety team), `report.comment`, `report.comment_remove` and `report.escalate` (the staff comment thread and the second look) point at the `report` and need it;
+ * `room.mode` (a lock or an emergency) and `room.retract` (taking a line back) point at the `room` and need it (see {@link roomAuditRef}); `insights.view` points at nothing.
+ * None of them carries a detail: a comment, a note, a line or a room mode's reason never reaches the trail.
  */
 export const AUDIT_ACTIONS = [
   'report.view',
@@ -82,6 +87,14 @@ export const AUDIT_ACTIONS = [
   'legal.hold',
   'legal.release',
   'legal.bundle',
+  'report.urgent',
+  'report.handoff',
+  'report.comment',
+  'report.comment_remove',
+  'report.escalate',
+  'room.mode',
+  'room.retract',
+  'insights.view',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -108,7 +121,28 @@ const AI_OWN_ACTIONS: readonly string[] = ['ai.read', 'ai.act'];
 const APPEAL_ACTIONS: readonly string[] = ['appeal.view', 'appeal.decide'];
 
 /** The actions that cannot be recorded without a target. */
-const TARGET_REQUIRED: readonly string[] = [...AI_ACTIONS, 'appeal.decide', 'name.rename_required', 'person.automation', 'privacy.export', 'privacy.erase', 'legal.hold', 'legal.release', 'legal.bundle'];
+const TARGET_REQUIRED: readonly string[] = [
+  ...AI_ACTIONS,
+  'appeal.decide',
+  'name.rename_required',
+  'person.automation',
+  'privacy.export',
+  'privacy.erase',
+  'legal.hold',
+  'legal.release',
+  'legal.bundle',
+  'report.urgent',
+  'report.handoff',
+  'report.comment',
+  'report.comment_remove',
+  'report.escalate',
+  'room.mode',
+  'room.retract',
+];
+
+/** The desk actions that point at a report (and only at one), and the room actions that point at a room (and only at one). `insights.view` points at nothing. */
+const DESK_REPORT_ACTIONS: readonly string[] = ['report.urgent', 'report.handoff', 'report.comment', 'report.comment_remove', 'report.escalate'];
+const ROOM_ACTIONS: readonly string[] = ['room.mode', 'room.retract'];
 
 /** The privacy actions that point at a person, the legal ones that point at a report, and the one that points at nothing. */
 const PRIVACY_PERSON_ACTIONS: readonly string[] = ['privacy.export', 'privacy.erase'];
@@ -120,8 +154,8 @@ const AI_ACTOR_PREFIX = 'ai:';
 /** The actions whose row carries an {@link AuditDetail}, and the only ones that may. */
 const DETAIL_ACTIONS: readonly string[] = ['policy.update', 'policy.reset', 'ai.acting', 'ai.undo_all'];
 
-/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id, an exception id, a saved reason id, an appeal id or a release version. */
-export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal', 'release'] as const;
+/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id, an exception id, a saved reason id, an appeal id, a release version or a room (see {@link roomAuditRef}). */
+export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal', 'release', 'room'] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 
 export interface AuditTarget {
@@ -233,6 +267,19 @@ const isRole = (v: unknown): v is Role => typeof v === 'string' && (ROLES as rea
 const isTargetType = (v: unknown): v is AuditTargetType =>
   typeof v === 'string' && (AUDIT_TARGET_TYPES as readonly string[]).includes(v);
 
+/** A room id that already looks like a hashed ref: it is hashed too, so a ref that starts `h-` is always a hash. */
+const HASHED_REF_RE = /^h-[0-9a-f]{16}$/;
+
+/**
+ * The audit ref of a room. A room id is the game's own string and may hold a space, a slash, non-ASCII text or run long, none of which an audit ref allows: such an id is recorded as `h-`
+ * and 16 hex characters of a keyed hash of it (the same id always gives the same ref, and the ref does not hold the id). An id that fits the ref alphabet (1 to 64 of `A-Z a-z 0-9 _ . : -`)
+ * is kept as it is. An id that itself looks like a hashed ref is hashed too, so a ref starting `h-` is always a hash.
+ */
+export function roomAuditRef(roomId: string, hasher: Hasher): string {
+  if (REF_RE.test(roomId) && !HASHED_REF_RE.test(roomId)) return roomId;
+  return `h-${hasher.clientKey(`audit-room:${roomId}`).slice(0, 16)}`;
+}
+
 /** The opaque cursor for "older than this entry": base64url of `at:id`. */
 export function encodeAuditCursor(at: number, id: string): string {
   return b64urlEncode(`${at}:${id}`);
@@ -290,7 +337,7 @@ function parse(input: unknown): AuditRecordInput | null {
   }
   const extra = parsedDetail === undefined ? {} : { detail: parsedDetail };
   if (target === undefined) return TARGET_REQUIRED.includes(action) ? null : { actor, role: roleOut, action, ...extra };
-  if (action === 'privacy.find') return null;
+  if (action === 'privacy.find' || action === 'insights.view') return null;
   if (typeof target !== 'object' || target === null) return null;
   const { type, ref } = target as Record<string, unknown>;
   if (!isTargetType(type) || typeof ref !== 'string' || !REF_RE.test(ref)) return null;
@@ -299,6 +346,8 @@ function parse(input: unknown): AuditRecordInput | null {
   if ((action === 'name.rename_required' || action === 'person.automation') && type !== 'person') return null;
   if (PRIVACY_PERSON_ACTIONS.includes(action) && type !== 'person') return null;
   if (LEGAL_REPORT_ACTIONS.includes(action) && type !== 'report') return null;
+  if (DESK_REPORT_ACTIONS.includes(action) && type !== 'report') return null;
+  if (ROOM_ACTIONS.includes(action) && type !== 'room') return null;
   return { actor, role: roleOut, action, target: { type, ref }, ...extra };
 }
 

@@ -56,6 +56,13 @@ describe('PERMISSIONS defaults', () => {
       'automation.write': 'senior',
       'filters.read': 'moderator',
       'legal.hold': 'senior',
+      'reports.urgent': 'moderator',
+      'reports.handoff': 'moderator',
+      'reports.comment': 'moderator',
+      'reports.escalate': 'moderator',
+      'insights.read': 'moderator',
+      'rooms.read': 'moderator',
+      'rooms.manage': 'moderator',
     });
   });
 
