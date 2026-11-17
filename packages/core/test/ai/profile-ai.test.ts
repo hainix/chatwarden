@@ -71,7 +71,7 @@ describe('the ai section of a profile', () => {
   it('level 3 and 4 are refused with a path', () => {
     for (const level of [3, 4]) {
       expect(pathOf(() => defineProfile({ ...PRESETS.standard, ai: { level } } as never))).toBe('profile.ai.level');
-      expect(reasonOf(() => defineProfile({ ...PRESETS.standard, ai: { level } } as never))).toMatch(/not available yet/);
+      expect(reasonOf(() => defineProfile({ ...PRESETS.standard, ai: { level } } as never))).toMatch(/acting switch/);
       expect(pathOf(() => applyPolicyLayer(PRESETS.standard, { ai: { level } } as never))).toBe('layer.ai.level');
     }
   });
@@ -161,6 +161,15 @@ describe('cw.policy and the ai section', () => {
     }
     expect(cw.policy.get().version).toBe(0);
     expect(cw.profile.ai.level).toBe(0);
+  });
+
+  it('level 3 and 4 are refused with the words "use the acting switch" and the acting state stays off', async () => {
+    const { cw } = await world();
+    for (const level of [3, 4]) {
+      const res = cw.policy.save({ ai: { level } } as never, { version: 0, ...OWNER });
+      expect(res).toEqual({ ok: false, error: 'invalid', path: 'layer.ai.level' });
+    }
+    expect(cw.ai.acting.state()).toMatchObject({ mode: 'off', paused: false });
   });
 
   it('learn must be a boolean', async () => {
@@ -328,5 +337,53 @@ describe('the daily call ceiling (ai.dailyCalls)', () => {
     expect(w.cw.policy.save({ ai: { dailyCalls: 10 } }, { version: 0, actor: 'owner_ann', reason: 'tighter' })).toEqual({ ok: true, version: 1, changed: ['ai'] });
     expect(w.cw.profile.ai.dailyCalls).toBe(10);
     expect(w.cw.policy.save({ ai: { dailyCalls: 0 } }, { version: 1, actor: 'owner_ann', reason: 'x' })).toEqual({ ok: false, error: 'invalid', path: 'layer.ai.dailyCalls' });
+  });
+});
+
+describe('ai.actExcludeRules (restrict-only: rule numbers the AI may never act on)', () => {
+  const rules = (list: unknown) => defineProfile({ ...PRESETS.standard, ai: { actExcludeRules: list } } as never).ai as { actExcludeRules?: number[] };
+
+  it('is absent by default, so every existing profile and document is unchanged', () => {
+    for (const n of NAMES) expect(Object.hasOwn(PRESETS[n].ai, 'actExcludeRules')).toBe(false);
+    expect(defineProfile({ ...PRESETS.standard, ai: { level: 2 } }).ai).toEqual({ level: 2, learn: true, dailyCalls: 5000 });
+  });
+
+  it('accepts a list of whole rule numbers, an empty one included, and freezes it', () => {
+    expect(rules([]).actExcludeRules).toEqual([]);
+    expect(rules([4]).actExcludeRules).toEqual([4]);
+    expect(rules([1, 2, 3, 12]).actExcludeRules).toEqual([1, 2, 3, 12]);
+    expect(Object.isFrozen(rules([4]).actExcludeRules)).toBe(true);
+  });
+
+  it.each([[[0]], [[-1]], [[1.5]], [['4']], [[null]], [[Number.NaN]], [[Number.POSITIVE_INFINITY]], [[true]], [[{}]], [[Number.MAX_SAFE_INTEGER + 2]]])(
+    'refuses %j with the path of the entry',
+    (list) => {
+      expect(pathOf(() => rules(list))).toBe('profile.ai.actExcludeRules[0]');
+    },
+  );
+
+  it.each([['4'], [4], [null], [{}], [true]])('refuses %j as not a list', (value) => {
+    expect(pathOf(() => rules(value))).toBe('profile.ai.actExcludeRules');
+  });
+
+  it('refuses a rule listed twice, naming the second place, and a list longer than 100', () => {
+    expect(pathOf(() => rules([2, 3, 2]))).toBe('profile.ai.actExcludeRules[2]');
+    expect(pathOf(() => rules(Array.from({ length: 101 }, (_, i) => i + 1)))).toBe('profile.ai.actExcludeRules');
+    expect(rules(Array.from({ length: 100 }, (_, i) => i + 1)).actExcludeRules).toHaveLength(100);
+  });
+
+  it('is an ai-section field of a layer: the owner can save it, it merges with the level, and reset("ai") removes it', async () => {
+    const { cw } = await world();
+    expect(cw.policy.save({ ai: { level: 2, actExcludeRules: [4, 5] } }, { version: 0, ...OWNER })).toEqual({ ok: true, version: 1, changed: ['ai'] });
+    expect(cw.profile.ai).toEqual({ level: 2, learn: true, dailyCalls: 5000, actExcludeRules: [4, 5] });
+    expect(cw.policy.save({ ai: { actExcludeRules: [0] } } as never, { version: 1, ...OWNER })).toEqual({ ok: false, error: 'invalid', path: 'layer.ai.actExcludeRules[0]' });
+    expect(cw.policy.reset('ai')).toMatchObject({ ok: true });
+    expect(Object.hasOwn(cw.profile.ai, 'actExcludeRules')).toBe(false);
+  });
+
+  it('a layer cannot add an acting key to the ai section (the acting state is not a setting)', () => {
+    for (const key of ['mode', 'acting', 'maxLevel', 'act', 'actingMode', 'aiAutoAct']) {
+      expect(pathOf(() => applyPolicyLayer(PRESETS.standard, { ai: { [key]: 'on' } } as never)), key).toBe(`layer.ai.${key}`);
+    }
   });
 });

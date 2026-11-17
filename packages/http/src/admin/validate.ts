@@ -241,6 +241,21 @@ export interface AutomationBody {
   code?: AutomationCode;
 }
 
+/** What the acting routes take: `{ confirm?, reason }`, and nothing else. `confirm` only on the steps that widen what the AI does. */
+export interface ActingBody {
+  confirm?: string;
+  reason: string;
+}
+
+/** The body of `POST /ai/acting/...`: a `reason` (text), an optional `confirm` (text) when `withConfirm`; any other key is 400 `forbidden_key`, a wrong type 400 `invalid_request`. */
+export function bodyActing(body: Record<string, unknown>, withConfirm: boolean): ActingBody {
+  const allowed = withConfirm ? ['reason', 'confirm'] : ['reason'];
+  if (Object.keys(body).some((k) => !allowed.includes(k))) throw new HttpError('forbidden_key');
+  if (typeof body.reason !== 'string') throw new ValidationError();
+  if (has(body, 'confirm') && typeof body.confirm !== 'string') throw new ValidationError();
+  return { reason: body.reason, ...(typeof body.confirm === 'string' ? { confirm: body.confirm } : {}) };
+}
+
 /**
  * The body of `PUT /people/:id/automation`: `{ allowed: boolean, code? }`. `allowed: false` needs one of the closed reason codes; `allowed: true` takes no code.
  * Any other key (free text, an actor) is 400 `forbidden_key`; any other shape is 400 `invalid_request`.

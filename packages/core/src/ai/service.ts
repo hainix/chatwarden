@@ -16,11 +16,15 @@ import { emptyStats } from './inert.js';
 import { CallWindow, startOfUtcDay, utcDayLabel } from './budget.js';
 import { prepareCase } from './case.js';
 import type { Prepared } from './case.js';
+import { createActing } from './acting.js';
+import type { AiActingFacade, AiActingState } from './acting.js';
+import { AI_ACT_CAPS_DEFAULTS, checkActCaps } from './caps.js';
+import type { AiActCaps } from './caps.js';
 import { assertWithinCeilings, AICeilingError } from './ceilings.js';
 import { actionsOnTarget, AI_EXAMPLES_MIN, pickExampleLines } from './casebook.js';
 import type { AiOutcomeArgs } from './casebook.js';
 import { suggest as ladderSuggest } from '../ladder.js';
-import { AI_ACT_CAP_DEFAULTS, AI_GATE_DEFAULTS, AI_RECENT_DAYS, evaluateCell } from './gates.js';
+import { AI_ACT_CAP_DEFAULTS, AI_GATE_DEFAULTS, AI_RECENT_DAYS, checkGateConfig, evaluateCell } from './gates.js';
 import type { AiAppealFacts, AiCellCounts, AiCellGate, AiGateConfig } from './gates.js';
 import { reachOf } from './reach.js';
 import type { AiReach } from './reach.js';
@@ -41,8 +45,12 @@ import type { AiStore, ReadEnd, WorkerEnv } from './worker.js';
 export interface AiOptions {
   /** The model behind the reads. Runs on the server only. */
   adapter: ModerationAI;
-  /** The highest level the hub may switch to. Default 2. */
-  maxLevel?: 1 | 2;
+  /**
+   * The highest level the hub may switch to. Default 2. 3 (act, within the gates) needs `act`; 4 (watch) needs `watch` and `act`. The hub's own level stays 0 to 2: levels
+   * 3 and 4 are reached through the owner's acting switch (`cw.ai.acting`), never through the settings.
+   * @experimental
+   */
+  maxLevel?: 1 | 2 | 3 | 4;
   /** The most the AI may spend in a UTC day, in micro-dollars (1 = $0.000001). Default 1 000 000 ($1.00). Set in code: a hub cannot raise it. */
   dailyBudgetMicros?: number;
   /** The most calls in any minute. Default 30. */
@@ -59,6 +67,29 @@ export interface AiOptions {
   blockedLines?: 'raw' | 'mask';
   /** Reserved. No room tag, and no tag value, is ever sent to a provider in this release. */
   contextTags?: string[];
+  /**
+   * Level 3, in code (design 6.3). Without it, and with `maxLevel` below 3, nothing here exists. In this release the AI only runs in SHADOW: every step of acting runs and
+   * records "would have acted"; nothing is written to a player.
+   * @experimental
+   */
+  act?: AiActOptions;
+  /** Level 4 (watch), design only in this release: required for `maxLevel: 4` and nothing more. @experimental */
+  watch?: { disclosed: true };
+}
+
+/**
+ * The code-side options of level 3 (acting). Every number is held inside its band (design 5.4) or `createChatwarden` throws; the hub cannot move any.
+ * @experimental
+ */
+export interface AiActOptions {
+  /** Default true when `act` is given. False is the kill switch in code: the acting state is pinned to `off`, whatever the store says. */
+  enabled?: boolean;
+  /** The adapter for the confirming read. Default: the same adapter. A second, larger model is better. */
+  confirmAdapter?: ModerationAI;
+  /** The gate numbers (design 5.2) inside their bands (`AI_GATE_BANDS`). */
+  gates?: Partial<AiGateConfig>;
+  /** The caps, the hold, the shadow period and the holdback share inside their bands (`AI_ACT_CAPS_BANDS`). */
+  caps?: Partial<AiActCaps>;
 }
 
 /** Where the AI stands, for Settings. */
@@ -67,7 +98,7 @@ export interface AiStatus {
   available: boolean;
   /** The effective level: the lower of the hub's setting and `maxLevel`; 0 without an adapter. */
   level: 0 | 1 | 2;
-  maxLevel: 0 | 1 | 2;
+  maxLevel: 0 | 1 | 2 | 3 | 4;
   state: 'ok' | 'paused_budget' | 'unavailable' | 'off';
   /** Today's spend (UTC), in micro-dollars, from the store. */
   spentMicros: number;
@@ -182,8 +213,15 @@ export type AiReadAgain =
  * @experimental
  */
 export interface AiFacade {
-  /** The effective level now. */
+  /** The effective level now: what is read and recommended, 0 to 2. Levels 3 and 4 are {@link AiFacade.effectiveLevel}. */
   level(): 0 | 1 | 2;
+  /**
+   * For display: 3 when the level is 2, the code allows 3 (`maxLevel`) and the owner has put acting in shadow or on (`acting.state().mode`), else `level()`. Level 4 does not exist
+   * in this release. Never used to decide anything: the act path reads the acting state itself.
+   */
+  effectiveLevel(): 0 | 1 | 2 | 3 | 4;
+  /** The owner's acting switch (design 6.3). Every method refuses when acting is not available. */
+  readonly acting: AiActingFacade;
   status(): AiStatus;
   /**
    * The newest finished read of a report as the case page shows it, or null. At level 0 nothing is read from the store. With
@@ -314,7 +352,7 @@ function missingAiMethods(store: Store): string[] {
 }
 
 /**
- * The store as the AI module may hold it: a frozen plain object with ONLY the AI methods, `loadReport`, `listReports` and `aiGateRows`, each a call through to the
+ * The store as the AI module may hold it: a frozen plain object with ONLY the AI methods, `loadReport`, `listReports`, `aiGateRows` and the acting state, each a call through to the
  * real store (so a spy on the store still sees it); throws a plain error when the store has not got the AI methods. This is the runtime half of the seam (the `AiStore` type is the compile-time half
  * and the lint the third): a cast, a computed key or `Reflect` on this object finds no writer, because the object has none.
  */
@@ -342,6 +380,8 @@ export function requireAiStore(store: Store): AiStore {
     loadReport: (...a) => store.loadReport(...a),
     listReports: (...a) => store.listReports(...a),
     ...(typeof store.aiGateRows === 'function' ? { aiGateRows: (...a) => store.aiGateRows!(...a) } : {}),
+    ...(typeof store.aiActingState === 'function' ? { aiActingState: () => store.aiActingState!() } : {}),
+    ...(typeof store.setAiActingState === 'function' ? { setAiActingState: (...a) => store.setAiActingState!(...a) } : {}),
   };
   return Object.freeze(narrow);
 }
@@ -355,13 +395,46 @@ export function checkAiSetup(store: Store, options: AiOptions): string[] {
   return missingAiMethods(store);
 }
 
-function checkOptions(o: AiOptions): Required<Omit<AiOptions, 'adapter' | 'contextTags'>> & { contextTags: string[] } {
+/** `ai.act` after checking: the kill switch, the confirming adapter, and the gate numbers and caps, each inside its band. */
+interface CheckedAct {
+  enabled: boolean;
+  confirmAdapter: ModerationAI;
+  gates: AiGateConfig;
+  caps: AiActCaps;
+}
+
+const isAdapter = (a: unknown): a is ModerationAI =>
+  typeof a === 'object' && a !== null && typeof (a as ModerationAI).id === 'string' && (a as ModerationAI).id !== '' && typeof (a as ModerationAI).read === 'function';
+
+function checkAct(o: AiOptions, primary: ModerationAI): CheckedAct | null {
+  const act: unknown = o.act;
+  if (act === undefined) {
+    if (o.maxLevel === 3 || o.maxLevel === 4) throw new TypeError('createChatwarden: ai.maxLevel 3 or more needs the ai.act option');
+    return null;
+  }
+  if (typeof act !== 'object' || act === null || Array.isArray(act)) throw new TypeError('createChatwarden: ai.act must be an object');
+  const a = act as AiActOptions;
+  for (const key of Object.keys(a)) if (!['enabled', 'confirmAdapter', 'gates', 'caps'].includes(key)) throw new RangeError(`createChatwarden: ai.act.${key} is not an acting option`);
+  if (a.enabled !== undefined && typeof a.enabled !== 'boolean') throw new TypeError('createChatwarden: ai.act.enabled must be true or false');
+  if (a.confirmAdapter !== undefined && !isAdapter(a.confirmAdapter)) throw new TypeError('createChatwarden: ai.act.confirmAdapter must be a ModerationAI ({ id, read })');
+  return { enabled: a.enabled !== false, confirmAdapter: a.confirmAdapter ?? primary, gates: checkGateConfig(a.gates), caps: checkActCaps(a.caps) };
+}
+
+function checkOptions(o: AiOptions): Required<Omit<AiOptions, 'adapter' | 'contextTags' | 'act' | 'watch'>> & { contextTags: string[]; act: CheckedAct | null } {
   const a: unknown = o?.adapter;
   if (typeof a !== 'object' || a === null || typeof (a as ModerationAI).id !== 'string' || (a as ModerationAI).id === '' || typeof (a as ModerationAI).read !== 'function') {
     throw new TypeError('createChatwarden: ai.adapter must be a ModerationAI ({ id, read })');
   }
   const maxLevel = o.maxLevel ?? DEFAULTS.maxLevel;
-  if (maxLevel !== 1 && maxLevel !== 2) throw new RangeError('createChatwarden: ai.maxLevel must be 1 or 2');
+  if (maxLevel !== 1 && maxLevel !== 2 && maxLevel !== 3 && maxLevel !== 4) throw new RangeError('createChatwarden: ai.maxLevel must be 1, 2, 3 or 4');
+  const act = checkAct(o, a as ModerationAI);
+  if (maxLevel === 4) {
+    const w: unknown = o.watch;
+    if (typeof w !== 'object' || w === null || (w as { disclosed?: unknown }).disclosed !== true) throw new TypeError('createChatwarden: ai.maxLevel 4 needs ai.watch ({ disclosed: true })');
+  }
+  if (o.watch !== undefined && (typeof o.watch !== 'object' || o.watch === null || (o.watch as { disclosed?: unknown }).disclosed !== true)) {
+    throw new TypeError('createChatwarden: ai.watch must be { disclosed: true }');
+  }
   const whole = (v: unknown, name: string, min: number): number => {
     if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v) || v < min) throw new RangeError(`createChatwarden: ai.${name} must be a whole number of at least ${min}`);
     return v;
@@ -374,7 +447,7 @@ function checkOptions(o: AiOptions): Required<Omit<AiOptions, 'adapter' | 'conte
   if (blockedLines !== 'raw' && blockedLines !== 'mask') throw new RangeError("createChatwarden: ai.blockedLines must be 'raw' or 'mask'");
   const contextTags = o.contextTags ?? [];
   if (!Array.isArray(contextTags) || contextTags.some((t) => typeof t !== 'string')) throw new TypeError('createChatwarden: ai.contextTags must be a list of strings');
-  return { maxLevel, dailyBudgetMicros, perMinuteCalls, concurrency, timeoutMs, blockedLines, contextTags: [...contextTags] };
+  return { maxLevel, dailyBudgetMicros, perMinuteCalls, concurrency, timeoutMs, blockedLines, contextTags: [...contextTags], act };
 }
 
 /** What the service needs from the kit around it. */
@@ -402,8 +475,10 @@ export interface AiServiceDeps {
    * and the newest revoke on appeal of an AI sanction in the cell. Without it, or when it throws, every cell reads "appeals not available".
    */
   appealFacts?: (cells: ReadonlyArray<{ rule: number; level: 'hostile' | 'severe' }>) => AiAppealFacts[];
-  /** The gate numbers, already checked against their bands (`checkGateConfig`). Default: {@link AI_GATE_DEFAULTS}. */
+  /** The gate numbers, already checked against their bands (`checkGateConfig`). Default: `ai.act.gates` (checked), else {@link AI_GATE_DEFAULTS}. */
   gateConfig?: AiGateConfig;
+  /** Whether in-kit appeals are enabled now (`cw.appeals.enabled()`). Without it acting cannot start: appeals must exist first (ruling 16). */
+  appealsEnabled?: () => boolean;
 }
 
 const DAY_MS = 86_400_000;
@@ -464,6 +539,8 @@ export class AiService implements AiFacade {
   private lastStable = '';
   private stableKey = '';
   private isClosed = false;
+  /** The owner's acting switch (`cw.ai.acting`). */
+  readonly acting: AiActingFacade;
 
   /** The dependencies WITHOUT the store: the service reads the store only through `this.store`, the narrow {@link AiStore} (design 6.1), never the full one. */
   protected readonly deps: Omit<AiServiceDeps, 'store'>;
@@ -476,6 +553,17 @@ export class AiService implements AiFacade {
     this.opts = checkOptions(deps.options);
     this.adapter = deps.options.adapter;
     this.actor = aiActorOf(this.adapter.id);
+    this.acting = createActing({
+      store: this.store,
+      clock: deps.clock,
+      level: () => this.deps.profile().ai.level,
+      maxLevel: this.opts.maxLevel,
+      actEnabled: this.opts.act?.enabled === true,
+      adapter: true,
+      appealsEnabled: () => this.deps.appealsEnabled?.() === true,
+      shadowDays: this.opts.act?.caps.shadowDays ?? AI_ACT_CAPS_DEFAULTS.shadowDays,
+      shadowCount: (since) => this.shadowCount(since),
+    });
     this.breaker = new Breaker(deps.clock);
     this.window = new CallWindow(this.opts.perMinuteCalls);
     // Only enqueue: no await, no store read, so the player's ack never waits for the AI.
@@ -495,6 +583,34 @@ export class AiService implements AiFacade {
       this.warn('ai.level_failed', err);
       return 0;
     }
+  }
+
+  effectiveLevel(): 0 | 1 | 2 | 3 | 4 {
+    try {
+      const level = this.level();
+      // 3 is a display of "level 2 plus acting in shadow or on"; the act path never asks this, it reads the acting state itself.
+      if (level === 2 && this.opts.maxLevel >= 3 && this.actingState().mode !== 'off') return 3;
+      return level;
+    } catch (err) {
+      this.warn('ai.level_failed', err);
+      return 0;
+    }
+  }
+
+  /** The acting state, never throwing: `off` when the store or the clock fails. */
+  protected actingState(): AiActingState {
+    try {
+      return this.acting.state();
+    } catch (err) {
+      this.warn('ai.acting_failed', err);
+      return { mode: 'off', paused: false, modeSince: null, shadowDaysDone: 0, shadowWouldHaveActed: 0, maxLevel: this.opts.maxLevel };
+    }
+  }
+
+  /** How many reports shadow mode recorded as "would have acted" at or after `since`. */
+  protected shadowCount(since: number): number {
+    void since;
+    return 0;
   }
 
   status(): AiStatus {
@@ -689,7 +805,7 @@ export class AiService implements AiFacade {
   gates(): AiGatesView {
     // `now` is read inside the try below: a clock that throws gives the empty view (at 0), never an exception.
     let now = 0;
-    const cfg = this.deps.gateConfig ?? AI_GATE_DEFAULTS;
+    const cfg = this.deps.gateConfig ?? this.opts.act?.gates ?? AI_GATE_DEFAULTS;
     const view = (cells: AiGateCell[]): AiGatesView => ({
       version: 1,
       windowDays: cfg.windowDays,

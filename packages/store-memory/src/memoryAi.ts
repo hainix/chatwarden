@@ -1,5 +1,7 @@
 import type {
   AISignal,
+  AiActingMode,
+  AiActingRow,
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
@@ -47,6 +49,8 @@ export type MemoryAiMethods = Required<
     | 'aiGateRows'
     | 'setNoAutomation'
     | 'loadNoAutomation'
+    | 'aiActingState'
+    | 'setAiActingState'
     | 'purgeAi'
   >
 >;
@@ -57,6 +61,7 @@ export type MemoryAiStore = MemoryStore & MemoryAiMethods;
 /** The methods, on a class only so they can reach the store's own state. Never constructed: `withMemoryAi` copies them onto a store. */
 class MemoryAi extends MemoryStore {
   private noAutomation?: Map<string, NoAutomationRow>;
+  private actingRow?: AiActingRow;
 
   // AI reads and the casebook (AI levels 1 and 2). Synchronous like claims; each write is journaled, so an undone transaction
   // undoes it. Rows go in and come out as copies.
@@ -396,6 +401,23 @@ class MemoryAi extends MemoryStore {
     return row === undefined ? null : { ...row };
   }
 
+  // The acting state (AI levels 3 and 4, release 2): one row, off until something sets it. A conditional write, journaled like every write.
+
+  aiActingState(): AiActingRow {
+    return { ...(this.actingRow ?? OFF) };
+  }
+
+  setAiActingState(expect: { mode: AiActingMode; paused: boolean }, next: AiActingRow): boolean {
+    const now = this.actingRow ?? OFF;
+    if (now.mode !== expect.mode || now.paused !== expect.paused) return false;
+    const before = this.actingRow;
+    this.actingRow = { ...next };
+    this.undoWith(() => {
+      this.actingRow = before;
+    });
+    return true;
+  }
+
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
     const reads = this.aiReads;
     const outcomes = new Map(this.aiOutcomes);
@@ -423,6 +445,9 @@ class MemoryAi extends MemoryStore {
     return { reads: reads.length - keptReads.length, outcomes: gone };
   }
 }
+
+/** The acting state of a store nobody has set: off, not paused. */
+const OFF: AiActingRow = { mode: 'off', modeSince: null, modeBy: null, paused: false, pausedSince: null, pausedBy: null };
 
 /** The conduct levels, mildest first: the order of `aiGateRows` within a rule. A local copy of core's: this package links no runtime core code. */
 const SEVERITY_ORDER: readonly string[] = ['banter', 'rude', 'hostile', 'severe'];

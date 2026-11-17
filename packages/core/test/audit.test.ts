@@ -62,6 +62,9 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'community.apply',
       'term.report',
       'person.automation',
+      'ai.act',
+      'ai.acting',
+      'ai.undo_all',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -98,10 +101,11 @@ describe('cw.audit.record and list', () => {
     const { cw } = await setup();
     for (const action of AUDIT_ACTIONS) {
       // A policy row must say what it changed (see audit-policy.test.ts); every other row carries ids only.
-      const detail = action === 'policy.update' || action === 'policy.reset' ? { detail: { sections: [] } } : {};
+      const detail =
+        action === 'policy.update' || action === 'policy.reset' ? { detail: { sections: [] } } : action === 'ai.acting' || action === 'ai.undo_all' ? { detail: { sections: ['ai'], reason: 'because' } } : {};
       // The AI rows point at a report; ai.read is the AI's own, with no role (see ai/audit-ai.test.ts).
-      const ai = action.startsWith('ai.') ? { target: { type: 'report', ref: 'r1' } } : {};
-      const who = action === 'ai.read' ? { actor: 'ai:test:model', role: null } : {};
+      const ai = action.startsWith('ai.') && action !== 'ai.acting' && action !== 'ai.undo_all' ? { target: { type: 'report', ref: 'r1' } } : {};
+      const who = action === 'ai.read' || action === 'ai.act' ? { actor: 'ai:test:model', role: null } : {};
       // appeal.decide points at an appeal and name.rename_required at a person (see vocabulary-appeals.test.ts).
       const own =
         action === 'appeal.decide'
@@ -120,7 +124,7 @@ describe('cw.audit.record and list', () => {
 
   it('person.automation (0.1.13, appended last) needs a person target, carries no detail, and is a name of its own', async () => {
     const { cw } = await setup();
-    expect(AUDIT_ACTIONS.at(-1)).toBe('person.automation');
+    expect(AUDIT_ACTIONS[32]).toBe('person.automation');
     expect(AUDIT_ACTIONS.filter((a) => a === 'person.automation')).toHaveLength(1);
     expect(rec(cw, { actor: 'sen_ann', role: 'senior', action: 'person.automation', target: { type: 'person', ref: 's_abc123' } })).toBe(true);
     // a person, always: no target, or another type, or a detail, is refused

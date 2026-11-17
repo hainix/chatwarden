@@ -14,6 +14,8 @@ import type {
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
+  AiActingMode,
+  AiActingRow,
   AiGateRow,
   AiOutcomeInsert,
   AiOutcomeRow,
@@ -1235,6 +1237,40 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() => {
       const r = this.db.prepare('SELECT subject_id, code, set_by, set_at FROM kit_ai_noauto WHERE subject_id = ?').get(subject);
       return r === undefined ? null : { subject: String(r.subject_id), code: String(r.code), setBy: String(r.set_by), setAt: Number(r.set_at) };
+    });
+  }
+
+  // The acting state (AI levels 3 and 4, migration 25): one row, `off` when none was ever written. The write is conditional on what the caller read.
+
+  aiActingState(): AiActingRow {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT mode, mode_since, mode_by, paused, paused_since, paused_by FROM kit_ai_acting WHERE id = 1').get();
+      if (r === undefined) return { mode: 'off', modeSince: null, modeBy: null, paused: false, pausedSince: null, pausedBy: null };
+      return {
+        mode: String(r.mode) as AiActingMode,
+        modeSince: r.mode_since === null ? null : Number(r.mode_since),
+        modeBy: r.mode_by === null ? null : String(r.mode_by),
+        paused: Number(r.paused) === 1,
+        pausedSince: r.paused_since === null ? null : Number(r.paused_since),
+        pausedBy: r.paused_by === null ? null : String(r.paused_by),
+      };
+    });
+  }
+
+  setAiActingState(expect: { mode: AiActingMode; paused: boolean }, next: AiActingRow): boolean {
+    return this.transaction(() => {
+      // The row is created off on the first move, so "expected off" works on a store nobody has touched; the UPDATE is the conditional.
+      if (expect.mode === 'off' && !expect.paused) this.db.prepare("INSERT OR IGNORE INTO kit_ai_acting (id, mode) VALUES (1, 'off')").run();
+      return (
+        Number(
+          this.db
+            .prepare(
+              `UPDATE kit_ai_acting SET mode = ?, mode_since = ?, mode_by = ?, paused = ?, paused_since = ?, paused_by = ?
+               WHERE id = 1 AND mode = ? AND paused = ?`,
+            )
+            .run(next.mode, next.modeSince, next.modeBy, next.paused ? 1 : 0, next.pausedSince, next.pausedBy, expect.mode, expect.paused ? 1 : 0).changes,
+        ) > 0
+      );
     });
   }
 

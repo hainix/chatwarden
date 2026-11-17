@@ -717,4 +717,58 @@ CREATE TABLE kit_ai_noauto (
 ) WITHOUT ROWID;
 `,
   },
+  {
+    // AI levels 3 and 4, release 2 (shadow mode). Additive: one column, two tables and their indexes; no table is rebuilt and no row is deleted, and the runner
+    // wraps this in one savepoint with the version bump, so a failure leaves version 24. In this release nothing writes a sanction: acting only records.
+    //   kit_ai_reads.purpose: 'read' (the case's read, what every existing row is) or 'confirm' (the confirming read before the AI acts, a clean prompt with no
+    //     signals and no examples). The purpose is part of the input hash, so a confirming read is its own row; the case page, the queue briefs and the sweeper read 'read' only.
+    //   kit_ai_acting: one row, the owner's two audited steps (off, shadow, on) and a pause. It sits apart from the policy layer so the hub's "save the profile"
+    //     cannot turn acting on. Absent row means off.
+    //   kit_ai_actions: one row per report, ever (UNIQUE (report_id)): queued for the confirming read, `shadow` for "would have applied", `held_back` for the
+    //     20% a person decides, `refused` with a closed code (never text), and (next release) active, confirmed or undone. Ids, a cell, a state, a code and times only;
+    //     undo_note is a person's private text of at most 500 characters, cleared with the report.
+    version: 25,
+    sql: `
+ALTER TABLE kit_ai_reads ADD COLUMN purpose TEXT NOT NULL DEFAULT 'read' CHECK (purpose IN ('read', 'confirm'));
+
+CREATE TABLE kit_ai_acting (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),
+  mode         TEXT NOT NULL CHECK (mode IN ('off', 'shadow', 'on')),
+  mode_since   INTEGER,
+  mode_by      TEXT,
+  paused       INTEGER NOT NULL DEFAULT 0,
+  paused_since INTEGER,
+  paused_by    TEXT
+);
+
+CREATE TABLE kit_ai_actions (
+  id              TEXT PRIMARY KEY,
+  report_id       TEXT NOT NULL,
+  read_id         TEXT NOT NULL,
+  confirm_read_id TEXT,
+  rule            TEXT NOT NULL,
+  severity        TEXT NOT NULL,
+  state           TEXT NOT NULL CHECK (state IN ('queued', 'shadow', 'active', 'confirmed', 'undone', 'refused', 'held_back')),
+  refused_code    TEXT,
+  not_before      INTEGER NOT NULL,
+  created_at      INTEGER NOT NULL,
+  group_id        TEXT,
+  kind            TEXT,
+  duration_ms     INTEGER,
+  acted_at        INTEGER,
+  review_due_at   INTEGER,
+  reviewed_at     INTEGER,
+  reviewed_by     TEXT,
+  undo_code       TEXT CHECK (undo_code IN ('not_a_violation', 'wrong_rule', 'too_heavy', 'already_handled')),
+  undo_note       TEXT,
+  adapter         TEXT,
+  prompt_version  INTEGER,
+  UNIQUE (report_id)
+);
+CREATE INDEX kit_ai_actions_by_state ON kit_ai_actions (state, not_before);
+CREATE INDEX kit_ai_actions_by_review ON kit_ai_actions (state, review_due_at);
+CREATE INDEX kit_ai_actions_by_cell ON kit_ai_actions (rule, severity, created_at);
+CREATE INDEX kit_ai_actions_by_group ON kit_ai_actions (group_id);
+`,
+  },
 ];

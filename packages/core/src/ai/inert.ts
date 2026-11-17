@@ -1,3 +1,4 @@
+import type { AiActingFacade, AiActingResult, AiActingState } from './acting.js';
 import type { AiFacade, AiStatsView, AiStatus } from './service.js';
 
 // The facade when no AI is configured. Apart from the service so that a build with no AI in it never loads the service (the kit imports the
@@ -5,11 +6,25 @@ import type { AiFacade, AiStatsView, AiStatus } from './service.js';
 // reason this file imports no other AI file (scripts/browser-bundle.test.ts pins it), so the few numbers of the empty gate view are written out here;
 // test/ai/gates-service.test.ts pins them equal to the real defaults.
 
+const INERT_ACTING: AiActingState = { mode: 'off', paused: false, modeSince: null, shadowDaysDone: 0, shadowWouldHaveActed: 0, maxLevel: 0 };
+const UNSUPPORTED: AiActingResult = { ok: false, error: 'unsupported' };
+/** `cw.ai.acting` with no AI: off, and every step refused as unsupported. */
+const inertActing = (): AiActingFacade => ({
+  state: () => ({ ...INERT_ACTING }),
+  startShadow: () => UNSUPPORTED,
+  startActing: () => UNSUPPORTED,
+  pause: () => UNSUPPORTED,
+  resume: () => UNSUPPORTED,
+  off: () => UNSUPPORTED,
+});
+
 /** The facade when no AI is configured: always off, never touches the store. */
 export function createInertAi(): AiFacade {
   const status: AiStatus = { available: false, level: 0, maxLevel: 0, state: 'off', spentMicros: 0, capMicros: 0, capCalls: 0, day: '', reads: 0, cacheHitRate: null, invalid: {} };
   return {
     level: () => 0,
+    effectiveLevel: () => 0,
+    acting: inertActing(),
     status: () => ({ ...status, invalid: {} }),
     read: () => null,
     expected: () => false,

@@ -100,13 +100,13 @@ describe('AiStore', () => {
     expect(() => requireAiStore(new MemoryStore())).toThrow(/AI methods/);
   });
 
-  it('the runtime object holds exactly the AI store methods, loadReport, listReports and aiGateRows (enumerated, not sampled)', () => {
+  it('the runtime object holds exactly the AI store methods, loadReport, listReports, aiGateRows and the two acting-state methods (enumerated, not sampled)', () => {
     const narrow = requireAiStore(withMemoryAi(new MemoryStore())) as unknown as Record<string, unknown>;
     expect(Object.keys(narrow).sort()).toEqual(
       [
         'reserveAiRead', 'completeAiRead', 'failAiRead', 'loadAiRead', 'loadAiReads', 'loadAiReadById', 'loadAiReadFor', 'listAiRetries',
         'aiSpendSince', 'insertAiOutcome', 'loadAiOutcome', 'markAiOutcome', 'aiExamples', 'aiTeachableCount', 'aiStats',
-        'loadReport', 'listReports', 'aiGateRows',
+        'loadReport', 'listReports', 'aiGateRows', 'aiActingState', 'setAiActingState',
       ].sort(),
     );
     for (const v of Object.values(narrow)) expect(typeof v).toBe('function');
@@ -142,6 +142,15 @@ describe('AiStore', () => {
     const { loadReport, aiTeachableCount } = requireAiStore(store);
     expect(loadReport('nope')).toBeNull();
     expect(aiTeachableCount(0)).toBe(0);
+  });
+
+  it('a store without the acting-state methods gets no such key (acting is then unsupported, the rest of the AI works)', () => {
+    const full = withMemoryAi(new MemoryStore());
+    const bare = new Proxy(full, { get: (t, k, r) => (k === 'aiActingState' || k === 'setAiActingState' ? undefined : Reflect.get(t, k, r)) });
+    const narrow = requireAiStore(bare);
+    expect('aiActingState' in narrow).toBe(false);
+    expect('setAiActingState' in narrow).toBe(false);
+    expect(typeof narrow.loadAiRead).toBe('function');
   });
 
   it('a store without aiGateRows gets no aiGateRows key (the service already treats it as optional)', () => {

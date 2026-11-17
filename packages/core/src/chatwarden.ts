@@ -1210,6 +1210,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           // The counts about the reported person the feed allows (`feeds.ai`), as label, polarity, distinct and window: nothing else leaves.
           // The rules cautioned for by the appeals the moderators lost (revokes only), as bands and rule numbers: never a rate, a count or a person.
           cautions: () => appealService.cautions(),
+          // Acting cannot start without in-kit appeals (design 3, ruling 16): read live, never kept.
+          appealsEnabled: () => appealService.enabled(),
           // The appeals side of the gate dashboard (revokes only; a reduce is carried apart and never counts). Read live from the appeals service, never from
           // the AI: with appeals absent or disabled every cell reads "not available". Nothing yet records an AI action, so no revoke of one is known.
           appealFacts: (cells) => {

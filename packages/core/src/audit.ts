@@ -30,6 +30,10 @@ export type Role = (typeof ROLES)[number];
  *
  * `person.automation` (0.1.13, appended last) is a senior setting or clearing the "do not automate" mark on a person; it targets the `person` and needs it, and
  * carries no detail (the closed reason code stays in the mark, not in the trail).
+ *
+ * The three AI acting actions (0.1.14, appended last): `ai.act` is the AI's own row (an `ai:` actor, no role) when it applied an action, or, in shadow mode, recorded one; it targets the
+ * `report` and carries no detail (the state is in the action row, not the trail). `ai.acting` is the owner or a senior moving the acting state (shadow, acting, pause, resume,
+ * off) and `ai.undo_all` the owner undoing every AI action since a time; both carry a detail with the sections `['ai']` and the reason, and no target.
  */
 export const AUDIT_ACTIONS = [
   'report.view',
@@ -65,6 +69,9 @@ export const AUDIT_ACTIONS = [
   'community.apply',
   'term.report',
   'person.automation',
+  'ai.act',
+  'ai.acting',
+  'ai.undo_all',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -82,7 +89,10 @@ export interface AuditDetail {
 export const AUDIT_REASON_MAX = 2000;
 
 /** The actions that point at a report (and only at one), and carry nothing else. */
-const AI_ACTIONS: readonly string[] = ['ai.read', 'ai.rerun', 'ai.outcome'];
+const AI_ACTIONS: readonly string[] = ['ai.read', 'ai.rerun', 'ai.outcome', 'ai.act'];
+
+/** The actions only the AI's own actor (`ai:<adapter id>`, no role) may record, and the only ones it may. */
+const AI_OWN_ACTIONS: readonly string[] = ['ai.read', 'ai.act'];
 
 /** The actions that point at an appeal (and only at one). `appeal.view` may point at none: the list and the numbers are not about one. */
 const APPEAL_ACTIONS: readonly string[] = ['appeal.view', 'appeal.decide'];
@@ -94,7 +104,7 @@ const TARGET_REQUIRED: readonly string[] = [...AI_ACTIONS, 'appeal.decide', 'nam
 const AI_ACTOR_PREFIX = 'ai:';
 
 /** The actions whose row carries an {@link AuditDetail}, and the only ones that may. */
-const DETAIL_ACTIONS: readonly string[] = ['policy.update', 'policy.reset'];
+const DETAIL_ACTIONS: readonly string[] = ['policy.update', 'policy.reset', 'ai.acting', 'ai.undo_all'];
 
 /** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id, an exception id, a saved reason id, an appeal id or a release version. */
 export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal', 'release'] as const;
@@ -117,7 +127,7 @@ export interface AuditRecordInput {
    * them as they are.)
    */
   actor: string;
-  /** The staff member's role. `null` only for the AI's own actor (`ai:<adapter id>`), which records `ai.read` and nothing else. */
+  /** The staff member's role. `null` only for the AI's own actor (`ai:<adapter id>`), which records `ai.read` and `ai.act` and nothing else. */
   role: Role | null;
   action: AuditAction;
   target?: AuditTarget;
@@ -246,10 +256,10 @@ function parse(input: unknown): AuditRecordInput | null {
   const { actor, role, action, target, detail } = input as Record<string, unknown>;
   if (typeof actor !== 'string' || !ACTOR_RE.test(actor)) return null;
   if (!isAction(action)) return null;
-  // The AI is the one actor with no role: `ai:<adapter id>` records `ai.read`, and only it does. A person always has a role.
+  // The AI is the one actor with no role: `ai:<adapter id>` records `ai.read` and `ai.act`, and only it does. A person always has a role.
   if (actor.startsWith(AI_ACTOR_PREFIX)) {
-    if (actor.length === AI_ACTOR_PREFIX.length || role !== null || action !== 'ai.read') return null;
-  } else if (!isRole(role) || action === 'ai.read') {
+    if (actor.length === AI_ACTOR_PREFIX.length || role !== null || !AI_OWN_ACTIONS.includes(action)) return null;
+  } else if (!isRole(role) || AI_OWN_ACTIONS.includes(action)) {
     return null;
   }
   const roleOut: Role | null = actor.startsWith(AI_ACTOR_PREFIX) ? null : (role as Role);
@@ -294,8 +304,8 @@ export class AuditService {
    * carrying the event name and at most the error class) for an input outside the closed lists or a store failure.
    *
    * A person always has a `role`. The AI is the one actor without: pass `role: null` explicitly (`undefined` is refused) with an actor
-   * that begins `ai:` (and is longer than that), for `ai.read` only. So a staff ref or login that begins `ai:` is refused (false), and
-   * so is `ai.read` from anyone else. The three `ai.*` actions need a `report` target and take no detail.
+   * that begins `ai:` (and is longer than that), for `ai.read` and `ai.act` only. So a staff ref or login that begins `ai:` is refused (false), and
+   * so is `ai.read` or `ai.act` from anyone else. The three `ai.*` actions need a `report` target and take no detail.
    */
   record(input: AuditRecordInput): boolean {
     try {

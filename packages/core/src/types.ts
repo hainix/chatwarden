@@ -1,6 +1,7 @@
 // Core types for @chatwarden/core. Organized by section; later tasks append
 // their own sections below.
 
+import type { AiActingMode, AiActingRow } from './ai/acting.js';
 import type { AiCellCounts } from './ai/gates.js';
 import type { AIExample, AIRead, AISignal } from './ai/types.js';
 import type { AppealStatus } from './appeals.js';
@@ -1345,6 +1346,19 @@ export interface Store {
 
   /** OPTIONAL. The "do not automate" mark of this subject (a copy), or null. A store reads only the subject it is given; the service asks for each alias. */
   loadNoAutomation?(subject: string): NoAutomationRow | null;
+
+  /**
+   * OPTIONAL. The acting state (AI levels 3 and 4, design 6.5): one row, `off` and not paused until something sets it. A copy. Read at every act (it is
+   * never cached), so a pause is seen by the very next act. Does not move the change token.
+   */
+  aiActingState?(): AiActingRow;
+
+  /**
+   * OPTIONAL. Move the acting state, but only when it still is what the caller read: `expect` is the `mode` and `paused` flag the caller planned from.
+   * True when this call changed the row; false (nothing changed) when another caller got there first, so of two processes starting acting exactly one
+   * does. Does not move the change token.
+   */
+  setAiActingState?(expect: { mode: AiActingMode; paused: boolean }, next: AiActingRow): boolean;
 
   // Signals (flood control and signals, design 5.8). OPTIONAL: a store without them cannot keep signals, and `createChatwarden` refuses a
   // profile that declares kinds or feeds with one. SYNCHRONOUS on purpose (like claims); they run inside `transaction`. They do not move
