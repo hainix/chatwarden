@@ -10,7 +10,7 @@ import type { ReportPerson } from '../excerpt.js';
 import { absoluteTime, listOf, personTag, timeOfDay } from '../format.js';
 import { useHubData } from '../hooks.js';
 import type { HubText } from '../i18n.js';
-import { displayName } from '../labels.js';
+import { displayName, filterOriginLabel } from '../labels.js';
 import { NameToggle, NameValue } from '../names.js';
 import type { ActionRecord, BlockedLine, SanctionKind } from '../types.js';
 import { Empty, Fetched, Link, PersonChip, Skeleton, Tag } from '../ui.js';
@@ -135,6 +135,16 @@ function Reporters({ people }: { people: ReportPerson[] }) {
   const { t, can } = useHub();
   const { detail, group } = useCase();
   const report = detail.data?.report;
+  // A report a chat filter filed has no reporter: the chip says which filter, where the reporters would be (no accuracy, no record).
+  if (report !== undefined && report.reporterPerson === null) {
+    return (
+      <Section title={t('hub.report.origin.title')}>
+        <p>
+          <Tag>{filterOriginLabel(t, report.originKey, (report as { originLabel?: string }).originLabel)}</Tag>
+        </p>
+      </Section>
+    );
+  }
   if (report === undefined || !can('history.read')) return null;
   // This report's reporter first, then the others who reported the same person.
   const refs = [...new Set([...(report.reporterPerson === null ? [] : [report.reporterPerson]), ...(group?.reporterPersons ?? [])])];

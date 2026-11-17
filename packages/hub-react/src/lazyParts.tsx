@@ -65,6 +65,7 @@ export const partLoaders: {
   signalPanel: () => Promise<ComponentType<PanelProps>>;
   appealPanel: () => Promise<ComponentType<PanelProps>>;
   namePanel: () => Promise<ComponentType<PanelProps>>;
+  filterPanel: () => Promise<ComponentType<PanelProps>>;
   appealList: () => Promise<ComponentType<{ selected: string | null }>>;
   shareTerm: () => Promise<ComponentType<ShareTermProps>>;
   reportTerm: () => Promise<ComponentType<ReportTermProps>>;
@@ -81,6 +82,7 @@ export const partLoaders: {
   signalPanel: () => import('./screens/SignalSettings.js').then((m) => m.SignalSettings),
   appealPanel: () => import('./screens/AppealSettings.js').then((m) => m.AppealSettings),
   namePanel: () => import('./screens/NameSettings.js').then((m) => m.NameSettings),
+  filterPanel: () => import('./screens/FilterSettings.js').then((m) => m.FilterSettings),
   appealList: () => import('./appeals/AppealList.js').then((m) => m.AppealList),
   shareTerm: () => import('./terms/ShareTerm.js').then((m) => m.ShareTerm),
   reportTerm: () => import('./terms/ReportTerm.js').then((m) => m.ReportTerm),
@@ -148,6 +150,7 @@ const pacePanel = lazyPart(() => partLoaders.pacePanel());
 const signalPanel = lazyPart(() => partLoaders.signalPanel());
 const appealPanel = lazyPart(() => partLoaders.appealPanel());
 const namePanel = lazyPart(() => partLoaders.namePanel());
+const filterPanel = lazyPart(() => partLoaders.filterPanel());
 const appealList = lazyPart(() => partLoaders.appealList());
 const shareTerm = lazyPart(() => partLoaders.shareTerm(), true);
 const reportTerm = lazyPart(() => partLoaders.reportTerm(), true);
@@ -188,6 +191,9 @@ export const LazyAppealSettings = appealPanel.Part;
 /** The "Names" panel of Settings > Advanced: loaded when that screen is opened. */
 export const LazyNameSettings = namePanel.Part;
 
+/** The "Chat filters" panel of Settings > Advanced: loaded when that screen is opened. */
+export const LazyFilterSettings = filterPanel.Part;
+
 /** The list of open appeals in the queue pane (the Appeals view): loaded when that view is first opened. */
 export const LazyAppealList = appealList.Part;
 
@@ -215,6 +221,7 @@ export function resetLazyParts(): void {
   signalPanel.reset();
   appealPanel.reset();
   namePanel.reset();
+  filterPanel.reset();
   appealList.reset();
   shareTerm.reset();
   reportTerm.reset();

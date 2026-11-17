@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useHub } from './context.js';
 import { absoluteTime, formatDuration, relativeTime, waitTone } from './format.js';
-import { displayName, groupName, reasonChip } from './labels.js';
+import { displayName, filterOriginLabel, groupName, reasonChip } from './labels.js';
 import { LazyAiParts } from './lazyParts.js';
 import { hasAiRead } from './queue.js';
 import type { QueueGroup } from './queue.js';
@@ -36,6 +36,9 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
           {group.reasons.map((r) => (
             <Tag key={r.id ?? 'none'}>{reasonChip(t, r.label)}</Tag>
           ))}
+          {(group.origins ?? []).map((o) => (
+            <Tag key={o.key}>{filterOriginLabel(t, o.key, o.label)}</Tag>
+          ))}
           {hasAiRead(group) && <LazyAiParts part="chip" group={group} />}
           {showStatus && group.open > 0 && <Tag>{t('hub.reports.tag.open')}</Tag>}
           {showStatus && group.actioned > 0 && <Tag>{t('hub.reports.tag.actioned')}</Tag>}
@@ -44,7 +47,7 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
         <div className="cw-facts">
           <span>{t('hub.reports.row.reports', { count: group.reports })}</span>
           <span>{t('hub.reports.row.rooms', { count: group.rooms.length })}</span>
-          <span>{t('hub.reports.row.reporters', { count: group.reporters })}</span>
+          {(group.reporters > 0 || (group.origins ?? []).length === 0) && <span>{t('hub.reports.row.reporters', { count: group.reporters })}</span>}
           {group.handles.length > 1 && <span>{t('hub.reports.row.alsoSeenAs', { names: seenAs.join(', ') })}</span>}
         </div>
         {earlier && older.length > 0 && (

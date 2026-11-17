@@ -114,6 +114,12 @@ describe('bundle size', () => {
     expect(eager.gzip).toBeGreaterThan(30 * 1024);
   });
 
+  it('the Chat filters panel is its own lazy chunk: a first load carries none of its cards, tools or draft model (only the words, the types, the client calls and the queue chip)', async () => {
+    const { eagerInputs, chunkRoots } = await bundle();
+    expect(chunkRoots.some((r) => r.endsWith('screens/FilterSettings.tsx'))).toBe(true);
+    expect(eagerInputs.filter((i) => ['src/filters/', 'screens/FilterSettings', 'policy/filters.ts'].some((part) => i.includes(part)))).toEqual([]);
+  });
+
   it('bundles none of React, React DOM or the kit', async () => {
     const { inputs } = await bundle();
     expect(inputs.filter((i) => /node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(i))).toEqual([]);

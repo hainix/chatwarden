@@ -38,7 +38,7 @@ describe('the panel', () => {
     await open(w);
     expect(within(panel()).getAllByRole('checkbox').map((c) => c.getAttribute('aria-labelledby') !== null)).toEqual([true, true, true, true]);
     for (const name of [PROFANITY, KEEP, RENAMES, MASK]) expect(sw(name)).toBeInTheDocument();
-    const names = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label') ?? within(r).queryByRole('heading')?.textContent);
+    const names = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label') ?? within(r).queryAllByRole('heading')[0]?.textContent);
     expect(names.indexOf('Names')).toBeGreaterThan(names.indexOf('Appeals'));
   });
 

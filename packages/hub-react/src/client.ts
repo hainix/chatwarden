@@ -1,3 +1,4 @@
+import type { FilterSettings } from '@chatwarden/core';
 import type { Transport, TransportRequest, TransportResponse } from './transport.js';
 import type {
   AiReadAgainResult,
@@ -25,6 +26,9 @@ import type {
   DismissOpenResult,
   ExceptionInput,
   ExceptionPatch,
+  FilterCheckView,
+  FilterStatsView,
+  FilterTestView,
   GapRow,
   GuideSection,
   ListAppealsQuery,
@@ -238,6 +242,12 @@ export interface HubClient {
   listTerms(): Promise<TermsList>;
   /** `POST /terms/check`: a dry run of a new term. */
   checkTerm(input: { term: string; language: string }): Promise<{ hits: string[] }>;
+  /** `GET /filters/stats?days=` (needs `filters.read`): what the chat filters did over the last 7 or 30 days. @experimental */
+  filterStats(days: 7 | 30): Promise<FilterStatsView>;
+  /** `POST /filters/test` (needs `filters.read`): the verdict for one line under `candidate` (filter settings not saved) or the settings in force. @experimental */
+  filterTest(input: { text: string; candidate?: FilterSettings }): Promise<FilterTestView>;
+  /** `POST /filters/check` (needs `filters.read`): `candidate` over the adopter's recent lines. @experimental */
+  filterCheck(input: { candidate: FilterSettings }): Promise<FilterCheckView>;
   /** `POST /terms/test`: would the live list block this line? */
   testText(text: string): Promise<{ verdict: TextVerdict; termId: string | null }>;
   /** `POST /terms`. */
@@ -366,6 +376,9 @@ export function createHubClient(transport: Transport): HubClient {
     listTerms: () => get<TermsList>('/terms'),
     checkTerm: (input) => post<{ hits: string[] }>('/terms/check', input),
     testText: (text) => post<{ verdict: TextVerdict; termId: string | null }>('/terms/test', { text }),
+    filterStats: (days) => get<FilterStatsView>('/filters/stats', q({ days })),
+    filterTest: (input) => post<FilterTestView>('/filters/test', input),
+    filterCheck: (input) => post<FilterCheckView>('/filters/check', input),
     addTerm: (input) => post<{ id: string }>('/terms', input),
     updateTerm: (id, p) => patch<{ ok: true }>(`/terms/${enc(id)}`, p),
     setTermActive: (id, active) => post<{ ok: true }>(`/terms/${enc(id)}/active`, { active }),

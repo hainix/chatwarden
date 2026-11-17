@@ -4027,3 +4027,94 @@
 .cw-hub .cw-result-rename {
   margin: 0;
 }
+
+/* Chat filters (0.2.0): Settings > Advanced > Chat filters. Counts are plain numbers and a chip is the neutral tag: no colour of its own. */
+.cw-hub .cw-fcard,
+.cw-hub .cw-fphrase {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin: 0 0 var(--cw-space-4, var(--cwd-space-4));
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  min-width: 0;
+}
+.cw-hub .cw-fcard-body {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+  min-width: 0;
+}
+.cw-hub .cw-fchoice {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.cw-hub .cw-fchoice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-fcard input[type='number'],
+.cw-hub .cw-fcard select,
+.cw-hub .cw-fphrase input[type='number'] {
+  max-width: 16rem;
+}
+.cw-hub .cw-fcard textarea,
+.cw-hub .cw-fmore textarea,
+.cw-hub .cw-ftool textarea {
+  width: 100%;
+  max-width: 100%;
+}
+.cw-hub .cw-fsub {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+}
+.cw-hub .cw-fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  max-width: 100%;
+  padding: 0 var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: 999px;
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-fadd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-fadd input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.cw-hub .cw-flabel {
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-ftool,
+.cw-hub .cw-fmore,
+.cw-hub .cw-fhits {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin-block-start: var(--cw-space-4, var(--cwd-space-4));
+  min-width: 0;
+}
+.cw-hub .cw-ftool h3 {
+  margin: 0;
+}
+.cw-hub .cw-ftool mark {
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: inherit;
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  text-decoration: underline;
+}
+.cw-hub .cw-fhits .cw-table-wrap {
+  overflow-x: auto;
+}

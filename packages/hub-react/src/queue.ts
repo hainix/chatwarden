@@ -30,6 +30,8 @@ export interface QueueGroup {
   rooms: string[];
   /** Distinct people who reported. */
   reporters: number;
+  /** The distinct filters that filed a report in the group (a report nobody wrote: no reporter), newest first. `label` is a phrase rule's name when the server sent one. Empty for a player's reports. */
+  origins?: Array<{ key: string; label?: string }>;
   /** Their staff refs (show the short tag, never the ref), newest report first. */
   reporterPersons: string[];
   /** The newest handle a report recorded for each of those reporters; a reporter none recorded one for has no entry (name them by their tag). */
@@ -175,6 +177,7 @@ export function groupQueue(
     const rooms = new Set<string>();
     const reporters = new Set<string>();
     const reporterPersons: string[] = [];
+    const origins: Array<{ key: string; label?: string }> = [];
     // No prototype: a reporter's ref is an opaque string, and `__proto__` or `constructor` must be a key like any other.
     const reporterHandles: Record<string, string> = Object.create(null) as Record<string, string>;
     const flaggedHandles: string[] = [];
@@ -200,7 +203,10 @@ export function groupQueue(
       const reason = r.reportedReason ?? null;
       if (!reasons.some((x) => x.id === reason)) reasons.push({ id: reason, label: reason === null ? null : (r.reportedReasonLabel ?? reason) });
       if (r.roomId !== '') rooms.add(r.roomId);
-      // A report nobody filed (a chat filter's flag) has no reporter to count or name.
+      // A report nobody filed (a chat filter's flag) has no reporter to count or name; it is shown by the filter that made it.
+      if (r.origin === 'filter' && typeof r.originKey === 'string' && !origins.some((o) => o.key === r.originKey)) {
+        origins.push({ key: r.originKey, ...(typeof r.originLabel === 'string' ? { label: r.originLabel } : {}) });
+      }
       if (r.reporterPerson !== null) {
         reporters.add(r.reporterPerson);
         if (!reporterPersons.includes(r.reporterPerson)) reporterPersons.push(r.reporterPerson);
@@ -233,6 +239,7 @@ export function groupQueue(
       dismissed,
       rooms: [...rooms],
       reporters: reporters.size,
+      origins,
       reporterPersons,
       reporterHandles,
       ...(Object.keys(reporterFlagged).length > 0 ? { reporterHandlesFlagged: { ...reporterFlagged } } : {}),

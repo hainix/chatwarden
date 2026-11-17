@@ -52,6 +52,20 @@ describe('a filter report in the staff reads', () => {
     expect(Object.keys(body.history)).toEqual([f.subject]);
   });
 
+  it('a phrase report carries the label of the rule as it is now; a link report and a retired rule carry none', async () => {
+    const w = await world({ overrides: { filters: { phrases: [{ id: 'gold', label: 'Gold ads', action: 'flag', phrases: ['buy gold'] }] } } });
+    const a = await flagged(w, 'RP', 'raw-client-key-p', 'phrase.gold');
+    const b = await flagged(w, 'RQ', 'raw-client-key-q', 'phrase.retired');
+    const c = await flagged(w, 'RL', 'raw-client-key-l', 'link.unlisted');
+    const list = (await w.call('GET', '/reports', { query: { status: 'open' } })).body as { items: Array<Record<string, unknown>> };
+    const by = (id: string) => list.items.find((r) => r.id === id)!;
+    expect(by(a.id).originLabel).toBe('Gold ads');
+    expect(Object.hasOwn(by(b.id), 'originLabel')).toBe(false);
+    expect(Object.hasOwn(by(c.id), 'originLabel')).toBe(false);
+    const one = (await w.call('GET', `/reports/${a.id}`)).body as { report: Record<string, unknown> };
+    expect(one.report.originLabel).toBe('Gold ads');
+  });
+
   it('an ordinary report carries no origin keys at all (the body is as it was)', async () => {
     const w = await world();
     const o = await w.file();

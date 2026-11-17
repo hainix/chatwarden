@@ -5,7 +5,7 @@ import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
 import { absoluteTime, formatDuration, listOf, waitTone } from '../format.js';
 import { Icon } from '../icons.js';
-import { errorText, groupName, reasonChip } from '../labels.js';
+import { errorText, filterOriginLabel, groupName, reasonChip } from '../labels.js';
 import { useQueue } from '../liveQueue.js';
 import { useFeatures } from '../features.js';
 import { LazyAiParts, LazyAppealList } from '../lazyParts.js';
@@ -265,10 +265,15 @@ function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; s
               {reasonChip(t, r.label)}
             </span>
           ))}
+          {(g.origins ?? []).map((o) => (
+            <span key={o.key} className="cw-cat">
+              {filterOriginLabel(t, o.key, o.label)}
+            </span>
+          ))}
           {!simple && hasAiRead(g) && <LazyAiParts part="chip" group={g} />}
         </span>
         <span className="cw-case-facts">
-          {t('hub.queue.reports', { count: g.reports, reporters: t('hub.queue.reporters', { count: g.reporters }) })}
+          {g.reporters === 0 ? t('hub.queue.reports.plain', { count: g.reports }) : t('hub.queue.reports', { count: g.reports, reporters: t('hub.queue.reporters', { count: g.reporters }) })}
           {row.gone && <span className="cw-case-closed"> {t('hub.queue.row.gone')}</span>}
           {g.rankedLow === true && <span className="cw-sr"> {t('hub.queue.row.rankedLow')}</span>}
         </span>

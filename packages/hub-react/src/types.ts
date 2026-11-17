@@ -37,9 +37,24 @@ import type {
   StaffReport,
   Suggestion,
 } from '@chatwarden/core';
+import type { FilterCheckResult, FilterKeyCounts, FilterTestResult } from '@chatwarden/core';
 import type { AiReadAgainBody, ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
 export type { PolicyLayer, PolicySection };
+
+/**
+ * What the filters did over a window: per counter key the counts by action, and for a phrase key the rule's name as it is now (absent when the rule is gone). No person,
+ * room or text. `GET /filters/stats`.
+ * @experimental
+ */
+export interface FilterStatsView {
+  days: 7 | 30;
+  keys: Record<string, FilterKeyCounts & { label?: string }>;
+}
+/** `POST /filters/test`: the verdict for one line, with ranges, and the line as it would be sent (`null` when it would not be). @experimental */
+export type FilterTestView = FilterTestResult;
+/** `POST /filters/check`: a candidate over recent lines. @experimental */
+export type FilterCheckView = FilterCheckResult;
 
 /**
  * The editable settings as the hub reads them: what is in force, what is saved, and what the kit left out. `limits` is the kit's chat rate and

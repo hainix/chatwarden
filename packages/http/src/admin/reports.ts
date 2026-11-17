@@ -85,6 +85,8 @@ export interface ReportSummary {
    * null, no note and no reporter accuracy. Absent on a player's report, so those bodies are as they were. Staff only.
    */
   origin?: 'filter' | 'watch';
+  /** With a `phrase.<id>` key whose rule is still in the settings: that rule's label as it is now, so a queue can say "Filter: Gold ads". Absent otherwise. */
+  originLabel?: string;
   /** With `origin`: the filter counter key that made the report (`link.unlisted`, `phrase.<id>` ...): a closed shape, never text from a line. The hub words it ("Filter: Links"). */
   originKey?: string;
   /** Present (true) only when the reported person's handle is one the matcher flags and `names.maskInHub` is on: the hub masks it until shown. Staff only. */
@@ -128,6 +130,7 @@ const summarize = (
   accuracy: ReporterAccuracy | undefined,
   ai: AiBrief | undefined,
   boosted = false,
+  originLabel?: string,
 ): ReportSummary => ({
   id: r.id,
   createdAt: r.createdAt,
@@ -151,6 +154,7 @@ const summarize = (
   ai: ai === undefined ? null : { ...ai },
   ...(boosted ? { boosted: true as const } : {}),
   ...originOf(r),
+  ...(originLabel === undefined ? {} : { originLabel }),
 });
 
 /**
@@ -216,6 +220,13 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
   const labelOf = (r: StaffReport): string | null =>
     r.reportedReason === null ? null : (reasonLabel(cw.profile.reporting.reasons, r.reportedReason) ?? r.reportedReason);
 
+  /** The label of the phrase rule a filter report names, as the settings have it now; undefined for any other report or a rule that is gone. */
+  const originLabelOf = (r: Pick<StaffReport, 'originKey'>): string | undefined => {
+    const key = r.originKey;
+    if (typeof key !== 'string' || !key.startsWith('phrase.')) return undefined;
+    return cw.profile.filters.phrases.find((p) => `phrase.${p.id}` === key)?.label;
+  };
+
   /** A report's claim, only while its case is open. */
   const claimOf = (r: StaffReport): CaseClaim | undefined => (r.status === 'open' ? cw.cases.holders([r.targetPerson]).get(r.targetPerson) : undefined);
 
@@ -266,8 +277,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const flagged = handleFlags(cw);
       const items = page.items.map((r) => ({
         ...(r.status === 'open'
-          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), r.reporterPerson === null ? undefined : accuracy.get(r.reporterPerson), briefs.get(r.id), boosted.has(r.targetPerson))
-          : summarize(r, undefined, undefined, labelOf(r), undefined, undefined)),
+          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), r.reporterPerson === null ? undefined : accuracy.get(r.reporterPerson), briefs.get(r.id), boosted.has(r.targetPerson), originLabelOf(r))
+          : summarize(r, undefined, undefined, labelOf(r), undefined, undefined, false, originLabelOf(r))),
         ...flagKey(flagged, 'targetHandleFlagged', r.targetHandle),
         ...flagKey(flagged, 'reporterHandleFlagged', r.reporterHandle),
       }));
@@ -318,6 +329,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const shown = {
         ...plain,
         ...originOf(report),
+        ...(originLabelOf(report) === undefined ? {} : { originLabel: originLabelOf(report) }),
         reportedReasonLabel: labelOf(report),
         ...flagKey(flagged, 'targetHandleFlagged', report.targetHandle),
         ...flagKey(flagged, 'reporterHandleFlagged', report.reporterHandle),

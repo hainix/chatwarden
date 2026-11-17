@@ -50,6 +50,7 @@ describe('groupQueue', () => {
       dismissed: 0,
       rooms: ['room-a'],
       reporters: 1,
+      origins: [],
       reporterPersons: ['rep-1'],
       reporterHandles: { 'rep-1': 'Rae' },
       firstAt: T,
@@ -244,7 +245,7 @@ describe('groupQueue', () => {
     const [g] = groupQueue([report({ targetPerson: '__proto__' })]);
     expect(g?.person).toBe('__proto__');
     expect(Object.keys(g ?? {}).sort()).toEqual(
-      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reasons', 'reportIds', 'reporterHandles', 'reporterPersons', 'reporters', 'reports', 'rooms', 'summaries', 'viewing'].sort(),
+      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'origins', 'person', 'reasons', 'reportIds', 'reporterHandles', 'reporterPersons', 'reporters', 'reports', 'rooms', 'summaries', 'viewing'].sort(),
     );
   });
 });
