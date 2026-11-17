@@ -91,6 +91,20 @@ describe('migration 26, the desk block, from a version-25 database', () => {
     expect(String(idx?.sql)).toMatch(/WHERE urgent = 1 AND status = 'open'/);
   });
 
+  it('the reporter-outcome index gains the reason, so the accuracy read that leaves out a welfare report is still one covering index', () => {
+    const db = memDb();
+    const store = openStore({ db });
+    expect(names(db, 'index')).toContain('kit_reports_by_reporter_outcome_reason');
+    expect(String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_reports_by_reporter_outcome_reason'").get()?.sql)).toMatch(/\(reporter_subject, created_at, status, bad_faith, reported_reason\)/);
+    const plan = db
+      .prepare("EXPLAIN QUERY PLAN SELECT reporter_subject, SUM(status = 'actioned') FROM kit_reports WHERE reporter_subject IN (?) AND created_at >= ? AND status != 'open' AND (reported_reason IS NULL OR reported_reason <> 'welfare') GROUP BY reporter_subject")
+      .all('s_a', 0)
+      .map((r) => String(r.detail))
+      .join(' | ');
+    expect(plan).toMatch(/COVERING INDEX kit_reports_by_reporter_outcome_reason/);
+    expect(store.reporterOutcomes?.(['s_a'], 0)).toEqual([]);
+  });
+
   it('the comment table has the spec columns, the (report_id, at, id) index and a kind CHECK that refuses an unknown kind', () => {
     const db = memDb();
     openStore({ db });

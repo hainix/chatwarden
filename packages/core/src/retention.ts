@@ -306,6 +306,8 @@ export async function purge(
   checkWindow('welfareReportsMs', p.welfareReportsMs);
   checkWindow('chatCountsMs', p.chatCountsMs);
   return store.transaction(() => {
+    // The most sensitive reports first, on their own shorter clock (a report held for legal reasons is skipped by the store); then every other report on `reportsMs`.
+    const welfareReports = store.purgeReportsByReason?.('welfare', now - p.welfareReportsMs) ?? 0;
     const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
     // Link rows (`cw.links`) are ids only and outlive the report they name by no useful time: the same clock as reports. Not counted in the result. A live row (an active EOS sanction, the EOS cursor) is kept by the store whatever its age.
     store.purgeLinks?.(now - p.reportsMs);
@@ -337,8 +339,8 @@ export async function purge(
       blockedNames: store.purgeBlockedNames?.(now - p.blockedNamesMs) ?? 0,
       // Counter rows are keyed by UTC day: a day goes once it ended before the cutoff (strictly older than the day the cutoff falls in).
       filterHits: store.purgeFilterHits(Math.floor((now - p.filterHitsMs) / DAY_MS)),
-      // Set by the urgent lane (welfare reports) and by Insights (daily counts); 0 until then.
-      welfareReports: 0,
+      welfareReports,
+      // Daily line counts (Insights): wired in U7.
       chatCounts: 0,
     };
     // Last: the finish of an erase that kept a remainder (a sanction in force) needs the sanction rows above to be gone, and the sweep of stray rows (a row whose person was

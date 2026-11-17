@@ -321,6 +321,10 @@ The store side: `StoredReport` gains optional `urgent` and `evidenceRef`; `Repor
 `Store` methods `setReportUrgent`, `setHandoff`, `setEscalation`, `countOpenUrgent`, `countOpenEscalated`, `insertComment`, `listComments`, `deleteComment`, `countComments`,
 `purgeReportsByReason`, `addChatCounts`, `chatCounts`, `purgeChatCounts` and `insightRows` (with `CommentRow`, `ChatDayRow`, `InsightRow`, `COMMENTS_PER_REPORT_MAX`) back the urgent lane,
 the staff thread and Insights; `purgeReports` also deletes the staff comments of the reports it deletes.
+The urgent lane: `cw.cases.setUrgent`, `cw.cases.handoff` (`report.handoff`) and `cw.cases.urgentCount` (`CaseWorkflow`, `CaseMarkResult`); `cw.cases.next` serves the oldest free urgent case first
+(under the same `category` and `reason`, ignoring `rankDownHabitual` and `signalBoost`, never over a claim); `cw.reports.dismissMany` leaves urgent reports open and counts them in
+`skipped.urgent`; a `welfare` report refuses `bad_faith` and `upheld`, writes no rule gap and is left out of a reporter's accuracy; `retention.welfareReportsMs` deletes welfare
+reports on their own clock (`PurgeResult.welfareReports`).
 
 ## Slow mode and flood control
 

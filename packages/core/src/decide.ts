@@ -14,6 +14,9 @@ import { isNonPersonReporter } from './privacy.js';
 import type { AiOutcomeInsert, Clock, ConductLevel, Logger, ReportExcerptLine, ReportRecord, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
 
 /** True when someone filed the report and still is somebody: not a report a system filed, and not one whose reporter was erased (`erased:<id>`). */
+/** The reason id of a report that someone may be at risk (see `DEFAULT_REPORT_REASONS`). A report under it is noted or dismissed, never upheld or marked bad faith. */
+const WELFARE_REASON_ID = 'welfare';
+
 const hasPersonReporter = (report: ReportRecord): boolean => !isOriginReport(report) && !isNonPersonReporter(report.reporterSubject);
 
 // The one path every moderator decision on a report takes. A decision closes the report, writes each sanction and
@@ -474,6 +477,12 @@ export class DecisionService {
     if (hasPersonReporter(report)) scope.add(this.subjects.canonical(report.reporterSubject));
     // There is no reporter to blame for a report nobody filed.
     if (norm.verdict === 'bad_faith' && isOriginReport(report)) throw new Error('bad_faith needs a reporter');
+    // A report about someone who may be at risk: a reporter is never marked for it, nobody is sanctioned over it (the verdict is `noted` or `no_action`), and it never writes a
+    // rule-gap row.
+    if (report.reportedReason === WELFARE_REASON_ID) {
+      if (norm.verdict === 'bad_faith' || norm.verdict === 'upheld') throw new Error('a welfare report is noted or dismissed');
+      if (norm.actions.some((a) => a.rule === 'uncovered')) throw new Error('a welfare report writes no rule gap');
+    }
 
     return norm.actions.map((a) => {
       if (!scope.has(a.subject)) return bad();

@@ -343,6 +343,9 @@ export class CaseDesk {
     const boost = filter.signalBoost;
     if (boost !== undefined && typeof boost !== 'boolean') throw new RangeError('cases: signalBoost must be a boolean');
     const boostMode = boost === true;
+    // An urgent case first, whatever rank-down and the signal boost would say; a case another moderator holds is skipped, never taken.
+    const urgent = this.nextUrgent(actor, category, reason);
+    if (urgent !== null) return urgent;
     const seen = new Set<SubjectId>();
     // Ranked-down people in the order the scan met them (oldest first).
     const deferred: SubjectId[] = [];
@@ -423,6 +426,43 @@ export class CaseDesk {
       if (won !== null) return won;
     }
     return null;
+  }
+
+  /**
+   * The urgent pass of `next`: the oldest FREE case with an open urgent report, under the caller's category and reason filters, ignoring `rankDownHabitual` and `signalBoost`. Null
+   * when there is none (a store that cannot count urgent reports has none, so the ordinary scan runs unchanged; a page is checked for the flag itself, so a custom store that
+   * ignores the `urgent` filter cannot make an ordinary report look urgent).
+   */
+  private nextUrgent(actor: string, category: ReportCategory | undefined, reason: string | null | undefined): NextCase | null {
+    if (typeof this.store.countOpenUrgent !== 'function' || this.store.countOpenUrgent() === 0) return null;
+    const seen = new Set<SubjectId>();
+    let after: { createdAt: number; id: string } | undefined;
+    for (;;) {
+      const page = this.store.listOpenReports({
+        urgent: true,
+        ...(category === undefined ? {} : { category }),
+        ...(reason === undefined ? {} : { reason }),
+        ...(after === undefined ? {} : { after: after.createdAt, afterId: after.id }),
+        limit: NEXT_PAGE,
+      });
+      const candidates: SubjectId[] = [];
+      for (const report of page) {
+        if (report.urgent !== true) continue;
+        const person = this.subjects.canonical(report.targetSubject);
+        if (seen.has(person)) continue;
+        seen.add(person);
+        candidates.push(person);
+      }
+      const held = new Set(this.store.loadClaims(candidates, this.clock.now()).map((c) => c.person));
+      for (const person of candidates) {
+        if (held.has(person)) continue;
+        const won = this.tryClaim(person, actor);
+        if (won !== null) return won;
+      }
+      const last = page[page.length - 1];
+      if (page.length < NEXT_PAGE || last === undefined) return null;
+      after = { createdAt: last.createdAt, id: last.id };
+    }
   }
 
   /** Did a claim `next` handed this moderator on this person run out within the last claim window? Forgets markers older than that. */

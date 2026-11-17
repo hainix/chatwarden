@@ -2447,6 +2447,7 @@ export class SqliteStore implements Store, TermStore {
                 SUM(status = 'dismissed' AND bad_faith = 1) AS bad_faith
          FROM kit_reports
          WHERE reporter_subject IN (${marks}) AND created_at >= ? AND status != 'open'
+           AND (reported_reason IS NULL OR reported_reason <> 'welfare')
          GROUP BY reporter_subject`;
         for (const r of this.db.prepare(sql).all(...part, since)) {
           out.push({ reporter: String(r.reporter), actioned: Number(r.actioned), noAction: Number(r.no_action), badFaith: Number(r.bad_faith) });

@@ -70,6 +70,20 @@ export type ReportDetailRefusal = 'off' | 'not_found' | 'not_reporter' | 'too_la
 
 export type ReportDetailResult = { ok: true } | { ok: false; refused: ReportDetailRefusal };
 
+/**
+ * What only the kit's own callers may add to a report at intake. The public {@link ReportInput} has no field for them, and the facade's `cw.reports.submit` takes none, so a
+ * player's body can never set them: `urgent` (a system rule that files an urgent report) and `evidenceRef` (the game's own id for the evidence behind it, read from its server
+ * side, a closed alphabet with no dot or slash). A reason flagged urgent makes the report urgent whatever this says.
+ * @internal
+ */
+export interface ReportIntakeExtras {
+  urgent?: boolean;
+  evidenceRef?: string | null;
+}
+
+/** An evidence ref the kit will store: 1 to 64 of `A-Z a-z 0-9 _ : -`. Anything else is dropped, never stored. */
+export const EVIDENCE_REF_RE = /^[A-Za-z0-9_:-]{1,64}$/;
+
 export interface ReportInput {
   roomId: string;
   /** The seat the reporter sits in. */
@@ -123,6 +137,8 @@ export interface SystemReportInput {
   target: SubjectId;
   lineId: string | null;
   reportedReason: 'spam' | 'personal_info';
+  /** The rule that files the report says it is urgent (a boolean `true`; anything else is not). Only this internal caller can: no player body reaches it. @internal */
+  urgent?: boolean;
 }
 
 /**
@@ -267,9 +283,9 @@ export class ReportService {
    * the reporter's seat out is ignored), otherwise the seat's current occupant. The excerpt is the room's evidence
    * snapshot: each line stores `p`, its writer's index in the report's `people` list, and no identity.
    */
-  async submit(input: ReportInput): Promise<ReportResult> {
+  async submit(input: ReportInput, extras?: ReportIntakeExtras): Promise<ReportResult> {
     try {
-      return this.run(input);
+      return this.run(input, extras);
     } catch (err) {
       this.warn('reports.submit_failed', { error: errName(err) });
       return refuse('off');
@@ -371,6 +387,8 @@ export class ReportService {
       status: 'open',
       origin: 'filter',
       originKey: input.originKey,
+      urgent: input.urgent === true,
+      evidenceRef: null,
     };
     const dayStart = Math.floor(now / DAY_MS) * DAY_MS;
     const cap = this.flagCap();
@@ -478,7 +496,7 @@ export class ReportService {
     return written === true ? { ok: true } : { ok: false, refused: 'already_added' };
   }
 
-  private run(input: ReportInput): ReportResult {
+  private run(input: ReportInput, extras?: ReportIntakeExtras): ReportResult {
     if (!this.enabled()) return refuse('off');
 
     const { roomId } = input;
@@ -534,6 +552,9 @@ export class ReportService {
         excerpt,
         people,
         status: 'open',
+        // A snapshot: the reason's flag as it is now, or the kit's own caller said so. Never from the player's input.
+        urgent: (given.id !== null && findReason(this.reporting().reasons, given.id)?.urgent === true) || extras?.urgent === true,
+        evidenceRef: typeof extras?.evidenceRef === 'string' && EVIDENCE_REF_RE.test(extras.evidenceRef) ? extras.evidenceRef : null,
       };
       const toStore = row;
       const written = this.store.transaction(() => this.store.insertReport(toStore));

@@ -242,6 +242,8 @@ export type {
 } from './audit.js';
 export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
+export { CaseWorkflow } from './caseWorkflow.js';
+export type { CaseMarkResult } from './caseWorkflow.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 // Desk, safety and room settings (@experimental): the three profile sections of the urgent-lane and rooms release, all defaulted.

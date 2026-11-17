@@ -22,6 +22,8 @@ import type { Limits, LimitsInput } from './limits.js';
 import { createAutomation } from './automation.js';
 import { hmacSha256Hex } from './crypto.js';
 import type { AutomationFacade } from './automation.js';
+import { CaseWorkflow } from './caseWorkflow.js';
+import type { CaseMarkResult } from './caseWorkflow.js';
 import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
@@ -479,6 +481,10 @@ export interface Chatwarden {
      */
     releaseWhenDone(person: SubjectId, actor: string): boolean;
     /**
+     * With an urgent report open, the oldest free case that has one is served first, under the same `category` and `reason` filters, ignoring `rankDownHabitual` and `signalBoost`
+     * for that pass; a case another moderator holds is skipped (urgent never overrides a claim), and when none is free the ordinary scan below runs unchanged. With no urgent report open
+     * this is exactly what it was.
+     *
      * Claim and return the oldest OPEN case nobody holds, optionally only cases with an open report of `category`
      * or that gave `reason` (an id, the old `disruption` reading as `griefing`; `null`: none given; `RangeError` for an unknown category or a
      * malformed id), or null. A case is a person, ranked by their oldest open report and opened on
@@ -497,6 +503,21 @@ export interface Chatwarden {
      * @experimental (the `rankDownHabitual` and `signalBoost` filters)
      */
     next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean }): NextCase | null;
+    /**
+     * Mark an open report urgent or not urgent (any moderator, both directions; the staff layer audits it). `ok: true` also for a repeat; `closed` for a decided report, `not_found` for
+     * an unknown id. Urgent is a stored snapshot (a reason's flag sets it at filing, see `reporting.reasons[].urgent`); this is the one other way it changes. Moves the change token,
+     * announces nothing, touches no claim and nothing about a person. `RangeError` for a malformed actor or a non-boolean flag; `TypeError` for a store without the urgent lane.
+     * @experimental
+     */
+    setUrgent(reportId: string, actor: string, on: boolean): CaseMarkResult;
+    /**
+     * Mark that `actor` passed the case to the game's safety team: who and when, once (the first call wins; a repeat answers `ok: true` and changes nothing). Allowed on an urgent or an
+     * ordinary open report. Emits `report.handoff` (the report id and the time only) after the write commits, fenced. It contacts no one and writes nothing to the person.
+     * @experimental
+     */
+    handoff(reportId: string, actor: string): CaseMarkResult;
+    /** How many open reports are urgent (0 for a store without the urgent lane). @experimental */
+    urgentCount(): number;
     /**
      * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
      * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
@@ -1288,8 +1309,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         createdAt: stored.createdAt,
         category: stored.category,
         reportedReason: stored.reportedReason ?? null,
-        // Read from the stored report once the store keeps it (U3); a report is not urgent until then.
-        urgent: false,
+        urgent: stored.urgent === true,
         ...(stored.origin === null || stored.origin === undefined ? {} : { origin: stored.origin }),
         roomTags: { ...stored.tags },
       });
@@ -1386,6 +1406,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     boosted: (people) => signals.boosted(people),
   });
   const reasonBook = new ReasonBook(store);
+  const caseWorkflow = new CaseWorkflow({ store, clock, emit: (event) => bus.emit(event) });
 
   // The AI read service. It listens for new reports and only enqueues; with no adapter it is a facade that is always off.
   const aiService =
@@ -1637,6 +1658,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       release: (person, actor) => desk.release(person, actor),
       releaseWhenDone: (person, actor) => desk.releaseWhenDone(person, actor),
       next: (actor, filter) => desk.next(actor, filter),
+      setUrgent: (reportId, actor, on) => caseWorkflow.setUrgent(reportId, actor, on),
+      handoff: (reportId, actor) => caseWorkflow.handoff(reportId, actor),
+      urgentCount: () => caseWorkflow.urgentCount(),
       view: (person, actor) => desk.view(person, actor),
       viewers: (person, except) => desk.viewers(person, except),
       viewersOf: (people, except) => desk.viewersOf(people, except),

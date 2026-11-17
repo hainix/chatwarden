@@ -484,6 +484,25 @@ export function deskContract(name: string, make: () => Store): void {
       });
     });
 
+    describe('reporter outcomes', () => {
+      it('a decided welfare report is left out of the numbers; every other report counts as before', () => {
+        const s = make();
+        for (const [id, reason, status] of [['a', 'welfare', 'dismissed'], ['b', 'welfare', 'dismissed'], ['c', 'harassment', 'dismissed'], ['d', null, 'actioned']] as const) {
+          s.insertReport(report(id, { reporterSubject: 's_same', reportedReason: reason, category: reason === null ? 'other' : 'harassment', targetSubject: `s_t_${id}` }));
+          s.closeReport(id, status, false, 'mod', NOW + 1, 'n');
+        }
+        s.insertReport(report('e', { reporterSubject: 's_same', reportedReason: 'welfare', targetSubject: 's_t_e' }));
+        expect(s.reporterOutcomes?.(['s_same'], 0)).toEqual([{ reporter: 's_same', actioned: 1, noAction: 1, badFaith: 0 }]);
+      });
+
+      it('a reporter with only welfare reports has no row at all', () => {
+        const s = make();
+        s.insertReport(report('a', { reporterSubject: 's_w', reportedReason: 'welfare' }));
+        s.closeReport('a', 'dismissed', false, 'mod', NOW + 1, 'n');
+        expect(s.reporterOutcomes?.(['s_w'], 0)).toEqual([]);
+      });
+    });
+
     describe('an erase of the person the report is about', () => {
       it('deletes the reports about them with their comments, and keeps the comments of other reports', async () => {
         const s = make();

@@ -823,6 +823,8 @@ export class MemoryStore implements Store {
     const by = new Map<SubjectId, ReporterOutcomeRow>();
     for (const r of this.reports) {
       if (r.origin !== null || !wanted.has(r.reporterSubject) || r.status === 'open' || r.createdAt < since) continue;
+      // A report about someone who may be at risk is never a reporter's false report: it is left out of the numbers.
+      if (r.reportedReason === 'welfare') continue;
       const row = by.get(r.reporterSubject) ?? { reporter: r.reporterSubject, actioned: 0, noAction: 0, badFaith: 0 };
       if (r.status === 'actioned') row.actioned += 1;
       else if (r.badFaith) row.badFaith += 1;

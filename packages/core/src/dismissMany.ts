@@ -60,8 +60,11 @@ export type DismissManyResult =
       dismissed: number;
       /** Already closed by an identical earlier dismissal. */
       replayed: number;
-      /** `claimed`: held by another moderator; `decided`: closed meanwhile by a different decision. */
-      skipped: { claimed: number; decided: number };
+      /**
+       * `claimed`: held by another moderator; `decided`: closed meanwhile by a different decision; `urgent`: an urgent report, which a bulk dismissal never closes (it stays open for a
+       * person to read; a single dismissal of it is allowed).
+       */
+      skipped: { claimed: number; decided: number; urgent: number };
       /** More open reports in scope than `limit`. */
       more: boolean;
       /** Dismissed plus replayed, for the staff layer's audit rows. */
@@ -160,12 +163,14 @@ export async function dismissMany(deps: DismissManyDeps, input: DismissManyInput
   const more = rows.length > limit;
   const candidates = rows.slice(0, limit);
 
+  // An urgent report is never closed by a bulk: it is a person's to read. Counted, so the caller can say so.
+  let todo = candidates.filter((r) => r.urgent !== true);
+  const urgent = candidates.length - todo.length;
   // Another moderator's live claim keeps that case out of the sweep, counted so the caller can say so.
   let claimed = 0;
-  let todo = candidates;
-  if (input.ignoreClaims !== true && candidates.length > 0) {
-    const held = deps.holders([...new Set(candidates.map((r) => subjects.canonical(r.targetSubject)))]);
-    todo = candidates.filter((r) => {
+  if (input.ignoreClaims !== true && todo.length > 0) {
+    const held = deps.holders([...new Set(todo.map((r) => subjects.canonical(r.targetSubject)))]);
+    todo = todo.filter((r) => {
       const claim = held.get(subjects.canonical(r.targetSubject));
       if (claim !== undefined && claim.by !== actor) {
         claimed += 1;
@@ -181,7 +186,7 @@ export async function dismissMany(deps: DismissManyDeps, input: DismissManyInput
     open: todo.length,
     dismissed: 0,
     replayed: 0,
-    skipped: { claimed, decided: 0 },
+    skipped: { claimed, decided: 0, urgent },
     more,
     reportIds: [] as string[],
     targets: [] as SubjectId[],

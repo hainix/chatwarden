@@ -793,7 +793,8 @@ CREATE INDEX kit_ai_actions_by_created ON kit_ai_actions (created_at);
     //   the urgent queue and its count read), the hand-off pair (`handoff_at`, `handoff_by`, the first mark only), the escalation triple (`escalated_to` senior or owner, by
     //   whom, when; all NULL while none is asked) and `evidence_ref` (the game's opaque id). Staff ids only, never a player. `kit_report_comments` is the staff thread of a
     //   report (a comment, an ask, an escalation, a look done), at most 50 a report, deleted with its report; `kit_chat_days` is one row per UTC day with two counts (lines
-    //   delivered and refused), written only when `desk.insights` is on: no player, room or text.
+    //   delivered and refused), written only when `desk.insights` is on: no player, room or text. `kit_reports_by_reporter_outcome_reason` is `kit_reports_by_reporter_outcome`
+    //   with the reason added, so the reporter-accuracy read (which leaves a welfare report out) is still answered from one covering index.
     version: 26,
     sql: `
 ALTER TABLE kit_reports ADD COLUMN origin TEXT CHECK (origin IS NULL OR origin IN ('filter', 'watch'));
@@ -854,6 +855,7 @@ CREATE TABLE kit_report_comments (
   text      TEXT
 );
 CREATE INDEX kit_report_comments_by_report ON kit_report_comments (report_id, at, id);
+CREATE INDEX kit_reports_by_reporter_outcome_reason ON kit_reports (reporter_subject, created_at, status, bad_faith, reported_reason);
 
 CREATE TABLE kit_chat_days (
   day       TEXT PRIMARY KEY,
