@@ -147,17 +147,25 @@ describe('migration 21: signal rows', () => {
   it('the ALTER leaves existing kit_ai_reads rows readable and signals_json null', () => {
     const db = memDb();
     const old = openAt20(db);
-    // The rows are pending, so no read is stored yet: every loadAiRead is null before and after. (The store of today filters on `purpose`, a column from version 25, so it opens the
-    // database at its latest version; what this test pins is that migration 21 left the rows and the new column in place.)
-    const readsBefore = Array.from({ length: 15 }, () => null);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM kit_ai_reads').get()).toEqual({ n: 15 });
+    // Two of the rows are finished reads (status ok, with a stored answer), so a lost or altered column would show; read with raw SQL, as version 20 wrote them.
+    db.prepare("UPDATE kit_ai_reads SET status = 'ok', severity = 'rude', rule = '2', summary = 's', evidence_json = '[\"L1\"]', confidence = 'high', rec_json = NULL WHERE id IN ('read-0', 'read-1')").run();
+    const before = db.prepare('SELECT * FROM kit_ai_reads ORDER BY id').all();
+    expect(before).toHaveLength(15);
+    expect(before.filter((r) => r.status === 'ok')).toHaveLength(2);
+    expect(before.every((r) => !('signals_json' in r))).toBe(true);
     old.close();
-    const store = openStore({ db });
-    const readsAfter = Array.from({ length: 15 }, (_, i) => store.loadAiRead(`m${String(i).padStart(4, '0')}`));
-    expect(readsAfter).toEqual(readsBefore);
+    // Opened through migration 21 only (the store of today also has version 25's `purpose`, which the rows must not need yet).
+    const store = openStore({ db, migrations: UP_TO_21 });
+    expect(store.schemaVersion()).toBe(21);
+    const after = db.prepare('SELECT * FROM kit_ai_reads ORDER BY id').all();
+    // every old column is exactly as it was, and the one new column is null on every row
+    expect(after.map(({ signals_json, ...rest }) => ({ signals_json, ...rest }))).toEqual(before.map((r) => ({ signals_json: null, ...r })));
     expect(db.prepare('SELECT COUNT(*) AS n, COUNT(signals_json) AS set_n FROM kit_ai_reads').get()).toEqual({ n: 15, set_n: 0 });
-    // A new read after the upgrade works as before.
-    expect(store.reserveAiRead(pending(99), NOW + 60_000, NOW)).toMatchObject({ reserved: true });
+    // The database goes on to today's version, and a new read works there as before.
+    store.close();
+    const latest = openStore({ db });
+    expect(latest.reserveAiRead(pending(99), NOW + 60_000, NOW)).toMatchObject({ reserved: true });
+    expect(db.prepare('SELECT COUNT(*) AS n, COUNT(signals_json) AS set_n FROM kit_ai_reads WHERE id LIKE ?').get('read-%')).toEqual({ n: 15, set_n: 0 });
   });
 
   it('a version 18 database with rows upgrades through 19, 20 and 21 without changing data', () => {
