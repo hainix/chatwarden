@@ -64,6 +64,13 @@ const NEEDS_CORE_0_1_11 = new Set(['@chatwarden/hub-react']);
 // keeps ^0.1.9; hub-react's floors stay where 0.1.11 put them; the rest keep theirs.
 const NEW_RANGE_0_1_12 = '^0.1.12';
 const NEEDS_CORE_0_1_12 = new Set(['@chatwarden/http', '@chatwarden/store-memory', '@chatwarden/store-sqlite']);
+// ...and, for 0.1.13 (AI levels 3 and 4, release 1: the gate dashboard and the do-not-automate mark), what is new in core: `cw.ai.gates` and `cw.people.automation` (http calls them), the optional
+// `aiGateRows`, `setNoAutomation` and `loadNoAutomation` `Store` methods and the `AiGateRow` and `NoAutomationRow` types that store-memory and store-sqlite name in their signatures, and the types
+// `AiGatesView`, `AutomationCode` and the audit action `person.automation` that hub-react names; hub-react also reads http's new routes and the permission key `automation.write`. That raises
+// five peers and nothing else: http, store-memory, store-sqlite and hub-react on core, hub-react on http. Each was confirmed with a grep of its source (see "peer floors" below). discord,
+// player-react, matcher, profanity and hub-element use nothing new and keep their floors.
+const NEW_RANGE_0_1_13 = '^0.1.13';
+const NEEDS_CORE_0_1_13 = new Set(['@chatwarden/http', '@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/hub-react']);
 // hub-element's optional peer on hub-react stays at ^0.1.5: it imports only what hub-react has had since then, and its types are unchanged.
 const HUB_REACT_RANGE_FOR_ELEMENT = '^0.1.5';
 const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
@@ -74,12 +81,13 @@ const BUNDLED = new Set(['@chatwarden/hub-element']);
 /** The range `pkgName` must declare for its peer `peerName`. */
 const peerRangeOf = (pkgName: string, peerName: string): string => {
   if (peerName === '@chatwarden/core') {
+    if (NEEDS_CORE_0_1_13.has(pkgName)) return NEW_RANGE_0_1_13;
     if (NEEDS_CORE_0_1_12.has(pkgName)) return NEW_RANGE_0_1_12;
     if (NEEDS_CORE_0_1_11.has(pkgName)) return NEW_RANGE_0_1_11;
     return NEEDS_NEW_KIT.has(pkgName) ? NEW_KIT_RANGE_0_1_9 : PEER_RANGE;
   }
   // hub-react names http's `AiReadAgainBody` (0.1.7) and reads the `ai` wire fields, since 0.1.8 `boosted`, `signals` and `limits`, and since 0.1.9 the appeal and rename routes, `features` and `MeFeatures`; hub-element's types are hub-react's, unchanged.
-  if (peerName === '@chatwarden/http') return NEW_RANGE_0_1_11;
+  if (peerName === '@chatwarden/http') return NEW_RANGE_0_1_13;
   if (peerName === '@chatwarden/hub-react') return HUB_REACT_RANGE_FOR_ELEMENT;
   return PEER_RANGE;
 };
@@ -144,7 +152,7 @@ describe('core is a peer, never a dependency', () => {
     expect(Object.keys(core.devDependencies ?? {}).filter(ownScope)).toEqual(['@chatwarden/store-memory']);
   });
   it.each(dependents.map((p) => [p.pkg.name, p.pkg] as const))(
-    '%s peers on core at its floor (^0.1.0, ^0.1.9 where it needs the 0.1.9 kit, ^0.1.11 where it uses the shared term list, ^0.1.12 where it uses cw.links or byRef) and dev-depends on core at the group version',
+    '%s peers on core at its floor (^0.1.0, ^0.1.9 where it needs the 0.1.9 kit, ^0.1.13 where it uses the gate dashboard or the do-not-automate mark) and dev-depends on core at the group version',
     (_n, pkg) => {
       expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(peerRangeOf(pkg.name, '@chatwarden/core'));
       expect(pkg.devDependencies?.['@chatwarden/core']).toBe(VERSION);
@@ -186,29 +194,51 @@ describe('store-memory', () => {
 
 describe('peer floors', () => {
   const byName = (n: string): Manifest => published.find((p) => p.pkg.name === n)!.pkg;
-  it.each([...NEEDS_NEW_KIT])('%s needs core ^0.1.9 (appeals and names: the optional Store methods and row types, cw.appeals, cw.names, cw.people.accountIds, the new events and types), ^0.1.11 where it uses the shared term list names, and ^0.1.12 where it uses links or byRef', (name) => {
-    expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe(NEEDS_CORE_0_1_12.has(name) ? '^0.1.12' : NEEDS_CORE_0_1_11.has(name) ? '^0.1.11' : '^0.1.9');
+  it.each([...NEEDS_NEW_KIT])('%s needs core ^0.1.9 (appeals and names: the optional Store methods and row types, cw.appeals, cw.names, cw.people.accountIds, the new events and types), and ^0.1.13 where it uses the gate dashboard or the do-not-automate mark', (name) => {
+    expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe(NEEDS_CORE_0_1_13.has(name) ? '^0.1.13' : '^0.1.9');
   });
-  it('the floors that name 0.1.12 are the three that use something only 0.1.12 has; the floors that name 0.1.11 are those of hub-react; nothing else moved', () => {
+  it('the floors that name 0.1.13 are the four that use something only 0.1.13 has; nothing else moved', () => {
     const atNew: string[] = [];
-    const atPrev: string[] = [];
     for (const { pkg } of published) {
       for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {}).filter(([n]) => ownScope(n))) {
-        expect(['^0.1.0', '^0.1.5', '^0.1.9', '^0.1.11', '^0.1.12'], `${pkg.name} peer ${peer}`).toContain(range);
-        if (range === '^0.1.12') atNew.push(`${pkg.name} -> ${peer}`);
-        if (range === '^0.1.11') atPrev.push(`${pkg.name} -> ${peer}`);
+        expect(['^0.1.0', '^0.1.5', '^0.1.9', '^0.1.13'], `${pkg.name} peer ${peer}`).toContain(range);
+        if (range === '^0.1.13') atNew.push(`${pkg.name} -> ${peer}`);
       }
     }
-    expect(atNew.sort()).toEqual(['@chatwarden/http -> @chatwarden/core', '@chatwarden/store-memory -> @chatwarden/core', '@chatwarden/store-sqlite -> @chatwarden/core']);
-    expect(atPrev.sort()).toEqual(['@chatwarden/hub-react -> @chatwarden/core', '@chatwarden/hub-react -> @chatwarden/http']);
-    expect(VERSION).toBe('0.1.12');
-    expect(peerRangeOf('@chatwarden/http', '@chatwarden/core')).toBe('^0.1.12');
-    expect(peerRangeOf('@chatwarden/hub-react', '@chatwarden/core')).toBe('^0.1.11');
-    expect(peerRangeOf('@chatwarden/hub-react', '@chatwarden/http')).toBe('^0.1.11');
+    expect(atNew.sort()).toEqual([
+      '@chatwarden/http -> @chatwarden/core',
+      '@chatwarden/hub-react -> @chatwarden/core',
+      '@chatwarden/hub-react -> @chatwarden/http',
+      '@chatwarden/store-memory -> @chatwarden/core',
+      '@chatwarden/store-sqlite -> @chatwarden/core',
+    ]);
+    expect(VERSION).toBe('0.1.13');
+    expect(peerRangeOf('@chatwarden/http', '@chatwarden/core')).toBe('^0.1.13');
+    expect(peerRangeOf('@chatwarden/hub-react', '@chatwarden/core')).toBe('^0.1.13');
+    expect(peerRangeOf('@chatwarden/hub-react', '@chatwarden/http')).toBe('^0.1.13');
     // Nothing else moved.
     for (const name of ['@chatwarden/discord', '@chatwarden/player-react']) expect(peerRangeOf(name, '@chatwarden/core'), name).toBe('^0.1.9');
     for (const name of ['@chatwarden/core', '@chatwarden/matcher', '@chatwarden/profanity']) expect(peerRangeOf(name, '@chatwarden/core'), name).toBe('^0.1.0');
     expect(peerRangeOf('@chatwarden/hub-element', '@chatwarden/hub-react')).toBe('^0.1.5');
+  });
+  // The floors above are raised because the package really names something only 0.1.13 has (a grep of its source), never for nothing.
+  it.each([
+    ['@chatwarden/http', /\bcw\.ai\.gates\b|\bcw\.people\.automation\b|\bAUTOMATION_CODES\b/],
+    ['@chatwarden/store-memory', /\bNoAutomationRow\b|\bAiGateRow\b/],
+    ['@chatwarden/store-sqlite', /\bNoAutomationRow\b|\bAiGateRow\b/],
+    ['@chatwarden/hub-react', /\bAiGatesView\b|\bAutomationCode\b|person\.automation/],
+  ] as const)('%s really uses a name that is new in 0.1.13 (the floor is not raised for nothing)', (name, pattern) => {
+    const dir = join(root, 'packages', name.replace('@chatwarden/', ''), 'src');
+    const files = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []));
+    expect(files(dir).some((f) => pattern.test(readFileSync(f, 'utf8'))), name).toBe(true);
+  });
+  it('discord, player-react, hub-element, matcher and profanity name nothing that is new in 0.1.13 from core', () => {
+    const files = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []));
+    for (const name of ['discord', 'player-react', 'hub-element', 'matcher', 'profanity']) {
+      for (const f of files(join(root, 'packages', name, 'src'))) {
+        expect(readFileSync(f, 'utf8'), `${name}/${f}`).not.toMatch(/\bAiGatesView\b|\bAiGateRow\b|\bNoAutomationRow\b|\bAUTOMATION_CODES\b|\bAutomationCode\b|\bcw\.ai\.gates\b|\bcw\.people\.automation\b|person\.automation|\bsetNoAutomation\b|\baiGateRows\b/);
+      }
+    }
   });
   it.each([
     ['@chatwarden/http', /\bcw\.links\b|\.sanctions\.byRef\b|\bnormalizeRefCode\b/],
@@ -268,8 +298,8 @@ describe('peer floors', () => {
   it.each(['@chatwarden/matcher', '@chatwarden/profanity'])('%s uses nothing new in core and keeps ^0.1.0', (name) => {
     expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.0');
   });
-  it('hub-react peers on http ^0.1.11 (the community routes; ^0.1.9 had the appeal and rename routes) and hub-element on hub-react ^0.1.5 (it uses nothing newer)', () => {
-    expect(byName('@chatwarden/hub-react').peerDependencies?.['@chatwarden/http']).toBe('^0.1.11');
+  it('hub-react peers on http ^0.1.13 (the gate route and the automation.write permission; ^0.1.11 had the community routes, ^0.1.9 the appeal and rename routes) and hub-element on hub-react ^0.1.5 (it uses nothing newer)', () => {
+    expect(byName('@chatwarden/hub-react').peerDependencies?.['@chatwarden/http']).toBe('^0.1.13');
     expect(byName('@chatwarden/hub-element').peerDependencies?.['@chatwarden/hub-react']).toBe('^0.1.5');
   });
   it('every @chatwarden floor is a caret range the group version satisfies, so each can be installed', () => {
@@ -375,7 +405,7 @@ describe('hub-react', () => {
     expect(Object.keys(hub().peerDependencies ?? {}).sort()).toEqual(['@chatwarden/core', '@chatwarden/http', 'react', 'react-dom']);
     expect(hub().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
     expect(hub().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
-    expect(hub().peerDependencies?.['@chatwarden/http']).toBe(NEW_RANGE_0_1_11);
+    expect(hub().peerDependencies?.['@chatwarden/http']).toBe(NEW_RANGE_0_1_13);
     expect(hub().dependencies).toBeUndefined();
   });
   it('ships the stylesheet as ./styles.css and the optional font as ./font.css, and lists only those under sideEffects', () => {

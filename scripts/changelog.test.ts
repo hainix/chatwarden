@@ -408,3 +408,83 @@ describe('the 0.1.12 notes (the Discord bot, Coop and EOS), in all ten CHANGELOG
     expect(readdirSync(join(root, '.changeset')).sort()).toEqual(['config.json']);
   });
 });
+
+// 0.1.13 (AI levels 3 and 4, release 1: the gate dashboard and the do-not-automate mark): the notes are in all ten CHANGELOGs and cannot be edited after publish, so what an adopter
+// must be told is pinned here: that nothing lets the AI act, the migration (one-way, back up first), the routes and permissions, the refused `source: 'ai'`, the widened unions,
+// and the peer floors.
+const section0113 = (dir: string): string => {
+  const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+  const at = text.indexOf('## 0.1.13');
+  const end = text.indexOf('\n## 0.1.12', at);
+  return at < 0 ? '' : text.slice(at, end < 0 ? undefined : end);
+};
+
+describe('the 0.1.13 notes (the AI gate dashboard and the do-not-automate mark), in all ten CHANGELOGs', () => {
+  const NEEDLES = [
+    // The promise: nothing acts.
+    'Nothing in this release lets the AI act',
+    '`@experimental`',
+    // The seam and the refused source.
+    '`source: \'ai\'`',
+    '`applySanction`',
+    '`writeSanction`',
+    '`validateSanctionInput`',
+    '`service`',
+    // The new names.
+    '`cw.ai.gates()`',
+    '`AiGatesView`',
+    '`cw.people.automation`',
+    '`automationAllowed(person, lookup?)`',
+    '`AUTOMATION_CODES`',
+    '`withMemoryAi(store)`',
+    // The routes and permissions.
+    '`GET /ai/gates`',
+    '`PUT /people/:id/automation`',
+    '`ai.review`',
+    '`ai.pause`',
+    '`automation.write`',
+    // The migration.
+    'Migration 24',
+    '`kit_ai_noauto`',
+    'one-way',
+    'Back up the database',
+    '`aiGateRows`',
+    '`setNoAutomation`',
+    '`loadNoAutomation`',
+    // The unions and the floors.
+    'Widened unions',
+    '`person.automation`',
+    '`PermissionKey`',
+    'peer floors raised on purpose',
+    '`@chatwarden/core` `^0.1.13`',
+    '`@chatwarden/http`',
+    '`@chatwarden/store-memory`',
+    '`@chatwarden/store-sqlite`',
+    '`@chatwarden/hub-react`',
+  ];
+  it.each(dirs)('%s names every one of them', (dir) => {
+    const s = section0113(dir);
+    expect(s.length, `${dir} has a 0.1.13 section`).toBeGreaterThan(1000);
+    for (const needle of NEEDLES) expect(s, `${dir}: ${needle}`).toContain(needle);
+  });
+  it('all ten carry exactly the same text', () => {
+    const first = section0113(dirs[0] as string);
+    for (const dir of dirs) expect(section0113(dir), dir).toBe(first);
+  });
+  it('the section sits above 0.1.12, as a patch change', () => {
+    for (const dir of dirs) {
+      const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+      expect(text.indexOf('## 0.1.13'), dir).toBeGreaterThan(-1);
+      expect(text.indexOf('## 0.1.13'), dir).toBeLessThan(text.indexOf('## 0.1.12'));
+      expect(section0113(dir), dir).toMatch(/### Patch Changes/);
+    }
+  });
+  it('says what the AI cannot do, and does not claim it can act', () => {
+    const s = section0113('core');
+    expect(s).toContain('never writes a sanction, a strike, a mute or a notice');
+    expect(s).not.toMatch(/the AI now acts|can now act|acts on its own/i);
+  });
+  it('no consumed changeset is left behind but the config', () => {
+    expect(readdirSync(join(root, '.changeset')).sort()).toEqual(['config.json']);
+  });
+});

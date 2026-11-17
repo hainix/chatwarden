@@ -827,6 +827,10 @@ no longer sent (a dismissal with no reason sends none).
 - **A key does nothing.** See "Guards on the act keys" above: a case that has just appeared, one still loading, an open window, a field
   with focus and a case someone else holds all ignore the act keys on purpose, and none of them says so.
 
+## AI levels 3 and 4, release 1 (0.1.13)
+
+`@experimental` until 0.2, and read-only: **nothing in this release lets the AI act.** Settings > AI > Advanced gains "Where the AI may act", a table of what `GET /ai/gates` says: a row for each rule and conduct level the profile could ever act on, each gate shown as a tick or a cross with its number against the need, what the ladder gives for a clean record, and any cooling date. Cells the AI can never act on (the step is over what it may ever apply) are collapsed under "Never acted on by the AI" with the reason. The hub computes no gate; it shows what the server sent. The page says "Acting is not available in this version", offers no Act option, and adds nothing to Simple mode, the case card or the queue. On the Person page a senior (`automation.write`) gets a `...` item "Do not automate" with a reason picker, and everyone who can read the page sees a quiet line while the person is marked. The client gains `aiGates()` and `setAutomation(person, input)`, the types `AiGatesView`, `AiGateCell`, `AutomationCode` and `AutomationInput`, and `PersonHistory.automation`. A server older than 0.1.13 answers the gate table with "This server does not have the gate view yet". The new words are in the AI catalog (`aiEn`, loaded with `loadAiWords()`), and the audit label for `person.automation` is in the hub's catalog. `@chatwarden/hub-react` now peers on `@chatwarden/core` and `@chatwarden/http` `^0.1.13`.
+
 ## Theming
 
 The hub ships one stylesheet, `@chatwarden/hub-react/styles.css`. Import it once (a bundler, or a `<link>`). Every colour, size,

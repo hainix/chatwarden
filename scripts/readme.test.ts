@@ -1335,3 +1335,46 @@ describe('the corpus service other pages say what the code does', () => {
     expect(text).not.toMatch(MARKETING);
   });
 });
+
+describe('the AI gate dashboard and do-not-automate docs (0.1.13)', () => {
+  const core = flat(section(readme('core'), 'AI levels 3 and 4: the seams and the gate dashboard'));
+  const http = flat(readme('http'));
+  const hub = flat(section(readme('hub-react'), 'AI levels 3 and 4, release 1 (0.1.13)'));
+  const sqlite = flat(readme('store-sqlite'));
+
+  it('core: says nothing acts, what the seam is, the gate view, the mark, the migration (one-way, back up first), the unions and the experimental names', () => {
+    for (const needle of [
+      '**Nothing in this release lets the AI act.**', '`source: \'ai\'`', '`applySanction`', '`writeSanction`', '`validateSanctionInput`', '`service`', '`cw.ai.gates()`', '`AiGatesView`',
+      '`actingAvailable` is false', 'lower 95% bound', '`cw.people.automation`', '`AUTOMATION_CODES`', 'no free text', 'follows a merge', '`automationAllowed(person, lookup?)`',
+      'migration 24 (SQLite)', '`kit_ai_noauto`', '**one-way**', '**back up the file before upgrading**', '`aiGateRows`', '`setNoAutomation`', '`loadNoAutomation`', '`withMemoryAi(store)`',
+      '`AUDIT_ACTIONS` gains `person.automation`', 'Experimental names',
+    ]) {
+      expect(core, needle).toContain(needle);
+    }
+    expect(readme('core')).toContain('| `cw.people` |');
+  });
+
+  it('http: the two routes, the three permissions and the history key are in the tables', () => {
+    for (const needle of [
+      '| `GET /ai/gates` | `policy.read` |', '| `PUT /people/:id/automation` | `automation.write` |', '| `ai.review` | moderator |', '| `ai.pause` | senior |', '| `automation.write` | senior |',
+      'Audited `person.automation`', '`automation` (`{ code, at }`)', 'never who',
+    ]) {
+      expect(http, needle).toContain(needle);
+    }
+    expect(http).toContain('`GET /ai/status`, `GET /ai/gates`');
+  });
+
+  it('hub-react: says it is read-only, what the table shows and the Person page mark, and the floors', () => {
+    for (const needle of [
+      '**nothing in this release lets the AI act.**', '"Where the AI may act"', '"Acting is not available in this version"', '"Never acted on by the AI"', 'computes no gate', '`automation.write`', '`aiGates()`', '`setAutomation(person, input)`', '`^0.1.13`',
+    ]) {
+      expect(hub, needle).toContain(needle);
+    }
+  });
+
+  it('store-sqlite: migration 24 is described like 20 and 22, one-way with a back-up note, with the columns, the index and the table', () => {
+    for (const needle of ['Migration 24 adds five columns', '`kit_ai_outcomes`', '`ai_rule`', '`decided_by`', '`kit_ai_noauto`', '`human`, `holdback`, `review` or `service`', 'a 0.1.12 or older store refuses a database at version 24', 'back up the file before upgrading']) {
+      expect(sqlite, needle).toContain(needle);
+    }
+  });
+});

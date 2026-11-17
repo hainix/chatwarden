@@ -242,3 +242,27 @@ Found building `@chatwarden/http/eos` (K5 E1 to E4, 2026-11).
   and deletes them is not built (design section 13).
 - **Open: pulling sanctions made in the EOS Developer Portal into the kit (`GET /sanctions/v1/sync`), EOS appeals and EOS anti-cheat.** Not built, on purpose (design section 13).
 - **Open: the lookup reads at most 500 sanctions of one user.** A user with more, where ours is not among them, gets no push and a `reconcile` log. If a real player has that many, page further.
+
+## AI levels 3 and 4, release 1 (0.1.13), parked
+
+Found building R1 (the seams and the read-only gate dashboard), 2026-11. Design: [design/2026-11-12-ai-levels-3-4.md](../design/2026-11-12-ai-levels-3-4.md); plan: [2026-11-12-ai-levels-3-4.md](2026-11-12-ai-levels-3-4.md).
+
+- **Decided 2026-11-16 (the maintainers' delegate): the G8 keep gate is a loss test.** The first reading of G8 (the upper Wilson bound of "undone as not a violation" at most 0.05) cannot hold below 73
+  reviewed actions even with no undo, so a cell with 20 to 72 reviewed actions could never keep its licence. From 20 reviewed actions a cell now **loses** its licence when the **lower** bound of its undo rate is
+  above 0.05 (three undos at 20 reviewed, ten at 100), or when two such undos fall within 14 days. The upper bound stays where a licence is granted (G4). Built and pinned in R1
+  (`packages/core/src/ai/gates.ts`, `keepLower`). Design ruling 22.
+- **Decided 2026-11-16 (the maintainers' delegate): bad-faith reports.** The gate maths keeps leaving bad-faith casebook rows out (as built). **For R3 (an act-path requirement):** the act planner (`ai/actPlan.ts`, and
+  the actor's own recheck) must refuse, as a hard override and not as a gate, to act on a report a person marked bad-faith, and on a report from a reporter who has a bad-faith mark. Task 11 and Task 14 tests must pin both.
+  Design ruling 23.
+- **Done in R1: only a person at the desk is a human decision.** A decision from the `api`, `coop` or `auto_filter` source files a casebook row with source `service` and no deciding moderator, so it never earns trust or
+  counts toward breadth (design ruling 24). If an integration should ever count, that is a separate, visible decision.
+- **R1 shows numbers that cannot move yet.** The `reviewed` counts and the cooling dates from undos are zero until the acting release; the appeals columns read "not available" until appeals are on. The gate table is meaningful
+  only after appeals (0.1.9) has run. No cell can open without appeals.
+- **Open, R2: `kit_ai_reads.purpose`.** The confirming read's column was left out of migration 24 on purpose; it comes with Task 9.
+- **Open: the Person page's `...` item is a disclosure.** The Person page had no `...` menu; R1 adds a small one that holds only "Do not automate". If other per-person items arrive (R3's AI actions), fold them in
+  rather than adding a second menu.
+- **Open: `GET /me` does not say whether the store can keep the mark.** A custom store without `setNoAutomation` and `loadNoAutomation` answers the mark route with 404 (the hub shows "Could not change the mark"). The
+  stores in this repository always have them; a `features.automation` flag would be additive if a custom store needs it.
+- **Open, R2: the `ai/**` import allowlist.** The AI folder may import only its own files and ten read-only modules of `core/src` (`eslint.config.js`, `AI_ALLOWED_MODULES`). The confirming read and the act planner will
+  need `gates`, `reach` and `ceilings` (inside the folder, so fine); a new import from outside is added to that list in view, never by loosening the rule.
+
