@@ -243,7 +243,7 @@ is required: a profile that says nothing about reporting gets the defaults.
   means: the first citable one is the rule a moderator is suggested, and a decision under any of them counts as "matched" for the reporter's
   accuracy. At least one reason must be on, and `other` can be relabelled and re-mapped but not removed or switched off. The defaults, in
   order: **Chat**: `harassment` (Insults or harassment, CR 2), `hate` (Hate, CR 1), `sexual` (Sexual content, CR 3), `threat` (Threats, CR 2),
-  `spam` (Spam or ads, CR 4), `personal_info` (Sharing personal info, CR 2); **Gameplay**: `cheating` (Cheating, CR 5), `griefing` (Throwing or
+  `spam` (Spam or ads, CR 4), `personal_info` (Sharing personal info, CR 2), `name` (Inappropriate name, CR 7); **Gameplay**: `cheating` (Cheating, CR 5), `griefing` (Throwing or
   griefing, CR 6), `afk` (Leaving or AFK, CR 6); then `other` (Something else, asks for a note).
 - **`thanks`**: what the reporter is told afterwards. Default "Thanks for the report. We'll look into it."
 

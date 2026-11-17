@@ -106,8 +106,8 @@ const reason = (id: string, label: string, hint: string, group: string, rules: n
 
 /**
  * The default reasons, deep-frozen: Chat (insults or harassment, hate, sexual content, threats, spam or ads, sharing personal
- * info), Gameplay (cheating, throwing or griefing, leaving or AFK), then Something else. Each maps to the starter Community
- * Rules it usually means: harassment, threats and personal info to CR 2, hate to CR 1, sexual content to CR 3, spam to CR 4,
+ * info, an inappropriate name), Gameplay (cheating, throwing or griefing, leaving or AFK), then Something else. Each maps to the starter Community
+ * Rules it usually means: harassment, threats and personal info to CR 2, a name to CR 7, hate to CR 1, sexual content to CR 3, spam to CR 4,
  * cheating to CR 5, griefing and AFK to CR 6. `other` maps to none.
  */
 export const DEFAULT_REPORT_REASONS: readonly Readonly<ReportReason>[] = Object.freeze(
@@ -118,6 +118,7 @@ export const DEFAULT_REPORT_REASONS: readonly Readonly<ReportReason>[] = Object.
     reason('threat', 'Threats', 'Threatening someone', 'Chat', [2]),
     reason('spam', 'Spam or ads', 'Repeated messages, flooding or advertising', 'Chat', [4]),
     reason('personal_info', 'Sharing personal info', "Posting someone's private details", 'Chat', [2]),
+    reason('name', 'Inappropriate name', 'An offensive or inappropriate player name', 'Chat', [7]),
     reason('cheating', 'Cheating', 'Cheating or exploiting a bug', 'Gameplay', [5]),
     reason('griefing', 'Throwing or griefing', 'Losing on purpose or ruining the game', 'Gameplay', [6]),
     reason('afk', 'Leaving or AFK', 'Leaving the game or not playing', 'Gameplay', [6]),
@@ -164,7 +165,7 @@ export function reasonLabel(reasons: readonly ReportReason[], id: string | null)
 /**
  * The 0.1.1 category a reason id is kept under in the stored report's `category` column (which old consumers still read): the
  * six old ids are themselves, `griefing` and `afk` are `disruption`, `threat` is `harassment`, and everything else (no reason,
- * `sexual`, `personal_info`, a studio's own) is `other`.
+ * `sexual`, `personal_info`, `name`, a studio's own) is `other`.
  */
 export function legacyCategoryOf(id: string | null): ReportCategory {
   switch (id) {

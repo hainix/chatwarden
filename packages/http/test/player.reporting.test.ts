@@ -34,7 +34,13 @@ interface Reporting {
 const reportingOf = (res: KitResponse): Reporting => (res.body as { reporting: Reporting }).reporting;
 
 describe('GET /rules: reporting', () => {
-  it('carries the default flow, the ten default reasons in order and the default thank-you', async () => {
+  it('lists Inappropriate name under Chat, with no rule mapping', async () => {
+    const { rules } = await setup();
+    const name = reportingOf(await rules()).reasons.find((x) => x.id === 'name');
+    expect(name).toEqual({ id: 'name', label: 'Inappropriate name', hint: 'An offensive or inappropriate player name', group: 'Chat', asksNote: false });
+  });
+
+  it('carries the default flow, the eleven default reasons in order and the default thank-you', async () => {
     const { rules } = await setup();
     const res = await rules();
     expect(res.status).toBe(200);
@@ -42,12 +48,12 @@ describe('GET /rules: reporting', () => {
     const r = reportingOf(res);
     expect(r.flow).toBe('one_tap');
     expect(r.thanks).toBe("Thanks for the report. We'll look into it.");
-    expect(r.reasons.map((x) => x.id)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'cheating', 'griefing', 'afk', 'other']);
+    expect(r.reasons.map((x) => x.id)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'other']);
     expect(r.reasons.map((x) => x.label)).toEqual([
-      'Insults or harassment', 'Hate', 'Sexual content', 'Threats', 'Spam or ads', 'Sharing personal info', 'Cheating', 'Throwing or griefing', 'Leaving or AFK', 'Something else',
+      'Insults or harassment', 'Hate', 'Sexual content', 'Threats', 'Spam or ads', 'Sharing personal info', 'Inappropriate name', 'Cheating', 'Throwing or griefing', 'Leaving or AFK', 'Something else',
     ]);
-    expect(r.reasons.map((x) => x.group)).toEqual(['Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Gameplay', 'Gameplay', 'Gameplay', '']);
-    expect(r.reasons.map((x) => x.asksNote)).toEqual([false, false, false, false, false, false, false, false, false, true]);
+    expect(r.reasons.map((x) => x.group)).toEqual(['Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Gameplay', 'Gameplay', 'Gameplay', '']);
+    expect(r.reasons.map((x) => x.asksNote)).toEqual([false, false, false, false, false, false, false, false, false, false, true]);
   });
 
   it('each reason has exactly id, label, hint, group, asksNote', async () => {

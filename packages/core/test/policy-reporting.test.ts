@@ -13,7 +13,7 @@ describe('cw.policy and the reporting section', () => {
     const { cw } = await world();
     const s = cw.policy.get();
     expect(s.effective.reporting.flow).toBe('one_tap');
-    expect(s.effective.reporting.reasons).toHaveLength(10);
+    expect(s.effective.reporting.reasons).toHaveLength(11);
     expect(s.base.reporting).toEqual(s.effective.reporting);
   });
 
@@ -60,7 +60,7 @@ describe('cw.policy and the reporting section', () => {
     const { cw } = await world();
     cw.policy.save({ reporting: { reasons: reasons() }, customDuration: false }, { version: 0, ...OWNER });
     expect(cw.policy.reset('reporting')).toMatchObject({ ok: true, changed: ['reporting'] });
-    expect(cw.profile.reporting.reasons).toHaveLength(10);
+    expect(cw.profile.reporting.reasons).toHaveLength(11);
     expect(cw.profile.customDuration).toBe(false);
     expect(cw.policy.reset('reporting')).toMatchObject({ ok: true, changed: [] });
   });
@@ -97,7 +97,7 @@ describe('cw.policy and the reporting section', () => {
     it('an empty layer previews the defaults; an invalid reporting layer is invalid with its path, and saves nothing', async () => {
       const { cw } = await world();
       const ok = cw.policy.preview({});
-      expect(ok.ok && ok.reporting.reasons).toHaveLength(10);
+      expect(ok.ok && ok.reporting.reasons).toHaveLength(11);
       expect(cw.policy.preview({ reporting: { flow: 'x' } } as never)).toEqual({ ok: false, error: 'invalid', path: 'layer.reporting.flow' });
       expect(cw.policy.get().version).toBe(0);
     });

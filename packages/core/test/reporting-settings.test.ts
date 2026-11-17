@@ -45,13 +45,13 @@ const r = (id: string, over: Partial<ReportReasonInput> = {}): ReportReasonInput
 const other = (): ReportReasonInput => r('other', { label: 'Something else' });
 
 describe('defaults', () => {
-  it('every preset resolves to one_tap, the ten default reasons and the thank-you', () => {
+  it('every preset resolves to one_tap, the eleven default reasons and the thank-you', () => {
     for (const name of ['relaxed', 'standard', 'strict'] as const) {
       const p = PRESETS[name];
       expect(p.reporting.flow).toBe('one_tap');
       expect(p.reporting.thanks).toBe("Thanks for the report. We'll look into it.");
       expect(p.reporting.reasons.map((x) => x.id)).toEqual([
-        'harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'cheating', 'griefing', 'afk', 'other',
+        'harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'other',
       ]);
     }
   });
@@ -65,6 +65,7 @@ describe('defaults', () => {
       ['threat', 'Threats', 'Chat', [2], false, true],
       ['spam', 'Spam or ads', 'Chat', [4], false, true],
       ['personal_info', 'Sharing personal info', 'Chat', [2], false, true],
+      ['name', 'Inappropriate name', 'Chat', [7], false, true],
       ['cheating', 'Cheating', 'Gameplay', [5], false, true],
       ['griefing', 'Throwing or griefing', 'Gameplay', [6], false, true],
       ['afk', 'Leaving or AFK', 'Gameplay', [6], false, true],

@@ -50,12 +50,12 @@ describe('the default flow, one_tap', () => {
 
   it('every default reason id is accepted', async () => {
     const w = await world();
-    for (const id of ['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'cheating', 'griefing', 'afk', 'other']) {
-      const t = w.table();
+    for (const id of ['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'other']) {
+      const t = w.table({ reporter: `key-rep-${id}` });
       expect(await w.submit(t.room, { reason: id }), id).toMatchObject({ ok: true });
     }
     expect((w.store as MemoryStore).rawReports().map((r) => r.reportedReason)).toEqual([
-      'harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'cheating', 'griefing', 'afk', 'other',
+      'harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'other',
     ]);
   });
 
@@ -73,7 +73,7 @@ describe('the default flow, one_tap', () => {
     const w = await world();
     const cases: Array<[string | undefined, ReportCategory]> = [
       [undefined, 'other'], ['harassment', 'harassment'], ['hate', 'hate'], ['spam', 'spam'], ['cheating', 'cheating'], ['griefing', 'disruption'],
-      ['afk', 'disruption'], ['threat', 'harassment'], ['sexual', 'other'], ['personal_info', 'other'], ['other', 'other'],
+      ['afk', 'disruption'], ['threat', 'harassment'], ['sexual', 'other'], ['personal_info', 'other'], ['name', 'other'], ['other', 'other'],
     ];
     for (const [i, [reason]] of cases.entries()) {
       const t = w.table({ reporter: `key-rep-${i}` });

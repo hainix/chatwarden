@@ -127,7 +127,7 @@ describe('reportingLayer', () => {
     const d = patchReason(fresh(), row(fresh(), 'hate').key, { label: 'Hate speech' });
     const layer = reportingLayer(d, base());
     expect(Object.keys(layer ?? {})).toEqual(['reasons']);
-    expect(layer?.reasons).toHaveLength(10);
+    expect(layer?.reasons).toHaveLength(11);
     expect(layer?.reasons?.find((r) => r.id === 'hate')?.label).toBe('Hate speech');
     expect(layer?.reasons?.[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', rules: [2], asksNote: false, enabled: true });
   });
@@ -138,7 +138,7 @@ describe('reportingLayer', () => {
     const d1 = patchReason(a.draft, a.key as string, { label: 'Hate' });
     const layer = reportingLayer(d1, base());
     const ids = layer?.reasons?.map((r) => r.id);
-    expect(ids).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'cheating', 'griefing', 'afk', 'hate_2', 'other']);
+    expect(ids).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'hate_2', 'other']);
   });
 
   it('"Something else" is always sent switched on', () => {
@@ -223,7 +223,7 @@ describe('the rows', () => {
 
   it('removes any other reason', () => {
     const d = fresh();
-    expect(removeReason(d, row(d, 'hate').key).reasons).toHaveLength(9);
+    expect(removeReason(d, row(d, 'hate').key).reasons).toHaveLength(10);
     expect(removeReason(d, 'no-such-key')).toBe(d);
   });
 
@@ -253,7 +253,7 @@ describe('the rows', () => {
   it('says where a row is after a move, one-based, out of the whole list', () => {
     const d = fresh();
     const moved = moveReason(d, row(d, 'hate').key, -1);
-    expect(positionOf(moved, row(moved, 'hate').key)).toEqual({ n: 1, total: 10 });
+    expect(positionOf(moved, row(moved, 'hate').key)).toEqual({ n: 1, total: 11 });
     expect(positionOf(moved, 'no-such-key')).toBeNull();
   });
 
@@ -271,7 +271,7 @@ describe('the rows', () => {
   it('adds a blank row on, before "Something else", up to 20 reasons, and then adds nothing', () => {
     let d = fresh();
     const a = addReason(d);
-    expect(a.draft.reasons).toHaveLength(11);
+    expect(a.draft.reasons).toHaveLength(12);
     expect(a.draft.reasons.at(-1)?.id).toBe('other');
     expect(a.draft.reasons.at(-2)).toMatchObject({ key: a.key, id: '', label: '', enabled: true, asksNote: false, rules: [] });
     d = a.draft;
@@ -326,13 +326,13 @@ describe('playerGroups: what players see', () => {
     d = patchReason(d, row(d, 'sexual').key, { enabled: false });
     const groups = playerGroups(d);
     expect(groups.map((g) => g.name)).toEqual(['Chat', 'Gameplay', '']);
-    expect(groups[0]?.labels).toEqual(['Insults or harassment', 'Hate', 'Threats', 'Spam or ads', 'Sharing personal info']);
+    expect(groups[0]?.labels).toEqual(['Insults or harassment', 'Hate', 'Threats', 'Spam or ads', 'Sharing personal info', 'Inappropriate name']);
     expect(groups[2]?.labels).toEqual(['Something else']);
   });
 
   it('a row with no label yet is not shown', () => {
     const a = addReason(fresh());
-    expect(playerGroups(a.draft).flatMap((g) => g.labels)).toHaveLength(10);
+    expect(playerGroups(a.draft).flatMap((g) => g.labels)).toHaveLength(11);
   });
 
   it('puts "Something else" last even when it has a group', () => {
