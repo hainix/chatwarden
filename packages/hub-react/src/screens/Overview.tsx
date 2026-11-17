@@ -7,6 +7,7 @@ import { groupName } from '../labels.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import type { LiveQueue } from '../liveQueue.js';
 import { queueStats } from '../queue.js';
+import { useFeatures } from '../features.js';
 import { Avatar, Empty, Fetched, Link, Panel, Skeleton } from '../ui.js';
 import { ActionRow } from './ActionRow.js';
 
@@ -20,12 +21,26 @@ export const RECENT_SHOWN = 10;
  * share it out, and speed is not shown because it rewards the wrong thing.
  */
 export function Overview() {
-  const { t, can } = useHub();
+  const { t, can, me } = useHub();
   const queue = useOptionalQueue();
+  const features = useFeatures();
   const showRecent = can('history.read');
+  // The cases someone asked a second look of this role (or a lower one): only with the workflow on, and only a number worth a line. Nothing else on the page changes.
+  const asked = features.workflow && queue !== null ? queue.groups.filter((g) => g.asked !== undefined && (g.asked === 'senior' ? me.role !== 'moderator' : me.role === 'owner')).length : 0;
   return (
     <div className="cw-screen">
       <h2 className="cw-screen-title" tabIndex={-1}>{t('hub.overview.title')}</h2>
+      {(asked > 0 || features.insights) && (
+        <p className="cw-hint cw-overview-desk">
+          {asked > 0 && <span>{t('hub.desk.overview.asked', { count: asked })}</span>}
+          {asked > 0 && features.insights && ' '}
+          {features.insights && (
+            <Link to={{ name: 'insights' }} className="cw-link">
+              {t('hub.insights.link')}
+            </Link>
+          )}
+        </p>
+      )}
       {queue !== null && <Stats queue={queue} />}
       <div className={queue !== null && showRecent ? 'cw-cols' : undefined}>
         {queue !== null && <Team queue={queue} />}

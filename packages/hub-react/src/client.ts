@@ -41,6 +41,7 @@ import type {
   GuideSection,
   ListAppealsQuery,
   ListAuditQuery,
+  InsightsView,
   ListReportsQuery,
   ListSanctionsQuery,
   Me,
@@ -202,6 +203,12 @@ export interface HubClient {
    * @experimental
    */
   clearEscalation(id: string): Promise<ReportMarkResult>;
+  /**
+   * `GET /insights?days` (needs `insights.read`; 404 with `desk.insights` off): the team's numbers over 7, 30 (the default) or 90 days. Counts and times only: never a person, a
+   * staff member or any text. A median that is not there yet is `null`.
+   * @experimental
+   */
+  insights(days?: 7 | 30 | 90): Promise<InsightsView>;
   /**
    * `POST /reports/dismiss-open` (needs `reports.decide.bulk`): dismiss every open report about one person, or from one reporter, as "nothing
    * wrong here" (the kit's standard reason; a sweep never takes one). Retrying is safe: a closed report counts as `replayed`.
@@ -413,6 +420,7 @@ export function createHubClient(transport: Transport): HubClient {
     removeComment: (id, commentId) => call<ReportMarkResult>({ method: 'DELETE', path: `/reports/${enc(id)}/comments/${enc(commentId)}` }),
     escalate: (id, input) => post<ReportMarkResult>(`/reports/${enc(id)}/escalate`, { to: input.to, ...(input.note === undefined ? {} : { note: input.note }) }),
     clearEscalation: (id) => call<ReportMarkResult>({ method: 'DELETE', path: `/reports/${enc(id)}/escalate` }),
+    insights: (days) => get<InsightsView>('/insights', q({ days })),
     dismissOpen: (input, options = {}) => post<DismissOpenResult>('/reports/dismiss-open', input, options),
     readAgain: (id) => post<AiReadAgainResult>(`/reports/${enc(id)}/ai/read`, undefined),
     aiStatus: () => get<AiStatusView>('/ai/status'),

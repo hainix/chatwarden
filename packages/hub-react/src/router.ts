@@ -18,6 +18,7 @@ export type Route =
   | { name: 'guide' }
   | { name: 'settings'; section: SettingsSection }
   | { name: 'actions' }
+  | { name: 'insights' }
   | { name: 'notFound'; path: string };
 
 /** The sections of the settings screen (`#/settings/ladder`, `#/settings/reporting`, `#/settings/ai`). A later section is another entry here and another section component on the screen. */
@@ -106,6 +107,7 @@ export function parseRoute(path: string): Route {
     case 'audit':
     case 'guide':
     case 'actions':
+    case 'insights':
       return second === undefined ? { name: first } : notFound;
     case 'settings': {
       if (second === undefined) return { name: 'settings', section: 'ladder' };
@@ -150,6 +152,7 @@ export function tabOf(route: Route): TabName | null {
   switch (route.name) {
     case 'overview':
     case 'actions':
+    case 'insights':
       return 'overview';
     case 'reports':
     case 'report':

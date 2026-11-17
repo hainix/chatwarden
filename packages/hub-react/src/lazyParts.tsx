@@ -78,6 +78,8 @@ export const partLoaders: {
   caseHold: () => Promise<ComponentType<CaseHoldProps>>;
   playerPreview: () => Promise<ComponentType<PlayerPreviewProps>>;
   whatToDo: () => Promise<ComponentType<{ id: string }>>;
+  commentThread: () => Promise<ComponentType<Record<string, never>>>;
+  deskPanel: () => Promise<ComponentType<PanelProps>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
@@ -100,6 +102,8 @@ export const partLoaders: {
   caseHold: () => import('./case/Hold.js').then((m) => m.CaseHold),
   playerPreview: () => import('./preview/PlayerPreview.js').then((m) => m.PlayerPreview),
   whatToDo: () => import('./case/WhatToDo.js').then((m) => m.WhatToDo),
+  commentThread: () => import('./case/CommentThread.js').then((m) => m.CommentThread),
+  deskPanel: () => import('./screens/DeskSettings.js').then((m) => m.DeskSettings),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -182,6 +186,8 @@ function PreviewUnavailable() {
   );
 }
 const whatToDo = lazyPart(() => partLoaders.whatToDo(), true);
+const commentThread = lazyPart(() => partLoaders.commentThread());
+const deskPanel = lazyPart(() => partLoaders.deskPanel());
 const playerPreview = lazyPart(() => partLoaders.playerPreview(), true, <p className="cw-hint cw-pv-hold" aria-hidden="true">{'\u00a0'}</p>, <PreviewUnavailable />);
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
@@ -241,6 +247,12 @@ export const LazyPlayerPreview = playerPreview.Part;
 /** The urgent case's "What to do" panel (the owner's guidance, the studio contact and the two buttons): loaded when an urgent case opens with the panel showing; an optional extra, never an error. */
 export const LazyWhatToDo = whatToDo.Part;
 
+/** The case's staff comment thread (behind `desk.workflow`): loaded when the thread is opened. */
+export const LazyCommentThread = commentThread.Part as ComponentType<FailureAware>;
+
+/** The "The desk" panel of Settings > Advanced (the workflow, Insights and surge switches): loaded when that screen is opened. */
+export const LazyDeskSettings = deskPanel.Part;
+
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
@@ -264,6 +276,8 @@ export function resetLazyParts(): void {
   caseHold.reset();
   playerPreview.reset();
   whatToDo.reset();
+  commentThread.reset();
+  deskPanel.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

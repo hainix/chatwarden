@@ -4296,3 +4296,101 @@
   width: 100%;
   min-width: 0;
 }
+
+/* The desk (0.2.0): the staff thread, the "Asked for a look" line, the ask form, the Overview line and the Insights tables. Words, not colour. */
+.cw-hub .cw-thread {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-thread-list {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-thread-entry {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+  padding-bottom: var(--cw-space-2, var(--cwd-space-2));
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-thread-head,
+.cw-hub .cw-thread-text {
+  margin: 0;
+}
+.cw-hub .cw-thread-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.cw-hub .cw-thread-entry > .cw-linkbtn {
+  justify-self: start;
+}
+.cw-hub .cw-thread-form {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+}
+.cw-hub .cw-thread-form .cw-field {
+  width: 100%;
+}
+.cw-hub .cw-thread-form p {
+  margin: 0;
+}
+.cw-hub .cw-asked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-asked-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-case-menu-form {
+  display: grid;
+  flex-basis: 100%;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-case-menu-form .cw-field {
+  width: 100%;
+}
+.cw-hub .cw-queue-asked {
+  min-width: 0;
+}
+.cw-hub .cw-overview-desk {
+  margin: 0;
+}
+.cw-hub .cw-insights-tables {
+  display: grid;
+  gap: var(--cw-space-4, var(--cwd-space-4));
+  min-width: 0;
+}
+.cw-hub .cw-insights-tables p {
+  margin: 0;
+}
+.cw-hub .cw-insights-table {
+  max-width: 100%;
+  border-collapse: collapse;
+}
+.cw-hub .cw-insights-table caption {
+  margin-bottom: var(--cw-space-1, var(--cwd-space-1));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  text-align: start;
+}
+.cw-hub .cw-insights-table th,
+.cw-hub .cw-insights-table td {
+  padding: var(--cw-space-2, var(--cwd-space-2));
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  text-align: start;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-insights-window {
+  max-width: 16rem;
+}

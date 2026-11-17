@@ -7,7 +7,7 @@ import { Report } from './Report.js';
 import { Reports } from './Reports.js';
 import { Settings } from './Settings.js';
 import { SimpleHome } from './SimpleHome.js';
-import { LazyActions, LazyAppealCard, LazyAppeals, LazyAudit, LazyBlocked, LazyGaps, LazyGuide, LazyTerms } from './lazy.js';
+import { LazyActions, LazyAppealCard, LazyAppeals, LazyAudit, LazyBlocked, LazyGaps, LazyGuide, LazyInsights, LazyTerms } from './lazy.js';
 
 /**
  * The screen for a route that the role may open. In Simple mode the landing is the calm Cases screen and a case is the one card;
@@ -29,6 +29,8 @@ export function screenFor(route: Route, simple = false): ReactNode {
       return <LazyAppealCard id={route.id} />;
     case 'actions':
       return <LazyActions />;
+    case 'insights':
+      return <LazyInsights />;
     case 'terms':
       return <LazyTerms />;
     case 'blocked':

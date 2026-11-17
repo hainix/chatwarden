@@ -20,6 +20,7 @@ const SCREENS = [
   { path: '/settings/reporting', title: 'Reporting' },
   { path: '/settings/ai', title: 'AI' },
   { path: '/settings/advanced', title: 'Advanced' },
+  { path: '/insights', title: 'Insights' },
 ] as const;
 
 describe.each(['simple', 'detailed'] as const)('lazy screens in %s mode', (mode) => {
@@ -153,7 +154,7 @@ describe('the Safety panel and the urgent parts are lazy', () => {
     resetLazyParts();
     const asked = new Set<string>();
     const real = { ...partLoaders };
-    for (const name of ['safetyPanel', 'whatToDo'] as const) {
+    for (const name of ['safetyPanel', 'deskPanel', 'whatToDo', 'commentThread'] as const) {
       (partLoaders as Record<string, () => unknown>)[name] = () => {
         asked.add(name);
         return real[name]();
@@ -169,8 +170,9 @@ describe('the Safety panel and the urgent parts are lazy', () => {
       }
       expect([...asked]).toEqual([]);
       const { unmount } = renderHub(w, { path: '/settings/advanced' });
-      await waitFor(() => expect(asked.has('safetyPanel')).toBe(true));
+      await waitFor(() => expect(asked.has('safetyPanel') && asked.has('deskPanel')).toBe(true));
       expect(asked.has('whatToDo')).toBe(false);
+      expect(asked.has('commentThread')).toBe(false);
       unmount();
     } finally {
       Object.assign(partLoaders, real);
@@ -198,6 +200,31 @@ describe('the Safety panel and the urgent parts are lazy', () => {
       await screen.findByRole('region', { name: 'What to do' });
       expect(asked).toEqual(['whatToDo']);
       second.unmount();
+    } finally {
+      Object.assign(partLoaders, real);
+    }
+  });
+});
+
+describe('the comment thread is lazy', () => {
+  it('a case with the workflow on does not ask for the thread until its tab or its button is opened', async () => {
+    const { partLoaders, resetLazyParts } = await import('../src/lazyParts.js');
+    resetLazyParts();
+    const asked: string[] = [];
+    const real = { ...partLoaders };
+    (partLoaders as Record<string, () => unknown>)['commentThread'] = () => {
+      asked.push('commentThread');
+      return real['commentThread']();
+    };
+    try {
+      const w = await hubWorld({ overrides: { desk: { workflow: true } } });
+      const f = await w.file({ reason: 'spam' });
+      const view = renderHub(w, { path: `/reports/${f.id}` });
+      await screen.findByRole('tab', { name: /^Staff comments/ });
+      expect(asked).toEqual([]);
+      await view.user.click(screen.getByRole('tab', { name: /^Staff comments/ }));
+      await screen.findByRole('region', { name: 'Staff comments' });
+      expect(asked).toEqual(['commentThread']);
     } finally {
       Object.assign(partLoaders, real);
     }

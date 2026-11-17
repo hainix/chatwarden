@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { AiReadSlot } from '../case/AiRead.js';
+import { AskedLine } from '../case/AskedLine.js';
 import { CaseMenu } from '../case/CaseMenu.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
 import { useCase } from '../case/CaseContext.js';
@@ -11,7 +12,8 @@ import { Transcript } from '../case/Transcript.js';
 import { UrgentStrip } from '../case/UrgentStrip.js';
 import type { LinePicks } from '../case/Transcript.js';
 import { useHub } from '../context.js';
-import { LazyCaseHold } from '../lazyParts.js';
+import { useFeatures } from '../features.js';
+import { LazyCaseHold, LazyCommentThread } from '../lazyParts.js';
 import { LINES_MAX } from '../decision.js';
 import { NameToggle, NameValue } from '../names.js';
 import { personName } from '../excerpt.js';
@@ -23,7 +25,7 @@ import { Empty, Fetched, Link, PersonChip, Tag, Time } from '../ui.js';
 // The case pane: who the case is about, who is handling it, the evidence in tabs (the transcript first), and the decision bar
 // docked under it. The person's record and who reported live in the pane beside it (`shell/CasePanel.tsx`).
 
-type TabId = 'evidence' | 'reports' | 'history';
+type TabId = 'evidence' | 'reports' | 'history' | 'comments';
 
 function Header({ detail }: { detail: ReportDetail }) {
   const { t, locale, now, can, me } = useHub();
@@ -58,6 +60,7 @@ function Header({ detail }: { detail: ReportDetail }) {
         <CaseMenu />
       </div>
       <UrgentStrip />
+      <AskedLine />
       {showHold && <LazyCaseHold reportId={report.id} hold={held} canHold={can('legal.hold')} canRelease={me.role === 'owner'} onChanged={read.reload} />}
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
         <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>
@@ -161,6 +164,7 @@ function History() {
 function Tabs({ detail }: { detail: ReportDetail }) {
   const { t, can } = useHub();
   const { group } = useCase();
+  const { workflow } = useFeatures();
   const id = useId();
   const [tab, setTab] = useState<TabId>('evidence');
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -168,6 +172,7 @@ function Tabs({ detail }: { detail: ReportDetail }) {
     { id: 'evidence', label: t('hub.case.tab.evidence') },
     { id: 'reports', label: t('hub.case.tab.reports', { count: group === null ? 1 : group.reports }) },
     ...(can('history.read') ? [{ id: 'history' as const, label: t('hub.case.tab.history') }] : []),
+    ...(workflow ? [{ id: 'comments' as const, label: t('hub.desk.tab', { count: detail.report.comments?.length ?? 0 }) }] : []),
   ];
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
     const at = tabs.findIndex((x) => x.id === tab);
@@ -205,6 +210,7 @@ function Tabs({ detail }: { detail: ReportDetail }) {
           {tab === 'evidence' && <Evidence detail={detail} />}
           {tab === 'reports' && <Reports detail={detail} />}
           {tab === 'history' && <History />}
+          {tab === 'comments' && <LazyCommentThread />}
         </div>
       </div>
     </>

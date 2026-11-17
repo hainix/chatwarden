@@ -25,6 +25,7 @@ import type {
   EvidenceBundle,
   GapRow,
   GuideSection,
+  InsightsResult,
   PolicyLayer,
   PolicyPreview,
   PolicyLimits,
@@ -82,6 +83,8 @@ export interface HoldView {
  */
 export type PolicyState = Omit<KitPolicyState, 'limits'> & { limits?: PolicyLimits };
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
+/** `GET /insights`: the team's numbers over 7, 30 or 90 days: counts and times only, no person and no staff member. @experimental */
+export type InsightsView = InsightsResult;
 export type { Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role };
 
 /**

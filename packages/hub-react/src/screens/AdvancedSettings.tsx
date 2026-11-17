@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { toHubError } from '../client.js';
 import { useHub } from '../context.js';
-import { LazyAppealSettings, LazyFilterSettings, LazyNameSettings, LazyPaceSettings, LazyPrivacySettings, LazySafetySettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
+import { LazyAppealSettings, LazyDeskSettings, LazyFilterSettings, LazyNameSettings, LazyPaceSettings, LazyPrivacySettings, LazySafetySettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
 import { usePolicy } from '../policyHooks.js';
 import { ErrorBlock, Fetched } from '../ui.js';
 
@@ -41,6 +41,7 @@ export function AdvancedSettingsScreen() {
               <LazyNameSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               <LazyFilterSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               <LazySafetySettings state={state} policy={policy} onFailed={() => setFailed(true)} />
+              <LazyDeskSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               {/* The owner's door to a person's data (privacy requests): nobody else is offered it. */}
               {me.role === 'owner' && <LazyPrivacySettings onFailed={() => setFailed(true)} />}
             </>

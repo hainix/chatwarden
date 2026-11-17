@@ -79,6 +79,12 @@ export interface QueueGroup {
   urgentOpen?: number;
   /** With `urgent`: when the oldest open urgent report was filed. */
   oldestUrgentAt?: number;
+  /**
+   * With `desk.workflow` on: the role someone asked for a second look at an open report of the person (`senior` or `owner`; the higher when there are several). It only marks the row and feeds
+   * a filter: it never reorders the queue. Absent when none is asked, and with the workflow off.
+   * @experimental
+   */
+  asked?: 'senior' | 'owner';
 }
 
 /**
@@ -199,6 +205,7 @@ export function groupQueue(
     let habitualOpen = 0;
     let boosted = false;
     let urgentOpen = 0;
+    let asked: 'senior' | 'owner' | null = null;
     let oldestUrgentAt: number | null = null;
     let claim: Claim | null = null;
     const viewing = new Set<string>();
@@ -231,6 +238,7 @@ export function groupQueue(
       }
       if (r.status === 'open') {
         if (r.boosted === true) boosted = true;
+        if (r.escalatedTo !== undefined && (asked === null || r.escalatedTo === 'owner')) asked = r.escalatedTo;
         if (r.urgent === true) {
           urgentOpen += 1;
           oldestUrgentAt = oldestUrgentAt === null ? r.createdAt : Math.min(oldestUrgentAt, r.createdAt);
@@ -268,6 +276,7 @@ export function groupQueue(
       viewing: [...viewing].sort(),
       summaries: list,
       ...(boosted ? { boosted: true as const } : {}),
+      ...(asked === null ? {} : { asked }),
       ...(urgentOpen > 0 ? { urgent: true as const, urgentOpen, oldestUrgentAt: oldestUrgentAt as number } : {}),
       // An urgent case is never ranked lower: a threat from a habitual false reporter is still read first.
       ...(rankDown === undefined
@@ -327,6 +336,11 @@ export interface QueueFilter {
   category: ReportCategory | 'all';
   /** A reason id, `none` for reports that gave no reason, or `all` (also when left out). */
   reason?: string;
+  /**
+   * Only the cases someone asked a second look of one of these roles (the hub sets the roles at or below the caller's, so a senior sees what was asked of a senior). Absent: no such filter.
+   * @experimental
+   */
+  asked?: ReadonlyArray<'senior' | 'owner'> | undefined;
 }
 
 /**
@@ -339,6 +353,7 @@ export function filterGroups(groups: readonly QueueGroup[], filter: QueueFilter,
     if (filter.category !== 'all' && !g.categories.includes(filter.category)) return false;
     const reason = filter.reason ?? 'all';
     if (reason !== 'all' && !g.reasons.some((x) => (reason === 'none' ? x.id === null : x.id === reason))) return false;
+    if (filter.asked !== undefined && (g.asked === undefined || !filter.asked.includes(g.asked))) return false;
     const held = liveClaim(g.claim, now);
     if (filter.claim === 'unclaimed') return held === null;
     if (filter.claim === 'mine') return held !== null && held.by === me;

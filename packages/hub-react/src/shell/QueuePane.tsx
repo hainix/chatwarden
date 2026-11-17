@@ -99,7 +99,7 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
     body = (
       <div className="cw-empty">
         <p>{t('hub.queue.empty.filtered')}</p>
-        <button type="button" className="cw-linkbtn" onClick={() => queue.setFilter({ claim: 'all', category: 'all', reason: 'all' })}>
+        <button type="button" className="cw-linkbtn" onClick={() => queue.setFilter({ claim: 'all', category: 'all', reason: 'all', asked: undefined })}>
           {t('hub.queue.clearFilters')}
         </button>
       </div>
@@ -166,6 +166,7 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
           </div>
         )}
         {!simple && !appealsView && <ReasonFilter />}
+        {!simple && !appealsView && features.workflow && piece === undefined && <AskedFilter />}
       </div>
       <div className="cw-newbar" role="status">
         {arrived !== null && (
@@ -214,6 +215,19 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
   );
 }
 
+/** With the staff workflow on: one option in the filters, the cases someone asked a second look of the caller's role or lower. Off: nothing is drawn. */
+function AskedFilter() {
+  const { t, me } = useHub();
+  const queue = useQueue();
+  const roles: ReadonlyArray<'senior' | 'owner'> = me.role === 'owner' ? ['senior', 'owner'] : me.role === 'senior' ? ['senior'] : [];
+  return (
+    <label className="cw-check cw-queue-asked">
+      <input type="checkbox" checked={queue.filter.asked !== undefined} onChange={(e) => queue.setFilter({ asked: e.target.checked ? roles : undefined })} />
+      <span>{t('hub.desk.filter.asked')}</span>
+    </label>
+  );
+}
+
 /** The reasons in the queue (and "No reason given") to filter by: a person with any report that said so stays. */
 function ReasonFilter() {
   const { t } = useHub();
@@ -250,6 +264,7 @@ function ReasonFilter() {
  */
 function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; simple: boolean; selected: boolean; piece: PieceRows | undefined; onRelease: () => void }) {
   const { t, locale, now, me } = useHub();
+  const features = useFeatures();
   const g = row.group;
   const name = groupName(t, g);
   const waiting = g.oldestOpenAt === null ? null : Math.max(0, now() - g.oldestOpenAt);
@@ -270,6 +285,7 @@ function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; s
         </span>
         <span className="cw-case-cats">
           {g.urgent === true && <Tag>{t('hub.urgent.row')}</Tag>}
+          {g.asked !== undefined && features.workflow && <Tag>{t('hub.desk.row.asked')}</Tag>}
           {g.reasons.map((r) => (
             <span key={r.id ?? 'none'} className="cw-cat">
               {reasonChip(t, r.label)}

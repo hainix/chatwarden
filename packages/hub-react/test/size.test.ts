@@ -29,7 +29,10 @@ const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 // Raised to 96 KB at 0.2.0 (privacy requests and legal hold), by the same rule: the first load gains the six audit labels, the wire types and client methods, the Person and
 // case plug-in points and the lazy wrappers, about 1.5 KB over the 92 KB it had reached (measured 94,498 gzipped before the raise). The Person page's Data requests, the erase
 // dialog, the Privacy requests panel, the case's hold dialogs and all their words (`privacy/i18n.ts`) are lazy chunks.
-const BUDGET = 96 * 1024;
+// Raised to 112 KB at 0.2.0 (the urgent lane, the desk, the careful view and rooms), by the same rule: the first load gains the urgent chip and pin, the case menu and strip, the
+// staff-workflow row word, filter and Overview line, the second look's line and form, the care reader and the words of all of it (the English catalog is eager): about 6 KB over the
+// 96 KB it had reached (measured 102,330 gzipped after the desk). The "What to do" panel, the thread, Insights, the Safety, Desk and Rooms panels and the careful view's panel are lazy.
+const BUDGET = 112 * 1024;
 const ENTRY_BUDGET = 52 * 1024;
 
 async function bundle() {

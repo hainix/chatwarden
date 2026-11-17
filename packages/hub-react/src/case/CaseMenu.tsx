@@ -4,6 +4,8 @@ import type { HubError } from '../client.js';
 import { useHub } from '../context.js';
 import { onPage } from '../dom.js';
 import { errorText } from '../labels.js';
+import { useFeatures } from '../features.js';
+import { AskForm } from './AskedLine.js';
 import { useCase } from './CaseContext.js';
 import { useUrgentActions } from './useUrgent.js';
 
@@ -23,9 +25,10 @@ export interface CaseMenuItem {
 
 /** What this caller may do about the open case, in order. */
 export function useCaseMenuItems(): CaseMenuItem[] {
-  const { t, can } = useHub();
+  const { t, can, me } = useHub();
   const { detail } = useCase();
   const { setUrgent } = useUrgentActions();
+  const { workflow } = useFeatures();
   const report = detail.data?.report;
   const items: CaseMenuItem[] = [];
   if (report === undefined || report.status !== 'open') return items;
@@ -39,6 +42,13 @@ export function useCaseMenuItems(): CaseMenuItem[] {
         return res.ok ? null : res.error;
       },
     });
+  }
+  // A second look (behind `desk.workflow`): a moderator or a senior may ask a senior or the owner; the owner has no one to ask.
+  if (workflow && can('reports.escalate') && me.role !== 'owner') {
+    const ask = t('hub.desk.menu.ask');
+    const escalate = t('hub.desk.menu.escalate');
+    items.push({ id: 'ask', label: ask, panel: (done) => <AskForm to="senior" label={ask} done={done} /> });
+    items.push({ id: 'escalate', label: escalate, panel: (done) => <AskForm to="owner" label={escalate} done={done} /> });
   }
   return items;
 }

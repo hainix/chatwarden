@@ -17,7 +17,8 @@ import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
-import { LazyAiParts, LazyPlayerPreview } from '../lazyParts.js';
+import { useFeatures } from '../features.js';
+import { LazyAiParts, LazyCommentThread, LazyPlayerPreview } from '../lazyParts.js';
 import { decideOp } from '../preview/ops.js';
 import { NameToggle, NameValue } from '../names.js';
 import { useQuickKeys } from '../quickKeys.js';
@@ -28,6 +29,7 @@ import { AiReadSlot } from './AiRead.js';
 import { RuleField } from './RuleField.js';
 import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { Line } from './Transcript.js';
+import { AskedLine } from './AskedLine.js';
 import { CaseMenu } from './CaseMenu.js';
 import { UrgentStrip } from './UrgentStrip.js';
 
@@ -97,6 +99,28 @@ function Said({ report, target, people }: { report: StaffReport; target: ReportP
         </button>
       )}
     </section>
+  );
+}
+
+/** With the staff workflow on: the staff thread behind one button on the card ("Staff comments (n)"). Off: nothing is drawn. */
+function CommentsDisclosure() {
+  const { t } = useHub();
+  const { workflow } = useFeatures();
+  const { detail } = useCase();
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  if (!workflow || detail.data === undefined) return null;
+  return (
+    <div className="cw-scard-comments">
+      <button type="button" className="cw-linkbtn" aria-expanded={open} aria-controls={`${id}-thread`} onClick={() => setOpen(!open)}>
+        {t('hub.desk.tab', { count: detail.data.report.comments?.length ?? 0 })}
+      </button>
+      {open && (
+        <div id={`${id}-thread`}>
+          <LazyCommentThread />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -407,6 +431,8 @@ export function CaseCard() {
             </p>
           </header>
           <UrgentStrip />
+          <AskedLine />
+          <CommentsDisclosure />
           <ReporterWarning report={report} people={people} />
           <AiReadSlot read={c.aiRead} />
           <Said report={report} target={target} people={people} />

@@ -9,6 +9,7 @@ import { personTag } from '../format.js';
 import { Icon } from '../icons.js';
 import { groupName } from '../labels.js';
 import { useOptionalQueue } from '../liveQueue.js';
+import { useFeatures } from '../features.js';
 import { TABS } from '../nav.js';
 import { keyLabel } from '../shortcuts.js';
 import { Kbd } from '../ui.js';
@@ -34,6 +35,7 @@ export interface CommandBarProps {
 
 export function CommandBar({ shortcuts, onClose, onChoose }: CommandBarProps) {
   const { t, can, client } = useHub();
+  const features = useFeatures();
   const queue = useOptionalQueue();
   const canUndo = useOptionalDecisions()?.canUndo === true;
   const [query, setQuery] = useState('');
@@ -68,6 +70,7 @@ export function CommandBar({ shortcuts, onClose, onChoose }: CommandBarProps) {
     for (const tab of TABS) {
       if (tab.permission === null || can(tab.permission)) out.push({ id: `screen:${tab.tab}`, kind: 'screen', label: t(tab.label), target: { type: 'go', route: tab.route } });
     }
+    if (features.insights) out.push({ id: 'screen:insights', kind: 'screen', label: t('hub.insights.title'), target: { type: 'go', route: { name: 'insights' } } });
     if (queue !== null) {
       for (const g of queue.groups) {
         const name = groupName(t, g);
@@ -96,7 +99,7 @@ export function CommandBar({ shortcuts, onClose, onChoose }: CommandBarProps) {
     }
     for (const term of terms) out.push({ id: `term:${term}`, kind: 'term', label: term, target: { type: 'go', route: { name: 'terms' } } });
     return out;
-  }, [queue, can, t, terms, canUndo]);
+  }, [queue, can, t, terms, canUndo, features.insights]);
 
   const results = useMemo(() => rankCommands(items, query), [items, query]);
   const found = activeId === null ? -1 : results.findIndex((r) => r.id === activeId);
