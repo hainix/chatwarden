@@ -24,8 +24,12 @@ export function useMinuteClock(): () => number {
   return useMemo(() => () => at, [at]);
 }
 
-/** What the plan needs from the hub: whether appeals are on, whether a reporter is thanked, the rules' titles, and the placeholder for a reference code. */
-export function usePlanContext(): PlanContext {
+/**
+ * What the plan needs from the hub: whether appeals are on, whether a reporter is thanked, the rules' titles, and the placeholder for a reference code.
+ * `ready` is false until the policy (the source of the rules' titles) has answered, so a label is never drawn without its title and then changed; a policy
+ * that cannot be read (a role without `policy.read`, or an error) is ready at once and the labels read by number alone.
+ */
+export function usePlanContext(): PlanContext & { ready: boolean } {
   const { t, can, session } = useHub();
   const { appeals } = useFeatures();
   const wants = can('policy.read');
@@ -35,6 +39,7 @@ export function usePlanContext(): PlanContext {
   // The kit thanks a reporter by default; a server that does not say (or a role that cannot read the policy) is read as the default.
   const reporterFeedback = policy.data?.notices?.reporterFeedback ?? true;
   const refCode = t('hub.preview.refMade');
+  const ready = !wants || !policy.loading;
   return useMemo(
     () => ({
       now: clock,
@@ -42,16 +47,23 @@ export function usePlanContext(): PlanContext {
       reporterFeedback,
       appeals,
       refCode,
+      ready,
     }),
-    [clock, titles, reporterFeedback, appeals, refCode],
+    [clock, titles, reporterFeedback, appeals, refCode, ready],
   );
 }
 
-/** The plan for an op (null while nothing is chosen), with the context it was made in. */
-export function usePlan(op: NoticeOp | null): { plan: NoticePlan | null; ctx: PlanContext } {
-  const ctx = usePlanContext();
+/**
+ * The plan for an op (null while nothing is chosen), with the context it was made in. The time is read when the form changes (and when the minute clock
+ * ticks), so an end is worded against the moment the moderator looked, not up to a minute earlier; the plan and the words drawn from it share that one time.
+ */
+export function usePlan(op: NoticeOp | null): { plan: NoticePlan | null; ctx: PlanContext; ready: boolean } {
+  const { ready, ...base } = usePlanContext();
+  const { now } = useHub();
+  const at = useMemo(() => now(), [op, base.now, now]);
+  const ctx = useMemo<PlanContext>(() => ({ ...base, now: () => at }), [base.now, base.ruleLabel, base.reporterFeedback, base.appeals, base.refCode, at]);
   const plan = useMemo(() => (op === null ? null : planNotices(op, ctx)), [op, ctx]);
-  return { plan, ctx };
+  return { plan, ctx, ready };
 }
 
 /**

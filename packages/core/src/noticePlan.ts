@@ -210,7 +210,8 @@ function decide(op: Extract<NoticeOp, { op: 'decide' }>, c: Context): NoticePlan
     notices.push({ to: op.target, notice: c.notice('rename_required', { rule: rename.rule, until: null, refCode: null }) });
     effects.push({ code: 'rename_asked', to: op.target, later: held.has(op.target) });
   }
-  if (notices.length > 0 && !thanked) effects.push({ code: 'reporter_not_told' });
+  // "Not told" is only said when the reporter has no notice at all in the plan (a sanction on the reporter is a notice they are sent).
+  if (notices.length > 0 && !notices.some((n) => n.to === op.reporter)) effects.push({ code: 'reporter_not_told' });
   const nothing = notices.length > 0 ? null : actions.length > 0 ? 'note' : op.verdict === 'no_action' || op.verdict === 'bad_faith' ? 'dismissal' : null;
   return { notices, effects, nothing };
 }

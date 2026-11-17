@@ -163,6 +163,33 @@ describe('the body sent', () => {
     expect(w.cw.names.pendingRename({ clientKey: 'key-target-Mallory' })).toBe(false);
   });
 
+  // The form-to-server seam: the body the hub builds goes through the real http handler and the core service (the hub world's transport), not a mock.
+  it.each([
+    ['a note', 'note:null'],
+    ['a warning', 'warning:null'],
+  ] as const)('rename plus %s is accepted by the real server: the verdict sent is upheld and the player is asked', async (_name, what) => {
+    const w = await world({ role: 'senior' });
+    const f = await w.file({ target: 'Mallory', reason: 'name' });
+    const r = await open(w, f.id);
+    await fair(r.user);
+    await openEditor(r.user);
+    for (const remove of within(bar()).queryAllByRole('button', { name: /^Remove action/ })) await r.user.click(remove);
+    await r.user.click(within(bar()).getByRole('button', { name: 'Add an action' }));
+    await r.user.selectOptions(within(bar()).getAllByRole('combobox', { name: 'What happens' }).at(-1) as HTMLSelectElement, what);
+    await r.user.selectOptions(within(bar()).getAllByLabelText('Community Rule').at(-1) as HTMLSelectElement, '7');
+    await r.user.click(rename() as HTMLElement);
+    await r.user.type(within(bar()).getByRole('textbox', { name: 'Reason' }), 'A name against the rules.');
+    vi.useFakeTimers({ toFake: [...FAKE] });
+    fireEvent.click(within(bar()).getByRole('button', { name: 'Decide' }));
+    await advance(5_300);
+    vi.useRealTimers();
+    expect((decides(w)[0]?.body as { verdict: string }).verdict).toBe('upheld');
+    expect(await screen.findByText('They have been asked to choose a new name.')).toBeInTheDocument();
+    expect(screen.queryByText(/did not accept/)).toBeNull();
+    expect(w.cw.reports.get(f.id)?.status).toBe('actioned');
+    expect(w.cw.names.pendingRename({ clientKey: 'key-target-Mallory' })).toBe(true);
+  });
+
   it.each([
     ['rename alone', 'none'],
     ['rename plus a warning', 'warning'],

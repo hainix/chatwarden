@@ -1,5 +1,6 @@
 import { Component, Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
+import { useHub } from './context.js';
 import type { CommandBarProps } from './shell/CommandBar.js';
 import type { AiPartsProps } from './case/AiParts.js';
 import type { PersonAutomationProps } from './person/Automation.js';
@@ -25,7 +26,7 @@ class LoadFailure extends Error {
   }
 }
 
-class Boundary extends Component<{ children: ReactNode; onFail: () => void; hide: boolean }, { error: unknown }> {
+class Boundary extends Component<{ children: ReactNode; onFail: () => void; hide: boolean; unavailable?: ReactNode }, { error: unknown }> {
   override state: { error: unknown } = { error: null };
 
   static getDerivedStateFromError(error: unknown): { error: unknown } {
@@ -40,7 +41,9 @@ class Boundary extends Component<{ children: ReactNode; onFail: () => void; hide
     const { error } = this.state;
     // A part that breaks while it renders is not ours to catch, except the AI's: those hide themselves (the case is never taken down by advice).
     if (error !== null && !(error instanceof LoadFailure) && !this.props.hide) throw error;
-    return error === null ? this.props.children : null;
+    // A part that is asked for to be useful (the player preview) says so when its code could not be fetched; the others draw nothing.
+    if (error === null) return this.props.children;
+    return error instanceof LoadFailure || this.props.hide ? (this.props.unavailable ?? null) : null;
   }
 }
 
@@ -90,7 +93,7 @@ export interface FailureAware {
   onFailed?: () => void;
 }
 
-function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>, hide = false, fallback: ReactNode = null): { Part: ComponentType<P & FailureAware>; preload: () => void; reset: () => void } {
+function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>, hide = false, fallback: ReactNode = null, unavailable: ReactNode = null): { Part: ComponentType<P & FailureAware>; preload: () => void; reset: () => void } {
   const make = () =>
     lazy(() =>
       load().then(
@@ -111,6 +114,7 @@ function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>, hide 
     return (
       <Boundary
         hide={hide}
+        unavailable={unavailable}
         onFail={() => {
           failed = true;
           onFailed?.();
@@ -149,7 +153,16 @@ const shareTerm = lazyPart(() => partLoaders.shareTerm(), true);
 const reportTerm = lazyPart(() => partLoaders.reportTerm(), true);
 const personAutomation = lazyPart(() => partLoaders.personAutomation(), true);
 // "What the player sees": until its code arrives the slot holds one line of height, so the form below it does not jump (an empty hint line, hidden from a screen reader).
-const playerPreview = lazyPart(() => partLoaders.playerPreview(), true, <p className="cw-hint cw-pv-hold" aria-hidden="true">{' '}</p>);
+// If its code cannot be fetched the slot says so in one short line (a moderator who sends with no preview should know), and the next drawing asks again.
+function PreviewUnavailable() {
+  const { t } = useHub();
+  return (
+    <p className="cw-hint cw-pv-hold" role="status">
+      {t('hub.preview.unavailable')}
+    </p>
+  );
+}
+const playerPreview = lazyPart(() => partLoaders.playerPreview(), true, <p className="cw-hint cw-pv-hold" aria-hidden="true">{'\u00a0'}</p>, <PreviewUnavailable />);
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;

@@ -13,6 +13,23 @@ export interface CasePreviewParts {
   nameOf: (ref: string) => string;
   /** The text the player's notice shows for one of their lines, with its UTC day; null for a line with no masked text (never the line as it was typed). */
   lineOf: (lineId: string) => { text: string; day: string } | null;
+  /** The ids of the report's lines, in the report's order: the order the player's notice lists lines in. */
+  order: readonly string[];
+}
+
+/**
+ * The two things the panel reads from a report's excerpt: the ids of its lines in the report's order, and the masked text the player's notice shows for one
+ * (with its UTC day), null for a line with no masked text (never the line as it was typed).
+ */
+export function previewLines(report: Pick<ReportDetail['report'], 'excerpt'> | undefined): Pick<CasePreviewParts, 'order' | 'lineOf'> {
+  const excerpt = report?.excerpt ?? [];
+  return {
+    order: excerpt.map((l) => l.lineId),
+    lineOf: (id) => {
+      const line = excerpt.find((l) => l.lineId === id);
+      return line === undefined || typeof line.noticeText !== 'string' ? null : { text: line.noticeText, day: new Date(line.ts).toISOString().slice(0, 10) };
+    },
+  };
 }
 
 /** The preview's inputs for a case. `report` is the case's report (`detail.report`). */
@@ -26,9 +43,6 @@ export function usePreviewParts(report: ReportDetail['report'] | undefined): Cas
       const person = people.find((p) => p.ref === ref);
       return person === undefined ? t('hub.person.unnamed', { tag: ref.slice(0, 8) }) : personName(person, people, t);
     },
-    lineOf: (id) => {
-      const line = report?.excerpt.find((l) => l.lineId === id);
-      return line === undefined || typeof line.noticeText !== 'string' ? null : { text: line.noticeText, day: new Date(line.ts).toISOString().slice(0, 10) };
-    },
+    ...previewLines(report),
   };
 }

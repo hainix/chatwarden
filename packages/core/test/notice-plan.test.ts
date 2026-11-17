@@ -105,7 +105,25 @@ describe('plan: a decision', () => {
     expect(planNotices(decide([], { verdict: 'bad_faith' }), ctx())).toEqual({ notices: [], effects: [], nothing: 'dismissal' });
     const plan = planNotices(decide([act('P-rep', 'chat')], { verdict: 'bad_faith' }), ctx());
     expect(plan.notices.map((n) => [n.to, n.notice.kind])).toEqual([['P-rep', 'chat']]);
-    expect(plan.effects).toContainEqual({ code: 'reporter_not_told' });
+    // The reporter is told (their own sanction notice is in the plan), so the plan never says they are not.
+    expect(plan.effects).not.toContainEqual({ code: 'reporter_not_told' });
+  });
+
+  it('"the person who reported is not told" only when the reporter has no notice in the plan', () => {
+    const told = { code: 'reporter_not_told' } as const;
+    // Bad faith with a sanction on someone else: only that person is told, the reporter is not.
+    expect(planNotices(decide([act('P-bob', 'chat')], { verdict: 'bad_faith' }), ctx()).effects).toContainEqual(told);
+    // Bad faith with a sanction on the reporter, and with a note on the reporter (a note sends nothing): control for each side.
+    expect(planNotices(decide([act('P-rep', 'ban')], { verdict: 'bad_faith' }), ctx()).effects).not.toContainEqual(told);
+    expect(planNotices(decide([act('P-rep', 'note')], { verdict: 'bad_faith' }), ctx()).effects).not.toContainEqual(told);
+    // Upheld with feedback off and a sanction on the reporter: their own sanction notice is in the plan.
+    expect(planNotices(decide([act('P-rep', 'warning')]), ctx({ reporterFeedback: false })).effects).not.toContainEqual(told);
+    // Upheld with feedback off and a sanction on the target: nobody tells the reporter.
+    expect(planNotices(decide([act('P-bob', 'warning')]), ctx({ reporterFeedback: false })).effects).toContainEqual(told);
+    // A rename alone tells only the target.
+    expect(planNotices(decide([], { rename: { rule: 7 } }), ctx()).effects).toContainEqual(told);
+    // Nothing sent at all adds no line.
+    expect(planNotices(decide([], { verdict: 'no_action' }), ctx()).effects).not.toContainEqual(told);
   });
 
   it('upheld with a sanction on the reporter: the reporter gets the sanction notice and then the thank-you', () => {

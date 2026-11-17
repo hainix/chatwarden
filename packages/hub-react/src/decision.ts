@@ -150,10 +150,14 @@ export function resolveDraft(d: Draft): Choice | null {
   return parseChoiceKey(d.what);
 }
 
-/** The verdict the server is sent. "Fair" is `noted` when every action is a note (and there is one), else `upheld`. */
+/**
+ * The verdict the server is sent. "Fair" is `noted` when every action is a note (and there is one), else `upheld`. A request for a new name is `upheld` always:
+ * the server refuses `noted` with a rename (a note is not a decision against the person).
+ */
 export function serverVerdict(form: DecisionForm): DecideInput['verdict'] {
   if (form.verdict === 'not_a_problem') return 'no_action';
   if (form.verdict === 'bad_faith') return 'bad_faith';
+  if (form.rename !== null) return 'upheld';
   const choices = form.actions.map(resolveDraft);
   return choices.length > 0 && choices.every((c) => c?.kind === 'note') ? 'noted' : 'upheld';
 }

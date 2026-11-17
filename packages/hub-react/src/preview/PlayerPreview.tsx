@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import type { ReactNode } from 'react';
-import { NOTICE_WORDS, noticeView, timeLeft, untilText } from '@chatwarden/core/notice-copy';
+import { NOTICE_WORDS, noticeView, restrictedChatText } from '@chatwarden/core/notice-copy';
 import type { EffectCode, NoticeOp, NoticePlan, NoticeView } from '@chatwarden/core/notice-copy';
 import type { PlayerNotice } from '@chatwarden/core';
 import { useHub } from '../context.js';
@@ -85,7 +85,7 @@ function sentenceOf(plan: NoticePlan | null, views: NoticeView[], t: ReturnType<
 export function PlayerPreview({ op, nameOf, reporter, extraEffects = [], prompt = 'choose', announce }: PlayerPreviewProps) {
   const { t, locale } = useHub();
   const titleId = useId();
-  const { plan, ctx } = usePlan(op);
+  const { plan, ctx, ready } = usePlan(op);
   const appeals = ctx.appeals;
   const now = ctx.now;
   const views = plan === null ? [] : plan.notices.map((n) => ({ to: n.to, notice: n.notice, view: noticeView(n.notice, { words: NOTICE_WORDS, locale: 'en', now }) }));
@@ -104,10 +104,15 @@ export function PlayerPreview({ op, nameOf, reporter, extraEffects = [], prompt 
   const several = new Set([...people, ...named]).size > 1;
 
   let body: ReactNode;
+  // Until the rules' titles have arrived the panel is one line of height (the same as while its code loads), so a label never shows without its title.
+  if (!ready) return <p className="cw-hint cw-pv-hold" aria-hidden="true">{'\u00a0'}</p>;
   if (plan === null) body = <p className="cw-hint cw-pv-line">{t(prompt === 'chooseRule' ? 'hub.preview.chooseRule' : 'hub.preview.choose')}</p>;
   else {
     const direct = plan.nothing === 'direct';
     const revoking = plan.notices.length === 0 && plan.effects.some((e) => e.code === 'lifts');
+    // A direct chat restriction shows its end in the drawn chat line, so that effect is not said twice; a direct public-rooms restriction or ban has no drawn
+    // line, so its end-time effect is the one place the end is said (design 4.3 C).
+    const listed = effects.filter((x) => !(direct && x.e.code === 'chat_off'));
     const none = plan.notices.length === 0 && plan.nothing === null && plan.effects.length === 0;
     body = (
       <>
@@ -136,11 +141,8 @@ export function PlayerPreview({ op, nameOf, reporter, extraEffects = [], prompt 
           <div className="cw-pv-direct">
             {plan.effects.map((e, i) => {
               if (e.code === 'chat_off') {
-                // What the chat box shows them when they next try to type: the kit's own line, with the referee card.
-                const line =
-                  e.until === null
-                    ? NOTICE_WORDS['player.restricted.moderator.noEnd']
-                    : fill(NOTICE_WORDS['player.restricted.moderator.until'], { when: untilText(e.until, 'en'), left: timeLeft(e.until, now(), 'en') ?? '' });
+                // What the chat box shows them when they next try to type: the kit's own line (the words player-react's RestrictedChatLine draws), with the referee card.
+                const line = restrictedChatText((key, values) => fill(NOTICE_WORDS[key], values), { until: e.until, byModerator: true, now: now(), locale: 'en' });
                 return (
                   <div key={i}>
                     <p className="cw-pv-line">{t('hub.preview.direct.chat')}</p>
@@ -155,14 +157,12 @@ export function PlayerPreview({ op, nameOf, reporter, extraEffects = [], prompt 
             })}
           </div>
         )}
-        {(effects.length > 0 || extraEffects.length > 0) && (
+        {(listed.length > 0 || extraEffects.length > 0) && (
           <ul className="cw-pv-effects">
-            {effects
-              .filter((x) => !(direct && (x.e.code === 'chat_off' || x.e.code === 'area_off' || x.e.code === 'banned')))
-              .map((x, i) => {
-                const person = effectPerson(x.e);
-                return <li key={i}>{several && person !== null ? t('hub.preview.effect.for', { name: nameOf(person), text: x.text }) : x.text}</li>;
-              })}
+            {listed.map((x, i) => {
+              const person = effectPerson(x.e);
+              return <li key={i}>{several && person !== null ? t('hub.preview.effect.for', { name: nameOf(person), text: x.text }) : x.text}</li>;
+            })}
             {extraEffects.map((text, i) => (
               <li key={`x${i}`}>{text}</li>
             ))}

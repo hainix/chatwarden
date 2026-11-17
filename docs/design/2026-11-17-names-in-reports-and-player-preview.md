@@ -118,7 +118,7 @@ fair, no actions, row ticked, a reason. The notices (sanctions first, then the r
    decision's reason, rule })`.
 The answer is the decision's answer plus `rename: { status: 'asked' | 'already' | 'failed'; error?: 'off' | 'not_found' | 'invalid' }`
 (absent when none was asked). `already` is `pending` from the core (a request is waiting): a rename that is already asked is the goal
-met. The server refuses before writing anything with 400 `invalid_body` when `rename` comes with a verdict other than `upheld`, with an
+met. The server refuses before writing anything with 400 `invalid_request` when `rename` comes with a verdict other than `upheld`, with an
 action list that acts on the reporter, or without a numbered rule; with 403 when the caller lacks `sanctions.apply` (as for any
 sanction); and with 404 when renames are not available (`names.renamesEnabled()` false), checked before the body as the rename route
 does. It audits `name.rename_required` for the person (best-effort, after the write), beside the decision's own audit row.
@@ -156,7 +156,7 @@ The hub tells the two apart from the resolved profile it already reads for the d
 
 0.1.9 left the rename's rule optional and defaulted it to the slur filter's rule (CR 1, "No slurs or hate"), which tells a player their
 name broke the hate rule. With no installed base to protect, the rule becomes required everywhere: `cw.names.requireRename({ ..., rule })`
-takes a required citable numbered rule (a missing one is `invalid`); `POST /people/:ref/rename` requires `rule` (400 `invalid_body`
+takes a required citable numbered rule (a missing one is `invalid`); `POST /people/:ref/rename` requires `rule` (400 `invalid_request`
 without it); both hub forms require it (the Person form's rule select stays, "No rule covers this" is not offered for a rename). The
 preview can then show the exact rule label the player will read. The `autoRestrictRule` default is no longer used for renames.
 
@@ -215,7 +215,7 @@ language. This preview is in English." (4.4).
   this." with an Acknowledge button, "Got it" for the others.
 - The reporter's notice: "Thanks for your report" with "A moderator looked at your report and took action. We do not share what was
   done." and "Got it", under "The person who reported sees". Present only on `upheld` with at least one non-note action, and only
-  when the kit's `reporterFeedback` is on (`GET /policy`). When absent, the effects say "The person who reported is not told."
+  when the kit's `reporterFeedback` is on (`GET /policy`). When the plan sends the reporter nothing at all (no thank-you, and no sanction notice of their own), the effects say "The person who reported is not told."
 - The rename notice: title "Please choose a new name", its body, Rule row, "Got it". No lines, no reference, no end, no appeal.
 - Effects (one line each, moderator-facing): chat off until T / until lifted; no public rooms until T / until lifted; banned until T /
   until lifted; the warning stays on the record for 90 days; "Their network address is also restricted for 24 hours." when an action

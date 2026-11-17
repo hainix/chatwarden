@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { dropTargetActions, emptyForm, newDraft, renameStartRule, toInput, validate } from '../src/decision.js';
+import { dropTargetActions, emptyForm, newDraft, renameStartRule, serverVerdict, toInput, validate } from '../src/decision.js';
+import { decideOp } from '../src/preview/ops.js';
 import type { DecisionForm, Draft, ValidationContext } from '../src/decision.js';
 import { shapeOf } from '../src/case/useQuickActions.js';
 
@@ -55,8 +56,19 @@ describe('toInput', () => {
     expect(toInput(form({ rename: { rule: '7' }, actions: [action()] }))).toMatchObject({ verdict: 'upheld', actions: [{ kind: 'warning' }], rename: { rule: 7 } });
   });
 
-  it('a note-only decision stays "noted" and carries the rename', () => {
-    expect(toInput(form({ rename: { rule: '7' }, actions: [action({ what: 'note:null' })] }))).toMatchObject({ verdict: 'noted', rename: { rule: 7 } });
+  it('a note-only decision with the rename is "upheld" (the server refuses "noted" with a rename), and stays "noted" without it', () => {
+    expect(toInput(form({ rename: { rule: '7' }, actions: [action({ what: 'note:null' })] }))).toMatchObject({ verdict: 'upheld', rename: { rule: 7 } });
+    expect(toInput(form({ rename: { rule: '7' }, actions: [action({ what: 'note:null' }), action({ uid: 'a2', what: 'note:null' })] })).verdict).toBe('upheld');
+    expect(toInput(form({ actions: [action({ what: 'note:null' })] })).verdict).toBe('noted');
+    expect(toInput(form({ rename: { rule: '7' }, actions: [action({ what: 'note:null' }), action({ uid: 'a2' })] })).verdict).toBe('upheld');
+    // Not a rename: the dismissal verdicts keep their own.
+    expect(serverVerdict(form({ verdict: 'bad_faith', actions: [action({ what: 'note:null' })] }))).toBe('bad_faith');
+    expect(serverVerdict(form({ verdict: 'not_a_problem', actions: [action({ what: 'note:null' })] }))).toBe('no_action');
+  });
+
+  it('the preview op carries the same verdict as the body', () => {
+    const f = form({ rename: { rule: '7' }, actions: [action({ what: 'note:null' })] });
+    expect(decideOp(f, { target: TARGET, reporter: 'P-rep', lineOf: () => null, order: [] })).toMatchObject({ verdict: toInput(f).verdict });
   });
 });
 

@@ -3,11 +3,12 @@ import { userEvent } from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NoticeOp } from '@chatwarden/core/notice-copy';
-import { LazyPlayerPreview, partLoaders } from '../src/lazyParts.js';
+import { LazyPlayerPreview, partLoaders, resetLazyParts } from '../src/lazyParts.js';
 import type { PlayerPreviewProps } from '../src/preview/PlayerPreview.js';
 import { HubProvider } from '../src/provider.js';
 import { appealsHub } from './appealsWorld.js';
 import { renderPieces } from './pieces-kit.js';
+import { renderHub } from './render.js';
 import { hubWorld, DAY, HOUR } from './world.js';
 import type { HubWorld } from './world.js';
 
@@ -85,6 +86,26 @@ describe('nothing sent', () => {
     const { panel } = await mount(w, { op: 'sanction', kind, durationMs });
     expect(panel).toHaveTextContent('Your game shows its own message when they try to join; the kit sends none.');
     expect(panel.querySelector('.cw-pv-chatline')).toBeNull();
+  });
+
+  it.each([
+    ['area', DAY, /They cannot join public rooms until .+\./],
+    ['area', null, /They cannot join public rooms until a moderator lifts it\./],
+    ['ban', 7 * DAY, /They are banned until .+\./],
+    ['ban', null, /They are banned until a moderator lifts it\./],
+  ] as const)('a direct %s (%s): its end-time line is shown, as the notice of a decision would say it', async (kind, durationMs, line) => {
+    const w = await hubWorld();
+    const { panel } = await mount(w, { op: 'sanction', kind, durationMs });
+    const effects = [...panel.querySelectorAll('.cw-pv-effects li')].map((n) => n.textContent ?? '');
+    expect(effects).toHaveLength(1);
+    expect(effects[0]).toMatch(line);
+  });
+
+  it('a direct chat restriction shows its end once, in the drawn chat line, not again as an effect', async () => {
+    const w = await hubWorld();
+    const { panel } = await mount(w, { op: 'sanction', kind: 'chat', durationMs: DAY });
+    expect(panel.querySelector('.cw-pv-effects')).toBeNull();
+    expect(panel.textContent?.match(/cannot chat until/g) ?? []).toHaveLength(0);
   });
 
   it('a direct warning: staff only', async () => {
@@ -361,5 +382,96 @@ describe('the live sentence', () => {
     });
     expect(region()).toHaveTextContent('Preview updated: nothing is sent.');
     r.unmount();
+  });
+});
+
+describe('the panel waits for what it words itself with', () => {
+  const rename = { op: 'rename', rule: 7 } as NoticeOp;
+
+  it('is not drawn until the rules\' titles have arrived, so a label never shows without its title and then changes', async () => {
+    const w = await hubWorld();
+    let release!: () => void;
+    const gate = new Promise<undefined>((res) => {
+      release = () => res(undefined);
+    });
+    w.intercept.fn = (req) => (req.method === 'GET' && req.path === '/policy' ? gate : undefined);
+    await partLoaders.playerPreview();
+    renderPieces(w, <LazyPlayerPreview op={rename} nameOf={NAME} />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.queryByRole('region', { name: 'What the player sees' })).toBeNull();
+    expect(document.body.textContent).not.toContain('Community Rule 7');
+    release();
+    const panel = await region();
+    expect(panel).toHaveTextContent('Community Rule 7: No offensive names');
+  });
+
+  it('a policy that cannot be read does not hold the panel back: it shows the number alone', async () => {
+    const w = await hubWorld();
+    w.intercept.fn = (req) => (req.path === '/policy' ? { status: 500, headers: {}, body: { error: 'internal', message: 'x' } } : undefined);
+    const { panel } = await mount(w, rename);
+    expect(panel).toHaveTextContent('Community Rule 7');
+    expect(panel).not.toHaveTextContent('No offensive names');
+  });
+
+  it('a role that cannot read the policy gets the panel at once, with the numbers alone', async () => {
+    const w = await hubWorld({ permissions: { 'policy.read': 'owner' } });
+    const { panel } = await mount(w, rename);
+    expect(panel).toHaveTextContent('Community Rule 7');
+    expect(panel).not.toHaveTextContent('No offensive names');
+    expect(w.sent.filter((r) => r.path === '/policy')).toHaveLength(0);
+  });
+});
+
+describe('the time is read when the form changes', () => {
+  it('a changed form is worded against the time now, not the minute-old time of the last tick', async () => {
+    const w = await hubWorld();
+    const r = await live(w, { op: 'sanction', kind: 'chat', durationMs: 2 * 3_600_000 });
+    const panel = (): HTMLElement => screen.getByRole('region', { name: 'What the player sees' });
+    const endOf = (): string => /until (.+?) \(in/.exec(panel().textContent ?? '')?.[1] ?? '';
+    const first = endOf();
+    expect(first).not.toBe('');
+    // Half an hour passes on the world's clock and no minute tick has fired; the moderator changes the form.
+    w.clock.t += 30 * 60_000;
+    r.set({ op: 'sanction', kind: 'chat', durationMs: 2 * 3_600_000 + 1 });
+    await waitFor(() => expect(endOf()).not.toBe(first));
+    expect(panel()).toHaveTextContent(/\(in 2 hours\)/);
+    r.unmount();
+  });
+});
+
+describe('when the panel\'s code cannot be loaded', () => {
+  const real = { ...partLoaders };
+  afterEach(() => {
+    Object.assign(partLoaders, real);
+    resetLazyParts();
+  });
+
+  it('says so in one short line, never silently, and asks for the code again the next time it is drawn', async () => {
+    resetLazyParts();
+    partLoaders.playerPreview = () => Promise.reject(new Error('offline'));
+    const w = await hubWorld();
+    const r = renderPieces(w, <LazyPlayerPreview op={{ op: 'note' }} nameOf={NAME} />);
+    expect(await screen.findByText('The preview could not be loaded.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'What the player sees' })).toBeNull();
+    r.unmount();
+    Object.assign(partLoaders, real);
+    const again = renderPieces(w, <LazyPlayerPreview op={{ op: 'note' }} nameOf={NAME} />);
+    expect(await region()).toHaveTextContent('Nothing is sent to the player.');
+    expect(screen.queryByText('The preview could not be loaded.')).toBeNull();
+    again.unmount();
+  });
+
+  it('a part that fails inside the hub (the decision bar) leaves the form and its Decide button in place', async () => {
+    resetLazyParts();
+    partLoaders.playerPreview = () => Promise.reject(new Error('offline'));
+    const w = await appealsHub({ names: { renames: true } });
+    const f = await w.fileRich({});
+    renderHub(w, { path: `/reports/${f.id}` });
+    await screen.findByRole('heading', { level: 2, name: /report against/ });
+    const bar = await screen.findByRole('region', { name: 'Decision' });
+    expect(await within(bar).findByText('The preview could not be loaded.')).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: 'Decide' })).toBeInTheDocument();
   });
 });

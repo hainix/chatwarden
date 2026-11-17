@@ -567,8 +567,10 @@ and a bundler that reads `sideEffects: false` takes only this file. It exports `
 them: `player.notice.title.warning`, `player.notice.gotIt`, `player.restricted.moderator.until`, and the rest) with `englishWords()` (a copy to spread under your
 own translation) and the types `NoticeWordKey` and `NoticeWords`; `titleKey`, `bodyKey`, `isSanction` and `WARNING_DAYS` (90); `dayText`, `untilText` and `timeLeft`;
 `noticeView(notice, { words, locale, timeZone?, now, record? })`, which returns a `NoticeView` (`kind`, `title`, `body`, `facts`, `refHint`, `linesLabel`, `lines`,
-`mustAcknowledge`, `todo`, `button`, `sanction`) as plain text, with the time passed in; and `communityRuleLabel(ref, title?)`, the one place "Community Rule 2: Title"
-is built (`CommunityRules.label` calls it).
+`mustAcknowledge`, `todo`, `button`, `sanction`) as plain text, with the time passed in; `communityRuleLabel(ref, title?)`, the one place "Community Rule 2: Title"
+is built (`CommunityRules.label` calls it); and `restrictedChatText(say, { until, byModerator, now, locale, timeZone? })`, the one line that stands in place of a chat box that is
+turned off (who did it, until when and how long is left, or that it has ended), which the player kit's `RestrictedChatLine` and a hub's preview both draw. Its three extra words
+(`player.restricted.filter.until`, `player.restricted.filter.noEnd` and `player.restricted.ended`) are in `NOTICE_WORDS` too.
 
 The same subpath carries `planNotices(op, ctx)`: what a moderator's action sends to the player, worked out from the form alone, so a screen can show "What the
 player sees" before the action is taken. `op` is one of `{ op: 'decide', verdict, target, reporter, actions, rename }`, `{ op: 'sanction', kind, durationMs }`,

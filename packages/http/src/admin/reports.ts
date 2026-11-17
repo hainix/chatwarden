@@ -281,16 +281,29 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // The text the player's notice shows for a line, on each line some person wrote themselves (`ownLineIds`): delivered, or starred where a
       // term was blocked, never raw. A line nobody wrote has none.
       const own = new Set(Object.values(report.ownLineIds).flat());
+      // A line that cannot be worded (a damaged row) has no `noticeText`; it never fails the whole report. Logged once per read, by class only.
+      const failed: unknown[] = [];
+      const noticeTextOf = (l: StaffReport['excerpt'][number]): { noticeText?: string } => {
+        if (!own.has(l.lineId)) return {};
+        try {
+          return { noticeText: cw.notices.lineText(l) };
+        } catch (err) {
+          failed.push(err);
+          return {};
+        }
+      };
+      const excerpt = report.excerpt.map((l) => ({
+        ...l,
+        ...noticeTextOf(l),
+        ...(flagged(l.handle) ? { handleFlagged: true as const } : {}),
+      }));
+      if (failed.length > 0) safeWarn(ctx.logger, 'chatwarden.http_notice_text_failed', { error: failed[0] instanceof Error ? failed[0].name : 'unknown', count: failed.length });
       const shown = {
         ...report,
         reportedReasonLabel: labelOf(report),
         ...flagKey(flagged, 'targetHandleFlagged', report.targetHandle),
         ...flagKey(flagged, 'reporterHandleFlagged', report.reporterHandle),
-        excerpt: report.excerpt.map((l) => ({
-          ...l,
-          ...(own.has(l.lineId) ? { noticeText: cw.notices.lineText(l) } : {}),
-          ...(flagged(l.handle) ? { handleFlagged: true as const } : {}),
-        })),
+        excerpt,
       };
       return {
         status: 200,

@@ -16,7 +16,8 @@ const lines: Record<string, { text: string; day: string }> = {
   L2: { text: 'honestly tarvo', day: '2027-01-16' },
 };
 const lineOf = (id: string) => lines[id] ?? null;
-const o = { target: TARGET, reporter: REPORTER, lineOf };
+// The report's own order of lines (the panel shows the player's lines in this order, as the notice does).
+const o = { target: TARGET, reporter: REPORTER, lineOf, order: ['L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7'] };
 const draft = (over: Partial<Draft> = {}): Draft => ({ ...newDraft('a1', TARGET, 2), what: 'chat:86400000', lineIds: ['L1'], ...over });
 const form = (over: Partial<DecisionForm> = {}): DecisionForm => ({ ...emptyForm(), verdict: 'fair', reason: 'PRIVATE-REASON', actions: [draft()], ...over });
 
@@ -62,6 +63,18 @@ describe('decideOp: the plan input from the form', () => {
   it('lines present and absent', () => {
     expect(decideOp(form({ actions: [draft({ lineIds: [] })] }), o)).toMatchObject({ actions: [{ lines: [] }] });
     expect(decideOp(form({ actions: [draft({ lineIds: ['L1', 'L2'] })] }), o)).toMatchObject({ actions: [{ lines: [lines.L1, lines.L2] }] });
+  });
+
+  it('lines are in the report\'s order, not the order they were ticked in; a repeat counts once', () => {
+    const many: Record<string, { text: string; day: string }> = Object.fromEntries(['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7'].map((id) => [id, { text: `text ${id}`, day: '2027-01-15' }]));
+    const op = (ids: string[]) => decideOp(form({ actions: [draft({ lineIds: ids })] }), { ...o, lineOf: (id: string) => many[id] ?? null }) as { actions: Array<{ lines: Array<{ text: string }> }> };
+    expect(op(['L5', 'L2']).actions[0]?.lines.map((l) => l.text)).toEqual(['text L2', 'text L5']);
+    expect(op(['L2', 'L5']).actions[0]?.lines.map((l) => l.text)).toEqual(['text L2', 'text L5']);
+    expect(op(['L7', 'L1', 'L4', 'L1']).actions[0]?.lines.map((l) => l.text)).toEqual(['text L1', 'text L4', 'text L7']);
+    // At most five, taken from the report's order.
+    expect(op(['L7', 'L6', 'L5', 'L4', 'L3', 'L2']).actions[0]?.lines.map((l) => l.text)).toEqual(['text L2', 'text L3', 'text L4', 'text L5', 'text L6']);
+    // A line the excerpt does not hold is left out, not placed first.
+    expect(op(['L9', 'L3']).actions[0]?.lines.map((l) => l.text)).toEqual(['text L3']);
   });
 
   it('two people and two actions on one person keep each as given (the plan sorts them)', () => {
@@ -125,6 +138,38 @@ describe('the panel in the decision bar', () => {
     await waitFor(() => expect(panel).toHaveTextContent('Your chat is turned off'));
     expect(panel).toHaveTextContent('Community Rule 2: No insulting, threatening or targeting another player');
     expect(panel).toHaveTextContent('Your messages that led to this');
+  });
+
+  it('lines ticked out of order are listed in the report\'s order, the order the player\'s notice has', async () => {
+    const w = await appealsHub({ names: { renames: true } });
+    const f = await w.fileRich({
+      lines: [
+        { who: 'reporter', text: 'hello there' },
+        { who: 'target', text: 'alpha first' },
+        { who: 'target', text: 'bravo second' },
+        { who: 'target', text: 'charlie third' },
+      ],
+    });
+    const { user, panel } = await open(w, f.id);
+    await waitFor(() => expect(panel).toHaveTextContent('Your messages that led to this'));
+    const boxes = () => within(screen.getByRole('list', { name: 'Chat lines' })).getAllByRole('checkbox', { name: /^Show the line at/ });
+    for (const box of boxes()) await user.click(box);
+    // The third line first, then the first.
+    await user.click(boxes()[2] as HTMLElement);
+    await user.click(boxes()[0] as HTMLElement);
+    const shown = () => [...panel.querySelectorAll('.cw-pv-line-text')].map((n) => n.textContent);
+    await waitFor(() => expect(shown()).toEqual(['alpha first', 'charlie third']));
+    // The notice the real decide writes lists them the same way.
+    const res = await w.cw.decide({
+      reportId: f.id,
+      verdict: 'upheld',
+      actor: 'mod_ann',
+      reason: 'checked',
+      actions: [{ subject: f.person, kind: 'chat', durationMs: 86_400_000, rule: 2, lineIds: [f.lineIds[3] as string, f.lineIds[1] as string] }],
+    } as never);
+    expect(res.ok).toBe(true);
+    const real = w.cw.notices.pending({ clientKey: 'key-target-Mallory' } as never).find((n) => n.kind === 'chat');
+    expect((real?.excerpt ?? []).map((l) => l.text)).toEqual(shown());
   });
 
   it('a blocked line reads from the server\'s masked text, starred; the raw word is never in the page', async () => {

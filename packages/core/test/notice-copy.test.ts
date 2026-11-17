@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { dayText, englishWords, noticeView, timeLeft, untilText } from '../src/noticeCopy.js';
+import { dayText, englishWords, noticeView, restrictedChatText, timeLeft, untilText } from '../src/noticeCopy.js';
 import type { NoticeViewContext } from '../src/noticeCopy.js';
 import type { PlayerNotice } from '../src/notices.js';
 
@@ -266,5 +266,38 @@ describe('the subpath is plain, portable code', () => {
   });
   it('it holds no clock of its own: the time is passed in', () => {
     expect(source).not.toMatch(/Date\.now\(|new Date\(\)|performance\.now/);
+  });
+});
+
+describe('restrictedChatText: the line in place of the chat box', () => {
+  const words = englishWords();
+  const say = (key: keyof typeof words, values: Record<string, string>) => words[key].replace(/\{(\w+)\}/g, (m, k: string) => values[k] ?? m);
+  const text = (o: { until: number | null; byModerator: boolean }, over: { now?: number; locale?: string } = {}) =>
+    restrictedChatText(say, { ...o, now: over.now ?? NOW, locale: over.locale ?? 'en', timeZone: 'UTC' });
+
+  it('a moderator, with an end: the date and how long is left', () => {
+    expect(text({ until: NOW + 3 * HOUR, byModerator: true })).toBe('A moderator turned off your chat until Jan 15, 2027, 3:00 PM (in 3 hours).');
+    expect(text({ until: NOW + 2 * DAY, byModerator: true })).toBe('A moderator turned off your chat until Jan 17, 2027, 12:00 PM (in 2 days).');
+  });
+
+  it('a moderator, no end', () => {
+    expect(text({ until: null, byModerator: true })).toBe('A moderator turned off your chat. It does not end on its own.');
+  });
+
+  it('the filter, with and without an end', () => {
+    expect(text({ until: NOW + HOUR, byModerator: false })).toBe('Your chat is off until Jan 15, 2027, 1:00 PM (in 1 hour). The automatic filter caught a message.');
+    expect(text({ until: null, byModerator: false })).toBe('Your chat is off. It does not end on its own. The automatic filter caught a message.');
+  });
+
+  it('an end that has passed says the chat is back on, whoever turned it off', () => {
+    for (const byModerator of [true, false]) {
+      expect(text({ until: NOW - MINUTE, byModerator })).toBe('Your chat is back on. The restriction ended Jan 15, 2027, 11:59 AM.');
+      expect(text({ until: NOW, byModerator })).toBe('Your chat is back on. The restriction ended Jan 15, 2027, 12:00 PM.');
+    }
+  });
+
+  it('an end that is not a finite number reads as no end', () => {
+    expect(text({ until: Number.NaN, byModerator: true })).toBe('A moderator turned off your chat. It does not end on its own.');
+    expect(text({ until: Infinity, byModerator: false })).toBe('Your chat is off. It does not end on its own. The automatic filter caught a message.');
   });
 });

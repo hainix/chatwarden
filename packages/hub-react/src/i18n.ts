@@ -1526,6 +1526,7 @@ export const en = {
   'hub.decide.result.rename.failed': 'Decision recorded, but asking for a new name did not go through.',
   'hub.decide.result.rename.failed.where': 'Open their page to ask again.',
   'hub.preview.title': 'What the player sees',
+  'hub.preview.unavailable': 'The preview could not be loaded.',
   'hub.preview.caption': "Shown in the player's language. This preview is in English.",
   'hub.preview.choose': 'Choose what happens to see what the player is sent.',
   'hub.preview.chooseRule': 'Choose a rule to see the notice they would get.',

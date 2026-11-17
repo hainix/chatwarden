@@ -91,7 +91,7 @@ CW_DEMO_APPEALS=1 TINY_CHAT_ADMIN_TOKEN=demo npm start -w @chatwarden/example-ti
 - To get a sanction to appeal, type the synthetic blocked term (`zorbak`) three times in the chat page. The automatic timeout has no human decider,
   so the demo's staff login can decide its appeal. A decision the staff login made itself cannot be decided by it (`409 same_decider`): that is the
   rule working. Have another actor decide the report, as `examples/tiny-chat/appeals.test.ts` does.
-- The same switch lets a moderator ask a person for a new name (the Sanction form on their page, "Ask for a new name"). The demo has no rename screen:
+- The same switch lets a moderator ask a person for a new name (the Sanction form on their page, "Ask for a new name", which always cites a numbered rule; `POST /admin/people/:ref/rename` takes `{ reason, rule }`). The demo has no rename screen:
   a real game listens for `rename.required` and calls `cw.names.renamed(who)` afterwards (see the core README, "Names").
 - `startServer({ demoAppeals })` takes the same switch as an option (an option that is passed wins over the environment; `false` forces it off; only
   the exact value `1` turns the variable on), and an `appeals` or `names` in `overrides` wins field by field.

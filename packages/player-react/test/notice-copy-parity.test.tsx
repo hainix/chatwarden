@@ -100,7 +100,7 @@ describe('en and the shared words', () => {
       expect(Object.hasOwn(en, key), key).toBe(true);
       expect((en as Record<string, string>)[key]).toBe(value);
     }
-    expect(Object.keys(NOTICE_WORDS)).toHaveLength(36);
+    expect(Object.keys(NOTICE_WORDS)).toHaveLength(39); // 36 notice words and the three restricted-chat words that moved with restrictedChatText (0.2.0)
   });
 
   it('PlayerText is the same union (every shared key is a PlayerText, and the notice position key stays)', () => {

@@ -31,7 +31,8 @@
 //   /api/*     the player API (`playerRoutes`): GET /api/notices, POST /api/notices/:id/ack, GET /api/record,
 //              GET /api/rules, GET /api/code-of-conduct?format=html|markdown|text, POST /api/names/check.
 //              With CW_DEMO_APPEALS=1 also GET /api/appeals and POST /api/appeals { noticeId, statement } (404 without it), and the staff routes
-//              GET /admin/appeals, GET /admin/appeals/:id, POST /admin/appeals/:id/decide and POST /admin/people/:ref/rename.
+//              GET /admin/appeals, GET /admin/appeals/:id, POST /admin/appeals/:id/decide and POST /admin/people/:ref/rename { reason, rule }
+//              (a rename always cites a Community Rule: a body with no `rule` is a 400).
 //              DEMO ONLY identity: the `x-chatwarden-key` header, or `?key=` (a key in a URL is unsafe, see the README).
 //   /healthz, /readyz   the probes (`healthRoutes`)
 // Optional Discord feed (`@chatwarden/discord`): set DISCORD_WEBHOOK_URL (and DISCORD_MENTION_ROLE_ID) to post reports and

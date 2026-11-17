@@ -235,7 +235,7 @@ export function DecisionBar() {
   // On a name report with renames unavailable: one plain line, where the row would be. Not for a role that cannot apply sanctions (nothing for it to switch on).
   const renameOff = nameReport && !features.renames && can('sanctions.apply') && !dismissal;
   // Only the masked text the server sent for a line the person wrote is ever shown; a line without it is left out, never shown as it was typed.
-  const previewOp = decideOp(form, { target, reporter: parts.reporter, lineOf: parts.lineOf });
+  const previewOp = decideOp(form, { target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order });
   // A problem on an action that is shown in short opens the editor, where the field is.
   const goTo = (id: string): void => {
     if (field(id) === null) {

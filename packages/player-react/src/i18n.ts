@@ -74,9 +74,6 @@ export const en = {
   'player.rules.loadFailed': 'We could not load the rules.',
   'player.rules.empty': 'No rules are published yet.',
 
-  'player.restricted.filter.until': 'Your chat is off until {when} ({left}). The automatic filter caught a message.',
-  'player.restricted.filter.noEnd': 'Your chat is off. It does not end on its own. The automatic filter caught a message.',
-  'player.restricted.ended': 'Your chat is back on. The restriction ended {when}.',
   'player.restricted.ref': 'Reference {code}',
 
   // A pause, not a sanction (slow mode, too many lines, the same line again). {left} is the wait with its own "in" ("in 3 seconds").

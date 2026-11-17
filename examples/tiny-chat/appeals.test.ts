@@ -159,10 +159,15 @@ describe('tiny-chat with CW_DEMO_APPEALS', () => {
     expect(refused.json.error).toBe('same_decider');
 
     // A rename request: a notice that names no name, and the game's hold until it calls `renamed`.
-    const asked = await call(server, `/admin/people/${encodeURIComponent(subject)}/rename`, { method: 'POST', as: 'staff', body: { reason: 'The name breaks Rule 1.' } });
+    // A rename always cites a rule: without one nothing is asked.
+    const noRule = await call(server, `/admin/people/${encodeURIComponent(subject)}/rename`, { method: 'POST', as: 'staff', body: { reason: 'The name breaks Rule 1.' } });
+    expect(noRule.status).toBe(400);
+    expect(noRule.json.error).toBe('invalid_request');
+    expect(server.chatwarden.names.pendingRename({ clientKey: keyOf('merl') })).toBe(false);
+    const asked = await call(server, `/admin/people/${encodeURIComponent(subject)}/rename`, { method: 'POST', as: 'staff', body: { reason: 'The name breaks Rule 1.', rule: 1 } });
     expect(asked.status).toBe(200);
     expect(server.chatwarden.names.pendingRename({ clientKey: keyOf('merl') })).toBe(true);
-    const asked2 = await call(server, `/admin/people/${encodeURIComponent(subject)}/rename`, { method: 'POST', as: 'staff', body: { reason: 'Again.' } });
+    const asked2 = await call(server, `/admin/people/${encodeURIComponent(subject)}/rename`, { method: 'POST', as: 'staff', body: { reason: 'Again.', rule: 1 } });
     expect(asked2.json.error).toBe('pending_rename');
     expect(server.chatwarden.names.renamed({ clientKey: keyOf('merl') })).toBe(true);
     expect(server.chatwarden.names.pendingRename({ clientKey: keyOf('merl') })).toBe(false);
@@ -200,7 +205,7 @@ describe('tiny-chat with CW_DEMO_APPEALS', () => {
     expect((await call(server, '/api/appeals', { method: 'POST', name: 'quissel', body: { noticeId: 'x', statement: 'y' } })).status).toBe(404);
     expect((await call(server, '/admin/appeals', { as: 'staff' })).status).toBe(404);
     expect((await call(server, '/admin/appeals/stats', { as: 'staff' })).status).toBe(404);
-    expect((await call(server, '/admin/people/s_none/rename', { method: 'POST', as: 'staff', body: { reason: 'x' } })).status).toBe(404);
+    expect((await call(server, '/admin/people/s_none/rename', { method: 'POST', as: 'staff', body: { reason: 'x', rule: 1 } })).status).toBe(404);
     // 0.1.8's bodies: no features in /me, and no outcome notice kinds appear.
     expect((await call(server, '/admin/me', { as: 'staff' })).json).not.toHaveProperty('features');
   });

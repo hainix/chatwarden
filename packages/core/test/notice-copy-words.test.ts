@@ -59,6 +59,10 @@ const SNAPSHOT_0_1_14: Record<string, string> = {
   'player.notice.appeal': 'Think this is a mistake?',
   'player.restricted.moderator.until': 'A moderator turned off your chat until {when} ({left}).',
   'player.restricted.moderator.noEnd': 'A moderator turned off your chat. It does not end on its own.',
+  // Moved here in 0.2.0 with `restrictedChatText` (same words as player-react's catalog held before).
+  'player.restricted.filter.until': 'Your chat is off until {when} ({left}). The automatic filter caught a message.',
+  'player.restricted.filter.noEnd': 'Your chat is off. It does not end on its own. The automatic filter caught a message.',
+  'player.restricted.ended': 'Your chat is back on. The restriction ended {when}.',
 };
 
 describe('NOTICE_WORDS', () => {
@@ -95,8 +99,8 @@ describe('NOTICE_WORDS', () => {
     for (const [key, value] of Object.entries(NOTICE_WORDS)) expect(source, key).toContain(`'${key}': ${JSON.stringify(value).replace(/^"|"$/g, "'")}`);
   });
 
-  it('every key is a player-react key: player.notice.* or player.restricted.moderator.*', () => {
-    for (const key of Object.keys(NOTICE_WORDS)) expect(key).toMatch(/^player\.(notice|restricted\.moderator)\./);
+  it('every key is a player-react key: player.notice.* or one of the restricted-chat words', () => {
+    for (const key of Object.keys(NOTICE_WORDS)) expect(key).toMatch(/^player\.(notice|restricted\.(moderator|filter|ended))/);
   });
 
   it('the fallbacks exist, and an unknown kind (or a prototype name) gets them', () => {

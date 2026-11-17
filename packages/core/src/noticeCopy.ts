@@ -47,6 +47,9 @@ const WORDS = {
   'player.notice.appeal': 'Think this is a mistake?',
   'player.restricted.moderator.until': 'A moderator turned off your chat until {when} ({left}).',
   'player.restricted.moderator.noEnd': 'A moderator turned off your chat. It does not end on its own.',
+  'player.restricted.filter.until': 'Your chat is off until {when} ({left}). The automatic filter caught a message.',
+  'player.restricted.filter.noEnd': 'Your chat is off. It does not end on its own. The automatic filter caught a message.',
+  'player.restricted.ended': 'Your chat is back on. The restriction ended {when}.',
 };
 
 /** A key of {@link NOTICE_WORDS}. */
@@ -56,8 +59,8 @@ export type NoticeWordKey = keyof typeof WORDS;
 export type NoticeWords = Readonly<Record<NoticeWordKey, string>>;
 
 /**
- * The English words of every notice kind (title and body), the labels of its facts, its hints, its buttons and the two lines of a chat that
- * a moderator turned off. Deep-frozen; {@link englishWords} is a copy to spread.
+ * The English words of every notice kind (title and body), the labels of its facts, its hints, its buttons and the lines of a chat that is
+ * turned off. Deep-frozen; {@link englishWords} is a copy to spread.
  */
 export const NOTICE_WORDS: NoticeWords = Object.freeze({ ...WORDS });
 
@@ -240,6 +243,32 @@ export function noticeView(notice: PlayerNotice, ctx: NoticeViewContext): Notice
     button: word(mustAcknowledge ? 'player.notice.acknowledge' : 'player.notice.gotIt'),
     sanction: isSanction(notice.kind),
   };
+}
+
+/** The words {@link restrictedChatText} asks for. */
+export type RestrictedWordKey =
+  | 'player.restricted.moderator.until'
+  | 'player.restricted.moderator.noEnd'
+  | 'player.restricted.filter.until'
+  | 'player.restricted.filter.noEnd'
+  | 'player.restricted.ended';
+
+/**
+ * The one line that stands in place of a chat box that is turned off: who did it (a moderator, or the automatic filter), until when and how long is left, or
+ * that it has ended. `say` fills a word's `{when}` and `{left}` (player-react's translator, or a plain template fill over {@link NOTICE_WORDS}). Player-react's
+ * `RestrictedChatLine` and the hub's "What the player sees" panel both draw this text, so they cannot word it differently. A reference code, when one exists, is the
+ * caller's to add. An `until` that is not a finite number reads as no end.
+ */
+export function restrictedChatText(
+  say: (key: RestrictedWordKey, values: { when: string; left: string }) => string,
+  o: { until: number | null; byModerator: boolean; now: number; locale: string; timeZone?: string },
+): string {
+  const who = o.byModerator ? 'moderator' : 'filter';
+  const until = o.until;
+  if (typeof until !== 'number' || !Number.isFinite(until)) return say(`player.restricted.${who}.noEnd`, { when: '', left: '' });
+  const when = untilText(until, o.locale, o.timeZone);
+  const left = timeLeft(until, o.now, o.locale);
+  return left === null ? say('player.restricted.ended', { when, left: '' }) : say(`player.restricted.${who}.until`, { when, left });
 }
 
 /** "Community Rule 2: Title", the name of a rule a player is told: the number and the title, "Community Rule 99" when there is no title, and a plain line for `'uncovered'`. */

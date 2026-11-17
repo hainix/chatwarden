@@ -106,6 +106,37 @@ describe('GET /reports/:id: noticeText on each own line', () => {
     expect(r.excerpt.slice(0, -1).every((l) => typeof l.noticeText === 'string')).toBe(true);
   });
 
+  it('a line that cannot be worded does not turn the whole report into a 500: it has no noticeText, the others keep theirs, and a warning is logged by class', async () => {
+    const w = await world({
+      matcher,
+      wrap: (cw) => ({
+        ...cw,
+        reports: {
+          ...cw.reports,
+          get: (rid: string) => {
+            const rep = cw.reports.get(rid);
+            if (rep === null) return null;
+            // A stored line with no raw text (a damaged row): `lineText` throws for it.
+            const excerpt = rep.excerpt.map((l, i) => (i === 0 ? ({ ...l, raw: undefined } as never) : l));
+            return { ...rep, excerpt };
+          },
+        },
+      }),
+    });
+    const id = await filed(w);
+    const r = await reportOf(w, id);
+    const own = new Set(Object.values(r.ownLineIds).flat());
+    const first = r.excerpt[0] as Line;
+    expect(own.has(first.lineId)).toBe(true);
+    expect(Object.hasOwn(first, 'noticeText')).toBe(false);
+    for (const l of r.excerpt.slice(1)) expect(Object.hasOwn(l, 'noticeText'), l.lineId).toBe(own.has(l.lineId));
+    expect(r.excerpt.slice(1).some((l) => typeof l.noticeText === 'string')).toBe(true);
+    const warned = w.logged.filter(([event]) => event === 'chatwarden.http_notice_text_failed');
+    expect(warned).toHaveLength(1);
+    // By class only: no line, no text.
+    expect(JSON.stringify(warned)).not.toMatch(/zorbak|vlemmo|clean line/);
+  });
+
   it('adds one key to a line and changes nothing else on it', async () => {
     const w = await world({ matcher });
     const id = await filed(w);

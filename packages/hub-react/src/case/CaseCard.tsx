@@ -380,7 +380,7 @@ export function CaseCard() {
         {c.aiCase?.from != null && !aiOk && draft.status === 'ready' && <LazyAiParts part="why" />}
         {!aiOk && one !== null && (
           <>
-            <LazyPlayerPreview op={decideOp(one.form, { target: parts.target, reporter: parts.reporter, lineOf: parts.lineOf })} nameOf={parts.nameOf} reporter={parts.reporter} />
+            <LazyPlayerPreview op={decideOp(one.form, { target: parts.target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order })} nameOf={parts.nameOf} reporter={parts.reporter} />
             <p className="cw-hint cw-scard-fine">{t('hub.simple.undo', { seconds: SECONDS })}</p>
           </>
         )}
