@@ -247,3 +247,6 @@ export function communityRuleLabel(ref: RuleRef, title?: string): string {
   if (ref === 'uncovered') return 'Not covered by a rule yet';
   return title === undefined ? `Community Rule ${ref}` : `Community Rule ${ref}: ${title}`;
 }
+
+export { appealReplacementEnd, planNotices } from './noticePlan.js';
+export type { EffectCode, NoticeOp, NoticePlan, PlanAction, PlanContext, PlanLine, PlannedNotice } from './noticePlan.js';

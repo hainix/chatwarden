@@ -570,6 +570,17 @@ own translation) and the types `NoticeWordKey` and `NoticeWords`; `titleKey`, `b
 `mustAcknowledge`, `todo`, `button`, `sanction`) as plain text, with the time passed in; and `communityRuleLabel(ref, title?)`, the one place "Community Rule 2: Title"
 is built (`CommunityRules.label` calls it).
 
+The same subpath carries `planNotices(op, ctx)`: what a moderator's action sends to the player, worked out from the form alone, so a screen can show "What the
+player sees" before the action is taken. `op` is one of `{ op: 'decide', verdict, target, reporter, actions, rename }`, `{ op: 'sanction', kind, durationMs }`,
+`{ op: 'note' }`, `{ op: 'rename', rule }`, `{ op: 'revoke', kind }`, `{ op: 'appeal', outcome, original, to? }` and `{ op: 'dismiss' }` (the types are `NoticeOp`, `PlanAction`
+and `PlanLine`); `ctx` is `{ now, ruleLabel, reporterFeedback, appeals, refCode }` (`PlanContext`). It returns a `NoticePlan`: `notices` (the `PlayerNotice`s the services
+would write, each with its recipient `to`, in the order they are written: people and kinds in the core's order, then the reporter's thank-you, then a rename),
+`effects` (`EffectCode`s: what else changes for the player, for a screen to put into words) and `nothing` (`'note'`, `'dismissal'` or `'direct'`, why no notice is sent).
+The input types have no field for a reason, evidence, a gap note, an actor, a staff reference, a group id, the IP flag, an AI read or an appeal statement. It never
+throws: a malformed op is an empty plan. A test runs the real services over a matrix of decisions, direct sanctions, renames, revokes and appeal decisions and checks
+that what they write equals the plan. `appealReplacementEnd(original, to)` is the end of the sanction a reduction on appeal writes (never later than the original's end);
+the appeals service and the plan share it.
+
 ## Upgrading to 0.1.9
 
 - **From 0.1.8.** SQLite migration 22 is one-way: a database it has run on cannot be opened by 0.1.8 or older. Back it up first.
