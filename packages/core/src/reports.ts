@@ -425,7 +425,7 @@ export class ReportService {
           p = seen;
         }
       }
-      return { lineId: l.lineId, ts: l.ts, seatId: l.seatId, handle: l.handle, raw: l.raw, delivered: l.delivered, blocked: l.blocked, audience: l.audience, p };
+      return { lineId: l.lineId, ts: l.ts, seatId: l.seatId, handle: l.handle, raw: l.raw, delivered: l.delivered, blocked: l.blocked, audience: l.audience, p, ...(l.retracted === true ? { retracted: true as const } : {}) };
     });
     return { excerpt, people };
   }

@@ -341,6 +341,13 @@ export interface Chatwarden {
      * (the game's word, as for `accept`) is always `'ok'`. A pure read, for the chat box's hello. @experimental
      */
     postingState(roomId: string, seatId: string, opts?: { staff?: boolean }): 'ok' | 'locked' | 'new_account';
+    /**
+     * Take a delivered line back for everyone, keeping it as evidence: its text stays in the evidence buffer and in any report filed from now on (flagged `retracted`), a report already filed is
+     * not rewritten, and a report on the line is still valid. `opts.allFromAuthor` also takes back every delivered line still in the buffer by the same person (the spam-wave case). It works only
+     * while the line is in the evidence buffer (15 minutes, 100 lines a room), else `not_found` (also for a line already taken back, a blocked line and any bad argument). Raises `line.retracted`
+     * (the room, the line ids and a time: no text, no seat). Not a sanction: no notice, no strike, nothing said to the author. @experimental
+     */
+    retract(roomId: string, lineId: string, opts?: { allFromAuthor?: boolean }): { ok: true; lineIds: string[] } | { ok: false; refused: 'not_found' };
   };
   /**
    * The chat filters (`profile.filters`): what they did, and a way to try them before they act. All off until an owner turns a block on.
@@ -1819,6 +1826,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           .filter((r) => r.seated > 0 || r.mode !== 'normal')
           .sort((a, b) => b.seated - a.seated || (a.roomId < b.roomId ? -1 : a.roomId > b.roomId ? 1 : 0))
           .slice(0, 500);
+      },
+      retract: (roomId, lineId, o) => {
+        if (typeof roomId !== 'string' || roomId === '' || typeof lineId !== 'string' || lineId === '') return { ok: false, refused: 'not_found' };
+        const lineIds = buffer.retract(roomId, lineId, { allFromAuthor: o?.allFromAuthor === true, canonical: (subject) => subjects.canonical(subject) });
+        if (lineIds.length === 0) return { ok: false, refused: 'not_found' };
+        bus.emit({ type: 'line.retracted', roomId, lineIds, at: clock.now() });
+        return { ok: true, lineIds: [...lineIds] };
       },
       postingState: (roomId, seatId, o) => {
         const subject = roster.occupant(roomId, seatId)?.subject ?? null;

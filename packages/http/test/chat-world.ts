@@ -1,5 +1,5 @@
 import { createChatwarden } from '@chatwarden/core';
-import type { Chatwarden, ChatResult, FilterSettings, LimitsInput, Logger, PaceSettings, ProfanityFilter, RawWho, SubjectId } from '@chatwarden/core';
+import type { Chatwarden, ChatwardenOptions, ChatResult, FilterSettings, LimitsInput, Logger, PaceSettings, ProfanityFilter, RawWho, RoomsSettings, SubjectId } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { MemoryTermStore, syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { MemoryStore } from '@chatwarden/store-memory';
@@ -83,6 +83,10 @@ export interface WorldOptions {
   pace?: PaceSettings;
   /** The chat filters in force from the start (links, personal info, phrases, caps and repeats). */
   filters?: FilterSettings;
+  /** The `rooms` settings in force from the start (emergency, probation, unknown age). */
+  rooms?: RoomsSettings;
+  /** The kit's `signals` options (the `accountAgeDays` hook). */
+  signals?: ChatwardenOptions['signals'];
   /** Do not build the broadcaster (a test builds its own). */
   noBroadcaster?: boolean;
 }
@@ -110,9 +114,11 @@ export async function chatWorld(over: WorldOptions = {}) {
     retention: false,
     // A filter is always installed (the kit logs once when there is none); the profile decides what it does.
     profanity: filter,
-    ...(over.profanity === 'refuse' || over.pace !== undefined || over.filters !== undefined
+    ...(over.signals === undefined ? {} : { signals: over.signals }),
+    ...(over.profanity === 'refuse' || over.pace !== undefined || over.filters !== undefined || over.rooms !== undefined
       ? {
           overrides: {
+            ...(over.rooms === undefined ? {} : { rooms: over.rooms }),
             ...(over.profanity === 'refuse' ? { profanity: { mode: 'refuse' as const } } : {}),
             ...(over.pace === undefined ? {} : { pace: over.pace }),
             ...(over.filters === undefined ? {} : { filters: over.filters }),

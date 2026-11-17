@@ -1,9 +1,9 @@
 // The wire types of the chat stream, copied from `@chatwarden/http/chat` so this package stays types-only toward the kit.
 // `test/chat-wire.test.ts` keeps the two copies the same type and `CHAT_WIRE_VERSION` the same number.
-import type { ReportRefusal } from '@chatwarden/core';
+import type { ReportRefusal, RoomMode } from '@chatwarden/core';
 
 /** The version of the frames below. A change that breaks a reader raises it. */
-export const CHAT_WIRE_VERSION = 1;
+export const CHAT_WIRE_VERSION = 2;
 
 /** One delivered line, as a viewer sees it. No seat, no person, no hash. */
 export interface WireLine {
@@ -35,21 +35,31 @@ export interface WireMuted {
 
 /**
  * Why a line was not sent, for its author. `reason` is one of: `length`, `rate`, `gate`, `restricted`, `blocked`, `profanity`, `banned`,
- * `empty`, and, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`). A reader treats any other string as unknown.
+ * `empty`, `link`, `personal_info` and `filter`, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`),
+ * and, new in version 2, `locked` and `new_account` (the room's mode: they carry `until`, when it ends) and `probation` (a new account's pause: it carries `retryAfterMs`). A reader treats any other string as unknown.
  * Never carries text, a handle, an id or a moderator's note.
  */
 export interface WireRefusal {
   reason: string;
-  /** `restricted` and `banned`: epoch ms it ends, or null. */
+  /** `restricted`, `banned`, `locked` and `new_account`: epoch ms it ends, or null. */
   until?: number | null;
   byModerator?: boolean;
   /** The Community Rule number to show as "Community Rule N". */
   rule?: number;
   /** The player's own notice that explains it (look it up with the player routes). */
   noticeId?: string;
-  /** `slow_mode`, `flood`, `duplicate`: when to try again, ms from the answer (a whole number, 1 or more). */
+  /** `slow_mode`, `flood`, `duplicate`, `probation`: when to try again, ms from the answer (a whole number, 1 or more). */
   retryAfterMs?: number;
 }
+
+/** A room's mode as the chat box is told it: `kind` and when it ends (epoch ms, null for `normal`). Never who set it or why. */
+export interface WireMode {
+  kind: RoomMode;
+  until: number | null;
+}
+
+/** Why a viewer cannot post right now, when it is the room's mode: `locked` (staff only) or `new_account` (an emergency, and an account too young). Absent when they can post. */
+export type WireReadOnly = 'locked' | 'new_account';
 
 export type ChatFrame =
   | {
@@ -58,7 +68,10 @@ export type ChatFrame =
       /** Changes when the server restarts or the room is closed and reopened. */
       epoch: string;
       room: string;
-      you: { name: string };
+      /** `readOnly`: the viewer cannot post because of the room's mode (version 2); absent when they can. */
+      you: { name: string; readOnly?: WireReadOnly };
+      /** The room's mode now (version 2): `normal`, `locked` or `emergency` and when it ends. */
+      mode: WireMode;
       /** The line length limit (`cw.limits.chatMaxLength`), for the input. */
       maxLength: number;
       /** How often the server sends a heartbeat comment while a stream is idle (the broadcaster's `heartbeatMs`), so a client can size its liveness watchdog from it. */
@@ -79,6 +92,10 @@ export type ChatFrame =
   | { type: 'state'; restriction: WireRestriction | null; muted: WireMuted[] }
   /** A notice is waiting for this player: ask the player routes for it. Carries nothing else. */
   | { type: 'notices' }
+  /** The room's mode changed or ended (version 2). `readOnly` is computed for THIS viewer. Carries no actor and no reason. */
+  | { type: 'mode'; mode: WireMode; readOnly?: WireReadOnly }
+  /** Lines were taken back for everyone (version 2): remove each id from view and drop its text. Sent to every stream, the author's too. */
+  | { type: 'retract'; ids: string[] }
   /** The server is ending this stream. `banned` carries when the ban ends. */
   | { type: 'bye'; reason: 'banned' | 'room_closed' | 'shutdown' | 'replaced'; until?: number | null };
 
@@ -137,6 +154,20 @@ function restrictionOf(raw: unknown): WireRestriction | null | undefined {
   if ((until !== null && !isNum(until)) || typeof byModerator !== 'boolean') return undefined;
   return { until, byModerator };
 }
+
+const MODES: readonly RoomMode[] = ['normal', 'locked', 'emergency'];
+
+/** A mode from the wire, or undefined when it is not one (a kind outside the three, or an `until` that is neither a time nor null). */
+function modeOf(raw: unknown): WireMode | undefined {
+  const o = bagOf(raw);
+  if (o === null) return undefined;
+  const kind = own(o, 'kind');
+  const until = own(o, 'until');
+  if (!MODES.includes(kind as RoomMode) || (until !== null && !isNum(until))) return undefined;
+  return { kind: kind as RoomMode, until };
+}
+
+const readOnlyOf = (raw: unknown): WireReadOnly | undefined => (raw === 'locked' || raw === 'new_account' ? raw : undefined);
 
 function mutedOf(raw: unknown): WireMuted[] | undefined {
   if (!Array.isArray(raw)) return undefined;
@@ -211,6 +242,8 @@ function readHello(o: Bag): ChatFrame | null {
   const room = own(o, 'room');
   const you = bagOf(own(o, 'you'));
   const youName = you === null ? undefined : own(you, 'name');
+  const youReadOnly = you === null ? undefined : readOnlyOf(own(you, 'readOnly'));
+  const mode = modeOf(own(o, 'mode'));
   const maxLength = own(o, 'maxLength');
   // An older server that does not say gets the broadcaster's default.
   const sent = own(o, 'heartbeatMs');
@@ -222,14 +255,15 @@ function readHello(o: Bag): ChatFrame | null {
   if (own(o, 'v') !== CHAT_WIRE_VERSION) return null;
   if (!isStr(epoch) || !isStr(room) || !isStr(youName) || !isStr(summary)) return null;
   if (!isNum(maxLength) || !Number.isInteger(maxLength) || maxLength < 1) return null;
-  if (restriction === undefined || muted === undefined || !Array.isArray(lines)) return null;
+  if (restriction === undefined || muted === undefined || mode === undefined || !Array.isArray(lines)) return null;
   const serverNow = own(o, 'now');
   return {
     type: 'hello',
     v: CHAT_WIRE_VERSION,
     epoch,
     room,
-    you: { name: cut(youName, MAX_NAME) },
+    you: youReadOnly === undefined ? { name: cut(youName, MAX_NAME) } : { name: cut(youName, MAX_NAME), readOnly: youReadOnly },
+    mode,
     maxLength,
     heartbeatMs: heartbeat,
     summary,
@@ -241,7 +275,7 @@ function readHello(o: Bag): ChatFrame | null {
 }
 
 /**
- * A frame from parsed JSON, or null when it is not one of the six frames or a field has the wrong type. Never throws. It builds a fresh
+ * A frame from parsed JSON, or null when it is not one of the eight frames or a field has the wrong type. Never throws. It builds a fresh
  * object field by field from own properties, so `__proto__` and `constructor` keys never land on the result, and unknown fields
  * are left behind. A name is cut at 64 and a text at 1 000. `jsonLength` is the length of the JSON text the value came from, in bytes;
  * a frame over 64 KiB is dropped.
@@ -270,6 +304,17 @@ export function readFrame(raw: unknown, jsonLength?: number): ChatFrame | null {
       }
       case 'notices':
         return { type: 'notices' };
+      case 'mode': {
+        const mode = modeOf(own(o, 'mode'));
+        if (mode === undefined) return null;
+        const readOnly = readOnlyOf(own(o, 'readOnly'));
+        return readOnly === undefined ? { type: 'mode', mode } : { type: 'mode', mode, readOnly };
+      }
+      case 'retract': {
+        const ids = own(o, 'ids');
+        if (!Array.isArray(ids)) return null;
+        return { type: 'retract', ids: (ids as unknown[]).filter((id): id is string => isStr(id) && id !== '' && id.length <= MAX_ID) };
+      }
       case 'bye': {
         const reason = own(o, 'reason');
         if (reason !== 'banned' && reason !== 'room_closed' && reason !== 'shutdown' && reason !== 'replaced') return null;

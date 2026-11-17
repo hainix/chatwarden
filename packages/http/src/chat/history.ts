@@ -32,6 +32,8 @@ export interface Ring {
   byId(id: string): RingLine | undefined;
   /** Every line still held by a seat, oldest first, as copies. */
   bySeat(seat: string): RingLine[];
+  /** Drop these lines (by id) from the ring, text and all: a retraction. Returns how many were held. Ids not held are ignored. */
+  remove(ids: readonly string[]): number;
   size(): number;
 }
 
@@ -84,6 +86,13 @@ export function createRing(opts: { lines: number; maxAgeMs: number; now: () => n
     bySeat(seat) {
       prune();
       return held.filter((line) => line.seat === seat).map(copyOf);
+    },
+    remove(ids) {
+      if (ids.length === 0) return 0;
+      const gone = new Set(ids);
+      const before = held.length;
+      held = held.filter((line) => !gone.has(line.id));
+      return before - held.length;
     },
     size() {
       prune();

@@ -9,10 +9,11 @@ const line: WireLine = { id: '41', at: 1_800_000_001_000, name: 'tarvo', text: '
 const FRAMES: ChatFrame[] = [
   {
     type: 'hello',
-    v: 1,
+    v: 2,
     epoch: 'k7f2q9',
     room: 'lobby',
     you: { name: 'snerp' },
+    mode: { kind: 'normal', until: null },
     maxLength: 200,
     heartbeatMs: 20_000,
     summary: 'Trash talk is part of the game.',
@@ -24,6 +25,8 @@ const FRAMES: ChatFrame[] = [
   { type: 'hide', ids: ['3', '4'] },
   { type: 'state', restriction: { until: null, byModerator: true }, muted: [] },
   { type: 'notices' },
+  { type: 'mode', mode: { kind: 'locked', until: 1_800_000_900_000 }, readOnly: 'locked' },
+  { type: 'retract', ids: ['3'] },
   { type: 'bye', reason: 'banned', until: 1_800_003_600_000 },
   { type: 'bye', reason: 'room_closed' },
   { type: 'bye', reason: 'replaced' },
@@ -55,7 +58,7 @@ describe('encodeFrame', () => {
   it('matches the documented hello example', () => {
     const out = encodeFrame(FRAMES[0] as ChatFrame);
     expect(
-      out.startsWith('event: hello\ndata: {"type":"hello","v":1,"epoch":"k7f2q9","room":"lobby","you":{"name":"snerp"},"maxLength":200,'),
+      out.startsWith('event: hello\ndata: {"type":"hello","v":2,"epoch":"k7f2q9","room":"lobby","you":{"name":"snerp"},"mode":{"kind":"normal","until":null},"maxLength":200,'),
     ).toBe(true);
   });
 
@@ -114,7 +117,7 @@ describe('HEARTBEAT', () => {
 
 describe('CHAT_WIRE_VERSION', () => {
   it('is 1 and is what hello carries', () => {
-    expect(CHAT_WIRE_VERSION).toBe(1);
+    expect(CHAT_WIRE_VERSION).toBe(2);
     expect((FRAMES[0] as { v: number }).v).toBe(CHAT_WIRE_VERSION);
   });
 });
@@ -261,7 +264,7 @@ describe('the wire types', () => {
     expectTypeOf<WireRestriction>().toEqualTypeOf<{ until: number | null; byModerator: boolean }>();
     expectTypeOf<WireMuted>().toEqualTypeOf<{ ref: string; name: string }>();
     expectTypeOf<WireLine['mine']>().toEqualTypeOf<true | undefined>();
-    expectTypeOf<typeof CHAT_WIRE_VERSION>().toEqualTypeOf<1>();
+    expectTypeOf<typeof CHAT_WIRE_VERSION>().toEqualTypeOf<2>();
     expectTypeOf<typeof HEARTBEAT>().toBeString();
     expectTypeOf(encodeFrame).parameters.toEqualTypeOf<[ChatFrame]>();
     expectTypeOf(encodeFrame).returns.toBeString();
@@ -271,7 +274,7 @@ describe('the wire types', () => {
   it('ChatFrame narrows on type', () => {
     const f = FRAMES[0] as ChatFrame;
     if (f.type === 'hello') {
-      expectTypeOf(f.v).toEqualTypeOf<1>();
+      expectTypeOf(f.v).toEqualTypeOf<2>();
       expectTypeOf(f.lines).toEqualTypeOf<WireLine[]>();
       expectTypeOf(f.restriction).toEqualTypeOf<WireRestriction | null>();
     }
@@ -279,6 +282,6 @@ describe('the wire types', () => {
     if (g.type === 'bye') expectTypeOf(g.reason).toEqualTypeOf<'banned' | 'room_closed' | 'shutdown' | 'replaced'>();
     if (g.type === 'line') expectTypeOf(g.line).toEqualTypeOf<WireLine>();
     if (g.type === 'hide') expectTypeOf(g.ids).toEqualTypeOf<string[]>();
-    expect(FRAMES.map((x) => x.type)).toEqual(['hello', 'line', 'hide', 'state', 'notices', 'bye', 'bye', 'bye']);
+    expect(FRAMES.map((x) => x.type)).toEqual(['hello', 'line', 'hide', 'state', 'notices', 'mode', 'retract', 'bye', 'bye', 'bye']);
   });
 });

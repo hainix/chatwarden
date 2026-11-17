@@ -28,6 +28,11 @@ export interface EvidenceLine {
   blocked: boolean;
   /** Seat ids that could see the line; null means the whole room. */
   audience: string[] | null;
+  /**
+   * A moderator took the line back for everyone (`cw.rooms.retract`). It stays here as evidence with its text; a report filed from now on carries the flag on its excerpt line. Absent until then.
+   * @experimental
+   */
+  retracted?: true;
 }
 
 export interface EvidenceBufferOptions {
@@ -94,6 +99,30 @@ export class EvidenceBuffer {
 
   drop(roomId: string): void {
     this.rooms.delete(roomId);
+  }
+
+  /**
+   * Take a delivered line back for everyone: flag it `retracted` and keep its text as evidence. `allFromAuthor` flags every other delivered line still in the buffer by the same author (the same
+   * person, so a seat that changed hands follows the occupant at the time of each line, and the same person in another seat counts; a guest is known by seat). `canonical` folds a merged subject into the person.
+   * A blocked line was never delivered and is never flagged. Returns the ids it flagged, oldest first; `[]` for an unknown room or line, a line already flagged, or one that has left the window
+   * (older than the window, or past the line cap).
+   */
+  retract(roomId: string, lineId: string, opts: { allFromAuthor?: boolean; canonical?: (subject: SubjectId) => SubjectId } = {}): string[] {
+    const room = this.prune(roomId);
+    const target = room?.lines.find((l) => l.lineId === lineId);
+    if (room === undefined || target === undefined || target.blocked) return [];
+    const canon = opts.canonical ?? ((s: SubjectId): SubjectId => s);
+    const author = target.subject === null ? null : canon(target.subject);
+    const sameAuthor = (l: EvidenceLine): boolean => (author === null ? l.subject === null && l.seatId === target.seatId : l.subject !== null && canon(l.subject) === author);
+    const changed: string[] = [];
+    for (const l of room.lines) {
+      if (l.blocked || l.retracted === true) continue;
+      if (l === target || (opts.allFromAuthor === true && sameAuthor(l))) {
+        l.retracted = true;
+        changed.push(l.lineId);
+      }
+    }
+    return changed;
   }
 
   /**

@@ -1,12 +1,12 @@
 // The wire types of the chat box (design 6.1). The client has a copy (packages/player-react/src/chat/wire.ts); a test keeps the
 // two assignable. Pure types and one pure function: no state, no `node:` import, browser-safe.
-import type { ReportRefusal } from '@chatwarden/core';
+import type { ReportRefusal, RoomMode } from '@chatwarden/core';
 
 /**
  * The version of the frames below. A change that breaks a reader raises it.
  * @experimental
  */
-export const CHAT_WIRE_VERSION = 1;
+export const CHAT_WIRE_VERSION = 2;
 
 /**
  * One delivered line, as a viewer sees it. No seat, no person, no hash.
@@ -52,22 +52,38 @@ export interface WireMuted {
 /**
  * Why a line was not sent, for its author. `reason` is one of: `length`, `rate`, `gate`, `restricted`, `blocked`, `profanity`, `banned`,
  * `empty`, `link`, `personal_info` and `filter` (the chat filters, `profile.filters`: a link, personal details, a phrase rule or caps and repeats;
- * with `rule`, the Community Rule the owner chose for it, and never what matched), and, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`). A reader treats any other string as unknown.
+ * with `rule`, the Community Rule the owner chose for it, and never what matched), when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`),
+ * and, new in version 2, `locked` and `new_account` (the room's mode, `cw.rooms.setMode`: they carry `until`, when it ends) and `probation` (a new account's pause, `rooms.probation`: it carries `retryAfterMs`). A reader treats any other string as unknown.
  * Never carries text, a handle, an id or a moderator's note.
  * @experimental
  */
 export interface WireRefusal {
   reason: string;
-  /** `restricted` and `banned`: epoch ms it ends, or null. */
+  /** `restricted`, `banned`, `locked` and `new_account`: epoch ms it ends, or null. */
   until?: number | null;
   byModerator?: boolean;
   /** The Community Rule number to show as "Community Rule N". */
   rule?: number;
   /** The player's own notice that explains it (look it up with the player routes). */
   noticeId?: string;
-  /** `slow_mode`, `flood`, `duplicate`: when to try again, ms from the answer (a whole number, 1 or more). */
+  /** `slow_mode`, `flood`, `duplicate`, `probation`: when to try again, ms from the answer (a whole number, 1 or more). */
   retryAfterMs?: number;
 }
+
+/**
+ * A room's mode as the chat box is told it: `kind` and when it ends (epoch ms, null for `normal`). Never who set it or why.
+ * @experimental
+ */
+export interface WireMode {
+  kind: RoomMode;
+  until: number | null;
+}
+
+/**
+ * Why a viewer cannot post right now, when it is the room's mode and not their own restriction: `locked` (the room takes staff only) or `new_account` (an emergency, and an account too young). Absent when they can post.
+ * @experimental
+ */
+export type WireReadOnly = 'locked' | 'new_account';
 
 /** @experimental */
 export type ChatFrame =
@@ -77,7 +93,10 @@ export type ChatFrame =
       /** Changes when the server restarts or the room is closed and reopened. */
       epoch: string;
       room: string;
-      you: { name: string };
+      /** `readOnly`: the viewer cannot post because of the room's mode (version 2); absent when they can. */
+      you: { name: string; readOnly?: WireReadOnly };
+      /** The room's mode now (version 2): `normal`, `locked` or `emergency` and when it ends. */
+      mode: WireMode;
       /** The line length limit (`cw.limits.chatMaxLength`), for the input. */
       maxLength: number;
       /** How often the server sends a heartbeat comment while a stream is idle (the broadcaster's `heartbeatMs`), so a client can size its liveness watchdog from it. */
@@ -98,6 +117,13 @@ export type ChatFrame =
   | { type: 'state'; restriction: WireRestriction | null; muted: WireMuted[] }
   /** A notice is waiting for this player: ask the player routes for it. Carries nothing else. */
   | { type: 'notices' }
+  /**
+   * The room's mode changed or ended (version 2). `readOnly` is computed for THIS viewer (a staff member's is absent, a new account's is `new_account` in an emergency): the same room tells two viewers
+   * two things. Carries no actor and no reason.
+   */
+  | { type: 'mode'; mode: WireMode; readOnly?: WireReadOnly }
+  /** Lines were taken back for everyone (version 2): remove each id from view and drop its text. Sent to every stream, the author's too. */
+  | { type: 'retract'; ids: string[] }
   /**
    * The server is ending this stream. `banned` carries when the ban ends. `replaced`: this player opened more streams than `maxStreamsPerMember`
    * allows and this was the oldest, so a client treats it as closed and does not reconnect by itself (a flap loop between tabs otherwise).

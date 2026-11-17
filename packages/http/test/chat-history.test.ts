@@ -240,6 +240,7 @@ describe('createRing', () => {
       snapshot(): RingLine[];
       byId(id: string): RingLine | undefined;
       bySeat(seat: string): RingLine[];
+      remove(ids: readonly string[]): number;
       size(): number;
     }>();
     expectTypeOf<RingLine>().toEqualTypeOf<{ id: string; at: number; seat: string; name: string; text: string }>();

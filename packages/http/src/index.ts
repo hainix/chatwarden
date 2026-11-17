@@ -105,7 +105,9 @@ export type {
   RoomBroadcasterOptions,
   SendResult,
   WireLine,
+  WireMode,
   WireMuted,
+  WireReadOnly,
   WireRefusal,
   WireRestriction,
 } from './chat/index.js';

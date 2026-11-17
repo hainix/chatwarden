@@ -83,7 +83,7 @@ function fakeFetch(steps: Step[] = []) {
 
 const line = (id: string, text = `line ${id}`, extra: Partial<WireLine> = {}): WireLine => ({ id, at: 1_800_000_000_000 + Number(id), name: 'tarvo', text, ...extra });
 const helloFrame = (over: Record<string, unknown> = {}): ChatFrame =>
-  ({ type: 'hello', v: 1, epoch: 'e1', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, heartbeatMs: 20_000, summary: 'Be kind.', restriction: null, lines: [], muted: [], ...over }) as ChatFrame;
+  ({ type: 'hello', v: 2, mode: { kind: 'normal', until: null }, epoch: 'e1', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, heartbeatMs: 20_000, summary: 'Be kind.', restriction: null, lines: [], muted: [], ...over }) as ChatFrame;
 const sse = (f: ChatFrame): string => `event: ${f.type}\ndata: ${JSON.stringify(f)}\n\n`;
 
 type CollectOptions = Partial<SseTransportOptions> & { random?: () => number };

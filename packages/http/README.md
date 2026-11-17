@@ -592,7 +592,7 @@ proxy from holding its first frames back. Errors use the kit's shapes.
 
 | Route | Body | Answer |
 | --- | --- | --- |
-| `GET /rooms/:room/stream` | none | `200 text/event-stream`: a `hello` first, then `line`, `hide`, `state`, `notices` and `bye` frames, and a `: ping` comment every `heartbeatMs` |
+| `GET /rooms/:room/stream` | none | `200 text/event-stream`: a `hello` first, then `line`, `hide`, `state`, `notices`, `mode`, `retract` and `bye` frames, and a `: ping` comment every `heartbeatMs` |
 | `POST /rooms/:room/lines` | `{ text }` | `200 { ok: true, line }` or `200 { ok: false, refused: { reason, until?, byModerator?, rule?, noticeId?, retryAfterMs? } }` (a refusal is an answer). With the chat filters on (0.2.0, `profile.filters`) `reason` can also be `link`, `personal_info` or `filter`, with the `rule` the owner chose and never what matched; a masked line is delivered starred and the author's `line` shows the starred text |
 | `POST /rooms/:room/mute` | `{ lineId, on }` or `{ ref, on }` | `200 { ok, hiddenIds }`: the ids of the muted player's lines the server hid from the muter |
 | `POST /rooms/:room/report` | `{ lineId, reason?, note? }` | `200 { ok: true, remaining }` or `200 { ok: false, refused }`; nothing else, never a report id |
@@ -602,6 +602,8 @@ one `bye` frame. A refused line is never echoed to anyone but its author, never 
 the muted player is never told. Nothing identifies a player on the wire: a line is `{ id, at, name, text, mine? }`, with no seat, subject,
 key, hash or address. `hello` carries `epoch`, `room`, `you`, `maxLength`, `heartbeatMs`, `now` (the server clock, ms), `summary`,
 `restriction`, `lines` (the viewer's snapshot, at most 50, never older than 15 minutes) and `muted`.
+
+**Wire version 2** (`@experimental`, new in 0.2.0; `CHAT_WIRE_VERSION` is 2, and a client reads only the version it was built for). `hello` also carries `mode: { kind, until }` (the room's mode: `normal`, `locked` or `emergency`, and when it ends) and `you.readOnly` (`locked` or `new_account`, only when the viewer cannot post because of the room's mode). A `mode` frame `{ mode, readOnly? }` goes to every open stream when the mode changes and when it ends (the broadcaster's own timer at `until`; the kit decides every line against its own clock, so a late timer never makes an answer wrong), with `readOnly` worked out for each viewer. A `retract` frame `{ ids }` goes to every stream, the author's too, when a moderator takes lines back (`cw.rooms.retract`): the broadcaster drops them from its history, so a joiner never sees them, and the box replaces each with "Message removed by a moderator". The broadcaster listens to the kit's `room.mode` and `line.retracted` events (a game with its own socket listens to the same ones) and stops when it closes. A refusal can now also be `locked` or `new_account` (with `until`) or `probation` (with `retryAfterMs`). `ChatMember.staff` (`true` only) and `ChatMember.evidenceRef` come from your `join` hook and nowhere else: a staff member may talk in a locked room and is never made read-only, and a report filed from the chat box carries the evidence id; no request field sets either.
 
 ### Chat options
 
@@ -677,7 +679,7 @@ io.on('connection', (socket) => {
 - **Experimental names** (listed so until 0.2): `createRoomBroadcaster`, `chatRoutes`, `encodeFrame`, `HEARTBEAT`, `CHAT_WIRE_VERSION`,
   `refusalOf`, `ROOM_BROADCASTER_DEFAULTS`, and the types `ChatMember`, `ChatSession`, `ChatSink`, `ChatStream`, `RoomBroadcaster`,
   `RoomBroadcasterOptions`, `ChatRoutesOptions`, `ChatFrame`, `WireLine`, `WireRestriction`, `WireMuted`, `WireRefusal`, `SendResult`,
-  `MuteTarget`, `MuteResult`, `ReportOutcome`.
+  `MuteTarget`, `MuteResult`, `ReportOutcome`, and, new in 0.2.0, `WireMode` and `WireReadOnly`.
 
 ## Webhooks
 

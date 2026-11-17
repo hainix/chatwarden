@@ -166,7 +166,7 @@ describe('the chat box', () => {
   });
 
   it('the mount example renders: the box over sseTransport, a hello from a server, a line, the input', async () => {
-    const hello = { type: 'hello', v: 1, epoch: 'e', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, heartbeatMs: 20_000, summary: 'Be kind.', restriction: null, lines: [{ id: '1', at: 1, name: 'tarvo', text: 'anyone for a round?' }], muted: [] };
+    const hello = { type: 'hello', v: 2, mode: { kind: 'normal', until: null }, epoch: 'e', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, heartbeatMs: 20_000, summary: 'Be kind.', restriction: null, lines: [{ id: '1', at: 1, name: 'tarvo', text: 'anyone for a round?' }], muted: [] };
     const body = new ReadableStream<Uint8Array>({
       start: (c) => {
         c.enqueue(new TextEncoder().encode(`event: hello\ndata: ${JSON.stringify(hello)}\n\n`));

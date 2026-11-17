@@ -19,7 +19,8 @@ const line = (over: Partial<WireLine> = {}): WireLine => ({ id: '41', at: 1_800_
 const hello = (over: Record<string, unknown> = {}): ChatFrame =>
   ({
     type: 'hello',
-    v: 1,
+    v: 2,
+    mode: { kind: 'normal', until: null },
     epoch: 'k7f2q9',
     room: 'lobby',
     you: { name: 'snerp' },
@@ -62,7 +63,7 @@ describe('the client types and the http types are assignable in both directions 
 
   it('the version is the same number on both sides', () => {
     expect(CHAT_WIRE_VERSION).toBe(HTTP_VERSION);
-    expect(CHAT_WIRE_VERSION).toBe(1);
+    expect(CHAT_WIRE_VERSION).toBe(2);
   });
 
   it('the control: a frame type the other side lacks is not equal (the check can fail)', () => {
@@ -134,7 +135,13 @@ describe('unknown type, missing field, wrong type, array, null, string: null', (
     ['hello with restriction.byModerator missing', { ...hello(), restriction: { until: null } }],
     ['hello with lines an object', { ...hello(), lines: {} }],
     ['hello with muted missing', { ...hello(), muted: undefined }],
-    ['hello from a newer wire version', { ...hello(), v: 2 }],
+    ['hello from a newer wire version', { ...hello(), v: 3 }],
+    ['hello from an older wire version', { ...hello(), v: 1 }],
+    ['hello with no mode', { ...hello(), mode: undefined }],
+    ['hello with a mode of an unknown kind', { ...hello(), mode: { kind: 'frozen', until: null } }],
+    ['mode frame with no mode', { type: 'mode' }],
+    ['mode frame with an until that is a string', { type: 'mode', mode: { kind: 'locked', until: 'soon' } }],
+    ['retract frame with ids not an array', { type: 'retract', ids: '3' }],
     ['hello with no version', { ...hello(), v: undefined }],
     ['line without line', { type: 'line' }],
     ['line with line null', { type: 'line', line: null }],
@@ -269,14 +276,14 @@ describe('__proto__ and constructor keys in a frame do not pollute', () => {
 
   it('JSON with __proto__, constructor and prototype keys at every depth lands nowhere', () => {
     const text =
-      '{"type":"hello","v":1,"epoch":"e","room":"r","maxLength":200,"summary":"s","restriction":{"until":null,"byModerator":false,"__proto__":{"polluted":true}},' +
+      '{"type":"hello","v":2,"mode":{"kind":"normal","until":null},"epoch":"e","room":"r","maxLength":200,"summary":"s","restriction":{"until":null,"byModerator":false,"__proto__":{"polluted":true}},' +
       '"you":{"name":"snerp","__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}}},' +
       '"lines":[{"id":"1","at":1,"name":"a","text":"b","__proto__":{"polluted":true},"constructor":"x"}],"muted":[{"ref":"r","name":"n","__proto__":{"polluted":true}}],' +
       '"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}}}';
     const out = readFrame(JSON.parse(text) as unknown);
     if (out?.type !== 'hello') throw new Error('expected a hello');
     expect(polluted()).toBe(false);
-    expect(Object.keys(out).sort()).toEqual(['epoch', 'heartbeatMs', 'lines', 'maxLength', 'muted', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
+    expect(Object.keys(out).sort()).toEqual(['epoch', 'heartbeatMs', 'lines', 'maxLength', 'mode', 'muted', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
     expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
     const l = out.lines[0] as WireLine;
     expect(Object.keys(l).sort()).toEqual(['at', 'id', 'name', 'text']);
@@ -295,7 +302,7 @@ describe('__proto__ and constructor keys in a frame do not pollute', () => {
   it('a polluted Object.prototype is not read as a field', () => {
     (Object.prototype as Record<string, unknown>).epoch = 'inherited';
     try {
-      expect(readFrame({ type: 'hello', v: 1, room: 'r', you: { name: 'a' }, maxLength: 200, summary: 's', restriction: null, lines: [], muted: [] })).toBeNull();
+      expect(readFrame({ type: 'hello', v: 2, mode: { kind: 'normal', until: null }, room: 'r', you: { name: 'a' }, maxLength: 200, summary: 's', restriction: null, lines: [], muted: [] })).toBeNull();
     } finally {
       delete (Object.prototype as Record<string, unknown>).epoch;
     }

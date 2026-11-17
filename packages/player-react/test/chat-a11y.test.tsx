@@ -77,7 +77,8 @@ describe('the log', () => {
     act(() => {
       transport.inject({
         type: 'hello',
-        v: 1,
+        v: 2,
+        mode: { kind: 'normal', until: null },
         epoch: 'other-epoch',
         room: 'lobby',
         you: { name: 'snerp' },

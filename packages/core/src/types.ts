@@ -705,6 +705,8 @@ export interface ReportExcerptLine {
   /** Seat ids that could see the line; null means the whole room. */
   audience: string[] | null;
   p: number | null;
+  /** A moderator had taken the line back for everyone when this report was filed (`cw.rooms.retract`). Present and true only then; a report filed earlier is never rewritten. @experimental */
+  retracted?: true;
 }
 
 /**
