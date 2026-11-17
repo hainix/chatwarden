@@ -22,7 +22,7 @@ import type { ActionProposer, AiActRefusal } from './types.js';
 const HOUR_MS = 3_600_000;
 /** The most due rows one sweep advances (each may call the model for the confirming read). */
 export const ACT_BATCH = 5;
-/** The most open reports one sweep looks at for ones with no action row yet. */
+/** The most action rows one sweep makes for open reports that have none yet. */
 export const CONSIDER_BATCH = 20;
 
 /** What the act path needs from the service around it. Every read is a function so the path holds no state of its own. */
@@ -182,16 +182,19 @@ export class ActPath {
     env.store.insertAiAction?.({ ...base, id: newId(), state: held ? 'held_back' : 'queued', kind: held || step === null ? null : step.kind, durationMs: held || step === null ? null : step.durationMs });
   }
 
-  /** Open reports that have a read and no action row yet (a restart, a pause that ended, a read that finished before acting was on): considered. */
+  /**
+   * Open reports that have a read and no action row yet (a restart, a pause that ended, a read that finished before acting was on): considered. The bound counts the reports that
+   * got a row (a candidate or a hard stop), not every report looked at: most reports never get one, and counting them would leave a candidate behind twenty of them unconsidered
+   * for good. The look itself is bounded by the page the sweeper hands in.
+   */
   considerAll(page: readonly { id: string }[]): void {
-    let n = 0;
+    let made = 0;
     for (const r of page) {
-      if (n >= CONSIDER_BATCH) break;
+      if (made >= CONSIDER_BATCH) break;
       try {
-        if ((this.env.store.loadAiAction?.(r.id) ?? null) === null) {
-          this.consider(r.id);
-          n += 1;
-        }
+        if ((this.env.store.loadAiAction?.(r.id) ?? null) !== null) continue;
+        this.consider(r.id);
+        if ((this.env.store.loadAiAction?.(r.id) ?? null) !== null) made += 1;
       } catch (err) {
         this.env.warn('ai.consider_failed', err);
       }

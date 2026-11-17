@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { MemoryStore, withMemoryAi, withMemoryAppeals } from '@chatwarden/store-memory';
 import { describe, expect, it } from 'vitest';
-import { createFakeModerationAI } from '../../src/ai/fake.js';
+import { createFakeModerationAI, fakeRead } from '../../src/ai/fake.js';
 import type { FakeStep } from '../../src/ai/fake.js';
 import { AIError } from '../../src/ai/types.js';
 import type { AIReadInput } from '../../src/ai/types.js';
@@ -138,15 +138,16 @@ describe('consider: after a read, a candidate is queued for the hold', () => {
       w.cw.ai.acting.startShadow('owner_ann', { confirm: 'ACT', reason: 'go' });
       expect(w.rowOf((await w.file()).id)).toBeNull();
     });
-    it('a person whose ladder step is beyond the ceilings (a ban for a repeat offender), and a player with a record', async () => {
+    it('a person whose ladder step is beyond the ceilings (a ban for a repeat offender)', async () => {
       const w = await actWorld();
       const t = w.table({ reporter: 'key-repeat-reporter' });
       for (let i = 0; i < 5; i += 1) {
         await w.cw.sanctions.apply({ kind: 'warning', subject: t.target, includeIp: false, durationMs: null, reason: 'earlier', actor: 'mod_ann', source: 'moderator', automated: false, rule: 2 });
         w.clock.t += 1000;
       }
+      // the ladder's step for this person is a ban (over every ceiling): asserted, not assumed, so the test cannot pass for the wrong reason
       const step = w.cw.suggest(t.target, 'hostile', 2, { roomId: null });
-      expect(JSON.stringify(step.outcome)).not.toBe(JSON.stringify({ kind: 'chat', durationMs: 24 * H }));
+      expect(JSON.stringify(step.outcome)).toContain('ban');
       for (const text of ['you are trash', 'uninstall the game']) {
         w.clock.t += 6000;
         w.cw.chat.accept(t.room, 'p2', text);
@@ -155,22 +156,36 @@ describe('consider: after a read, a candidate is queued for the hold', () => {
       const res = await w.submit(t.room);
       if (!res.ok) throw new Error('refused');
       await w.idle();
-      const outside = JSON.stringify(step.outcome).includes('ban') || JSON.stringify(step.outcome).includes('"note"') || step.outcome === 'note' || step.outcome === 'none';
-      if (outside) expect(w.rowOf(res.reportId)).toBeNull();
+      // the read is there and usable, and still no row: the step is not one the AI may take
+      expect(w.store.loadAiRead(res.reportId)?.read?.recommendation?.verdict).toBe('upheld');
+      expect(w.rowOf(res.reportId)).toBeNull();
+    });
+    it('a player with a record whose step is still within the ceilings is queued like any other (the control)', async () => {
+      const w = await actWorld();
+      const r = await w.candidate();
+      expect(w.rowOf(r.id)?.state).toBe('queued');
     });
     it('a read that cites no line by the reported person (the ceiling on the cited line, checked before anything is queued)', async () => {
-      const w = await actWorld();
+      // the evidence of the upheld read is the reporter's own line, never the reported person's
+      const reporterLine = (input: AIReadInput): string => input.lines.find((l) => l.who !== 'P1')?.ref ?? 'L1';
+      const w = await actWorld({
+        script: (i) => ({ output: fakeRead(i, { severity: 'hostile', rule: 2, confidence: 'high', evidence: [reporterLine(i)], recommendation: { verdict: 'upheld', severity: 'hostile', rule: 2, evidence: [reporterLine(i)] } }) }),
+      });
       const t = w.table({ reporter: 'key-foreign-reporter' });
       for (const [seat, text] of [['p1', 'hello there'], ['p2', 'you are trash']] as const) {
         w.clock.t += 6000;
         w.cw.chat.accept(t.room, seat, text);
       }
       w.clock.t += 1000;
-      // answer with the reporter's line as the evidence of an upheld (the validator would refuse it; the stored read is edited instead)
       const res = await w.submit(t.room);
       if (!res.ok) throw new Error('refused');
       await w.idle();
-      expect(w.rowOf(res.reportId)?.state === 'queued' || w.rowOf(res.reportId)?.state === 'held_back').toBe(true);
+      // the read was made and stored whole; the module's own validation stops an upheld read that cites only another player's line, so it is no candidate
+      const read = w.store.loadAiRead(res.reportId);
+      expect(read?.status).toBe('ok');
+      expect(read?.read?.recommendation?.verdict).not.toBe('upheld');
+      expect(w.rowOf(res.reportId)).toBeNull();
+      expect(w.store.listAiActions({ limit: 50 })).toEqual([]);
     });
   });
 });
@@ -203,11 +218,21 @@ describe('hard stops are recorded as refused, with the code', () => {
     expect(w.rowOf(r.id)).toMatchObject({ state: 'refused', refusedCode: 'do_not_automate' });
   });
 
-  it('a report marked bad faith, and one that is a system report (nobody filed it)', async () => {
-    const { w, r } = await later((w, r) => markReportBadFaith(w.store, r.id, null));
-    // a person closed it as bad faith: it is not open and no candidate; the AI never acts on it either way
-    expect(['refused', undefined]).toContain(w.rowOf(r.id)?.state);
-    if (w.rowOf(r.id) !== null) expect(w.rowOf(r.id)?.refusedCode).toBe('not_open');
+  it('a report marked bad faith that is still open: refused not_open, recorded', async () => {
+    const { w, r } = await later((x, rr) => {
+      (x.store as unknown as { reports: Array<Record<string, unknown>> }).reports.find((p) => p.id === rr.id)!.badFaith = true;
+    });
+    expect(w.rowOf(r.id)).toMatchObject({ state: 'refused', refusedCode: 'not_open' });
+    expect(confirmCalls(w)).toBe(0);
+  });
+
+  it('a report a person closed as bad faith is not open, so the sweeper never reaches it and no row is made', async () => {
+    const { w, r } = await later((x, rr) => markReportBadFaith(x.store, rr.id, null));
+    expect(w.rowOf(r.id)).toBeNull();
+    expect(confirmCalls(w)).toBe(0);
+  });
+
+  it('a system report (nobody filed it): refused system_report', async () => {
     const sys = await later((x, rr) => {
       (x.store as unknown as { reports: Array<Record<string, unknown>> }).reports.find((p) => p.id === rr.id)!.reporterSubject = '';
     });
@@ -572,6 +597,36 @@ describe('a restart', () => {
     expect(b.rowOf(r.id)?.state).toBe('shadow');
     expect(confirmCalls(b)).toBe(0);
     expect(b.cw.audit.list({ limit: 100 }).items.filter((i) => i.action === 'ai.act')).toHaveLength(1);
+  });
+
+  it('a candidate behind 25 reports that are not candidates is still considered after a restart (the scan counts candidates, not every report it looks at)', async () => {
+    // the oldest report is the one real candidate; 25 newer ones were read at medium confidence, so none of them is
+    let calls = 0;
+    const w = await actWorld({
+      shadow: false,
+      script: (i) => {
+        calls += 1;
+        return upheldHigh(calls <= 1 ? {} : { confidence: 'medium' })(i);
+      },
+    });
+    const candidate = await fileBy(w, 'key-starved-candidate');
+    for (let i = 0; i < 25; i += 1) await fileBy(w, `key-starved-filler-${i}`);
+    expect(w.store.loadAiRead(candidate.id)?.read?.confidence).toBe('high');
+    expect(w.rowOf(candidate.id)).toBeNull();
+    expect(w.cw.ai.acting.startShadow('owner_ann', { confirm: 'ACT', reason: 'go' })).toMatchObject({ ok: true });
+    await w.sweep();
+    expect(w.rowOf(candidate.id)).toMatchObject({ state: expect.stringMatching(/^(queued|held_back)$/) });
+  });
+
+  it('the scan still stops after CONSIDER_BATCH candidates in one sweep, and the rest wait for the next', async () => {
+    const w = await actWorld({ shadow: false });
+    const ids: string[] = [];
+    for (let i = 0; i < 22; i += 1) ids.push((await fileBy(w, `key-batch-${i}`)).id);
+    expect(w.cw.ai.acting.startShadow('owner_ann', { confirm: 'ACT', reason: 'go' })).toMatchObject({ ok: true });
+    await w.sweep();
+    expect(ids.filter((id) => w.rowOf(id) !== null)).toHaveLength(20);
+    await w.sweep();
+    expect(ids.filter((id) => w.rowOf(id) !== null)).toHaveLength(22);
   });
 
   it('while the other process holds the confirming read\'s lease the row waits (one call, not two)', async () => {
