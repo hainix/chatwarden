@@ -106,7 +106,7 @@ describe('AiStore', () => {
       [
         'reserveAiRead', 'completeAiRead', 'failAiRead', 'loadAiRead', 'loadAiReads', 'loadAiReadById', 'loadAiReadFor', 'listAiRetries',
         'aiSpendSince', 'insertAiOutcome', 'loadAiOutcome', 'markAiOutcome', 'aiExamples', 'aiTeachableCount', 'aiStats',
-        'loadReport', 'listReports', 'loadClaims', 'aiGateRows', 'aiActingState', 'setAiActingState',
+        'loadReport', 'listReports', 'loadClaims', 'aiGateRows', 'aiActingState',
         'insertAiAction', 'loadAiAction', 'transitionAiAction', 'dueAiActions', 'listAiActions', 'aiActionCounts', 'aiActedCount', 'aiActionsOnSubjects', 'aiUnreviewed',
       ].sort(),
     );
@@ -129,11 +129,63 @@ describe('AiStore', () => {
       kind: null, durationMs: null, actedAt: null, reviewDueAt: null, reviewedAt: null, reviewedBy: null, undoCode: null, undoNote: null, adapter: null, promptVersion: null,
     };
     expect(narrow.insertAiAction?.(row)).toBe(true);
-    expect(narrow.transitionAiAction?.('a1', ['queued'], { state: 'shadow', kind: 'chat', durationMs: 3_600_000, actedAt: 2 })).toBe(true);
-    expect(narrow.setAiActingState?.({ mode: 'off', paused: false }, { mode: 'shadow', modeSince: 1, modeBy: 'o', paused: false, pausedSince: null, pausedBy: null })).toBe(true);
+    expect(narrow.transitionAiAction?.('a1', ['queued'], { confirmReadId: 'c1' })).toBe(true);
+    expect(narrow.transitionAiAction?.('a1', ['queued'], { state: 'refused', refusedCode: 'cap_hour' })).toBe(true);
     expect(narrow.dueAiActions?.(10, 5)).toEqual([]);
     expect(narrow.listAiActions?.({ limit: 5 })).toHaveLength(1);
     expect(sizes()).toBe(before);
+  });
+
+  it('the switch of acting is not in it: no setAiActingState by type, by name or at runtime (only the acting facade has a handle on it)', () => {
+    expectTypeOf<AiStore>().not.toHaveProperty('setAiActingState');
+    const store = withMemoryAi(new MemoryStore());
+    const narrow = requireAiStore(store) as unknown as Record<string, unknown>;
+    expect('setAiActingState' in narrow).toBe(false);
+    expect(narrow['setAiActingState']).toBeUndefined();
+    expect(Reflect.has(narrow, 'setAiActingState')).toBe(false);
+    // the AI module can still read where acting stands
+    expect(typeof narrow['aiActingState']).toBe('function');
+    // and the store itself has it (a control)
+    expect(typeof (store as unknown as Record<string, unknown>)['setAiActingState']).toBe('function');
+  });
+
+  it('the AI path may only refuse a queued row or record its confirming read: by type, and at runtime a forged patch throws and the row is untouched', () => {
+    const store = withMemoryAi(new MemoryStore());
+    const narrow = requireAiStore(store);
+    const row = {
+      id: 'a1', reportId: 'r1', readId: 'x', confirmReadId: null, rule: '2', severity: 'hostile' as const, state: 'queued' as const, refusedCode: null, notBefore: 1, createdAt: 1, groupId: null,
+      kind: null, durationMs: null, actedAt: null, reviewDueAt: null, reviewedAt: null, reviewedBy: null, undoCode: null, undoNote: null, adapter: null, promptVersion: null,
+    };
+    expect(narrow.insertAiAction?.(row)).toBe(true);
+    type Patch = Parameters<NonNullable<AiStore['transitionAiAction']>>[2];
+    expectTypeOf<{ state: 'refused'; refusedCode: string }>().toExtend<Patch>();
+    expectTypeOf<{ confirmReadId: string }>().toExtend<Patch>();
+    expectTypeOf<{ state: 'shadow' }>().not.toExtend<Patch>();
+    expectTypeOf<{ state: 'active'; kind: 'chat' }>().not.toExtend<Patch>();
+    expectTypeOf<{ state: 'confirmed'; reviewedBy: 'x' }>().not.toExtend<Patch>();
+    expectTypeOf<{ kind: 'ban' }>().not.toExtend<Patch>();
+    const forged: unknown[] = [
+      { state: 'shadow' },
+      { state: 'active' },
+      { state: 'confirmed', reviewedAt: 5, reviewedBy: 'x' },
+      { state: 'refused' },
+      { state: 'refused', refusedCode: 'x', kind: 'ban' },
+      { confirmReadId: 'c1', kind: 'chat' },
+      { kind: 'ban', durationMs: 1 },
+      { reviewedAt: 1 },
+      { undoCode: 'not_a_violation' },
+      { groupId: 'g1' },
+      {},
+    ];
+    for (const patch of forged) expect(() => narrow.transitionAiAction?.('a1', ['queued'], patch as never), JSON.stringify(patch)).toThrow(/may only/);
+    // from any state but queued is refused too
+    expect(() => narrow.transitionAiAction?.('a1', ['queued', 'shadow'] as never, { confirmReadId: 'c1' })).toThrow(/may only/);
+    expect(() => narrow.transitionAiAction?.('a1', ['shadow'] as never, { state: 'refused', refusedCode: 'x' })).toThrow(/may only/);
+    expect(store.loadAiAction('r1')).toEqual(row);
+    // the two allowed shapes work
+    expect(narrow.transitionAiAction?.('a1', ['queued'], { confirmReadId: 'c1' })).toBe(true);
+    expect(narrow.transitionAiAction?.('a1', ['queued'], { state: 'refused', refusedCode: 'cap_hour' })).toBe(true);
+    expect(store.loadAiAction('r1')).toMatchObject({ state: 'refused', refusedCode: 'cap_hour', confirmReadId: 'c1', kind: null });
   });
 
   it('no writer is reachable: not by name, not by a cast and a computed key, not by Reflect, a spread or the prototype chain', () => {

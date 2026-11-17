@@ -35,18 +35,21 @@ export type AiStore = Pick<
   | 'loadClaims'
   | 'aiGateRows'
   | 'aiActingState'
-  | 'setAiActingState'
   | 'insertAiAction'
   | 'loadAiAction'
-  | 'transitionAiAction'
   | 'dueAiActions'
   | 'listAiActions'
   | 'aiActionCounts'
   | 'aiActedCount'
   | 'aiActionsOnSubjects'
   | 'aiUnreviewed'
-> &
-  Required<
+> & {
+    /**
+     * The only two moves the AI module may make on an action row: refuse a queued row (with a closed code), or record the confirming read it asked for. Not the state that records an act,
+     * not a step, not a review field: those are the actor's (`transitionAiAction` on the full store), and the write of the owner's acting state is the acting facade's alone.
+     */
+    transitionAiAction?(id: string, from: readonly ['queued'], patch: AiPathPatch): boolean;
+  } & Required<
     Pick<
       Store,
       | 'reserveAiRead'
@@ -66,6 +69,9 @@ export type AiStore = Pick<
       | 'aiStats'
     >
   >;
+
+/** What the AI module may change on an action row (see {@link AiStore}). */
+export type AiPathPatch = { state: 'refused'; refusedCode: string } | { confirmReadId: string };
 
 /** The counters of this process: calls in flight, the last cost, tokens for the cache hit rate, invalid answers by code. */
 export class Meter {

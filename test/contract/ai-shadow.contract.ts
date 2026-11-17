@@ -270,6 +270,40 @@ export function aiShadowContract(name: string, make: () => Store): void {
         expect(s.loadAiAction('r1')).toMatchObject({ reportId: 'r1', createdAt: T, confirmReadId: null });
       });
 
+      it('an empty patch changes nothing and says so (false), whatever state the row is in', () => {
+        const s = actions(make());
+        const r = row('r1');
+        s.insertAiAction(r);
+        expect(s.transitionAiAction(r.id, ['queued'], {})).toBe(false);
+        // a patch whose every field is undefined is empty too
+        expect(s.transitionAiAction(r.id, ['queued'], { state: undefined, refusedCode: undefined })).toBe(false);
+        expect(s.loadAiAction('r1')).toEqual(r);
+      });
+
+      it('a state outside the closed set is refused with a throw, and the row is left as it was', () => {
+        const s = actions(make());
+        const r = row('r1');
+        s.insertAiAction(r);
+        for (const bad of ['', 'Shadow', 'done', 'queued ', 'null']) {
+          expect(() => s.transitionAiAction(r.id, ['queued'], { state: bad as never }), bad).toThrow();
+        }
+        expect(s.loadAiAction('r1')).toEqual(r);
+      });
+
+      it('a key that is no column of the row is ignored, never written onto it', () => {
+        const s = actions(make());
+        const r = row('r1');
+        s.insertAiAction(r);
+        // only an unknown key: nothing to change
+        expect(s.transitionAiAction(r.id, ['queued'], { surprise: 'x', __proto__: { polluted: true } } as never)).toBe(false);
+        // an unknown key beside a real one: the real one is applied, the unknown one is dropped
+        expect(s.transitionAiAction(r.id, ['queued'], { state: 'shadow', surprise: 'x' } as never)).toBe(true);
+        const after = s.loadAiAction('r1') as AiActionRow;
+        expect(after.state).toBe('shadow');
+        expect(Object.keys(after).sort()).toEqual(Object.keys(r).sort());
+        expect('surprise' in after).toBe(false);
+      });
+
       it('is undone with a rolled-back transaction, insert and transition alike', () => {
         const s = actions(make());
         const r = row('r1');

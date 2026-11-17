@@ -7,7 +7,7 @@ import { AI_DAILY_CALLS_DEFAULT } from '../profile.js';
 import { suggestedRule } from '../reporting.js';
 import type { CommunityRules, RuleRef } from '../rules.js';
 import { CONDUCT_LEVELS } from '../types.js';
-import type { AiActionRow, AiReadRow } from '../types.js';
+import type { AiActionRow, AiActionState, AiReadRow } from '../types.js';
 import type { AiOutcomeInsert, AiVerdict, Clock, ConductLevel, Logger, ReportRecord, SanctionKind, Store, SubjectId } from '../types.js';
 import { agreementOf } from './agreement.js';
 import type { StepLike } from './agreement.js';
@@ -18,7 +18,7 @@ import { prepareCase } from './case.js';
 import type { Prepared } from './case.js';
 import { ActPath } from './act.js';
 import { createActing } from './acting.js';
-import type { AiActingFacade, AiActingState } from './acting.js';
+import type { ActingStore, AiActingFacade, AiActingState } from './acting.js';
 import { AI_ACT_CAPS_DEFAULTS, checkActCaps } from './caps.js';
 import type { AiActCaps } from './caps.js';
 import type { ActStep, HoldbackHasher } from './actPlan.js';
@@ -35,7 +35,7 @@ import { aiPolicyText } from './prompt.js';
 import { sha256Hex } from '../crypto.js';
 import type { ActionProposer, AIExampleInput, AIRead, AISignal, ModerationAI } from './types.js';
 import { isFinalRow, Meter, runRead } from './worker.js';
-import type { AiStore, ReadEnd, WorkerEnv } from './worker.js';
+import type { AiPathPatch, AiStore, ReadEnd, WorkerEnv } from './worker.js';
 
 // The AI service (design sections 4 and 6): listens for new reports and only enqueues; a small worker pool reads them off the ack
 // path; a sweeper fills the gaps; the facade (`cw.ai`) answers the hub. Everything fails soft: any error here is logged by class and
@@ -390,6 +390,32 @@ function missingAiMethods(store: Store): string[] {
     .map(([name]) => name);
 }
 
+/** The patch the AI module may send, checked at runtime too (a cast cannot widen it): refuse a queued row with a code, or record the confirming read. Anything else throws. */
+function aiPathPatch(from: readonly AiActionState[], patch: unknown): AiPathPatch {
+  const keys = typeof patch === 'object' && patch !== null ? Object.keys(patch) : [];
+  const p = patch as Record<string, unknown>;
+  if (from.length === 1 && from[0] === 'queued') {
+    if (keys.length === 2 && p.state === 'refused' && typeof p.refusedCode === 'string' && keys.includes('refusedCode')) return { state: 'refused', refusedCode: p.refusedCode };
+    if (keys.length === 1 && typeof p.confirmReadId === 'string') return { confirmReadId: p.confirmReadId };
+  }
+  throw new TypeError('the AI module may only refuse a queued action row or record its confirming read');
+}
+
+/**
+ * What the owner's switch needs of the store: the acting state, its conditional write and the probes that say the action rows are kept. It is the acting facade's own handle (frozen,
+ * four calls through), apart from {@link AiStore}: the AI module that reads and queues has no way to write the state the owner's switch holds.
+ */
+function actingStoreOf(store: Store): ActingStore {
+  return Object.freeze({
+    ...(typeof store.aiActingState === 'function' ? { aiActingState: () => store.aiActingState!() } : {}),
+    ...(typeof store.setAiActingState === 'function' ? { setAiActingState: (...a: Parameters<NonNullable<Store['setAiActingState']>>) => store.setAiActingState!(...a) } : {}),
+    ...(typeof store.insertAiAction === 'function' ? { insertAiAction: () => undefined } : {}),
+    ...(typeof store.loadAiAction === 'function' ? { loadAiAction: () => undefined } : {}),
+    ...(typeof store.transitionAiAction === 'function' ? { transitionAiAction: () => undefined } : {}),
+    ...(typeof store.dueAiActions === 'function' ? { dueAiActions: () => undefined } : {}),
+  });
+}
+
 /**
  * The store as the AI module may hold it: a frozen plain object with ONLY the AI methods, `loadReport`, `listReports`, `aiGateRows` and the acting state, each a call through to the
  * real store (so a spy on the store still sees it); throws a plain error when the store has not got the AI methods. This is the runtime half of the seam (the `AiStore` type is the compile-time half
@@ -420,11 +446,10 @@ export function requireAiStore(store: Store): AiStore {
     listReports: (...a) => store.listReports(...a),
     ...(typeof store.aiGateRows === 'function' ? { aiGateRows: (...a) => store.aiGateRows!(...a) } : {}),
     ...(typeof store.aiActingState === 'function' ? { aiActingState: () => store.aiActingState!() } : {}),
-    ...(typeof store.setAiActingState === 'function' ? { setAiActingState: (...a) => store.setAiActingState!(...a) } : {}),
     loadClaims: (...a) => store.loadClaims(...a),
     ...(typeof store.insertAiAction === 'function' ? { insertAiAction: (...a) => store.insertAiAction!(...a) } : {}),
     ...(typeof store.loadAiAction === 'function' ? { loadAiAction: (...a) => store.loadAiAction!(...a) } : {}),
-    ...(typeof store.transitionAiAction === 'function' ? { transitionAiAction: (...a) => store.transitionAiAction!(...a) } : {}),
+    ...(typeof store.transitionAiAction === 'function' ? { transitionAiAction: (id, from, patch) => store.transitionAiAction!(id, from, aiPathPatch(from, patch)) } : {}),
     ...(typeof store.dueAiActions === 'function' ? { dueAiActions: (...a) => store.dueAiActions!(...a) } : {}),
     ...(typeof store.listAiActions === 'function' ? { listAiActions: (...a) => store.listAiActions!(...a) } : {}),
     ...(typeof store.aiActionCounts === 'function' ? { aiActionCounts: (...a) => store.aiActionCounts!(...a) } : {}),
@@ -621,7 +646,7 @@ export class AiService implements AiFacade {
     this.adapter = deps.options.adapter;
     this.actor = aiActorOf(this.adapter.id);
     this.acting = createActing({
-      store: this.store,
+      store: actingStoreOf(store),
       clock: deps.clock,
       level: () => this.deps.profile().ai.level,
       maxLevel: this.opts.maxLevel,

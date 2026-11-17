@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { MemoryStore, withMemoryAi, withMemoryAppeals } from '@chatwarden/store-memory';
 import { describe, expect, it } from 'vitest';
 import { createFakeModerationAI, fakeRead } from '../../src/ai/fake.js';
@@ -717,6 +717,28 @@ describe('what the planner reads', () => {
       for (const writer of FORBIDDEN_WRITERS) expect(text, `${file} ${writer}`).not.toContain(writer);
       expect(text, file).not.toMatch(/source:\s*'ai'/);
     }
+  });
+});
+
+describe('the switch of acting belongs to the acting facade alone', () => {
+  it('no file of the AI module but acting.ts and the one handle in service.ts names setAiActingState', () => {
+    const dir = new URL('../../src/ai/', import.meta.url);
+    const named: string[] = [];
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith('.ts')) continue;
+      if (readFileSync(new URL(file, dir), 'utf8').includes('setAiActingState')) named.push(file);
+    }
+    expect(named.sort()).toEqual(['acting.ts', 'service.ts']);
+    // act.ts, the path that reads and queues, is not among them, and neither is the actor
+    expect(readFileSync(new URL('act.ts', dir), 'utf8')).not.toContain('setAiActingState');
+    expect(readFileSync(new URL('../aiActor/service.ts', dir), 'utf8')).not.toContain('setAiActingState');
+    expect(readFileSync(new URL('../aiActor/recheck.ts', dir), 'utf8')).not.toContain('setAiActingState');
+    // in service.ts every mention is inside the function that makes the acting facade's own handle
+    const service = readFileSync(new URL('service.ts', dir), 'utf8');
+    const from = service.indexOf('function actingStoreOf');
+    expect(from).toBeGreaterThan(0);
+    expect(service.slice(0, from)).not.toContain('setAiActingState');
+    expect(service.slice(service.indexOf('\n}\n', from))).not.toContain('setAiActingState');
   });
 });
 

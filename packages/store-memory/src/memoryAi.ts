@@ -459,11 +459,13 @@ class MemoryAi extends MemoryStore {
   transitionAiAction(id: string, from: readonly AiActionState[], patch: AiActionPatch): boolean {
     const row = this.actions().find((r) => r.id === id);
     if (row === undefined || !from.includes(row.state)) return false;
+    // The same as the SQL store: a state outside the closed set throws (its CHECK), a key that is no column of the row is ignored, the row's id, report and creation time never
+    // move, a field the patch leaves undefined is left alone, and a patch with nothing left to change says so (false).
+    if (patch.state !== undefined && !AI_ACTION_STATES.includes(patch.state)) throw new Error('transitionAiAction: not an action state');
+    const changes = Object.entries(patch).filter(([key, value]) => value !== undefined && key !== 'id' && key !== 'reportId' && key !== 'createdAt' && Object.hasOwn(row, key));
+    if (changes.length === 0) return false;
     const before = { ...row };
-    for (const [key, value] of Object.entries(patch)) {
-      // The row's id, report and creation time never move; a field the patch leaves undefined is left alone.
-      if (value !== undefined && key !== 'id' && key !== 'reportId' && key !== 'createdAt') (row as unknown as Record<string, unknown>)[key] = value;
-    }
+    for (const [key, value] of changes) (row as unknown as Record<string, unknown>)[key] = value;
     this.undoWith(() => Object.assign(row, before));
     return true;
   }
@@ -558,6 +560,8 @@ const OFF: AiActingRow = { mode: 'off', modeSince: null, modeBy: null, paused: f
 const SEVERITY_ORDER: readonly string[] = ['banter', 'rude', 'hostile', 'severe'];
 
 /** The page sizes used when a limit is omitted, not finite or below 1. Local copies of core's: this package links no runtime core code. */
+/** The closed set of action states (the SQL store's CHECK). */
+const AI_ACTION_STATES: readonly AiActionState[] = ['queued', 'shadow', 'active', 'confirmed', 'undone', 'refused', 'held_back'];
 const ACTIONS_DEFAULT_LIMIT = 200;
 const EXAMPLES_DEFAULT_LIMIT = 2;
 const RETRIES_DEFAULT_LIMIT = 20;
