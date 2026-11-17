@@ -68,6 +68,7 @@ export type {
   ChatDayRow,
   CommentRow,
   InsightRow,
+  ReportComment,
 } from './types.js';
 export { CLAIM_TTL_MS, COMMENTS_PER_REPORT_MAX, CONDUCT_LEVELS } from './types.js';
 export {
@@ -243,6 +244,8 @@ export type {
 export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
 export { CaseWorkflow } from './caseWorkflow.js';
+export { COMMENT_MAX, CommentService, hasWorkflowMethods } from './commentService.js';
+export type { ClearEscalationResult, CommentRemoveResult, CommentResult, EscalateResult } from './commentService.js';
 export type { CaseMarkResult } from './caseWorkflow.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';

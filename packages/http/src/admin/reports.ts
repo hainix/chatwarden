@@ -96,6 +96,11 @@ export interface ReportSummary {
   urgent?: true;
   /** Present only after a moderator marked the case as passed to the game's safety team: when (never who). Staff only. @experimental */
   handoffAt?: number;
+  /**
+   * Present only with `desk.workflow` on, on an OPEN report that someone asked a senior or the owner to look at: the role asked (never who, never why). The queue is not reordered by it. Staff
+   * only. @experimental
+   */
+  escalatedTo?: 'senior' | 'owner';
   /** Present (true) only when the reported person's handle is one the matcher flags and `names.maskInHub` is on: the hub masks it until shown. Staff only. */
   targetHandleFlagged?: true;
   /** The same for the reporter's handle. */
@@ -138,6 +143,7 @@ const summarize = (
   ai: AiBrief | undefined,
   boosted = false,
   originLabel?: string,
+  escalated = false,
 ): ReportSummary => ({
   id: r.id,
   createdAt: r.createdAt,
@@ -164,6 +170,7 @@ const summarize = (
   ...(originLabel === undefined ? {} : { originLabel }),
   ...(r.urgent ? { urgent: true as const } : {}),
   ...(r.handoffAt === null ? {} : { handoffAt: r.handoffAt }),
+  ...(escalated && r.status === 'open' && r.escalatedTo !== null ? { escalatedTo: r.escalatedTo } : {}),
 });
 
 /**
@@ -296,10 +303,11 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const briefs = cw.ai.briefs(page.items.filter((r) => r.status === 'open').map((r) => r.id));
       c.audit('report.view');
       const flagged = handleFlags(cw);
+      const workflow = cw.desk.workflowEnabled();
       const items = page.items.map((r) => ({
         ...(r.status === 'open'
-          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), r.reporterPerson === null ? undefined : accuracy.get(r.reporterPerson), briefs.get(r.id), boosted.has(r.targetPerson), originLabelOf(r))
-          : summarize(r, undefined, undefined, labelOf(r), undefined, undefined, false, originLabelOf(r))),
+          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), r.reporterPerson === null ? undefined : accuracy.get(r.reporterPerson), briefs.get(r.id), boosted.has(r.targetPerson), originLabelOf(r), workflow)
+          : summarize(r, undefined, undefined, labelOf(r), undefined, undefined, false, originLabelOf(r), workflow)),
         ...flagKey(flagged, 'targetHandleFlagged', r.targetHandle),
         ...flagKey(flagged, 'reporterHandleFlagged', r.reporterHandle),
       }));
@@ -345,14 +353,22 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (failed.length > 0) safeWarn(ctx.logger, 'chatwarden.http_notice_text_failed', { error: failed[0] instanceof Error ? failed[0].name : 'unknown', count: failed.length });
       // A player's report carries no `origin` keys (the body is as it was); a report nobody filed carries them, with `reporterPerson` null. The raw hand-off, escalation and evidence
       // columns are not the body's shape: `urgent` and `handoff: { at, by }` stand in for them (staff ids, never a player's).
-      const { origin: _origin, originKey: _originKey, handoffAt, handoffBy, escalatedTo: _to, escalatedBy: _by, escalatedAt: _at, evidenceRef: _ref, ...plain } = report;
-      void [_origin, _originKey, _to, _by, _at, _ref];
+      const { origin: _origin, originKey: _originKey, handoffAt, handoffBy, escalatedTo, escalatedBy, escalatedAt, evidenceRef: _ref, ...plain } = report;
+      void [_origin, _originKey, _ref];
+      // With the workflow on: the staff thread and the second look asked of a senior or the owner. With it off the keys are not there at all.
+      const workflow = cw.desk.workflowEnabled()
+        ? {
+            comments: cw.comments.list(id).map((cm) => ({ id: cm.id, at: cm.at, author: cm.author, role: cm.role, kind: cm.kind, text: cm.text })),
+            escalation: escalatedTo === null || report.status !== 'open' ? null : { to: escalatedTo, by: escalatedBy, at: escalatedAt },
+          }
+        : {};
       // A held report shows `hold: { code, at }` (never who held it); every other body is as it was.
       const held = cw.legal.status(id);
       const shown = {
         ...plain,
         urgent: report.urgent,
         handoff: handoffAt === null ? null : { at: handoffAt, by: handoffBy },
+        ...workflow,
         ...originOf(report),
         ...(held === null ? {} : { hold: held }),
         ...(originLabelOf(report) === undefined ? {} : { originLabel: originLabelOf(report) }),

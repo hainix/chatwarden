@@ -110,6 +110,9 @@ describe('adminRoutes: shape', () => {
     const { routes } = await world();
     expect(Object.keys(routes).filter((k) => /\/(reports|people)/.test(k)).sort()).toEqual([
       // Legal hold and privacy requests (0.2.0): their own checks are in admin.legal.test.ts and admin.privacy.test.ts.
+      // The staff workflow (0.2.0): their own checks are in admin.workflow.test.ts.
+      'DELETE /reports/:id/comments/:cid',
+      'DELETE /reports/:id/escalate',
       'DELETE /reports/:id/hold',
       'GET /people/:ref/history',
       'GET /people/:ref/privacy/export',
@@ -121,7 +124,9 @@ describe('adminRoutes: shape', () => {
       'POST /people/:ref/rename',
       'POST /reports/:id/ai/dont-teach',
       'POST /reports/:id/ai/read',
+      'POST /reports/:id/comments',
       'POST /reports/:id/decide',
+      'POST /reports/:id/escalate',
       // The urgent lane (0.2.0): their own checks are in admin.urgent.test.ts.
       'POST /reports/:id/handoff',
       'POST /reports/:id/suggest',

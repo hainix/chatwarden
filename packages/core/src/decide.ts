@@ -523,6 +523,8 @@ export class DecisionService {
     const outcome = this.outcomeFor(norm, report, now);
 
     const done = this.store.transaction(() => {
+      // A decided report asks nobody for a second look: the escalation goes in the same transaction, so a failure keeps both as they were.
+      if (report.escalatedTo !== null && report.escalatedTo !== undefined) this.store.setEscalation?.(report.id, null);
       if (!this.store.closeReport(report.id, status, norm.verdict === 'bad_faith', norm.actor, now, norm.reason, norm.evidence)) {
         return null;
       }

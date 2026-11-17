@@ -867,6 +867,20 @@ export interface CommentRow {
   text: string | null;
 }
 
+/**
+ * One entry of the staff thread as the staff API shows it: `author` is a staff ref, `kind` says what it is (`comment`, `ask` for a senior, `escalate` for the owner, `clear` for "looked at")
+ * and `text` is null for an entry with no note. Staff only. @experimental
+ */
+export interface ReportComment {
+  id: string;
+  reportId: string;
+  at: number;
+  author: string;
+  role: 'moderator' | 'senior' | 'owner';
+  kind: 'comment' | 'ask' | 'escalate' | 'clear';
+  text: string | null;
+}
+
 /** The most entries one report's thread holds: the store refuses the next. @experimental */
 export const COMMENTS_PER_REPORT_MAX = 50;
 

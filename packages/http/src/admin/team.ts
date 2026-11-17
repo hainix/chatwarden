@@ -120,8 +120,9 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
       const token = cw.changes.token();
       // The open appeals, only while appeals are on and the caller may read them: else the body is what 0.1.7 sent.
       const appeals = cw.appeals.enabled() && roleAtLeast(c.authz.role, ctx.permissions['appeals.read']) ? { appeals: cw.appeals.openCount() } : {};
-      // The open urgent reports, for the queue's one chip: a count, always there (0 when none).
-      return { status: 200, body: { token, changed: since !== token, urgent: cw.cases.urgentCount(), ...appeals } };
+      // The open urgent reports, for the queue's one chip: a count, always there (0 when none). With the staff workflow on, the open reports asked of a senior or the owner, by role asked.
+      const asked = cw.desk.workflowEnabled() ? { asked: cw.cases.askedCount() } : {};
+      return { status: 200, body: { token, changed: since !== token, urgent: cw.cases.urgentCount(), ...asked, ...appeals } };
     }),
 
     'GET /reasons': ctx.secure('reasons.read', () => ({ status: 200, body: { reasons: cw.reasons.list() } })),

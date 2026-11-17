@@ -325,6 +325,9 @@ The urgent lane: `cw.cases.setUrgent`, `cw.cases.handoff` (`report.handoff`) and
 (under the same `category` and `reason`, ignoring `rankDownHabitual` and `signalBoost`, never over a claim); `cw.reports.dismissMany` leaves urgent reports open and counts them in
 `skipped.urgent`; a `welfare` report refuses `bad_faith` and `upheld`, writes no rule gap and is left out of a reporter's accuracy; `retention.welfareReportsMs` deletes welfare
 reports on their own clock (`PurgeResult.welfareReports`).
+The staff workflow (`desk.workflow`, off by default): `cw.comments` (`add`, `list`, `remove`; `CommentService`, `ReportComment`, `COMMENT_MAX`) keeps a staff-only thread on each report (1 to 500 characters, at
+most 50 entries, deleted with the report); `cw.cases.escalate` and `clearEscalation` ask a senior or the owner for a second look (a flag and a thread entry; `case.escalated`; deciding clears it; the claim,
+the queue order and take next are untouched); `cw.cases.askedCount()` and `cw.desk.workflowEnabled()`. `createChatwarden` throws a plain message when the setting is on and the store lacks the thread methods.
 
 ## Slow mode and flood control
 

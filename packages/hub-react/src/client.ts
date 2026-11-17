@@ -30,6 +30,7 @@ import type {
   DecideResult,
   DismissOpenInput,
   DismissOpenResult,
+  ReportComment,
   ReportMarkResult,
   ExceptionInput,
   ExceptionPatch,
@@ -179,6 +180,28 @@ export interface HubClient {
    * @experimental
    */
   handoff(id: string, options?: { takeOver?: boolean }): Promise<ReportMarkResult>;
+  /**
+   * `POST /reports/:id/comments` (needs `reports.comment`; 404 with `desk.workflow` off): add a staff comment of 1 to 500 characters (at most 50 entries a report). Never claim-gated.
+   * Rejects with `invalid_request` (400), `not_found` (404) or `comment_limit` (409).
+   * @experimental
+   */
+  addComment(id: string, text: string): Promise<{ comment: ReportComment }>;
+  /**
+   * `DELETE /reports/:id/comments/:cid` (needs `reports.comment`): remove a comment (its author, or a senior). Another moderator's and an unknown id are the same `not_found`.
+   * @experimental
+   */
+  removeComment(id: string, commentId: string): Promise<ReportMarkResult>;
+  /**
+   * `POST /reports/:id/escalate` (needs `reports.escalate`): ask a senior or the owner for a second look, with an optional note that joins the thread. An owner asks no one (`forbidden`).
+   * Rejects with `invalid_request`, `not_found`, `already_decided` or `forbidden`.
+   * @experimental
+   */
+  escalate(id: string, input: { to: 'senior' | 'owner'; note?: string }): Promise<ReportMarkResult>;
+  /**
+   * `DELETE /reports/:id/escalate` (needs `reports.escalate`): "Looked at": clear the ask (the asker, or anyone at or above the role asked; else `forbidden`).
+   * @experimental
+   */
+  clearEscalation(id: string): Promise<ReportMarkResult>;
   /**
    * `POST /reports/dismiss-open` (needs `reports.decide.bulk`): dismiss every open report about one person, or from one reporter, as "nothing
    * wrong here" (the kit's standard reason; a sweep never takes one). Retrying is safe: a closed report counts as `replayed`.
@@ -386,6 +409,10 @@ export function createHubClient(transport: Transport): HubClient {
     decide: (id, input, options = {}) => post<DecideResult>(`/reports/${enc(id)}/decide`, input, options),
     setUrgent: (id, on) => post<ReportMarkResult>(`/reports/${enc(id)}/urgent`, { on }),
     handoff: (id, options = {}) => post<ReportMarkResult>(`/reports/${enc(id)}/handoff`, options.takeOver === true ? { takeOver: true } : undefined),
+    addComment: (id, text) => post<{ comment: ReportComment }>(`/reports/${enc(id)}/comments`, { text }),
+    removeComment: (id, commentId) => call<ReportMarkResult>({ method: 'DELETE', path: `/reports/${enc(id)}/comments/${enc(commentId)}` }),
+    escalate: (id, input) => post<ReportMarkResult>(`/reports/${enc(id)}/escalate`, { to: input.to, ...(input.note === undefined ? {} : { note: input.note }) }),
+    clearEscalation: (id) => call<ReportMarkResult>({ method: 'DELETE', path: `/reports/${enc(id)}/escalate` }),
     dismissOpen: (input, options = {}) => post<DismissOpenResult>('/reports/dismiss-open', input, options),
     readAgain: (id) => post<AiReadAgainResult>(`/reports/${enc(id)}/ai/read`, undefined),
     aiStatus: () => get<AiStatusView>('/ai/status'),

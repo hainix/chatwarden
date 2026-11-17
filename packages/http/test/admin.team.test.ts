@@ -916,7 +916,7 @@ describe('GET /changes', () => {
     const res = await w.call('GET', '/changes', { query: { since: 'x' } });
     expect(res.status).toBe(200);
     // The token, one live read of whether appeals are on (the open count is read only while they are, and only for a caller who may read it), and the open urgent count.
-    expect(reads).toEqual(['changes', 'appeals', 'cases']);
+    expect(reads).toEqual(['changes', 'appeals', 'desk', 'cases']);
     expect(w.routeAudit()).toEqual([]);
   });
 

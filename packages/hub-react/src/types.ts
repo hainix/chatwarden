@@ -384,6 +384,27 @@ export interface ReportMarkResult {
 }
 
 /**
+ * One entry of a report's staff thread (`ReportDetail.comments`, with `desk.workflow` on): `kind` is `comment`, `ask` (a senior was asked), `escalate` (the owner was asked) or `clear` ("looked at").
+ * `author` is a staff ref; `text` is null for an entry with no note.
+ * @experimental
+ */
+export interface ReportComment {
+  id: string;
+  at: number;
+  author: string;
+  role: 'moderator' | 'senior' | 'owner';
+  kind: 'comment' | 'ask' | 'escalate' | 'clear';
+  text: string | null;
+}
+
+/** The second look asked of a senior or the owner: the role asked, who asked and when. @experimental */
+export interface ReportEscalation {
+  to: 'senior' | 'owner';
+  by: string;
+  at: number;
+}
+
+/**
  * `POST /reports/:id/decide`. `replay` is true when the same decision had already been made and nothing was applied again.
  * @experimental
  */

@@ -1,7 +1,7 @@
 import { createInertAi } from './ai/inert.js';
 import type { AiFacade, AiOptions, AiService } from './ai/service.js';
 import { AuditService } from './audit.js';
-import type { AuditPage, AuditQuery, AuditRecordInput } from './audit.js';
+import type { AuditPage, AuditQuery, AuditRecordInput, Role } from './audit.js';
 import { ChatService } from './chat.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
@@ -23,6 +23,8 @@ import { createAutomation } from './automation.js';
 import { hmacSha256Hex } from './crypto.js';
 import type { AutomationFacade } from './automation.js';
 import { CaseWorkflow } from './caseWorkflow.js';
+import { CommentService, hasWorkflowMethods } from './commentService.js';
+import type { ClearEscalationResult, CommentRemoveResult, CommentResult, EscalateResult } from './commentService.js';
 import type { CaseMarkResult } from './caseWorkflow.js';
 import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
@@ -102,6 +104,7 @@ import type {
   RawWho,
   ReasonRow,
   ReportCategory,
+  ReportComment,
   ReportExcerptLine,
   ConductLevel,
   Store,
@@ -516,6 +519,20 @@ export interface Chatwarden {
      * @experimental
      */
     handoff(reportId: string, actor: string): CaseMarkResult;
+    /**
+     * Ask a senior or the owner for a second look at an open report (`desk.workflow` on; `off` otherwise). A moderator or a senior may ask a senior or the owner; an owner no one
+     * (`not_allowed`). Sets the report's escalation, adds an `ask` or `escalate` entry (with the optional note) to its staff thread and emits `case.escalated` after the commit. It never
+     * touches the claim, never blocks a decision, never reorders the queue; deciding the report clears it. `RangeError` for a malformed actor or role.
+     * @experimental
+     */
+    escalate(reportId: string, actor: string, role: Role, input: { to: 'senior' | 'owner'; note?: string }): EscalateResult;
+    /**
+     * End a second look ("Looked at"): the asker, or anyone at or above the role asked. A report with none answers ok and changes nothing.
+     * @experimental
+     */
+    clearEscalation(reportId: string, actor: string, role: Role): ClearEscalationResult;
+    /** How many open reports are asked of each role (zeros with the workflow off). @experimental */
+    askedCount(): { senior: number; owner: number };
     /** How many open reports are urgent (0 for a store without the urgent lane). @experimental */
     urgentCount(): number;
     /**
@@ -528,6 +545,26 @@ export interface Chatwarden {
     viewers(person: SubjectId, except?: string): string[];
     /** `viewers` for several people at once; people nobody is viewing are absent. */
     viewersOf(people: readonly SubjectId[], except?: string): Map<SubjectId, string[]>;
+  };
+  /**
+   * The staff thread on a report (`desk.workflow` on; `off` and an empty list otherwise): comments of 1 to 500 characters, at most 50 entries a report, deleted with the report, never
+   * claim-gated, never in an event, a webhook, a post, an audit row, a notice, an AI input or a log. `RangeError` for a malformed actor or role. Staff only.
+   * @experimental
+   */
+  comments: {
+    /** Add a comment (cleaned like an appeal statement: control, bidi and zero-width characters removed; counted in code points). A decided report still takes one. */
+    add(reportId: string, actor: string, role: Role, text: string): CommentResult;
+    /** The thread, oldest first. Includes the entries an ask, an escalation and a "looked at" wrote. */
+    list(reportId: string): ReportComment[];
+    /** Remove an entry: its author, or a senior or the owner. Another moderator's, an unknown id and another report's all answer `not_found`. */
+    remove(reportId: string, commentId: string, actor: string, role: Role): CommentRemoveResult;
+  };
+  /**
+   * The desk's own switches. @experimental
+   */
+  desk: {
+    /** Whether `desk.workflow` is on in the profile in force (and the store can keep the thread). */
+    workflowEnabled(): boolean;
   };
   /** A cheap "did anything change?" for the moderator queue. */
   changes: {
@@ -1045,6 +1082,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   };
   // The filters may cite only an active Community Rule (a code profile fails here, a layer when it is saved).
   checkFilterRules(baseProfile.filters, isActiveRule, 'profile.filters');
+  // The staff workflow keeps a thread per report in the store: a code profile that asks for it over a store that cannot is refused here, plainly.
+  if (baseProfile.desk.workflow && !hasWorkflowMethods(store)) {
+    throw new Error('desk.workflow needs a store that keeps staff comments and escalation (insertComment, listComments, deleteComment, countComments, setEscalation, countOpenEscalated); this store lacks them');
+  }
   if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
   const profanity = buildProfanityFilter(opts, baseProfile.profanity);
   if (profanity === undefined && baseProfile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
@@ -1064,7 +1105,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await mutes.load();
   await strikes.load();
   // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
-  const policy = new PolicyService({ store, clock, logger, base: baseProfile, isActiveRule: isActiveRule, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store), accountAge: typeof opts.signals?.accountAgeDays === 'function' });
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile, isActiveRule: isActiveRule, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store), workflowKept: hasWorkflowMethods(store), accountAge: typeof opts.signals?.accountAgeDays === 'function' });
   policy.load();
 
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and
@@ -1407,6 +1448,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   });
   const reasonBook = new ReasonBook(store);
   const caseWorkflow = new CaseWorkflow({ store, clock, emit: (event) => bus.emit(event) });
+  const commentService = new CommentService({ store, clock, enabled: () => policy.profileNow().desk.workflow, emit: (event) => bus.emit(event) });
 
   // The AI read service. It listens for new reports and only enqueues; with no adapter it is a facade that is always off.
   const aiService =
@@ -1660,11 +1702,20 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       next: (actor, filter) => desk.next(actor, filter),
       setUrgent: (reportId, actor, on) => caseWorkflow.setUrgent(reportId, actor, on),
       handoff: (reportId, actor) => caseWorkflow.handoff(reportId, actor),
+      escalate: (reportId, actor, role, input) => commentService.escalate(reportId, actor, role, input),
+      clearEscalation: (reportId, actor, role) => commentService.clearEscalation(reportId, actor, role),
+      askedCount: () => commentService.askedCount(),
       urgentCount: () => caseWorkflow.urgentCount(),
       view: (person, actor) => desk.view(person, actor),
       viewers: (person, except) => desk.viewers(person, except),
       viewersOf: (people, except) => desk.viewersOf(people, except),
     },
+    comments: {
+      add: (reportId, actor, role, text) => commentService.add(reportId, actor, role, text),
+      list: (reportId) => commentService.list(reportId),
+      remove: (reportId, commentId, actor, role) => commentService.remove(reportId, commentId, actor, role),
+    },
+    desk: { workflowEnabled: () => policy.profileNow().desk.workflow },
     changes: { token: () => store.changeToken() },
     reasons: {
       list: () => reasonBook.list(),

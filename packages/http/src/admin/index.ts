@@ -22,6 +22,7 @@ import { reportRoutes } from './reports.js';
 import { sanctionRoutes } from './sanctions.js';
 import { teamRoutes } from './team.js';
 import { termRoutes } from './terms.js';
+import { workflowRoutes } from './workflow.js';
 import type { TermsAdmin } from './terms.js';
 
 export { AuditFailedError, BadActorError, createAdminContext } from './context.js';
@@ -53,6 +54,7 @@ export type { Me, MeFeatures } from './me.js';
 export { DEFAULT_GAME_NAME, policyRoutes } from './policy.js';
 export type { PolicyOptions } from './policy.js';
 export { reportRoutes } from './reports.js';
+export { workflowRoutes } from './workflow.js';
 export type { ReporterAccuracySummary, ReportSummary } from './reports.js';
 export { sanctionRoutes } from './sanctions.js';
 export { teamRoutes } from './team.js';
@@ -100,6 +102,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
     ...personRoutes(ctx),
     ...privacyRoutes(ctx),
     ...legalRoutes(ctx),
+    ...workflowRoutes(ctx),
     ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),
     ...(terms === undefined

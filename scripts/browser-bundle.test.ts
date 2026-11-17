@@ -51,7 +51,9 @@ const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.
 // and core carries the privacy registry, the canonical JSON and the bundle (about 4 KB). With the dist rebuilt, the hub's own strings (the Chat filters panel
 // words) already put the entry near 161 KB, so this is the generous raise the release asks for; the guard still catches large accidental growth. The bundle
 // builder and the registry could load behind an `import()` the way the signal service does, if a later theme needs the room.
-const SIZE_BUDGET_GZIP = 176 * 1024;
+// Raised to 192 KB at 0.2.0 (the urgent lane and the desk): the memory store gains the urgent, hand-off, comment and day-count methods, and core carries the desk, safety and room
+// settings, the case workflow and the comment service (about 4 KB gzip together; the bundle measured 180.5 KB just before this raise). Still a guard against large accidental growth.
+const SIZE_BUDGET_GZIP = 192 * 1024;
 
 /**
  * The browser build without the server-only AI module, as a bundler that splits at `import()` gives a page that never passes an adapter:

@@ -123,7 +123,7 @@ describe('every staff route has a client method', () => {
   };
 
   /** The world every route is exercised in: appeals and renames are on, so their routes answer instead of 404. */
-  const world = () => appealsHub({ role: 'owner', ai: { level: 2, options: { maxLevel: 3, act: {} } }, names: { renames: true } });
+  const world = () => appealsHub({ role: 'owner', ai: { level: 2, options: { maxLevel: 3, act: {} } }, names: { renames: true }, overrides: { desk: { workflow: true } } });
 
   async function exercise(w: AppealsHub) {
     const { id, person } = await w.file({ target: 'Mallory', reporter: 'Rita' });
@@ -133,6 +133,18 @@ describe('every staff route has a client method', () => {
     const gap = await w.sanction(person, 'warning', 'uncovered');
     const termId = w.live.rows.terms[0]!.id;
     const c = w.client;
+    // The owner asks no one for a second look (the role order): the same client asks as a moderator for that one call.
+    const seeded = w.cw.comments.add(id, 'mod_ann', 'moderator', 'a seeded comment');
+    const commentId = seeded.ok ? seeded.comment.id : 'missing';
+    const asModerator = async <T,>(fn: () => Promise<T>): Promise<T> => {
+      const was = w.session.who;
+      w.session.who = { actor: 'maya@example.test', role: 'moderator' };
+      try {
+        return await fn();
+      } finally {
+        w.session.who = was;
+      }
+    };
     const newTerm = await c.addTerm({ term: 'quibblex', language: 'en', note: 'n' });
     const newExc = await c.addException({ phrase: 'quibblexes', language: 'en' });
     const reasonId = (await w.direct.addReason({ label: 'Repeat', text: 'Again after a warning.' })).reason.id;
@@ -151,6 +163,11 @@ describe('every staff route has a client method', () => {
       ['setUrgent off', () => c.setUrgent(id, false), { method: 'POST', path: `/reports/${id}/urgent`, body: { on: false } }],
       ['handoff', () => c.handoff(id), { method: 'POST', path: `/reports/${id}/handoff` }],
       ['handoff takeOver', () => c.handoff(id, { takeOver: true }), { method: 'POST', path: `/reports/${id}/handoff`, body: { takeOver: true } }],
+      ['addComment', () => c.addComment(id, 'seen it'), { method: 'POST', path: `/reports/${id}/comments`, body: { text: 'seen it' } }],
+      ['removeComment', () => c.removeComment(id, commentId), { method: 'DELETE', path: `/reports/${id}/comments/${commentId}` }],
+      ['escalate', () => asModerator(() => c.escalate(id, { to: 'senior' })), { method: 'POST', path: `/reports/${id}/escalate`, body: { to: 'senior' } }],
+      ['escalate with a note', () => asModerator(() => c.escalate(id, { to: 'owner', note: 'please look' })), { method: 'POST', path: `/reports/${id}/escalate`, body: { to: 'owner', note: 'please look' } }],
+      ['clearEscalation', () => c.clearEscalation(id), { method: 'DELETE', path: `/reports/${id}/escalate` }],
       ['handoff takeOver false sends none', () => c.handoff(id, { takeOver: false }), { method: 'POST', path: `/reports/${id}/handoff` }],
       ['getReport', () => c.getReport(id, { level: 'rude' }), { method: 'GET', path: `/reports/${id}`, query: { level: 'rude' } }],
       ['suggest', () => c.suggest(id, { level: 'hostile', rule: 1 }), { method: 'POST', path: `/reports/${id}/suggest`, body: { level: 'hostile', rule: 1 } }],
