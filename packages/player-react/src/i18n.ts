@@ -11,9 +11,11 @@
 // The copy is written for a player in the middle of a game: second person, sentence case, plain words, and never shaming. It says
 // what happened, until when, and what the player can do.
 
+import { NOTICE_WORDS } from '@chatwarden/core/notice-copy';
 import type { enChat } from './chat/words.js';
 
 export const en = {
+  ...NOTICE_WORDS,
   'player.error.network': 'Could not reach the server. Check your connection and try again.',
   'player.error.unauthorized': 'You are signed out. Sign in again, then try again.',
   'player.error.forbidden': 'This account cannot do that.',
@@ -28,41 +30,7 @@ export const en = {
 
   'player.notices.loadFailed': 'We could not check for notices.',
 
-  'player.notice.title.warning': 'You have a warning',
-  'player.notice.title.chat': 'Your chat is turned off',
-  'player.notice.title.area': 'You cannot join public rooms',
-  'player.notice.title.ban': 'You are banned',
-  'player.notice.title.report_outcome': 'Thanks for your report',
-  'player.notice.title.rename_required': 'Please choose a new name',
-  'player.notice.title.appeal_upheld': 'We looked again and kept the decision',
-  'player.notice.title.appeal_reduced': 'We looked again and changed the decision',
-  'player.notice.title.appeal_revoked': 'We looked again and removed the decision',
-  'player.notice.title.fallback': 'A message from the moderators',
-  'player.notice.body.warning': 'A moderator gave you a warning for something you wrote. You can keep playing.',
-  'player.notice.body.chat': 'A moderator turned off your chat. You can still play.',
-  'player.notice.body.area': 'A moderator stopped you joining public rooms and matchmaking. You can still play in private rooms.',
-  'player.notice.body.ban': 'A moderator banned you from playing.',
-  'player.notice.body.report_outcome': 'A moderator looked at your report and took action. We do not share what was done.',
-  'player.notice.body.rename_required': 'A moderator asked you to change your name because it breaks the community rules. Choose a new name to keep playing.',
-  'player.notice.body.appeal_upheld': 'A moderator read your appeal. The original decision stands.',
-  'player.notice.body.appeal_reduced': 'A moderator read your appeal and made the decision lighter. The new decision is on your record.',
-  'player.notice.body.appeal_revoked': 'A moderator read your appeal and took the decision off your record.',
-  'player.notice.body.fallback': 'There is a new message about your account.',
   'player.notice.position': 'Notice {n} of {total}',
-  'player.notice.rule': 'Rule',
-  'player.notice.given': 'Given',
-  'player.notice.until': 'Until',
-  'player.notice.ended': 'Ended',
-  'player.notice.noEnd': 'No end date',
-  'player.notice.onRecordUntil': 'On your record until',
-  'player.notice.untilLeft': '{when} ({left})',
-  'player.notice.ref': 'Reference',
-  'player.notice.refHint': 'Quote this code if you contact us.',
-  'player.notice.lines': 'Your messages that led to this',
-  'player.notice.todo.warning': 'Press Acknowledge to confirm you saw this.',
-  'player.notice.acknowledge': 'Acknowledge',
-  'player.notice.gotIt': 'Got it',
-  'player.notice.appeal': 'Think this is a mistake?',
   'player.notice.ackFailed': 'Your notice is still here.',
   'player.notice.closeForNow': 'Close for now',
 
@@ -106,8 +74,6 @@ export const en = {
   'player.rules.loadFailed': 'We could not load the rules.',
   'player.rules.empty': 'No rules are published yet.',
 
-  'player.restricted.moderator.until': 'A moderator turned off your chat until {when} ({left}).',
-  'player.restricted.moderator.noEnd': 'A moderator turned off your chat. It does not end on its own.',
   'player.restricted.filter.until': 'Your chat is off until {when} ({left}). The automatic filter caught a message.',
   'player.restricted.filter.noEnd': 'Your chat is off. It does not end on its own. The automatic filter caught a message.',
   'player.restricted.ended': 'Your chat is back on. The restriction ended {when}.',

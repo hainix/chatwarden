@@ -865,9 +865,12 @@ describe('the appeals and names docs (0.1.9)', () => {
     expect(count('player.appeal.')).toBe(18);
     expect(count('player.name.')).toBe(2);
     expect(doc).toContain('28 keys to `en`: 18 `player.appeal.*`, 2 `player.name.*`');
+    // The notice words moved to core (`@chatwarden/core/notice-copy`); `en` spreads them.
+    const words = read('packages/core/src/noticeCopy.ts');
+    expect(catalog).toContain('...NOTICE_WORDS');
     for (const kind of ['rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked']) {
-      expect(catalog, `title ${kind}`).toContain(`'player.notice.title.${kind}'`);
-      expect(catalog, `body ${kind}`).toContain(`'player.notice.body.${kind}'`);
+      expect(words, `title ${kind}`).toContain(`'player.notice.title.${kind}'`);
+      expect(words, `body ${kind}`).toContain(`'player.notice.body.${kind}'`);
     }
   });
 

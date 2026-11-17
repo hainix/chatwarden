@@ -17,7 +17,7 @@ npm install @chatwarden/player-react @chatwarden/core react react-dom
 `react` and `react-dom` (18.3 or 19) are peer dependencies, so your game has one copy of React. The components use only APIs that
 exist in 18.3 (`useId`, `useRef`). The unit and interaction tests run on React 19; the consumer smoke test installs React 18.3, type-checks against
 `@types/react` 18 and renders every component on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` is a peer too (`^0.1.9`), for its types
-only (`AppealRefusal`, `PlayerAppeal` and `NameReason` are new in 0.1.9): no run-time import of it, or of the HTTP package, is in the bundle. Node 22.13 or newer for the tooling; the components
+(`AppealRefusal`, `PlayerAppeal` and `NameReason` are new in 0.1.9) and for one run-time subpath, `@chatwarden/core/notice-copy` (the notice words and the view of a notice, pure functions with no engine behind them); no other run-time import of core, and none of the HTTP package, is in the bundle. Node 22.13 or newer for the tooling; the components
 themselves run in a browser and import no `node:` module.
 
 Your server needs `@chatwarden/http` for the routes the components call (`playerRoutes`). The JavaScript is under 14 KB gzipped
@@ -339,6 +339,8 @@ import { createT, en } from '@chatwarden/player-react';
 const de = { 'player.notice.acknowledge': 'Verstanden', 'player.notice.gotIt': 'Okay' };
 export const t = createT({ ...en, ...de }, 'de');
 ```
+
+The notice words (every title, body, fact label and button of a notice, and the two restricted-chat lines) are core's `NOTICE_WORDS`; `en` spreads them, so a translation spread over `en` wins key by key. The moderator hub draws the same words in its "What the player sees" panel, so the two cannot drift.
 
 Pass it as `<NoticeQueue t={t} locale="de" ... />`. Dates and times use `Intl` with the same locale; pass `timeZone="UTC"` to show a
 fixed zone, or leave it out to use the player's own. The copy is written for a player in the middle of a game: second person,

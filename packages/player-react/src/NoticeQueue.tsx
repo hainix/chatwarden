@@ -9,7 +9,7 @@ import { toPlayerError } from './client.js';
 import type { PlayerClient, PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
 import { usePlayerData } from './hooks.js';
-import { AppealLink, bodyKey, Card, errorText, Facts, isSanction, Lines, Portal, Root, titleKey, useUi } from './ui.js';
+import { AppealLink, Card, errorText, Facts, Lines, Portal, Root, useUi, viewOf } from './ui.js';
 import type { DialogHostProps, PlayerUiProps, Ui } from './ui.js';
 
 export interface NoticeQueueProps extends PlayerUiProps, DialogHostProps {
@@ -209,7 +209,7 @@ function NoticeCard({
     }
   };
 
-  const mustAck = notice.kind === 'warning' || notice.mustAcknowledge;
+  const view = viewOf(ui, notice);
   return (
     <>
       {/* Always drawn, so a screen reader that has seen it empty hears it when a second notice arrives. */}
@@ -219,20 +219,20 @@ function NoticeCard({
       <div className="cw-head">
         <Card kind={notice.kind} />
         <h2 id={titleId} ref={heading} className="cw-title" tabIndex={-1}>
-          {t(titleKey(notice.kind))}
+          {view.title}
         </h2>
       </div>
-      <p className="cw-body">{t(bodyKey(notice.kind))}</p>
+      <p className="cw-body">{view.body}</p>
       <Facts ui={ui} notice={notice} />
-      {notice.refCode !== null && <p className="cw-hint">{t('player.notice.refHint')}</p>}
+      {view.refHint !== null && <p className="cw-hint">{view.refHint}</p>}
       <Lines ui={ui} notice={notice} id={linesId} />
-      {isSanction(notice.kind) &&
+      {view.sanction &&
         (appeals === null ? (
         <AppealLink ui={ui} href={appealUrl} />
       ) : (
         <AppealSlot ui={ui} notice={notice} appeals={appeals} onOpen={onAppeal} focus={returned} onFocused={onReturned} inert={busy} />
       ))}
-      {mustAck && <p className="cw-hint">{t('player.notice.todo.warning')}</p>}
+      {view.todo !== null && <p className="cw-hint">{view.todo}</p>}
       {failure !== null && (
         <div className="cw-error" role="alert">
           <p>
@@ -252,7 +252,7 @@ function NoticeCard({
           aria-busy={busy || undefined}
           onClick={() => void acknowledge()}
         >
-          {t(mustAck ? 'player.notice.acknowledge' : 'player.notice.gotIt')}
+          {view.button}
         </button>
       </div>
     </>

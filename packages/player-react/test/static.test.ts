@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { NOTICE_WORDS } from '@chatwarden/core/notice-copy';
 import { en as baseEn } from '../src/i18n.js';
 import { enChat } from '../src/chat/words.js';
 
@@ -98,7 +99,9 @@ describe('no words outside the catalog', () => {
     const literalsUsed = new Set([...text.matchAll(/'(player\.[A-Za-z0-9_.]+)'/g)].map((m) => m[1] as string));
     const prefixes = [...text.matchAll(/`(player\.[A-Za-z0-9_.]*\.)\$\{/g)].map((m) => m[1] as string);
     const bases = [...new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
-    const dead = bases.filter((k) => !literalsUsed.has(k) && !prefixes.some((p) => k.startsWith(p)));
+    // The notice words are core's (`@chatwarden/core/notice-copy`): the shared view uses them, and core's own tests hold that every one is used.
+    const shared = new Set<string>(Object.keys(NOTICE_WORDS));
+    const dead = bases.filter((k) => !shared.has(k)).filter((k) => !literalsUsed.has(k) && !prefixes.some((p) => k.startsWith(p)));
     // A key the components stopped using stays in the exported catalogue for a patch release (nothing is removed in 0.1.x), marked
     // `@deprecated unused since 0.1.3`. So the dead words are exactly the marked ones: an unused key must be marked, and a marked
     // key must really be unused (otherwise the mark is a lie).
@@ -160,12 +163,13 @@ describe('imports', () => {
     for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).not.toMatch(/hub-react|packages\/hub|\.\.\/\.\.\//);
   });
 
-  it('imports the kit as types only: no run-time import of core or http, so the bundle needs no kit code', () => {
-    for (const f of code) for (const i of importsOf(f).filter((x) => x.spec.startsWith('@chatwarden/'))) expect(i.typeOnly, `${rel(f)} imports ${i.spec}`).toBe(true);
+  it('imports the kit as types only, except the one run-time subpath @chatwarden/core/notice-copy (pure words and functions, no engine)', () => {
+    for (const f of code)
+      for (const i of importsOf(f).filter((x) => x.spec.startsWith('@chatwarden/') && x.spec !== '@chatwarden/core/notice-copy')) expect(i.typeOnly, `${rel(f)} imports ${i.spec}`).toBe(true);
   });
 
   it('imports nothing but React, the kit types and its own files', () => {
-    for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react-dom$|react\/jsx-runtime$|@chatwarden\/core$)/);
+    for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react-dom$|react\/jsx-runtime$|@chatwarden\/core(\/notice-copy)?$)/);
   });
 });
 

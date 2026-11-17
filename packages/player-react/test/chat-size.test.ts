@@ -74,7 +74,8 @@ describe('chat bundle size', () => {
   it('imports only what the peers provide, and contains no Node builtin and no eval', async () => {
     const { text } = await bundle(chat);
     const imports = [...text.matchAll(/\bimport\b[^;"]*?\bfrom\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(new Set(imports)).toEqual(new Set(['react', 'react/jsx-runtime', 'react-dom']));
+    // The date formatters are core's (`@chatwarden/core/notice-copy`), the one run-time kit import.
+    expect(new Set(imports)).toEqual(new Set(['react', 'react/jsx-runtime', 'react-dom', '@chatwarden/core/notice-copy']));
     expect(text).not.toMatch(/from\s*"node:/);
     expect(text).not.toMatch(/\beval\(|new Function\(/);
   });
