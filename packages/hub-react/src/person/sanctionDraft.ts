@@ -92,6 +92,12 @@ function asDecision(d: SanctionDraft, mode: SanctionMode): DecisionForm {
   };
 }
 
+/** The kind and length a draft stands for, or null while no kind is chosen or the length typed is not one the kit takes (what the preview asks about). */
+export function sanctionChoice(d: SanctionDraft, mode: SanctionMode): { kind: SanctionKind; durationMs: number | null } | null {
+  const choice = resolveDraft(asDecision(d, mode).actions[0] as DecisionForm['actions'][number]);
+  return choice === null ? null : { kind: choice.kind, durationMs: choice.durationMs };
+}
+
 /** Everything the server would refuse, found before sending. */
 export function sanctionProblems(d: SanctionDraft, mode: SanctionMode, ctx: SanctionContext): SanctionProblems {
   const found = validate(asDecision(d, mode), {
@@ -140,21 +146,24 @@ export function toSanctionInput(subject: string, d: SanctionDraft, mode: Sanctio
 }
 
 /**
- * What "Ask for a new name (no sanction)" refuses before anything is sent: only the reason (required, at most 500 characters). The rule is optional (the server
- * has its own), and there is no length, IP or gap note.
+ * What "Ask for a new name (no sanction)" refuses before anything is sent: the reason (required, at most 500 characters) and a numbered rule (a rename always cites
+ * one; "No rule covers this" is not a choice here). There is no length, IP or gap note.
  */
 export function renameProblems(d: SanctionDraft): SanctionProblems {
+  const out: SanctionProblems = { count: 0 };
   const reason = d.reason.trim();
-  if (reason === '') return { reason: { key: 'hub.decide.error.reasonRequired' }, count: 1 };
-  if (reason.length > REASON_MAX) return { reason: { key: 'hub.decide.error.reasonLong', params: { max: REASON_MAX } }, count: 1 };
-  return { count: 0 };
+  if (reason === '') out.reason = { key: 'hub.decide.error.reasonRequired' };
+  else if (reason.length > REASON_MAX) out.reason = { key: 'hub.decide.error.reasonLong', params: { max: REASON_MAX } };
+  if (!/^[1-9]\d*$/.test(d.rule)) out.rule = { key: 'hub.decide.error.ruleRequired' };
+  out.count = [out.reason, out.rule].filter((x) => x !== undefined).length;
+  return out;
 }
 
-/** The body for `POST /people/:ref/rename`: the reason and, when a numbered rule was chosen, the rule (anything else leaves it to the server). */
-export function toRenameInput(d: SanctionDraft, options: { takeOver?: boolean } = {}): { reason: string; rule?: number; takeOver?: boolean } {
+/** The body for `POST /people/:ref/rename`: the reason, the numbered rule and, when asked for, `takeOver`. Call it on a draft that has no problems. */
+export function toRenameInput(d: SanctionDraft, options: { takeOver?: boolean } = {}): { reason: string; rule: number; takeOver?: boolean } {
   return {
     reason: d.reason.trim(),
-    ...(/^[1-9]\d*$/.test(d.rule) ? { rule: Number(d.rule) } : {}),
+    rule: Number(d.rule),
     ...(options.takeOver === true ? { takeOver: true } : {}),
   };
 }

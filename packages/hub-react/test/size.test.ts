@@ -120,7 +120,8 @@ describe('bundle size', () => {
 
   it('imports only what the peers provide: React, and the kit core for the ladder table', async () => {
     const { all } = await bundle();
-    const peers = new Set(['react', 'react/jsx-runtime', '@chatwarden/core']);
+    // 0.2.0: and the shared notice words and plan, `@chatwarden/core/notice-copy` (pure functions; the panel is a lazy chunk that draws them).
+    const peers = new Set(['react', 'react/jsx-runtime', '@chatwarden/core', '@chatwarden/core/notice-copy']);
     // `import ... from "x"` only: a catalog phrase that happens to end in "from" is not an import. A `./chunk-...` import is the bundle's own.
     const importsOf = (text: string): string[] => [...text.matchAll(/\bimport\b[^;"]*?\bfrom\s*"([^"]+)"/g)].map((m) => m[1] as string).filter((i) => !i.startsWith('./'));
     // The entry and its chunks together use all three (which file holds the kit import moves with how the bundler splits shared code); none reaches for
@@ -181,6 +182,17 @@ describe('bundle size', () => {
     expect(chunkRoots.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toHaveLength(1);
   });
 
+  it('keeps the "What the player sees" panel, its hooks and its words out of the first load: one chunk, loaded when an action first shows it (0.2.0)', async () => {
+    const { entryInputs, eagerInputs, chunkRoots } = await bundle();
+    for (const file of ['preview/PlayerPreview.tsx', 'preview/usePreview.ts', 'preview/effects.ts']) {
+      expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
+      expect(eagerInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the first load`).toEqual([]);
+    }
+    expect(chunkRoots.filter((i) => i.endsWith('src/preview/PlayerPreview.tsx'))).toHaveLength(1);
+    // The one thing of the preview that is eager is the small op builders (types only from core).
+    expect(eagerInputs.filter((i) => /src\/preview\//.test(i)).map((i) => i.slice(i.indexOf('src/'))).sort()).toEqual(['src/preview/ops.ts']);
+  });
+
   it('keeps the appeal card, the appeals list and the Appeals screen out of the first load: each a chunk of its own, loaded when appeals are used (0.1.9)', async () => {
     const { entryInputs, eagerInputs, chunkRoots } = await bundle();
     for (const file of ['case/AppealCard.tsx', 'appeals/AppealList.tsx', 'screens/Appeals.tsx']) {
@@ -211,6 +223,7 @@ describe('bundle size', () => {
     // And 18 KB at 7j: every one of the 960 token reads now carries its private default, `var(--cw-x, var(--cwd-x))`, which is what lets a
     // page theme the hub from any element above it (owner-approved, 2026-11-10): +20 KB raw, about +1 KB gzipped. The fallbacks are not
     // folded away at build time: that is the transform this task removed from the element.
-    expect(gzip).toBeLessThan(18 * 1024);
+    // And 20 KB at 0.2.0 (the "What the player sees" panel, its notice box and its lines): about +0.9 KB gzipped over the 18 KB it had reached.
+    expect(gzip).toBeLessThan(20 * 1024);
   });
 });

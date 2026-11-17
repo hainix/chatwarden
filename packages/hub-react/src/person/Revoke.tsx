@@ -4,7 +4,9 @@ import { useHub } from '../context.js';
 import { REASON_MAX } from '../decision.js';
 import type { Problem } from '../decision.js';
 import { useHubAction } from '../hooks.js';
+import { LazyPlayerPreview } from '../lazyParts.js';
 import { choiceLabel, errorText } from '../labels.js';
+import { revokeOp } from '../preview/ops.js';
 import { useToasts } from '../toasts.js';
 import type { SanctionGroupView } from '../types.js';
 
@@ -103,6 +105,7 @@ export function Revoke({ s, open, onOpen, onClose, onRevoked }: { s: SanctionGro
           >
             {(a) => <textarea {...a} ref={textRef} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />}
           </Field>
+          <LazyPlayerPreview op={revokeOp(s)} nameOf={() => ''} />
           {failed !== null && (
             <div className="cw-error" role="alert">
               <p>{errorText(t, failed)}</p>

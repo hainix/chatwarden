@@ -79,7 +79,7 @@ export interface ActionProps {
 }
 
 /** The rule menu of an action: the active rules, and "No rule covers this". */
-export function RuleOptions({ rules }: { rules: ReadonlyArray<{ number: number; title: string }> }) {
+export function RuleOptions({ rules, noUncovered = false }: { rules: ReadonlyArray<{ number: number; title: string }>; noUncovered?: boolean }) {
   const { t } = useHub();
   return (
     <>
@@ -89,7 +89,7 @@ export function RuleOptions({ rules }: { rules: ReadonlyArray<{ number: number; 
           {t('hub.decide.action.rule.option', { number: r.number, title: r.title })}
         </option>
       ))}
-      <option value="uncovered">{t('hub.decide.action.rule.uncovered')}</option>
+      {!noUncovered && <option value="uncovered">{t('hub.decide.action.rule.uncovered')}</option>}
     </>
   );
 }

@@ -457,7 +457,7 @@ and no control: the name is a click away in the case. An older server flags noth
 is the one helper that turns a handle into text; if you draw handles yourself (`useCases`, the headless controller), use it or check `handleFlagged`.
 
 **Asking for a new name (0.1.9).** With `names.renames` on (and the store able to release a rename), the Sanction form on a person's page gains a last
-choice, "Ask for a new name (no sanction)": it hides the length and the IP, keeps the rule (optional) and the reason, and calls
+choice, "Ask for a new name (no sanction)": it hides the length and the IP, keeps the rule (a numbered rule is required: a rename always cites one, and "No rule covers this" is not offered) and the reason, and calls
 `POST /people/:ref/rename` with the same claim rules and take-over as a sanction. The person's timeline then reads "Asked to choose a new name", with
 "Waiting for a new name" until they have. The choice shows on the Person page in Simple too, because that page is the same in both modes; Simple's menu and its Cases list are unchanged. With renames off the form is what it was.
 
@@ -547,6 +547,13 @@ timer ends. At most `TOAST_HELD_MAX` (10) decisions wait at once; the oldest is 
 
 **Limits.** "On now" lists the people who hold or are viewing a case, and you: the kit has no presence route, so someone signed in and idle is
 not shown. Recent actions is read again whenever the queue is read because the change token moved.
+
+**What the player sees (0.2.0).** Every action that sends or withholds a notice shows one quiet panel, "What the player sees", as the last thing above its button: the notice as the
+player will read it (built from the same words as `@chatwarden/player-react`, through `@chatwarden/core/notice-copy`), or one plain line saying none is sent, who else is told, and
+what else changes for them. It follows the form as it changes, reads the clock each minute, makes no request, and is English whatever the hub's language (its caption says so). Nothing
+in it takes focus (the buttons are drawn as words), and no reason, gap note, reference or other moderator-only field is ever an input. On the Person page it sits above Apply for a sanction, a
+note and a rename (a direct sanction sends no notice, so it says so and shows the line the chat box will show) and above Confirm revoke (what lifts for the player). It is a lazy chunk, so the
+first load does not carry it. If a game words its notices differently, the player sees the game's words, not these.
 
 ### The case and the decision
 

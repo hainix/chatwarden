@@ -482,7 +482,8 @@ describe('revoke', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Your role cannot do this.');
     expect(reasonBox()).toHaveValue('because');
     expect(histories(w)).toHaveLength(1);
-    expect(within(inForce()).getAllByRole('listitem')).toHaveLength(1);
+    // The sanctions in force (the revoke panel's own effect lines are list items too, one list deeper).
+    expect(within(inForce()).getAllByRole('listitem').filter((li) => li.closest('.cw-pv') === null)).toHaveLength(1);
   });
 
   it('a network failure keeps the reason and Confirm sends it again, once', async () => {

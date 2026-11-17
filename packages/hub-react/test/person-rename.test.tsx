@@ -29,7 +29,14 @@ async function openForm(w: AppealsHub | Awaited<ReturnType<typeof hubWorld>>, pe
   return r;
 }
 
-describe('with renames off the Sanction form is what 0.1.7 drew', () => {
+/** The form without "What the player sees" (a lazy panel that may or may not have arrived): the rest is what 0.1.7 drew, save the hint the panel replaced. */
+const withoutPanel = (form: Element): string => {
+  const clone = form.cloneNode(true) as Element;
+  clone.querySelectorAll('.cw-pv, .cw-pv-hold').forEach((n) => n.remove());
+  return normalized(clone);
+};
+
+describe('with renames off the Sanction form keeps its fields (0.1.7), and the panel replaces its hint', () => {
   it('the form, open', async () => {
     const w = await hubWorld();
     const f = await w.file({ target: 'Mallory' });
@@ -38,10 +45,10 @@ describe('with renames off the Sanction form is what 0.1.7 drew', () => {
     await user.click(await screen.findByRole('button', { name: 'Sanction' }));
     const form = await screen.findByRole('region', { name: 'Sanction Mallory' });
     await waitFor(() => expect((screen.getByLabelText('Community Rule') as HTMLSelectElement).options.length).toBeGreaterThan(2));
-    await expect(normalized(form)).toMatchFileSnapshot(baseline('sanction-form'));
+    await expect(withoutPanel(form)).toMatchFileSnapshot(baseline('sanction-form'));
   });
 
-  it('and with appeals on and renames untouched (default off): the same form, byte for byte', async () => {
+  it('and with appeals on and renames untouched (default off): the same form, byte for byte (the panel apart)', async () => {
     const w = await appealsHub();
     const f = await w.file({ target: 'Mallory' });
     const { user } = renderHub(w, { path: `/people/${f.person}` });
@@ -49,7 +56,7 @@ describe('with renames off the Sanction form is what 0.1.7 drew', () => {
     await user.click(await screen.findByRole('button', { name: 'Sanction' }));
     const form = await screen.findByRole('region', { name: 'Sanction Mallory' });
     await waitFor(() => expect((screen.getByLabelText('Community Rule') as HTMLSelectElement).options.length).toBeGreaterThan(2));
-    await expect(normalized(form)).toMatchFileSnapshot(baseline('sanction-form'));
+    await expect(withoutPanel(form)).toMatchFileSnapshot(baseline('sanction-form'));
     expect([...what().options].map((o) => o.textContent)).not.toContain(OPTION);
   });
 
@@ -129,15 +136,33 @@ describe('the rename option', () => {
     expect(within(timeline).getByText('Waiting for a new name')).toBeInTheDocument();
   });
 
-  it('the rule is optional: with none chosen it is left out and the server uses its own', async () => {
+  it('the rule is required: with none chosen nothing is sent, the rule field says so, and "No rule covers this" is not offered', async () => {
     const w = await world();
     const f = await w.file({ target: 'Mallory' });
     const { user } = await openForm(w, f.person);
     await user.selectOptions(what(), 'rename');
+    expect([...rule().options].map((o) => o.value)).not.toContain('uncovered');
     await user.type(reason(), 'Please pick another.');
     await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(await screen.findByText('Choose the rule this is under.')).toBeInTheDocument();
+    expect(rule()).toHaveAttribute('aria-invalid', 'true');
+    expect(renames(w)).toEqual([]);
+    await user.selectOptions(rule(), '7');
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(renames(w)).toHaveLength(1));
-    expect(renames(w)[0]?.body).toEqual({ reason: 'Please pick another.' });
+    expect(renames(w)[0]?.body).toEqual({ reason: 'Please pick another.', rule: 7 });
+  });
+
+  it('a sanction form left on "No rule covers this" does not carry it into a rename', async () => {
+    const w = await world();
+    const f = await w.file({ target: 'Mallory' });
+    const { user } = await openForm(w, f.person);
+    await user.selectOptions(what(), 'chat');
+    await user.selectOptions(rule(), 'uncovered');
+    await user.selectOptions(what(), 'rename');
+    expect(rule().value).toBe('');
+    await user.selectOptions(what(), 'chat');
+    expect([...rule().options].map((o) => o.value)).toContain('uncovered');
   });
 
   it('a reason is required: nothing is sent and the field is marked', async () => {

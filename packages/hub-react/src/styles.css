@@ -3902,3 +3902,117 @@
   gap: var(--cw-space-2, var(--cwd-space-2));
   min-width: 0;
 }
+
+/* "What the player sees": one quiet panel inside an action. A hairline box for the notice (the Notice's look without a tone), the player's own scale, no new colour. */
+.cw-hub .cw-pv {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-pv p,
+.cw-hub .cw-pv ul,
+.cw-hub .cw-pv dl {
+  margin: 0;
+}
+.cw-hub .cw-pv-heading {
+  margin: 0;
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-caption,
+.cw-hub .cw-pv-hold {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-pv-hold {
+  margin: 0;
+}
+.cw-hub .cw-pv-who,
+.cw-hub .cw-pv-pos {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-pv-person {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-pv-one {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-pv-notice {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink, var(--cwd-ink));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-pv-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-pv-title {
+  margin: 0;
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+}
+.cw-hub .cw-pv-facts {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-pv-fact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-pv-fact dt {
+  min-width: 7rem;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-fact dd {
+  margin: 0;
+}
+.cw-hub .cw-pv-hint,
+.cw-hub .cw-pv-lines-label {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-lines {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-pv-line-day {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-actions,
+.cw-hub .cw-pv-appeal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+/* A button drawn as words: it is never a control, so it takes no focus and has no pointer. */
+.cw-hub .cw-pv-btn {
+  display: inline-block;
+  padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-chatline {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-pv-effects {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: 0;
+  list-style: none;
+}
