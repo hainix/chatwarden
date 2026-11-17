@@ -109,9 +109,14 @@ describe('adminRoutes: shape', () => {
   it('includes exactly the report/decision/history routes and the two AI report routes (the other groups have their own files)', async () => {
     const { routes } = await world();
     expect(Object.keys(routes).filter((k) => /\/(reports|people)/.test(k)).sort()).toEqual([
+      // Legal hold and privacy requests (0.2.0): their own checks are in admin.legal.test.ts and admin.privacy.test.ts.
+      'DELETE /reports/:id/hold',
       'GET /people/:ref/history',
+      'GET /people/:ref/privacy/export',
       'GET /reports',
       'GET /reports/:id',
+      'GET /reports/:id/bundle',
+      'POST /people/:ref/privacy/erase',
       // The rename route lives with the sanctions (its own checks are in admin.names.test.ts).
       'POST /people/:ref/rename',
       'POST /reports/:id/ai/dont-teach',
@@ -121,6 +126,7 @@ describe('adminRoutes: shape', () => {
       'POST /reports/dismiss-open',
       // AI levels 3 and 4 (0.1.13): the "do not automate" mark lives with the people routes (its own checks are in admin.automation.test.ts).
       'PUT /people/:id/automation',
+      'PUT /reports/:id/hold',
     ]);
   });
 

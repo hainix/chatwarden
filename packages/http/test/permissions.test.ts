@@ -55,6 +55,7 @@ describe('PERMISSIONS defaults', () => {
       'ai.pause': 'senior',
       'automation.write': 'senior',
       'filters.read': 'moderator',
+      'legal.hold': 'senior',
     });
   });
 

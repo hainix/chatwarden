@@ -326,9 +326,12 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const { origin: _origin, originKey: _originKey, ...plain } = report;
       void _origin;
       void _originKey;
+      // A held report shows `hold: { code, at }` (never who held it); every other body is as it was.
+      const held = cw.legal.status(id);
       const shown = {
         ...plain,
         ...originOf(report),
+        ...(held === null ? {} : { hold: held }),
         ...(originLabelOf(report) === undefined ? {} : { originLabel: originLabelOf(report) }),
         reportedReasonLabel: labelOf(report),
         ...flagKey(flagged, 'targetHandleFlagged', report.targetHandle),

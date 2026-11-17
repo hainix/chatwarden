@@ -323,6 +323,16 @@ describe('Discord posts "Appeal filed against a 24-hour chat restriction, Rule 2
     expect(logged).toEqual([]);
   });
 
+  it('report.escalated (a legal hold) is ignored too: nothing is posted, nothing is logged, and the feed does not even listen for it', async () => {
+    const k = fakeKit();
+    const { d, logged } = start(k);
+    expect([...k.listeners].map((l) => l.type)).not.toContain('report.escalated');
+    await k.emit({ type: 'report.escalated', reportId: 'r1', at: NOW, code: 'law_enforcement_request', target: sid() } as KitEvent);
+    await settle();
+    expect(d.calls).toHaveLength(0);
+    expect(logged).toEqual([]);
+  });
+
   it('a throwing kit never reaches the caller: the listener is fenced', async () => {
     const k = fakeKit();
     (k.kit as unknown as { people: { canonical: () => never } }).people.canonical = () => {

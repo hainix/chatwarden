@@ -9,10 +9,12 @@ import type { CommunityAdmin } from './community.js';
 import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
 import { filterRoutes } from './filters.js';
+import { legalRoutes } from './legal.js';
 import { gapRoutes } from './gaps.js';
 import { meRoutes } from './me.js';
 import { nameRoutes } from './names.js';
 import { personRoutes } from './people.js';
+import { privacyRoutes } from './privacy.js';
 import { policyRoutes } from './policy.js';
 import { policyProfileRoutes } from './policyProfile.js';
 import type { PolicyOptions } from './policy.js';
@@ -45,6 +47,8 @@ export { gapRoutes } from './gaps.js';
 export { meRoutes } from './me.js';
 export { nameRoutes } from './names.js';
 export { personRoutes } from './people.js';
+export { privacyRoutes } from './privacy.js';
+export { legalRoutes } from './legal.js';
 export type { Me, MeFeatures } from './me.js';
 export { DEFAULT_GAME_NAME, policyRoutes } from './policy.js';
 export type { PolicyOptions } from './policy.js';
@@ -94,6 +98,8 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
     ...appealRoutes(ctx),
     ...nameRoutes(ctx),
     ...personRoutes(ctx),
+    ...privacyRoutes(ctx),
+    ...legalRoutes(ctx),
     ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),
     ...(terms === undefined

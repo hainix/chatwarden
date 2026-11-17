@@ -151,7 +151,7 @@ type Job = PostJob | EditJob;
  *   appeal's sanction when `cw.appeals` can say; no length otherwise). `appeal.decided`: "Appeal decided: lighter." (`upheld`, `lighter` for a
  *   reduction, `revoked`) and the same link. Both go to the person's thread, ping no one, and never carry the statement, the reason, a handle or an
  *   id except inside the hub link. An appeal made moot announces nothing (the kit raises no event for it). `rename.required` is not posted: it is
- *   for the game, not for staff.
+ *   for the game, not for staff. `report.escalated` (a legal hold, 0.2.0) is not posted either: the kit forwards a hold to no one, and the game reads it from `cw.on` or a webhook.
  * - Severe means category `hate`, or the rule (the report's default rule, or the sanction's) is in
  *   `cw.profile.severeRules` (default Community Rule 1). Only a severe report or sanction pings `mentionRoleId`;
  *   `allowed_mentions` is `{ parse: [] }` on every other post, so no adopter or rule text can ping `@everyone`.

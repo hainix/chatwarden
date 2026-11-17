@@ -38,7 +38,7 @@ export interface WebhookEndpoint {
    */
   includeExcerpts?: boolean;
   /**
-   * Add `accounts: string[]` to `rename.required` (and to no other event): the account ids the kit holds for that person, as the game passed them
+   * Add `accounts: string[]` to `rename.required` and `report.escalated` (and to no other event): the account ids the kit holds for that person, as the game passed them
    * (`RawWho.accountId`), found with `cw.people.accountIds` when the event is raised, so the game knows which of its players to rename. A guest has
    * none (`[]`). Without it the event names only the person's staff ref, which means nothing to the game.
    *
@@ -243,7 +243,7 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports' | 'people'>, o
             safeWarn(logger, 'chatwarden.webhook_excerpt_failed', { error: errorClass(err) });
           }
         }
-        if (endpoint.includeAccounts && event.type === 'rename.required') {
+        if (endpoint.includeAccounts && (event.type === 'rename.required' || event.type === 'report.escalated')) {
           try {
             // Fetched now, when the event is raised: the body is fixed from here on, and nothing is cached between events.
             data = { ...data, accounts: cw.people.accountIds(event.target) };

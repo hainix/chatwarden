@@ -16,6 +16,9 @@ interface Ids {
   person: string;
   /** A saved reason. */
   reason: string;
+  /** An open report nobody has held, and one that is held (for the release route). */
+  report: string;
+  held: string;
 }
 interface Spec {
   name: string;
@@ -68,6 +71,15 @@ const SPECS: Spec[] = [
   { name: 'GET /filters/stats', method: 'GET', path: () => '/filters/stats', query: { days: '7' }, lock: { 'filters.read': 'owner' }, min: 'moderator' },
   { name: 'POST /filters/test', method: 'POST', path: () => '/filters/test', body: { text: 'a harmless line' }, lock: { 'filters.read': 'owner' }, min: 'moderator' },
   { name: 'POST /filters/check', method: 'POST', path: () => '/filters/check', body: { candidate: {} }, lock: { 'filters.read': 'owner' }, min: 'moderator' },
+  // Privacy requests and legal hold (0.2.0): the owner's routes are fixed in code, so no permission lock moves them; the hold is `legal.hold`, a senior's. Their own checks are in
+  // admin.privacy.test.ts and admin.legal.test.ts.
+  { name: 'POST /privacy/find', method: 'POST', path: () => '/privacy/find', body: { accountId: 'acct-none' }, lock: {}, min: 'owner' },
+  { name: 'GET /people/:ref/privacy/export', method: 'GET', path: (i) => `/people/${i.subject}/privacy/export`, lock: {}, min: 'owner' },
+  { name: 'POST /people/:ref/privacy/erase', method: 'POST', path: (i) => `/people/${i.subject}/privacy/erase`, body: { keep: 'safety', confirm: 'SUBJ', dryRun: true }, lock: {}, min: 'owner' },
+  { name: 'GET /privacy/statement', method: 'GET', path: () => '/privacy/statement', lock: {}, min: 'owner' },
+  { name: 'PUT /reports/:id/hold', method: 'PUT', path: (i) => `/reports/${i.report}/hold`, body: { code: 'other' }, lock: { 'legal.hold': 'owner' }, min: 'senior' },
+  { name: 'DELETE /reports/:id/hold', method: 'DELETE', path: (i) => `/reports/${i.held}/hold`, lock: {}, min: 'owner' },
+  { name: 'GET /reports/:id/bundle', method: 'GET', path: (i) => `/reports/${i.report}/bundle`, lock: {}, min: 'owner' },
   { name: 'GET /audit', method: 'GET', path: () => '/audit', lock: { 'audit.read': 'owner' }, min: 'senior' },
 ];
 
@@ -89,7 +101,9 @@ async function ids(w: Awaited<ReturnType<typeof world>>): Promise<Ids> {
   const exception = w.live.rows.exceptions[0]?.id as string;
   const filed = await w.file();
   const reason = w.cw.reasons.add({ label: 'Seed', text: 'A seeded reason.' });
-  return { group: made.groupId, gap: gap.groupId, term, exception, subject, person: filed.target, reason: reason.id };
+  const second = await w.file();
+  await w.cw.legal.hold(second.id, { code: 'other', actor: 'senior_seed' });
+  return { group: made.groupId, gap: gap.groupId, term, exception, subject, person: filed.target, reason: reason.id, report: filed.id, held: second.id };
 }
 const bodyOf = (s: Spec, i: Ids): unknown =>
   s.body === undefined ? undefined : JSON.parse(JSON.stringify(s.body).replace('SUBJ', i.subject));
