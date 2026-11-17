@@ -12,6 +12,7 @@ import {
   defaultLines,
   initialForm,
   outcomeChoice,
+  renameStartRule,
   presets,
   resolveDraft,
   validate,
@@ -51,6 +52,8 @@ export interface DecisionDraft {
   rules: ReadonlyArray<{ number: number; title: string }>;
   /** The reporting reasons and the rules each usually means, or undefined until the policy is read (or when the kit sends none). */
   reportReasons: ReadonlyArray<{ id: string; rules: readonly number[] }> | undefined;
+  /** `names.renames` as the profile has it (the owner's setting), or undefined until the policy is read (or when the role cannot read it). */
+  renamesSetting: boolean | undefined;
   /** Whether the rules are loaded; a verdict can still be sent without them (no actions). */
   rulesState: RulesState;
   rulesError: HubError | null;
@@ -71,6 +74,10 @@ export interface DecisionDraft {
   suggestionIndex: number;
   useSuggestion: () => void;
   setVerdict: (verdict: UiVerdict) => void;
+  /** Tick or untick "Ask for a new name": ticked, its rule starts on the first action's rule, else the report's (and the change is announced). */
+  toggleRename: (on: boolean) => void;
+  /** The rule the player is told when asked for a new name. */
+  setRenameRule: (rule: string) => void;
   patchAction: (uid: string, patch: Partial<Draft>) => void;
   toggleLine: (uid: string, lineId: string) => void;
   addEmptyAction: () => string | null;
@@ -245,8 +252,10 @@ export function useDecisionForm({
         const result = dropTargetActions(next, ctx.target);
         if (result.dropped > 0) {
           dropped.current = true;
-          announce(t('hub.decide.announce.dropped', { count: result.dropped }));
+          if (!result.renameCleared) announce(t('hub.decide.announce.dropped', { count: result.dropped }));
         }
+        // A request for a new name goes with "Fair": it is taken off, and the moderator is told (after the dropped actions, when both went).
+        if (result.renameCleared) announce(result.dropped > 0 ? `${t('hub.decide.announce.dropped', { count: result.dropped })} ${t('hub.decide.announce.renameDropped')}` : t('hub.decide.announce.renameDropped'));
         next = result.form;
       }
       formRef.current = next;
@@ -254,6 +263,21 @@ export function useDecisionForm({
     },
     [announce, ctx, detail, nextUid, reportedLine, t],
   );
+
+  const toggleRename = useCallback(
+    (on: boolean): void => {
+      const base = formRef.current ?? emptyForm();
+      if (on === (base.rename !== null) || detail === undefined) return;
+      const next: DecisionForm = { ...base, rename: on ? { rule: renameStartRule(base, ctx, detail.rule) } : null };
+      formRef.current = next;
+      setFormState(next);
+      announce(t(on ? 'hub.decide.announce.renameOn' : 'hub.decide.announce.renameOff'));
+    },
+    [announce, ctx, detail, t],
+  );
+  const setRenameRule = useCallback((rule: string): void => {
+    setFormState((f) => (f === null || f.rename === null ? f : { ...f, rename: { rule } }));
+  }, []);
 
   /** Asks the ladder again: for another conduct level, and for the rule the reported person's action cites. The latest ask wins. */
   const ask = useCallback(
@@ -350,6 +374,7 @@ export function useDecisionForm({
     problems,
     rules,
     reportReasons,
+    renamesSetting: policy.data === undefined || policy.data === null ? undefined : (policy.data.profile as { names?: { renames?: boolean } }).names?.renames === true,
     rulesState,
     rulesError: policy.error,
     reloadRules: policy.reload,
@@ -364,6 +389,8 @@ export function useDecisionForm({
     suggestionIndex,
     useSuggestion,
     setVerdict,
+    toggleRename,
+    setRenameRule,
     patchAction,
     toggleLine,
     addEmptyAction,

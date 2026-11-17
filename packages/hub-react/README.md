@@ -352,7 +352,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
   includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh`, `HubControllerOptions.host`, `HubClient.dismissOpen`, `HubClient.aiGates`, `HubClient.aiActing`, `HubClient.aiActingStep`, `HubClient.aiActions`, `HubClient.setAutomation`,
-  `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss`, `ReporterRecord.accuracy`, the signal and pace fields `PersonHistory.signals`, `PersonHistory.automation`, `PolicyLayer.appeals`, `PolicyLayer.names`, `PolicyLayer.pace`, `PolicyLayer.signals`, `ReportSummary.boosted` and `Suggestion.signals`, the AI methods `HubClient.readAgain`, `HubClient.aiStatus` and `HubClient.dontTeach`, and the appeals and names fields and methods `Changes.appeals`, `PersonHistory.appeals`, `PersonHistory.renames`, `HubClient.appeals`, `HubClient.appeal`, `HubClient.decideAppeal`, `HubClient.appealStats`, `HubClient.rename` and `HubClient.listBlockedNames`. The names are the same declarations the main entry re-exports (`createHubClient`,
+  `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss`, `ReporterRecord.accuracy`, the signal and pace fields `PersonHistory.signals`, `PersonHistory.automation`, `PolicyLayer.appeals`, `PolicyLayer.names`, `PolicyLayer.pace`, `PolicyLayer.signals`, `ReportSummary.boosted` and `Suggestion.signals`, the AI methods `HubClient.readAgain`, `HubClient.aiStatus` and `HubClient.dontTeach`, and the appeals and names fields and methods `Changes.appeals`, `PersonHistory.appeals`, `PersonHistory.renames`, `HubClient.appeals`, `HubClient.appeal`, `HubClient.decideAppeal`, `HubClient.appealStats`, `HubClient.rename` and `HubClient.listBlockedNames`, and the rename fields `DecideInput.rename`, `DecideResult.rename` and `DecisionForm.rename` (0.2.0). The names are the same declarations the main entry re-exports (`createHubClient`,
   `fetchTransport`, `HubError`, the staff types and so on), so they are experimental there too. The kit's own types that `/headless` passes through
   (`Role`, `Me`, `StaffReport` and the other types declared in `@chatwarden/core` and `@chatwarden/http`) follow those packages.
   - functions, values and classes:
@@ -554,6 +554,16 @@ what else changes for them. It follows the form as it changes, reads the clock e
 in it takes focus (the buttons are drawn as words), and no reason, gap note, reference or other moderator-only field is ever an input. On the Person page it sits above Apply for a sanction, a
 note and a rename (a direct sanction sends no notice, so it says so and shows the line the chat box will show) and above Confirm revoke (what lifts for the player). It is a lazy chunk, so the
 first load does not carry it. If a game words its notices differently, the player sees the game's words, not these.
+
+**Asking for a new name in a decision (0.2.0).** With renames on, the decision bar has one quiet row after the actions, "Ask for a new name": shown at once on a report whose reason is
+`name`, and behind the action editor ("Change") for any other reason; unticked to start, only with the verdict "Fair" and only for the reported person, with one rule to cite (a numbered
+rule: it starts on the first action's rule, else the report's, and "No rule covers this" is not offered). Choosing "Not a problem" or "Bad faith" takes it off and says so. Ticked, the
+decision is sent with `rename: { rule }` after the usual five-second hold; the server writes the decision first and then asks, in the same request, and the result block says which: asked,
+"They have already been asked to choose a new name", or "Decision recorded, but asking for a new name did not go through" with a way to their page (the decision stands). With renames off, a
+`name` report shows one plain line where the row would be: the setting is off (a link to Settings, Advanced, Names for the owner, the words for everyone else), or this setup's store cannot
+release a rename (words only). The headless controller carries the same: `DecisionForm.rename`, `DecideInput.rename`, and `rename?: 'asked' | 'already' | 'failed'` on a finished
+decision (`DecisionState.done`, `DecisionOutcome.done`). Simple's card shows "What the player sees" for the primary one-tap step in place of its old one-sentence preview, and each other
+one-tap button describes itself in one line.
 
 ### The case and the decision
 

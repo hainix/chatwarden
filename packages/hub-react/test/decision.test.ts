@@ -357,7 +357,7 @@ describe('addAction and dropTargetActions', () => {
   });
   it('dropping nothing returns the same form', () => {
     const f = form({ actions: [draft({ person: R })] });
-    expect(dropTargetActions(f, T)).toEqual({ form: f, dropped: 0 });
+    expect(dropTargetActions(f, T)).toEqual({ form: f, dropped: 0, renameCleared: false });
   });
 });
 

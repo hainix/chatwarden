@@ -19,12 +19,18 @@ import type { Hold, Toasts } from './toasts.js';
 // Closing the hub sends a held decision at once (the toast store flushes on `pagehide`, when the tab is hidden and on dispose);
 // the send always carries `keepalive`, so the page going away does not cancel it.
 
+/**
+ * How asking for a new name ended, when the decision asked for it: `asked`, `already` (they were already asked), or `failed` (the decision stands, the request did not go through).
+ * @experimental
+ */
+export type RenameAnswer = 'asked' | 'already' | 'failed';
+
 /** @experimental */
 export type DecisionState =
   /** In its Undo window: nothing has been sent. */
   | { status: 'held' }
   | { status: 'sending' }
-  | { status: 'done'; replay: boolean; groups: DecideResult['groups'] }
+  | { status: 'done'; replay: boolean; groups: DecideResult['groups']; rename?: RenameAnswer }
   /** The server did not take it. The form comes back with this error. */
   | { status: 'failed'; error: HubError }
   /** Someone else decided the report first. */
@@ -74,7 +80,7 @@ export interface SubmitDecision {
  * @experimental
  */
 export type DecisionOutcome =
-  | { status: 'done'; replay: boolean; groups: DecideResult['groups'] }
+  | { status: 'done'; replay: boolean; groups: DecideResult['groups']; rename?: RenameAnswer }
   /** The server did not take it: the entry keeps the error and what was typed, and `retry` sends it again. */
   | { status: 'failed'; error: HubError }
   /** Someone else decided the report first. */
@@ -187,7 +193,7 @@ export interface DecisionStoreOptions {
 const outcomeOf = (state: DecisionState): DecisionOutcome | null => {
   switch (state.status) {
     case 'done':
-      return { status: 'done', replay: state.replay, groups: state.groups };
+      return { status: 'done', replay: state.replay, groups: state.groups, ...(state.rename === undefined ? {} : { rename: state.rename }) };
     case 'failed':
       return { status: 'failed', error: state.error };
     case 'conflict':
@@ -272,7 +278,7 @@ export function createDecisionStore(options: DecisionStoreOptions): DecisionStor
     if (!entry.keepsCase) queue?.setPending(entry.person, true);
     try {
       const result = await client.decide(entry.reportId, entry.input, { keepalive: true });
-      entry = stateOf(entry, { status: 'done', replay: result.replay, groups: result.groups });
+      entry = stateOf(entry, { status: 'done', replay: result.replay, groups: result.groups, ...(result.rename === undefined ? {} : { rename: result.rename.status }) });
       toasts.push({ text: words('hub.decide.sent', { who: entry.name }) });
       // The case is closed now: read the queue again so it is gone, and only then let it show (it must not flash back).
       if (queue !== null) await queue.reload();

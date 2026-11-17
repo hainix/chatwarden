@@ -17,10 +17,12 @@ import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
-import { LazyAiParts } from '../lazyParts.js';
+import { LazyAiParts, LazyPlayerPreview } from '../lazyParts.js';
+import { decideOp } from '../preview/ops.js';
 import { NameToggle, NameValue } from '../names.js';
 import { useQuickKeys } from '../quickKeys.js';
 import { QuickKeys } from './QuickKeys.js';
+import { usePreviewParts } from './usePreviewParts.js';
 import { reporterRate } from './ReporterStanding.js';
 import { AiReadSlot } from './AiRead.js';
 import { RuleField } from './RuleField.js';
@@ -171,6 +173,7 @@ export function CaseCard() {
   // What the card offers as one tap, and when it may be sent (the case is open, read, fresh, and nothing is waiting). The same rule the
   // Detailed bar uses; the card sends each through the hold and goes on to the next case.
   const q = useQuickActions({ paused: elseOpen, refresh: true });
+  const parts = usePreviewParts(report);
   // Simple's digits act at once unless the moderator turned Quick keys off (Ctrl+Enter stays the suggested step either way).
   const digits = useQuickKeys('simple').on;
   const keyed = shortcuts && digits;
@@ -351,12 +354,12 @@ export function CaseCard() {
                 {kbd('1')}
               </button>
             )}
-            <button ref={noActionRef} type="button" className="cw-btn" aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '2' } : {})} onClick={(e) => q.sendDismiss(e)}>
+            <button ref={noActionRef} type="button" className="cw-btn" aria-describedby={`${base}-none-hint`} aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '2' } : {})} onClick={(e) => q.sendDismiss(e)}>
               <span>{t('hub.simple.noAction')}</span>
               {kbd('2')}
             </button>
             {quick !== null && (
-              <button ref={quickRef} type="button" className="cw-btn" aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '3' } : {})} onClick={(e) => q.sendWarning(e)}>
+              <button ref={quickRef} type="button" className="cw-btn" aria-describedby={`${base}-warn-hint`} aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '3' } : {})} onClick={(e) => q.sendWarning(e)}>
                 <span>{stepLabel(t, locale, quick.choice)}</span>
                 {kbd('3')}
               </button>
@@ -364,15 +367,22 @@ export function CaseCard() {
             <button ref={elseRef} type="button" className={one === null ? 'cw-btn cw-btn--primary' : 'cw-btn'} onClick={openElse}>
               {t('hub.simple.else')}
             </button>
+            <p id={`${base}-none-hint`} className="cw-sr">
+              {t('hub.quick.dismiss.hint')}
+            </p>
+            {quick !== null && (
+              <p id={`${base}-warn-hint`} className="cw-sr">
+                {t('hub.quick.warning.hint', { rule: quick.rule })}
+              </p>
+            )}
           </div>
         )}
         {c.aiCase?.from != null && !aiOk && draft.status === 'ready' && <LazyAiParts part="why" />}
         {!aiOk && one !== null && (
-          <p className="cw-hint cw-scard-fine">
-            {one.choice.kind === 'note'
-              ? t('hub.simple.sees.note', { name, seconds: SECONDS })
-              : t('hub.simple.sees', { name, rule: one.rule, count: one.lineCount, seconds: SECONDS })}
-          </p>
+          <>
+            <LazyPlayerPreview op={decideOp(one.form, { target: parts.target, reporter: parts.reporter, lineOf: parts.lineOf })} nameOf={parts.nameOf} reporter={parts.reporter} />
+            <p className="cw-hint cw-scard-fine">{t('hub.simple.undo', { seconds: SECONDS })}</p>
+          </>
         )}
       </section>
     );

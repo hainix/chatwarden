@@ -970,6 +970,9 @@ describe('what is marked @experimental', () => {
     expect(headless.experimentalMembers).toMatchInlineSnapshot(`
       [
         "Changes.appeals",
+        "DecideInput.rename",
+        "DecideResult.rename",
+        "DecisionForm.rename",
         "DecisionStore.dismissOpen",
         "DecisionStore.previewDismiss",
         "DecisionStore.undoLatest",

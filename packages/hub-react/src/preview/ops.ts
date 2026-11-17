@@ -1,5 +1,6 @@
-import type { NoticeOp } from '@chatwarden/core/notice-copy';
-import { hasLength } from '../decision.js';
+import type { NoticeOp, PlanAction, PlanLine } from '@chatwarden/core/notice-copy';
+import { hasLength, resolveDraft, serverVerdict } from '../decision.js';
+import type { DecisionForm } from '../decision.js';
 import type { SanctionGroupView, SanctionKind } from '../types.js';
 
 // The ops the panel is asked about, built from the forms' own state. Small and eager (the panel's code is a lazy chunk, these are not): they carry only
@@ -9,6 +10,26 @@ import type { SanctionGroupView, SanctionKind } from '../types.js';
 export function sanctionOp(choice: { kind: SanctionKind; durationMs: number | null } | null): NoticeOp | null {
   if (choice === null) return null;
   return choice.kind === 'note' ? { op: 'note' } : { op: 'sanction', kind: choice.kind, durationMs: hasLength(choice.kind) ? choice.durationMs : null };
+}
+
+/**
+ * What a case decision sends, from the decision form: the verdict the server would be sent, each action that is complete enough to say what it sends (a kind and length
+ * chosen, a rule cited), the lines the player is shown (`lineOf` answers the server's masked text for a line, or null: a line with no masked text is never shown), and the
+ * rename when its rule is chosen. A problem elsewhere in the form never blanks it: it is what the valid part would send. Null while nothing is chosen.
+ */
+export function decideOp(form: DecisionForm, o: { target: string; reporter: string; lineOf: (lineId: string) => PlanLine | null }): NoticeOp | null {
+  const dismissal = form.verdict === 'not_a_problem' || form.verdict === 'bad_faith';
+  if (form.verdict === null && form.actions.length === 0 && form.rename === null) return null;
+  const actions: PlanAction[] = [];
+  for (const d of form.actions) {
+    const choice = resolveDraft(d);
+    const rule = d.rule === 'uncovered' ? 'uncovered' : /^[1-9]\d*$/.test(d.rule) ? Number(d.rule) : null;
+    if (choice === null || rule === null) continue;
+    const lines = choice.kind === 'note' ? [] : d.lineIds.map(o.lineOf).filter((l): l is PlanLine => l !== null);
+    actions.push({ person: d.person, kind: choice.kind, durationMs: hasLength(choice.kind) ? choice.durationMs : null, rule, lines });
+  }
+  const rename = !dismissal && form.rename !== null && /^[1-9]\d*$/.test(form.rename.rule) ? { rule: Number(form.rename.rule) } : null;
+  return { op: 'decide', verdict: serverVerdict(form), target: o.target, reporter: o.reporter, actions, rename };
 }
 
 /** The rename the Person page asks for, once a numbered rule is chosen. */

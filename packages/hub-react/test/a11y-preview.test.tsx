@@ -62,6 +62,42 @@ describe.each(['light', 'dark'] as const)('axe on the panel, %s theme', (theme) 
   });
 });
 
+describe.each(['light', 'dark'] as const)('axe on the case decision, %s theme', (theme) => {
+  async function openCase(options: Parameters<typeof appealsHub>[0] = {}) {
+    const w = await appealsHub({ role: 'owner', names: { renames: true }, ...options });
+    const f = await w.file({ target: 'Mallory', reason: 'name' });
+    const r = renderHub(w, { theme, path: `/reports/${f.id}`, mode: 'detailed' });
+    await screen.findByRole('heading', { level: 2, name: /report against/ });
+    const bar = await screen.findByRole('region', { name: 'Decision' });
+    await within(bar).findByRole('radio', { name: 'Fair' });
+    return { ...r, bar };
+  }
+
+  it('the bar with the rename row ticked and the panel showing two notices has no violations', async () => {
+    const { container, user, bar } = await openCase();
+    await user.click(within(bar).getByRole('radio', { name: 'Fair' }));
+    await user.click(within(bar).getByRole('checkbox', { name: 'Ask for a new name' }));
+    const panel = await within(bar).findByRole('region', { name: 'What the player sees' });
+    await waitFor(() => expect(within(panel).getAllByRole('heading', { level: 4 }).length).toBeGreaterThan(1));
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the bar with the off-hint (renames off, a link for the owner) has no violations', async () => {
+    const { container, bar } = await openCase({ names: undefined });
+    await within(bar).findByText('Asking for a new name is switched off. Turn it on in', { exact: false });
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the Simple card with its panel has no violations', async () => {
+    const w = await appealsHub({ role: 'owner', names: { renames: true } });
+    const f = await w.file({ target: 'Mallory' });
+    const { container } = renderHub(w, { theme, path: `/reports/${f.id}`, mode: 'simple' });
+    await screen.findByRole('button', { name: /^No action needed/ });
+    await within(screen.getByRole('region', { name: 'Decision' })).findByRole('region', { name: 'What the player sees' });
+    expect(await violations(container)).toEqual([]);
+  });
+});
+
 describe('the panel is built to wrap, not to scroll sideways (360 px)', () => {
   const css = readFileSync(join(import.meta.dirname, '..', 'src', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const rules = [...css.matchAll(/(\.cw-hub \.cw-pv[^{]*)\{([^}]*)\}/g)].map((m) => ({ selector: (m[1] ?? '').trim(), body: m[2] ?? '' }));

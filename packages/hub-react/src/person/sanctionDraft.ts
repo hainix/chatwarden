@@ -74,6 +74,7 @@ function asDecision(d: SanctionDraft, mode: SanctionMode): DecisionForm {
   return {
     verdict: 'fair',
     evidence: '',
+    rename: null,
     reason: d.reason,
     actions: [
       {

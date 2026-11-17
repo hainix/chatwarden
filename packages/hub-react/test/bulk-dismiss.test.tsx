@@ -157,6 +157,16 @@ describe('the confirm window', () => {
     expect(within(dialog).getByRole('button', { name: 'Dismiss 3 reports' })).toBeInTheDocument();
   });
 
+  it('carries one plain line that nothing is sent to anyone, above the confirm button', async () => {
+    const s = await start();
+    await open(s.user);
+    await s.user.click(within(disclosure()).getByRole('button', { name: 'Dismiss all 3 open reports about Mallory' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Dismiss 3 reports about Mallory?' });
+    const line = within(dialog).getByText('Nothing is sent to anyone.');
+    const confirm = within(dialog).getByRole('button', { name: 'Dismiss 3 reports' });
+    expect(line.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('says it is counting first', async () => {
     const s = await start();
     let release: () => void = () => undefined;

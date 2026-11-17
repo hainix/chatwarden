@@ -93,6 +93,7 @@ function Confirm({ ask, onClose, onConfirm }: { ask: Ask; onClose: () => void; o
           {takeOver && can('claims.override') && <p>{t('hub.bulk.confirm.body', { seconds: 5 })}</p>}
           {!takeOver && held > 0 && <p>{t('hub.bulk.confirm.claimed', { count: held })}</p>}
           {result.more && <p className="cw-hint">{t('hub.bulk.more')}</p>}
+          <p className="cw-hint">{t('hub.bulk.confirm.nothingSent')}</p>
         </div>
       )}
       <div className="cw-bulk-buttons">

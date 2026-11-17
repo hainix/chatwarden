@@ -4016,3 +4016,14 @@
   padding: 0;
   list-style: none;
 }
+
+/* "Ask for a new name" in the decision bar: one quiet row after the actions, and its off-hint and result line. */
+.cw-hub .cw-rename {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-rename .cw-hint,
+.cw-hub .cw-rename-off,
+.cw-hub .cw-result-rename {
+  margin: 0;
+}

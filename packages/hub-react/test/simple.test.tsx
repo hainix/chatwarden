@@ -343,33 +343,45 @@ describe('the suggestion and the three controls', () => {
     expect(something()).not.toHaveClass('cw-btn--primary');
   });
 
-  it('says what the player will see, with the real counts and the rule number', async () => {
+  // "What the player sees" replaces the old one-sentence preview: the notice itself, with the rule the player is told and the lines it quotes.
+  const panel = async (): Promise<HTMLElement> => within(decision()).findByRole('region', { name: 'What the player sees' });
+  const quoted = (p: HTMLElement): string[] => [...p.querySelectorAll('.cw-pv-lines li .cw-pv-line-text')].map((n) => n.textContent ?? '');
+
+  it('shows the notice the player will get, with the rule number and the lines it quotes', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     await open(w, f.id);
-    expect(within(decision()).getByText(`Mallory sees these 2 lines and Rule ${RULE}. You can undo for 5 seconds.`)).toBeInTheDocument();
+    const p = await panel();
+    await waitFor(() => expect(p).toHaveTextContent(`Community Rule ${RULE}`));
+    expect(quoted(p)).toHaveLength(2);
+    expect(within(decision()).queryByText(/sees these/)).toBeNull();
+    expect(within(decision()).getByText('You can undo for 5 seconds.')).toBeInTheDocument();
   });
 
-  it('says "this line" for one', async () => {
+  it('quotes one line when there is one', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: [{ who: 'reporter', text: 'hi' }, { who: 'target', text: 'one line' }] });
     await open(w, f.id);
-    expect(within(decision()).getByText(`Mallory sees this line and Rule ${RULE}. You can undo for 5 seconds.`)).toBeInTheDocument();
+    const p = await panel();
+    await waitFor(() => expect(quoted(p)).toEqual(['one line']));
   });
 
-  it('says only the rule when there are no lines to show', async () => {
+  it('quotes no lines when there are none to show: no "Your messages" section', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: [{ who: 'reporter', text: 'hi' }, { who: 'bystander', text: 'hm' }], cite: null });
     await open(w, f.id);
-    expect(within(decision()).getByText(`Mallory sees Rule ${RULE}. You can undo for 5 seconds.`)).toBeInTheDocument();
+    const p = await panel();
+    await waitFor(() => expect(p).toHaveTextContent(`Community Rule ${RULE}`));
+    expect(p).not.toHaveTextContent('Your messages that led to this');
   });
 
-  it('counts at most five lines', async () => {
+  it('quotes at most five lines', async () => {
     const w = await hubWorld();
     const lines: RichLine[] = [{ who: 'reporter', text: 'hi' }, ...Array.from({ length: 7 }, (_, i): RichLine => ({ who: 'target', text: `target line ${i + 1}` }))];
     const f = await w.fileRich({ lines });
     await open(w, f.id);
-    expect(within(decision()).getByText(`Mallory sees these 5 lines and Rule ${RULE}. You can undo for 5 seconds.`)).toBeInTheDocument();
+    const p = await panel();
+    await waitFor(() => expect(quoted(p)).toHaveLength(5));
   });
 
   it('the primary button is named after the step the ladder gives a person with a record', async () => {
@@ -389,7 +401,7 @@ describe('the suggestion and the three controls', () => {
     const f = await w.fileRich({ lines: TALK, category: 'cheating' });
     await open(w, f.id);
     expect(within(decision()).getByRole('button', { name: /^Restrict area, 24 hours/ })).toHaveClass('cw-btn--primary');
-    expect(within(decision()).getByText(`Mallory sees these 2 lines and Rule ${CATEGORY_TO_RULE.cheating as number}. You can undo for 5 seconds.`)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('region', { name: 'What the player sees' })).toHaveTextContent(`Community Rule ${CATEGORY_TO_RULE.cheating as number}`));
   });
 
   it('a hateful report is the 7-day step, in the same words', async () => {

@@ -24,7 +24,9 @@ const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 // Raised to 88 KB at 0.1.9 (appeals and names), by the owner's rule to raise generously and never trim code for bytes: the first load gains the wire types and
 // client methods, the hidden-name helpers (`displayName`, the Show control), the Appeals switch and route plumbing, and Person's appeal entries: 79,100 -> about
 // 83,300. The appeal card, the appeals list, the Appeals screen and the Settings panels are chunks loaded when used.
-const BUDGET = 88 * 1024;
+// Raised to 92 KB at 0.2.0 (names and "What the player sees"), by the same rule: the first load gains the form's `rename` field and its row and off-hint in the
+// decision bar, the client types, the op builders and the lazy wrapper, about 2 KB over the 88 KB it had reached (measured 90,661 gzipped). The panel, its hooks and its words are one lazy chunk.
+const BUDGET = 92 * 1024;
 const ENTRY_BUDGET = 52 * 1024;
 
 async function bundle() {

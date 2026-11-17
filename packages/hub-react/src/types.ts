@@ -283,6 +283,12 @@ export interface DecideInput {
   /** A senior or owner moving another moderator's live claim to themselves (audited by the server). */
   takeOver?: boolean;
   /**
+   * Also ask the reported person to choose a new name, citing this numbered rule (an `upheld` verdict, actions only on the reported person, `sanctions.apply`, renames on).
+   * The server writes the decision first and then asks, in the same request; the rename is not part of the decision's identity.
+   * @experimental
+   */
+  rename?: { rule: number };
+  /**
    * The AI read the moderator was shown, and whether the decision is that read's pre-fill as it stood. The server checks it against the decision:
    * it can never make a decision, only describe it. Send it whenever a read was shown.
    */
@@ -327,6 +333,11 @@ export interface DecideResult {
   ok: true;
   replay: boolean;
   groups: Array<{ refCode: string; kind: SanctionKind }>;
+  /**
+   * Present when the body asked for a rename: `asked`, `already` (a request is waiting, or was asked since the decision), or `failed` (the decision stands; `error` says why when the core refused).
+   * @experimental
+   */
+  rename?: { status: 'asked' | 'already' | 'failed'; error?: 'off' | 'not_found' | 'invalid' };
 }
 
 /** @experimental */
