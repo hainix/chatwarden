@@ -157,9 +157,10 @@ describe('the rename option', () => {
   it('a pending_rename refusal shows in words, with everything typed kept', async () => {
     const w = await world();
     const f = await w.file({ target: 'Mallory' });
-    await w.client.rename(f.person, { reason: 'first' });
+    await w.client.rename(f.person, { reason: 'first', rule: 2 });
     const { user } = await openForm(w, f.person);
     await user.selectOptions(what(), 'rename');
+    await user.selectOptions(rule(), '2');
     await user.type(reason(), 'second');
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('They have already been asked to choose a new name and have not done it yet.');
@@ -172,6 +173,7 @@ describe('the rename option', () => {
     const f = await w.file({ target: 'Mallory' });
     const { user } = await openForm(w, f.person);
     await user.selectOptions(what(), 'rename');
+    await user.selectOptions(rule(), '2');
     await user.type(reason(), 'a reason');
     w.intercept.fn = (req) => (/\/rename$/.test(req.path) ? { status: 404, headers: {}, body: { error: 'not_found', message: 'x' } } : undefined);
     await user.click(screen.getByRole('button', { name: 'Apply' }));
@@ -191,6 +193,7 @@ describe('the claim gate and takeOver behave as for a sanction', () => {
     await w.clientFor('maya@example.test', 'moderator').claimCase(f.person);
     const { user } = await openForm(w, f.person);
     await user.selectOptions(what(), 'rename');
+    await user.selectOptions(rule(), '2');
     await user.type(reason(), 'a reason');
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('maya is handling this player’s case, so this was not applied. What you entered is kept.');
@@ -204,12 +207,13 @@ describe('the claim gate and takeOver behave as for a sanction', () => {
     await w.clientFor('maya@example.test', 'moderator').claimCase(f.person);
     const { user } = await openForm(w, f.person);
     await user.selectOptions(what(), 'rename');
+    await user.selectOptions(rule(), '2');
     await user.type(reason(), 'a reason');
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     await user.click(await screen.findByRole('button', { name: 'Take over and apply' }));
     await waitFor(() => expect(renames(w)).toHaveLength(2));
-    expect(renames(w)[0]?.body).toEqual({ reason: 'a reason' });
-    expect(renames(w)[1]?.body).toEqual({ reason: 'a reason', takeOver: true });
+    expect(renames(w)[0]?.body).toEqual({ reason: 'a reason', rule: 2 });
+    expect(renames(w)[1]?.body).toEqual({ reason: 'a reason', rule: 2, takeOver: true });
     expect(w.cw.audit.list({ limit: 50 }).items.some((a) => a.action === 'name.rename_required')).toBe(true);
   });
 });
@@ -220,7 +224,7 @@ describe('the Person page timeline', () => {
   it('shows "Asked to choose a new name" with its date, and that it is waiting', async () => {
     const w = await world();
     const f = await w.file({ target: 'Mallory' });
-    await w.client.rename(f.person, { reason: 'a name' });
+    await w.client.rename(f.person, { reason: 'a name', rule: 2 });
     renderHub(w, { path: `/people/${f.person}` });
     await screen.findByRole('region', { name: 'Timeline' });
     const li = (await within(timeline()).findByText('Asked to choose a new name')).closest('li') as HTMLElement;
@@ -232,7 +236,7 @@ describe('the Person page timeline', () => {
   it('once they have chosen another name it is no longer waiting', async () => {
     const w = await world();
     const f = await w.file({ target: 'Mallory' });
-    await w.client.rename(f.person, { reason: 'a name' });
+    await w.client.rename(f.person, { reason: 'a name', rule: 2 });
     const real = await w.client.personHistory(f.person);
     w.intercept.fn = (req) => (/\/history$/.test(req.path) ? { status: 200, headers: {}, body: { ...real, renames: real.renames?.map((r) => ({ ...r, pending: false })) } } : undefined);
     renderHub(w, { path: `/people/${f.person}` });

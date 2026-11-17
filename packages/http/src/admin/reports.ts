@@ -8,7 +8,7 @@ import { parseDecision, peopleOf } from './apply.js';
 import type { AdminCall, AdminContext } from './context.js';
 import { gateCase } from './claims.js';
 import { decideAs } from './decideAs.js';
-import { bodyAiEcho, bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
+import { bodyAiEcho, bodyDecideRename, bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
 
 /** How many recent reports `GET /people/:ref/history` summarises when `limit` is absent. */
 const HISTORY_REPORTS_DEFAULT = 20;
@@ -159,7 +159,7 @@ const summarize = (
  *   carries `signals: { raised, ids }` and the rule's sentence is in `why`; `GET /reports/:id` carries the same in its `suggest`. Both are only
  *   for a caller whose role holds `history.read` (the sentence is a count of what other players did, like the counts on the record): a caller
  *   without it gets the same outcome and label, but no `signals` key and no such sentence in `why`.
- * - `POST /reports/:id/decide { verdict, actions, reason?, evidence?, takeOver? }`: decide (`report.decide`, replays too). `reason` may be
+ * - `POST /reports/:id/decide { verdict, actions, reason?, evidence?, rename?, takeOver? }`: decide (`report.decide`, replays too). `reason` may be
  *   left out (or blank) only for a `no_action` with no actions, a one-click dismissal: the core then stores `NO_ACTION_DEFAULT_REASON`.
  *   Every other decision needs a real reason (400 `invalid_request`). The body may carry `ai: { readId, accepted, severity? }`, the read the
  *   moderator saw, whether they accepted its pre-fill in one click and the conduct level their form settled on: it records an outcome against
@@ -167,7 +167,11 @@ const summarize = (
  *   this) and never changes the answer; a malformed `ai` is 400, an unknown `readId` is ignored. Another
  *   moderator's live claim on the reported person is 409 `claimed` unless `takeOver: true` and the caller holds
  *   `claims.override` (then the takeover is audited as `case.takeover`, first). Deciding the person's last open report releases the
- *   caller's claim; while they have other open reports it is kept (one case per person).
+ *   caller's claim; while they have other open reports it is kept (one case per person). `rename: { rule }` also asks the reported person to
+ *   choose a new name (an upheld verdict, actions only on that person, `sanctions.apply`, renames on; else 400, 403 or 404 before anything is
+ *   written). It is asked after the decision is written, with the decision's reason, and the answer gains `rename: { status: 'asked' | 'already' |
+ *   'failed', error? }` (`error` is `off`, `not_found` or `invalid` for a refusal; a throw is `failed` with none; the decision stands either way).
+ *   A rename that was asked is audited as `name.rename_required` after the decision's own row.
  * - `POST /reports/dismiss-open { scope: 'person' | 'reporter', ref, takeOver?, dryRun? }`: "nothing wrong here" for every open report about a person
  *   (their case) or from a reporter, in one call (`reports.decide.bulk`, and `reports.decide`): at most 200, `more: true` when there are
  *   more. 200 `{ ok, dryRun, open, dismissed, replayed, skipped: { claimed, decided }, more }`: counts only, no ids. Each report is
@@ -306,9 +310,26 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
     'POST /reports/:id/decide': ctx.secure('reports.decide', async (c) => {
       const id = c.params.id as string;
       const body = bodyObject(c.req);
-      const decision = parseDecision(body);
+      // A rename rides on an upheld decision: it needs the right to ask for one and renames to be on, checked before the rest of the body is
+      // judged (as `POST /people/:ref/rename` does) and before anything is written.
+      let rename: { rule: number } | undefined;
+      if (has(body, 'rename')) {
+        c.need('sanctions.apply');
+        if (!cw.names.renamesEnabled()) throw new NotFoundError();
+        rename = bodyDecideRename(body.rename);
+      }
+      const decision = parseDecision(Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'rename')));
       const takeOver = bodyTakeOver(body);
       const echo = has(body, 'ai') ? bodyAiEcho(body.ai) : undefined;
+      const reported = cw.reports.get(id);
+      if (rename !== undefined) {
+        // Only an upheld decision asks for a rename, and only of the reported person: an action on anyone else is refused, never moved.
+        if (decision.verdict !== 'upheld') throw new ValidationError();
+        if (reported !== null) {
+          const target = cw.people.canonical(reported.targetPerson);
+          if (!decision.actions.every((a) => cw.people.canonical(a.subject) === target)) throw new ValidationError();
+        }
+      }
 
       // The whole decision path is `decideAs`, shared with the Discord bot and the Coop callback: the permissions the decision needs, the
       // lengths on offer, another moderator's claim (a senior may take the case over, on the record: the takeover's audit row is written
@@ -328,7 +349,21 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       });
       // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
       c.audit('report.decide', { type: 'report', ref: id }, 'best-effort');
-      return { status: 200, body: { ok: true, replay: result.replay, groups: result.groups } };
+      if (rename === undefined || reported === null) return { status: 200, body: { ok: true, replay: result.replay, groups: result.groups } };
+
+      // The claim was gated once, above; the rename follows the decision and never undoes it: a refusal or a throw here is the answer's `failed`.
+      let answer: { status: 'asked' | 'already' | 'failed'; error?: 'off' | 'not_found' | 'invalid' };
+      try {
+        const asked = cw.names.requireRename({ subject: reported.targetPerson, actor: c.authz.actor, reason: decision.reason ?? '', rule: rename.rule });
+        if (asked.ok) answer = { status: 'asked' };
+        else if (asked.error === 'pending') answer = { status: 'already' };
+        else answer = { status: 'failed', error: asked.error };
+      } catch (err) {
+        safeWarn(ctx.logger, 'chatwarden.http_rename_failed', { error: err instanceof Error ? err.name : 'unknown' });
+        answer = { status: 'failed' };
+      }
+      if (answer.status === 'asked') c.audit('name.rename_required', { type: 'person', ref: cw.people.canonical(reported.targetPerson) }, 'best-effort');
+      return { status: 200, body: { ok: true, replay: result.replay, groups: result.groups, rename: answer } };
     }),
 
     'POST /reports/dismiss-open': ctx.secure('reports.decide.bulk', async (c) => {

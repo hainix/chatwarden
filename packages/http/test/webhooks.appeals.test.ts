@@ -105,7 +105,7 @@ describe('webhooksOut accepts the three types, signs them, and never adds a stat
     w.cw.rooms.seat('rename-room', 'p1', { clientKey: 'raw-client-key-rename', accountId: ACCOUNT }, 'RenameHandle');
     await w.cw.flush();
     const subject = w.cw.rooms.subjectAt('rename-room', 'p1') as string;
-    expect(w.cw.names.requireRename({ subject, actor: 'mod_ann', reason: REASON })).toMatchObject({ ok: true });
+    expect(w.cw.names.requireRename({ subject, actor: 'mod_ann', reason: REASON, rule: 1 })).toMatchObject({ ok: true });
     void asked;
     await wait(f, 3);
     expect(f.calls.map((c) => bodyOf(c).type)).toEqual(['appeal.created', 'appeal.decided', 'rename.required']);

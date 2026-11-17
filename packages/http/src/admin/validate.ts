@@ -243,22 +243,35 @@ export function bodyAppealDecision(body: Record<string, unknown>): AppealDecisio
 /** What `POST /people/:ref/rename` takes, checked for shape. */
 export interface RenameBody {
   reason: string;
-  rule?: number;
+  rule: number;
   takeOver: boolean;
 }
 
 /**
- * The body of `POST /people/:ref/rename`: `{ reason, rule?, takeOver? }`. `reason` is text that is not blank (the core keeps it to 500 characters); `rule`
- * a whole number from 1 (the core checks that it is an active rule; `'uncovered'` is not one); `takeOver` a boolean. Anything else is 400.
+ * The body of `POST /people/:ref/rename`: `{ reason, rule, takeOver? }`. `reason` is text that is not blank (the core keeps it to 500 characters); `rule`
+ * is required (a rename always cites a rule) and a whole number from 1 (the core checks that it is an active rule; `'uncovered'` is not one); `takeOver` a
+ * boolean. Anything else is 400.
  */
 export function bodyRename(body: Record<string, unknown>): RenameBody {
   const reason = bodyText(body.reason);
   if (reason.trim() === '') throw new ValidationError();
   const takeOver = bodyTakeOver(body);
-  if (!has(body, 'rule')) return { reason, takeOver };
   const rule = body.rule;
   if (typeof rule !== 'number' || !Number.isSafeInteger(rule) || rule < 1) throw new ValidationError();
   return { reason, rule, takeOver };
+}
+
+/**
+ * The `rename` of `POST /reports/:id/decide`: exactly `{ rule }`, a whole number from 1 (the core checks that it is an active rule). Any other
+ * shape, or any other key, is 400. Where the decision's own reason, actor and person come from is the route's business, never this object's.
+ */
+export function bodyDecideRename(value: unknown): { rule: number } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new ValidationError();
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== 'rule') throw new ValidationError();
+  const rule = (value as { rule: unknown }).rule;
+  if (typeof rule !== 'number' || !Number.isSafeInteger(rule) || rule < 1) throw new ValidationError();
+  return { rule };
 }
 
 /** What `PUT /people/:id/automation` takes, checked for shape. */

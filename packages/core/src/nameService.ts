@@ -168,11 +168,11 @@ export class NameService {
   /**
    * Ask a player to choose a new name: one `rename_required` notice (no name, no excerpt, no reason) and, after the write, the player's
    * client is told and `rename.required` goes out. Answers, in this order: `off` (`names.renames` is false, or the store cannot release a
-   * rename), `invalid` (a malformed input, a reason that is not 1 to 500 characters once trimmed, a rule that is not an active integer rule),
+   * rename), `invalid` (a malformed input, a reason that is not 1 to 500 characters once trimmed, a rule that is missing or is not an active integer rule),
    * `not_found` (a person the kit does not hold), `pending` (an unreleased request exists, seen or not). A store failure is logged by class
-   * and thrown, with nothing written. The reason and the actor are validated here and kept by the staff layer's audit row, not by the notice.
+   * and thrown, with nothing written. A rename always cites a rule: `rule` is required, and no default (not the slur filter's) stands in. The reason and the actor are validated here and kept by the staff layer's audit row, not by the notice.
    */
-  requireRename(input: { subject: SubjectId; actor: string; reason: string; rule?: number }): RenameResult {
+  requireRename(input: { subject: SubjectId; actor: string; reason: string; rule: number }): RenameResult {
     const d = this.d;
     if (!this.renamesEnabled()) return { ok: false, error: 'off' };
     const checked = this.checkRename(input);
@@ -248,7 +248,6 @@ export class NameService {
     if (typeof reason !== 'string') return null;
     const why = reason.trim();
     if (why === '' || why.length > RENAME_REASON_MAX) return null;
-    if (rule === undefined) return { subject, rule: this.d.rule };
     if (typeof rule !== 'number' || !Number.isSafeInteger(rule) || !this.d.rules.isCitable(rule)) return null;
     return { subject, rule };
   }

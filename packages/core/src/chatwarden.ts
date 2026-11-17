@@ -552,12 +552,12 @@ export interface Chatwarden {
     /**
      * Ask a player to choose a new name. Writes one notice of kind `rename_required` (it names no name, no excerpt, no reason) and, after
      * the write, tells the player's client and emits `rename.required`. Staff only. `{ ok: false, error: 'off' }` while `names.renames` is
-     * false (or the store cannot release a rename); `invalid` for a reason that is not 1 to 500 characters or a rule that is not an active
-     * integer rule; `not_found` for a person the kit does not hold; `pending` while a request is already waiting. `rule` defaults to the
-     * slur filter's (`autoRestrictRule`) and is shown to the player as a rule label. A store failure is logged (class only) and thrown.
+     * false (or the store cannot release a rename); `invalid` for a reason that is not 1 to 500 characters or a rule that is missing or is not an
+     * active integer rule; `not_found` for a person the kit does not hold; `pending` while a request is already waiting. `rule` is required (a rename always cites a
+     * Community Rule; there is no default) and is shown to the player as a rule label. A store failure is logged (class only) and thrown.
      * @experimental
      */
-    requireRename(input: { subject: SubjectId; actor: string; reason: string; rule?: number }): { ok: true; noticeId: string } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
+    requireRename(input: { subject: SubjectId; actor: string; reason: string; rule: number }): { ok: true; noticeId: string } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
     /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. @experimental */
     pendingRename(who: RawWho): boolean;
     /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. @experimental */

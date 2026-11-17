@@ -540,7 +540,7 @@ cw.names.renamed(who);
   per person and 200 an hour overall (in memory, per process), after which the check still answers and keeps nothing more. An allowed name is never stored and a
   name is never logged. Kept names are deleted after 30 days (`retention.blockedNamesMs`) and read by staff with `cw.blocked.names({ days })`. They need a store
   with the blocked-name methods (SQLite, or `withMemoryNames(store)`).
-- **Asking for a new name.** `cw.names.requireRename({ subject, actor, reason, rule? })` is for staff and needs `names.renames`. It writes one notice of kind
+- **Asking for a new name.** `cw.names.requireRename({ subject, actor, reason, rule })` is for staff and needs `names.renames`. A rename always cites a Community Rule: `rule` is required and must be an active whole-number rule (a missing or retired one is `invalid`; there is no default). It writes one notice of kind
   `rename_required` (it names no name, no reason and no excerpt; it is not a sanction, is not on "My record" and needs no acknowledgement) and then emits
   `rename.required`. It answers `{ ok: true, noticeId }` or `{ ok: false, error }` with `error` `off`, `not_found`, `pending` (a request is already waiting) or
   `invalid`. `cw.names.renamesEnabled()` says whether it can work now (the setting is on and the store can release a rename), and `cw.names.renamesOf(subject)`

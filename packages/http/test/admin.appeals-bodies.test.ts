@@ -142,7 +142,7 @@ describe('history carries appeals and renames entries with dates and outcomes an
     const a = await w.appeal();
     const none = await w.file();
     const t = w.clock.now();
-    expect(w.cw.names.requireRename({ subject: a.subject, actor: 'mod_ann', reason: 'private reason for the rename' })).toMatchObject({ ok: true });
+    expect(w.cw.names.requireRename({ subject: a.subject, actor: 'mod_ann', reason: 'private reason for the rename', rule: 1 })).toMatchObject({ ok: true });
     // on: both keys for the person with entries, both present and empty for the one without
     let h = await history(w, a.subject);
     expect(h.appeals).toHaveLength(1);
@@ -176,7 +176,7 @@ describe('history carries appeals and renames entries with dates and outcomes an
     const f = await w.file();
     expect((await history(w, f.target)).renames).toEqual([]);
     const t = w.clock.now();
-    expect(w.cw.names.requireRename({ subject: f.target, actor: 'mod_ann', reason: 'private reason for the rename' })).toMatchObject({ ok: true });
+    expect(w.cw.names.requireRename({ subject: f.target, actor: 'mod_ann', reason: 'private reason for the rename', rule: 1 })).toMatchObject({ ok: true });
     let h = await history(w, f.target);
     expect(h.renames).toEqual([{ at: t, pending: true }]);
     expect(JSON.stringify(h)).not.toContain('private reason for the rename');

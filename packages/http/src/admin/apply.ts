@@ -31,9 +31,12 @@ export interface ParsedDecision {
 /**
  * Check a decision body's shape (`verdict`, `actions`, `reason?`, `evidence?`). A `reason` that is given must be a string of a sane
  * length; whether one is REQUIRED (every verdict but a `no_action` with no actions) is the facade's rule, so the staff route, the
- * incoming webhook and every other caller cannot disagree. Rules and limits stay with the facade.
+ * incoming webhook and every other caller cannot disagree. Rules and limits stay with the facade. A `rename` key is refused (400): only the
+ * staff decide route asks for one, and it strips it first.
  */
 export function parseDecision(body: Record<string, unknown>): ParsedDecision {
+  // A rename rides on the staff route only (`POST /reports/:id/decide` takes it out before this); the webhook and `decideAs` callers send none.
+  if (has(body, 'rename')) throw new ValidationError();
   const verdict = body.verdict;
   if (typeof verdict !== 'string' || !(VERDICTS as readonly string[]).includes(verdict)) throw new ValidationError();
   if (!Array.isArray(body.actions) || body.actions.length > MAX_ACTIONS) throw new ValidationError();
