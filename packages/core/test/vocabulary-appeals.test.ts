@@ -8,7 +8,7 @@ import { createChatwarden } from '../src/chatwarden.js';
 import { KIT_EVENT_TYPES } from '../src/events.js';
 import type { KitEvent, KitEventOf, StaffRef } from '../src/events.js';
 import type { RuleRef } from '../src/rules.js';
-import type { Platform, RawWho, SanctionKind } from '../src/types.js';
+import type { Platform, RawWho, SanctionKind, Source } from '../src/types.js';
 
 // The vocabulary of the appeals and names release: the audit actions and target type, the three events, and the appeal enums they use.
 
@@ -126,6 +126,25 @@ describe('events', () => {
     }
     expect(() => cw.on('appeal.moot' as never, () => undefined)).toThrow(TypeError);
     expect(() => cw.on('appeal.create' as never, () => undefined)).toThrow(TypeError);
+  });
+
+  it('sanction.overturned (0.2.1) is appended at the end of KIT_EVENT_TYPES, once, and cw.on accepts it', async () => {
+    expect(KIT_EVENT_TYPES.at(-1)).toBe('sanction.overturned');
+    expect(KIT_EVENT_TYPES.filter((t) => t === 'sanction.overturned')).toHaveLength(1);
+    // every earlier type is where it was
+    expect(KIT_EVENT_TYPES.slice(0, 6)).toEqual(['report.created', 'report.closed', 'sanction.applied', 'sanction.revoked', 'gap.created', 'auto.restricted']);
+    expect(KIT_EVENT_TYPES.at(-2)).toBe('insights.digest');
+    const cw = await kit();
+    const off = cw.on('sanction.overturned', () => undefined);
+    expect(typeof off).toBe('function');
+    off();
+    expect(() => cw.on('sanction.overturn' as never, () => undefined)).toThrow(TypeError);
+  });
+
+  it('the sanction.overturned shape is ids, a source and optional codes: no person, no text (a type-level check)', () => {
+    expectTypeOf<KitEventOf<'sanction.overturned'>>().toEqualTypeOf<{ type: 'sanction.overturned'; groupId: string; at: number; source: Source; termId?: string; filterKey?: string }>();
+    expectTypeOf<Extract<keyof KitEventOf<'sanction.overturned'>, 'target' | 'subject' | 'person' | 'statement' | 'reason' | 'text'>>().toEqualTypeOf<never>();
+    expectTypeOf<'sanction.overturned'>().toExtend<KitEvent['type']>();
   });
 
   it('the new event shapes hold no statement, reason or handle', () => {

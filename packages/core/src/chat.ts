@@ -17,7 +17,7 @@ import type { RoomModeState } from './roomModes.js';
 import type { ResolvedRooms } from './roomSettings.js';
 import type { SlidingWindow } from './rateLimit.js';
 import { parseRuleRef } from './rules.js';
-import { applySanction } from './sanctions.js';
+import { APPEALS_START_TOKEN, applySanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
 import type { StrikeService } from './strikes.js';
 import type { SubjectIndex } from './subjects.js';
@@ -966,7 +966,7 @@ export class ChatService {
       // The kill switch: the strike is kept and the line was blocked, but nothing is enforced, so no row is
       // written (it would go live when the switch flips back), nothing is held in memory and nobody is told.
       if (!this.sanctions.isEnabled()) return;
-      this.applyTimeout(roomId, seatId, subject, autoRestrict.durationMs, autoRestrict.second === true, line);
+      this.applyTimeout(roomId, seatId, subject, autoRestrict.durationMs, autoRestrict.second === true, line, termId);
     } catch (err) {
       this.warn('chat.strike_failed', { error: errName(err) });
     }
@@ -979,6 +979,7 @@ export class ChatService {
     durationMs: number,
     second: boolean,
     line: BlockedLine,
+    termId: string,
   ): void {
     // Read after the strike was written, so the restriction starts at or after every strike it consumed. The
     // strike service reads the same clock, so with one instant per call (as in tests) the two are identical;
@@ -1002,6 +1003,9 @@ export class ChatService {
             source: 'auto_filter',
             automated: true,
             rule: this.autoRestrictRule,
+            // The term of the strike that tipped it (the one just recorded), kept on the subject row for the appeal that may overturn it. The kit's own key.
+            termId,
+            startsAtToken: APPEALS_START_TOKEN,
           },
           now,
           this.sanctions,

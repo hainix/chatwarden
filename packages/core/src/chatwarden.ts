@@ -1831,6 +1831,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     // A granted appeal marks the original decision reversed in the casebook; with no AI this is the inert facade and does nothing.
     // A REVOKE teaches the opposite sign and counts as a false positive; a REDUCE only keeps the decision from teaching (the rule applied).
     onGranted: (appeal, outcome) => void (outcome === 'revoke' ? ai.markReversed(appeal.reportId as string, { corrective: true }) : ai.markReversed(appeal.reportId as string)),
+    // A granted appeal on an automatic restriction sets its strikes aside in the store; the live tally forgets them through the strike service.
+    strikeWindowMs: limits.strikes.windowMs,
+    forgive: (subject, startsAt) => strikes.forgive(subject, startsAt),
   });
 
   // Names. The profanity filter for a name is the kit's own when the profile has one; otherwise (a profile that allows swearing in chat) it is

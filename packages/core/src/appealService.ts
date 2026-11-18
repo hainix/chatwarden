@@ -38,7 +38,7 @@ import { APPEALS_START_TOKEN, MAX_SANCTION_DURATION_MS, writeSanction } from './
 import type { SanctionIndex } from './sanctions.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
 import type { SubjectIndex } from './subjects.js';
-import type { AppealRow, Clock, Logger, Matcher, RawWho, Store, SubjectId } from './types.js';
+import type { AppealRow, Clock, Logger, Matcher, RawWho, SanctionRow, Store, SubjectId } from './types.js';
 
 // The appeals service: filing (the player side) here; deciding and the staff reads are added to the same class. It holds no state of its own:
 // every fact is in the store, so two processes on one database agree.
@@ -91,6 +91,13 @@ export interface AppealServiceDeps {
    * report: the AI's casebook marks that decision reversed. A throw is logged and never fails the decision.
    */
   onGranted?: (appeal: AppealRow, outcome: 'reduce' | 'revoke') => void;
+  /** The strike window (`limits.strikes.windowMs`): the strikes of an overturned automatic restriction are the ones in the window before its start. */
+  strikeWindowMs: number;
+  /**
+   * Told, after the commit and fenced, that an automatic restriction (`source: 'auto_filter'`) was overturned and recorded: the in-memory strike tally forgets the
+   * strikes that earned it (`StrikeService.forgive`). A throw is logged by class and never fails the decision.
+   */
+  forgive?: (subject: SubjectId, startsAt: number) => void;
 }
 
 /** A decision step that must roll the transaction back and answer something other than success. */
@@ -321,6 +328,8 @@ export class AppealService {
     const clear = this.d.clearStatements();
     const pending = !this.d.index.isEnabled();
     let written: ReturnType<typeof writeSanction> | null = null;
+    // What the overturn record said, for the announcements after the commit (null: none was recorded).
+    let overturn: { termId: string | null; filterKey: string | null } | null = null;
     try {
       store.transaction(() => {
         if (d.outcome !== 'uphold') {
@@ -368,6 +377,7 @@ export class AppealService {
           ...(clear ? { clearStatement: true } : {}),
         });
         if (moved !== true) throw new Stop('already_decided');
+        if (d.outcome !== 'uphold') overturn = this.recordOverturn(appeal, group, person, now);
         if (d.outcome !== 'uphold' && appeal.reportId !== null) {
           try {
             this.d.onGranted?.(appeal, d.outcome);
@@ -400,8 +410,49 @@ export class AppealService {
     const made = written as ReturnType<typeof writeSanction> | null;
     if (made !== null) fenced(() => this.d.index.add(made.rows, now));
     fenced(() => notices.announce(person));
+    // An automatic restriction that was overturned: the live tally forgets the strikes that earned it (the store already set them aside).
+    const recorded = overturn as { termId: string | null; filterKey: string | null } | null;
+    if (recorded !== null && group.source === 'auto_filter') fenced(() => this.d.forgive?.(person, group.startsAt));
+    if (recorded !== null) {
+      fenced(() =>
+        this.d.emit({
+          type: 'sanction.overturned',
+          groupId: appeal.groupId,
+          at: now,
+          source: group.source,
+          ...(recorded.termId === null ? {} : { termId: recorded.termId }),
+          ...(recorded.filterKey === null ? {} : { filterKey: recorded.filterKey }),
+        }),
+      );
+    }
     fenced(() => this.d.emit({ type: 'appeal.decided', appealId: appeal.id, at: now, target: person, outcome: d.outcome, rule: ruleRefOf(appeal.rule), reason: d.reasonCode }));
     return { ok: true, status: OUTCOME_STATUS[d.outcome], ...(made === null ? {} : { replacementGroupId: made.groupId }) };
+  }
+
+  /**
+   * Record the overturn of a granted appeal, inside the decision's transaction: the group, the strikes that earned an automatic restriction, and the report a
+   * decision came from. Null when the store cannot record it, or already had (another process recorded this group first); a throw is the store failing and rolls
+   * the decision back like any other store failure.
+   */
+  private recordOverturn(appeal: AppealRow, group: SanctionRow, person: SubjectId, now: number): { termId: string | null; filterKey: string | null } | null {
+    const { store, subjects } = this.d;
+    if (store.recordOverturn === undefined) return null;
+    const automatic = group.source === 'auto_filter';
+    const termId = automatic ? (group.termId ?? null) : null;
+    const report = appeal.reportId === null ? null : store.loadReport(appeal.reportId);
+    const filterKey = report !== null && report.origin === 'filter' && typeof report.originKey === 'string' ? report.originKey : null;
+    const recorded = store.recordOverturn({
+      groupId: appeal.groupId,
+      at: now,
+      subject: person,
+      aliases: subjects.aliasesOf(person),
+      source: group.source,
+      termId,
+      filterKey,
+      reportId: appeal.reportId,
+      strikes: automatic ? { from: group.startsAt - this.d.strikeWindowMs, to: group.startsAt } : null,
+    });
+    return recorded ? { termId, filterKey } : null;
   }
 
   /** The sanction is gone: close the appeal as moot (committed, unlike a refusal) and say so. Nothing is announced or marked. */
