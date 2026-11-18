@@ -404,6 +404,45 @@ export function blockedCountsByTerm(store: Store, days: unknown, now: number): R
   return out;
 }
 
+/** One term flagged for review (0.2.1): a term id (never the term text), how many automatic restrictions it caused were overturned on appeal, and when the last was. */
+export interface TermReviewFlag {
+  termId: string;
+  overturned: number;
+  lastAt: number;
+}
+
+/**
+ * The terms whose restrictions were overturned often enough to review (`cw.terms.reviewFlags`). `days` is an integer 1 to 365 (default 90) and `min` an integer 1 to 1000
+ * (default 2), else `RangeError`. From the store's overturn counts (never from strikes, which retention deletes sooner); a store without them gives `[]`. Sorted by
+ * `overturned` descending, then `lastAt` descending, then term id.
+ */
+export function termReviewFlags(store: Store, q: { days?: unknown; min?: unknown } | undefined, now: number): TermReviewFlag[] {
+  // Only an absent key (or undefined) asks for the default; `null`, a string and the rest are the caller's value and are checked as one.
+  const raw = (key: 'days' | 'min'): unknown => (q !== undefined && q !== null && typeof q === 'object' && Object.hasOwn(q, key) ? q[key] : undefined);
+  const d = raw('days') === undefined ? 90 : raw('days');
+  const m = raw('min') === undefined ? 2 : raw('min');
+  if (typeof d !== 'number' || !Number.isInteger(d) || d < 1 || d > 365) throw new RangeError('terms.reviewFlags: days must be a whole number from 1 to 365');
+  if (typeof m !== 'number' || !Number.isInteger(m) || m < 1 || m > 1000) throw new RangeError('terms.reviewFlags: min must be a whole number from 1 to 1000');
+  const rows = store.overturnedTermCounts?.(now - d * DAY_MS) ?? [];
+  return rows
+    .filter((r) => r.overturned >= m)
+    .map((r) => ({ termId: r.termId, overturned: r.overturned, lastAt: r.lastAt }))
+    .sort((a, b) => b.overturned - a.overturned || b.lastAt - a.lastAt || (a.termId < b.termId ? -1 : a.termId > b.termId ? 1 : 0));
+}
+
+/**
+ * How many granted appeals overturned a decision that came from each filter key's reports, over the last 7, 30 or 90 days (default 90; another value is a `RangeError`)
+ * (`cw.filters.overturned`). An object with no prototype, so a key such as `__proto__` is only a key; a key with none is absent; `{}` for a store without the counts.
+ */
+export function filterOverturnedCounts(store: Store, q: { days?: unknown } | undefined, now: number): Record<string, number> {
+  const asked = q !== undefined && q !== null && typeof q === 'object' && Object.hasOwn(q, 'days') && q.days !== undefined;
+  const days: unknown = asked ? (q as { days?: unknown }).days : 90;
+  if (days !== 7 && days !== 30 && days !== 90) throw new RangeError('filters.overturned: days must be 7, 30 or 90');
+  const out: Record<string, number> = Object.create(null) as Record<string, number>;
+  for (const r of store.overturnedFilterCounts?.(now - days * DAY_MS) ?? []) if (r.overturned > 0) out[r.filterKey] = r.overturned;
+  return out;
+}
+
 /**
  * One kept blocked name (`names.keepBlocked`): the name as it was typed, the term the matcher reported (null for a profanity hit), why it was
  * refused, and the person when the caller was found (a staff ref; null for a caller the kit did not hold). Carries a name and a subject id: staff

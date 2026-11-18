@@ -88,6 +88,8 @@ import type { RevokeWithin, SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
 import {
   blockedCountsByTerm,
+  filterOverturnedCounts,
+  termReviewFlags,
   blockedItems,
   blockedNameItems,
   listSanctionGroups,
@@ -398,6 +400,24 @@ export interface Chatwarden {
      * with their ranges, and how many lines it would refuse or mask. Writes nothing and counts nothing. At most 5 000 lines are read. Staff only.
      */
     check(candidate: FilterSettings, lines: readonly string[]): FilterCheckResult;
+    /**
+     * How many granted appeals overturned a decision that came from each filter key's reports, over the last 7, 30 or 90 UTC days (default 90; any other value is a
+     * `RangeError`): `{ [filterKey]: count }`, an object with no prototype, a key with none absent. Counts groups, from the overturn rows. `{}` for a store that keeps
+     * none. A number beside `stats`, never a person or a line. Staff only.
+     */
+    overturned(q?: { days?: 7 | 30 | 90 }): Record<string, number>;
+  };
+  /**
+   * The blocked terms, read for review. Staff only.
+   */
+  terms: {
+    /**
+     * Terms whose automatic restrictions were overturned on appeal often enough to look at (0.2.1): `{ termId, overturned, lastAt }`, `overturned` counting groups in
+     * the last `days` (an integer 1 to 365, default 90), kept when it is at least `min` (an integer 1 to 1000, default 2), ordered by `overturned` descending, then
+     * `lastAt` descending, then `termId`. Read from the overturn rows, so a purge of the strikes does not change it. `[]` for a store that keeps none; `RangeError`
+     * for a bad `days` or `min`. A term id, never the term text. Staff only.
+     */
+    reviewFlags(q?: { days?: number; min?: number }): Array<{ termId: string; overturned: number; lastAt: number }>;
   };
   chat: {
     accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult;
@@ -1833,6 +1853,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     onGranted: (appeal, outcome) => void (outcome === 'revoke' ? ai.markReversed(appeal.reportId as string, { corrective: true }) : ai.markReversed(appeal.reportId as string)),
     // A granted appeal on an automatic restriction sets its strikes aside in the store; the live tally forgets them through the strike service.
     strikeWindowMs: limits.strikes.windowMs,
+    strikesCount: () => limits.strikes.count,
     forgive: (subject, startsAt) => strikes.forgive(subject, startsAt),
   });
 
@@ -1989,6 +2010,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         if (q === null || typeof q !== 'object' || (q.days !== 7 && q.days !== 30)) return Promise.reject(new RangeError('filters.stats: days must be 7 or 30'));
         return filterHits.stats(q.days);
       },
+      overturned: (q) => filterOverturnedCounts(store, q, clock.now()),
       test: (text, candidate) => {
         if (typeof text !== 'string') throw new TypeError('filters.test: text must be a string');
         const settings = candidate === undefined ? policy.profileNow().filters : resolveFilters(candidate, 'candidate');
@@ -2082,6 +2104,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
       reporterAccuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
       dismissMany: (input) => dismissMany({ store, subjects, holders: (people) => desk.holders(people), decide: decideAnnounced }, input),
+    },
+    terms: {
+      reviewFlags: (q) => termReviewFlags(store, q, clock.now()),
     },
     blocked: {
       list: (q) => blockedItems(store, subjects, q?.days, clock.now()),

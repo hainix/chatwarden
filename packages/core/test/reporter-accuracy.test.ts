@@ -11,7 +11,8 @@ import {
 } from '../src/reporterAccuracy.js';
 import { SUSPEND_WINDOW_MS } from '../src/reports.js';
 import type { Logger, Platform, RawWho, Store, StoredReport } from '../src/types.js';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAppeals } from '@chatwarden/store-memory';
+import { appealsKit } from './appealsWorld.js';
 
 // D3: reporter accuracy. A pure summary of outcome counts, and a service that reads them with ONE grouped store query.
 
@@ -56,6 +57,7 @@ describe('summarizeOutcomes', () => {
       noticeable: true,
       habitual: false,
       windowMs: REPORTER_ACCURACY_WINDOW_MS,
+      overturned: 0,
     });
   });
 
@@ -167,6 +169,7 @@ describe('cw.reports.reporterAccuracy', () => {
       noticeable: true,
       habitual: false,
       windowMs: REPORTER_ACCURACY_WINDOW_MS,
+      overturned: 0,
     });
   });
 
@@ -290,5 +293,119 @@ describe('reporterAccuracyFor (the function)', () => {
     const subjects = { canonical: (s: string) => s, aliasesOf: (s: string) => [s, `${s}-alias`] };
     reporterAccuracyFor(t.store, subjects as never, [a], NOW);
     expect(spy).toHaveBeenCalledWith([a, `${a}-alias`], NOW - REPORTER_ACCURACY_WINDOW_MS);
+  });
+});
+
+describe('overturned reports (0.2.1): a report whose sanction was overturned on appeal is neither upheld nor dismissed', () => {
+  const overturn = (store: Store, groupId: string, reportId: string): void => {
+    expect((store as ReturnType<typeof withMemoryAppeals<MemoryStore>>).recordOverturn({ groupId, at: NOW, subject: 's_x', aliases: ['s_x'], source: 'moderator', termId: null, filterKey: null, reportId, strikes: null })).toBe(true);
+  };
+
+  it('summarizeOutcomes: overturned is not in decided, defaults to 0 and is never a false report', () => {
+    expect(summarizeOutcomes({ actioned: 2, noAction: 1, badFaith: 0 })).toMatchObject({ decided: 3, overturned: 0 });
+    const s = summarizeOutcomes({ actioned: 3, noAction: 5, badFaith: 0, overturned: 2 });
+    expect(s).toMatchObject({ decided: 8, noAction: 5, unfounded: 5, overturned: 2, falseRate: 5 / 8, noticeable: true, habitual: false });
+    // an overturned report moves nothing: the same outcomes without it rate the same
+    expect(summarizeOutcomes({ actioned: 3, noAction: 5, badFaith: 0 })).toMatchObject({ falseRate: 5 / 8, decided: 8 });
+    // and a lot of them do not make a reporter noticeable
+    expect(summarizeOutcomes({ actioned: 0, noAction: 0, badFaith: 0, overturned: 50 })).toMatchObject({ decided: 0, falseRate: null, noticeable: false, habitual: false, overturned: 50 });
+  });
+
+  it('an actioned report that was overturned is not in actioned, not in decided, and is in overturned', async () => {
+    const t = await setup(withMemoryAppeals(new MemoryStore()));
+    const a = t.person();
+    const kept = t.file(a, 'upheld');
+    const reversed = t.file(a, 'upheld');
+    overturn(t.store, 'g1', reversed);
+    expect(kept).not.toBe(reversed);
+    expect(t.cw.reports.reporterAccuracy([a]).get(a)).toMatchObject({ decided: 1, noAction: 0, badFaith: 0, unfounded: 0, overturned: 1 });
+    // the store row says the same
+    expect(t.store.reporterOutcomes?.([a], 0)).toEqual([{ reporter: a, actioned: 1, noAction: 0, badFaith: 0, overturned: 1 }]);
+  });
+
+  it('five upheld and five dismissed with two of the upheld overturned: decided 8, falseRate 5/8', async () => {
+    const t = await setup(withMemoryAppeals(new MemoryStore()));
+    const a = t.person();
+    const upheld = Array.from({ length: 5 }, () => t.file(a, 'upheld'));
+    t.many(a, 'dismissed', 5);
+    overturn(t.store, 'g1', upheld[0] as string);
+    overturn(t.store, 'g2', upheld[1] as string);
+    const got = t.cw.reports.reporterAccuracy([a]).get(a);
+    expect(got).toMatchObject({ decided: 8, noAction: 5, unfounded: 5, overturned: 2, falseRate: 5 / 8, noticeable: true, habitual: false });
+    // control: without the overturns the rate is 5/10
+    const c = await setup(withMemoryAppeals(new MemoryStore()));
+    const b = c.person();
+    c.many(b, 'upheld', 5);
+    c.many(b, 'dismissed', 5);
+    expect(c.cw.reports.reporterAccuracy([b]).get(b)).toMatchObject({ decided: 10, falseRate: 0.5, overturned: 0 });
+  });
+
+  it('a reporter with only overturned reports appears with decided 0 and overturned 2 and no rate', async () => {
+    const t = await setup(withMemoryAppeals(new MemoryStore()));
+    const a = t.person();
+    const other = t.person();
+    overturn(t.store, 'g1', t.file(a, 'upheld'));
+    overturn(t.store, 'g2', t.file(a, 'noted'));
+    const got = t.cw.reports.reporterAccuracy([a, other]);
+    expect([...got.keys()]).toEqual([a]);
+    expect(got.get(a)).toMatchObject({ decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, overturned: 2 });
+    // reporterRecord shows it too
+    expect(t.cw.reports.reporterRecord(a).accuracy).toMatchObject({ decided: 0, overturned: 2 });
+  });
+
+  it('a person with no decided and no overturned report is still absent, and an open report is not an overturned one', async () => {
+    const t = await setup(withMemoryAppeals(new MemoryStore()));
+    const a = t.person();
+    t.many(a, 'open', 3);
+    expect(t.cw.reports.reporterAccuracy([a]).size).toBe(0);
+  });
+
+  it('a store whose rows have no overturned field (a 0.2.0 store) reads as 0', async () => {
+    const mem = new MemoryStore();
+    const old = new Proxy(mem, {
+      get(target, prop, receiver) {
+        if (prop === 'reporterOutcomes') {
+          return (reporters: string[], since: number) => target.reporterOutcomes(reporters, since).map(({ reporter, actioned, noAction, badFaith }) => ({ reporter, actioned, noAction, badFaith }));
+        }
+        const v = Reflect.get(target, prop, receiver) as unknown;
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    const t = await setup(old);
+    const a = t.person();
+    t.many(a, 'upheld', 2);
+    t.many(a, 'dismissed', 3);
+    const got = t.cw.reports.reporterAccuracy([a]).get(a);
+    expect(got).toMatchObject({ decided: 5, noAction: 3, overturned: 0, falseRate: 0.6 });
+    expect(Number.isFinite(got?.overturned)).toBe(true);
+  });
+
+  it('merged aliases are one reporter for overturned reports too', async () => {
+    const t = await setup(withMemoryAppeals(new MemoryStore()));
+    const a = t.person();
+    const b = t.person();
+    overturn(t.store, 'g1', t.file(a, 'upheld'));
+    overturn(t.store, 'g2', t.file(b, 'upheld'));
+    t.cw.rooms.seat('merge-room-ov', 'p1', { clientKey: 'raw-client-key-acc-0001', accountId: 'acct-ov' }, 'X');
+    t.cw.rooms.seat('merge-room-ov', 'p2', { clientKey: 'raw-client-key-acc-0002', accountId: 'acct-ov' }, 'Y');
+    await t.cw.flush();
+    expect([...t.cw.reports.reporterAccuracy([a]).values()][0]).toMatchObject({ decided: 0, overturned: 2 });
+  });
+
+  it('end to end: file, decide (upheld), appeal revoked, then reporterAccuracy shows it as overturned; an uphold on appeal changes nothing', async () => {
+    const k = await appealsKit({}, { perPlayerPerWeek: 20 });
+    const s = await k.sanction();
+    const reporter = k.store.loadReport(s.reportId)?.reporterSubject as string;
+    expect(k.cw.reports.reporterAccuracy([reporter]).get(reporter)).toMatchObject({ decided: 1, overturned: 0 });
+    const filed = k.cw.appeals.file(s.who, { noticeId: s.noticeId, statement: 'It was not me.' });
+    if (!filed.ok) throw new Error('filing refused');
+    expect((await k.cw.appeals.decide({ appealId: filed.appeal.id, outcome: 'revoke', actor: 'senior_bea', reason: 'second look' })).ok).toBe(true);
+    expect(k.cw.reports.reporterAccuracy([reporter]).get(reporter)).toMatchObject({ decided: 0, noAction: 0, unfounded: 0, falseRate: null, overturned: 1 });
+    // a second report by the same reporter, upheld on appeal: it stays decided
+    const t = await k.sanction();
+    const f2 = k.cw.appeals.file(t.who, { noticeId: t.noticeId, statement: 'Please look again.' });
+    if (!f2.ok) throw new Error('filing refused');
+    await k.cw.appeals.decide({ appealId: f2.appeal.id, outcome: 'uphold', actor: 'senior_bea', reason: 'second look' });
+    expect(k.cw.reports.reporterAccuracy([reporter]).get(reporter)).toMatchObject({ decided: 1, overturned: 1 });
   });
 });

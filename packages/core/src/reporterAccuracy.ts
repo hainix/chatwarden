@@ -35,7 +35,9 @@ export const RANK_DOWN_SCAN_MAX = 1_000;
  * How a reporter's decided reports (filed in the last `windowMs`) turned out. `decided` is `actioned + noAction + badFaith`;
  * `unfounded` is `noAction + badFaith` (a dismissal, with or without the bad-faith mark: the strongest false report counts too).
  * `noted` and `upheld` are both founded: something was found. `falseRate` is `unfounded / decided`, null below
- * {@link REPORTER_ACCURACY_MIN_DECIDED} decided. Open reports are never counted.
+ * {@link REPORTER_ACCURACY_MIN_DECIDED} decided. Open reports are never counted. `overturned` is the reports in the window whose sanction was overturned on appeal (0.2.1):
+ * they are neither upheld nor dismissed, so they are in neither `decided` nor the rate, and never count as bad faith. A reporter whose only decided reports were
+ * overturned has `decided: 0` and `overturned` above 0, so a staff line can say so.
  * Staff only: never send to a player.
  */
 export interface ReporterAccuracy {
@@ -50,10 +52,12 @@ export interface ReporterAccuracy {
   habitual: boolean;
   /** {@link REPORTER_ACCURACY_WINDOW_MS}, so a screen can say "in the last 30 days". */
   windowMs: number;
+  /** Reports whose sanction was overturned on appeal; not part of `decided` or the rate. */
+  overturned: number;
 }
 
 /** The pure part: outcome counts in, the summary out. */
-export function summarizeOutcomes(c: { actioned: number; noAction: number; badFaith: number }): ReporterAccuracy {
+export function summarizeOutcomes(c: { actioned: number; noAction: number; badFaith: number; overturned?: number }): ReporterAccuracy {
   const decided = c.actioned + c.noAction + c.badFaith;
   const unfounded = c.noAction + c.badFaith;
   const falseRate = decided >= REPORTER_ACCURACY_MIN_DECIDED ? unfounded / decided : null;
@@ -66,13 +70,14 @@ export function summarizeOutcomes(c: { actioned: number; noAction: number; badFa
     noticeable: falseRate !== null && falseRate >= REPORTER_FALSE_RATE_NOTICEABLE,
     habitual: falseRate !== null && falseRate >= REPORTER_FALSE_RATE_HABITUAL,
     windowMs: REPORTER_ACCURACY_WINDOW_MS,
+    overturned: c.overturned ?? 0,
   };
 }
 
 /**
  * The accuracy of each person as a reporter, keyed by canonical person. Each person is made canonical and expanded to every merged
  * alias; ONE `store.reporterOutcomes` call reads them all; the rows are folded by `canonical(row.reporter)`. A person with no decided
- * report in the window is absent from the map. A store without `reporterOutcomes` gives an empty map. More than
+ * and no overturned report in the window is absent from the map. A store without `reporterOutcomes` gives an empty map. More than
  * {@link REPORTER_ACCURACY_BATCH_MAX} people (after removing duplicates) is a `RangeError`.
  */
 export function reporterAccuracyFor(
@@ -86,18 +91,21 @@ export function reporterAccuracyFor(
   const out = new Map<SubjectId, ReporterAccuracy>();
   if (roots.length === 0 || store.reporterOutcomes === undefined) return out;
   const all = [...new Set(roots.flatMap((p) => subjects.aliasesOf(p)))];
-  const folded = new Map<SubjectId, { actioned: number; noAction: number; badFaith: number }>();
+  const folded = new Map<SubjectId, { actioned: number; noAction: number; badFaith: number; overturned: number }>();
   for (const row of store.reporterOutcomes(all, now - REPORTER_ACCURACY_WINDOW_MS)) {
     const root = subjects.canonical(row.reporter);
-    const c = folded.get(root) ?? { actioned: 0, noAction: 0, badFaith: 0 };
+    const c = folded.get(root) ?? { actioned: 0, noAction: 0, badFaith: 0, overturned: 0 };
     c.actioned += row.actioned;
     c.noAction += row.noAction;
     c.badFaith += row.badFaith;
+    // A 0.2.0 store has no such field: it reads as 0.
+    c.overturned += row.overturned ?? 0;
     folded.set(root, c);
   }
   for (const root of roots) {
     const c = folded.get(root);
-    if (c !== undefined && c.actioned + c.noAction + c.badFaith > 0) out.set(root, summarizeOutcomes(c));
+    // A reporter whose only decided reports were overturned is present too (decided 0, overturned above 0), so the case can say so.
+    if (c !== undefined && c.actioned + c.noAction + c.badFaith + c.overturned > 0) out.set(root, summarizeOutcomes(c));
   }
   return out;
 }

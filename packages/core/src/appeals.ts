@@ -227,9 +227,23 @@ export interface AppealSummary {
 }
 
 /**
+ * Why a sanction was made, as the moderator who decides its appeal is shown it (0.2.1). One shape per source, built from the sanction's subject row and the report
+ * behind it; never text of a line. `decidedBy` says whether a person or the AI made the report's decision; `strikes` is the strike count that tips an automatic
+ * restriction (`limits.strikes.count`) and `termId` the term of the strike that tipped it (null on a restriction written before 0.2.1). `other` is a sanction with no
+ * report to show (a co-op feed, the API, a direct sanction) or whose report or rows are gone. Staff only.
+ */
+export type AppealCause =
+  | { source: 'report'; reportId: string; decidedBy: 'human' | 'ai' }
+  | { source: 'term'; termId: string | null; strikes: number }
+  | { source: 'filter'; reportId: string; filterKey: string; decidedBy: 'human' | 'ai' }
+  | { source: 'other'; via: 'coop' | 'api' };
+
+/**
  * One appeal in full, for one staff read (audited by the route).
  */
 export interface AppealDetail extends AppealSummary {
+  /** Why the sanction was made (see {@link AppealCause}). On the detail only: the list does not carry it. */
+  cause: AppealCause;
   /** The player's words. Staff only. Null once purged. Masked by the hub when `statementFlagged`. */
   statement: string | null;
   /**

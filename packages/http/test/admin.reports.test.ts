@@ -858,7 +858,7 @@ describe('GET /people/:ref/history', () => {
       sanctions: [],
       asReporter: {
         reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0,
-        accuracy: { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000 },
+        accuracy: { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000, overturned: 0 },
       },
       handle: null,
     });

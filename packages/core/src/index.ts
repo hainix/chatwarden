@@ -452,7 +452,7 @@ export type { FilterKeyCounts, FilterStats } from './filters/counters.js';
 export type { FilterSpan } from './filters/fold.js';
 // Appeals and names settings: off until set (names masking in the hub is the one default-on setting).
 export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_REASON_CODES, APPEAL_REASON_DEFAULT, APPEAL_REASONS, APPEAL_STATEMENT_MAX, APPEAL_STATS_MIN_SANCTIONS, normalizeStatement, resolveAppeals, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
-export type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealReasonCode, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';
+export type { AppealCause, AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealReasonCode, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';
 export { LINK_SYSTEMS } from './links.js';
 export type { LinkRow, LinkSystem } from './links.js';
 export { checkNameRules, DEFAULT_RESERVED_RULE, MAX_RESERVED_ENTRIES, NAME_ALLOW_MAX, NAME_ENTRY_MAX, NAME_ENTRY_MIN, resolveNames } from './names.js';

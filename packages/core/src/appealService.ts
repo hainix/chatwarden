@@ -12,6 +12,7 @@ import {
   statementLength,
 } from './appeals.js';
 import type {
+  AppealCause,
   AppealDecideResult,
   AppealDecision,
   AppealDetail,
@@ -91,6 +92,8 @@ export interface AppealServiceDeps {
    * report: the AI's casebook marks that decision reversed. A throw is logged and never fails the decision.
    */
   onGranted?: (appeal: AppealRow, outcome: 'reduce' | 'revoke') => void;
+  /** The strike count that tips an automatic restriction (`limits.strikes.count`), read live: the cause of an appeal on one says it. */
+  strikesCount: () => number;
   /** The strike window (`limits.strikes.windowMs`): the strikes of an overturned automatic restriction are the ones in the window before its start. */
   strikeWindowMs: number;
   /**
@@ -544,11 +547,37 @@ export class AppealService {
             ? null
             : { by: r.decidedBy, at: r.decidedAt, reason: r.decisionReason ?? '', reasonCode: knownReasonCode(r), replacementGroupId: r.replacementGroupId },
         reportId: r.reportId,
+        cause: this.causeOf(r),
         shown: notice === undefined ? [] : notice.excerpt.map((l) => ({ text: l.text, day: l.day })),
       };
     } catch (err) {
       this.warn(err);
       return null;
+    }
+  }
+
+  /**
+   * Why the sanction behind an appeal was made. From the sanction's subject row (its source, term and report) and the report row. Never throws: rows that are gone
+   * (retention) and a store that fails both read as `other`, the failure logged by class.
+   */
+  private causeOf(r: AppealRow): AppealCause {
+    const { store } = this.d;
+    try {
+      const group = store.loadSanctionSubjectRow?.(r.groupId) ?? null;
+      if (group === null) return { source: 'other', via: 'api' };
+      if (group.source === 'auto_filter') return { source: 'term', termId: group.termId ?? null, strikes: this.d.strikesCount() };
+      const reportId = typeof group.reportId === 'string' && group.reportId !== '' ? group.reportId : null;
+      const report = reportId === null ? null : store.loadReport(reportId);
+      if (reportId !== null && report !== null) {
+        const decidedBy = group.source === 'ai' ? 'ai' : 'human';
+        return report.origin === 'filter' && typeof report.originKey === 'string'
+          ? { source: 'filter', reportId, filterKey: report.originKey, decidedBy }
+          : { source: 'report', reportId, decidedBy };
+      }
+      return { source: 'other', via: group.source === 'coop' ? 'coop' : 'api' };
+    } catch (err) {
+      this.warn(err);
+      return { source: 'other', via: 'api' };
     }
   }
 
