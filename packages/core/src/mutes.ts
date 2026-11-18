@@ -55,6 +55,16 @@ export class MuteService {
   private absorbed = new Map<SubjectId, SubjectId[]>();
   private staleAt = -1;
 
+  /**
+   * The inverse of the rows, by CANONICAL ids: the people who muted or blocked a target (`muters`) and the people each person blocked (`blocksOf`), so `unseenBy` costs the people who matter,
+   * not the rows. Rebuilt lazily, in one pass, when the rows changed (`rows`) or a merge moved the canonical ids; a mute that has run out is still in it and is checked at query time.
+   */
+  private muters = new Map<SubjectId, Set<SubjectId>>();
+  private blocksOf = new Map<SubjectId, Set<SubjectId>>();
+  private inverseAt = -1;
+  private inverseRows = -1;
+  private rows = 0;
+
   constructor(store: Store, clock: Clock, subjects: SubjectIndex, opts?: { logger?: Logger }) {
     this.store = store;
     this.clock = clock;
@@ -74,6 +84,7 @@ export class MuteService {
       }
       this.byViewer = next;
       this.staleAt = -1;
+      this.rows += 1;
       return Promise.resolve();
     } catch (err) {
       return Promise.reject(err);
@@ -116,6 +127,21 @@ export class MuteService {
   /** Has `viewer` BLOCKED `target`? One direction; {@link blockedBetween} reads both. */
   isBlocked(viewer: SubjectId | null, target: SubjectId | null): boolean {
     return this.find(viewer, target)?.block === true;
+  }
+
+  /**
+   * The people who must not be shown `sender`'s lines: those who muted or blocked the sender, and those the sender blocked (a block is two-way), as canonical subject ids. Never the sender. Empty for
+   * a null or empty id and for a person nobody has a row with. The cost is those people, not the rows or the room: a room's `hiddenFor` is this set mapped to seats.
+   */
+  unseenBy(sender: SubjectId | null): Set<SubjectId> {
+    const out = new Set<SubjectId>();
+    if (!present(sender)) return out;
+    this.refreshInverse();
+    const cs = this.subjects.canonical(sender);
+    for (const viewer of this.muters.get(cs) ?? []) if (this.find(viewer, cs) !== null) out.add(viewer);
+    for (const target of this.blocksOf.get(cs) ?? []) out.add(target);
+    out.delete(cs);
+    return out;
   }
 
   /** Has either of the two blocked the other? */
@@ -284,8 +310,34 @@ export class MuteService {
     this.staleAt = version;
   }
 
+  private refreshInverse(): void {
+    const version = this.subjects.mergeVersion;
+    if (version === this.inverseAt && this.rows === this.inverseRows) return;
+    const muters = new Map<SubjectId, Set<SubjectId>>();
+    const blocksOf = new Map<SubjectId, Set<SubjectId>>();
+    const add = (map: Map<SubjectId, Set<SubjectId>>, key: SubjectId, value: SubjectId): void => {
+      const held = map.get(key);
+      if (held === undefined) map.set(key, new Set([value]));
+      else held.add(value);
+    };
+    for (const [sv, targets] of this.byViewer) {
+      const cv = this.subjects.canonical(sv);
+      for (const [st, entry] of targets) {
+        const ct = this.subjects.canonical(st);
+        if (cv === ct) continue;
+        add(muters, ct, cv);
+        if (entry.block) add(blocksOf, cv, ct);
+      }
+    }
+    this.muters = muters;
+    this.blocksOf = blocksOf;
+    this.inverseAt = version;
+    this.inverseRows = this.rows;
+  }
+
   /** The rows changed: an index that holds anything is rebuilt at the next lookup (one that holds nothing stays right, since `set` writes canonical ids only). */
   private touched(): void {
+    this.rows += 1;
     if (this.stale.size > 0 || this.absorbed.size > 0) this.staleAt = -1;
   }
 }

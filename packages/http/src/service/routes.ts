@@ -3,7 +3,7 @@
 // Browser-safe: nothing here imports `node:`.
 import { errorClass, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, ChatResult, DoorKind, NameKind, RawWho, ReportEntity } from '@chatwarden/core';
-import { ValidationError } from '../errors.js';
+import { HttpError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import type { KitResponse } from '../types.js';
 import { VERSION } from '../version.js';
@@ -337,28 +337,58 @@ function parseTags(value: unknown): Record<string, string> | undefined {
   return tags;
 }
 
-/** The seats this process has seated, by room: what `hiddenFor` walks. The kit holds the people; the service keeps only the game's own seat ids. */
-class Roster {
+/** The most seats the service lets one room hold, and the most rooms one process holds. Past the seats a seat is refused; past the rooms the room idle the longest is closed. */
+export const SERVICE_MAX_SEATS_PER_ROOM = 5000;
+export const SERVICE_MAX_ROOMS = 10_000;
+
+/**
+ * A bounded tally of the rooms and seats this process seated through the API, oldest use first. It holds ids only to count them: who must not see a line comes from the kit's own roster
+ * (`cw.chat.hiddenFor`), so there is no second copy that could drift. A room stays in the tally when its last seat leaves (the kit keeps the room's tags) until it is closed or evicted.
+ */
+class RoomTally {
   private readonly rooms = new Map<string, Set<string>>();
-  add(room: string, seat: string): void {
+  private readonly maxSeats: number;
+  private readonly maxRooms: number;
+  constructor(maxSeats: number, maxRooms: number) {
+    this.maxSeats = maxSeats;
+    this.maxRooms = maxRooms;
+  }
+  /** Mark the room as just used (the least recently used room is evicted first). */
+  touch(room: string): void {
+    const seats = this.rooms.get(room);
+    if (seats === undefined) return;
+    this.rooms.delete(room);
+    this.rooms.set(room, seats);
+  }
+  /** May this seat be added? A seat the room already holds may always change hands. */
+  canSeat(room: string, seat: string): boolean {
+    const seats = this.rooms.get(room);
+    return seats === undefined || seats.has(seat) || seats.size < this.maxSeats;
+  }
+  /** Record a seat; returns the room evicted to make room for a new one, if any. */
+  add(room: string, seat: string): string | undefined {
     let seats = this.rooms.get(room);
+    let evicted: string | undefined;
     if (seats === undefined) {
       seats = new Set();
       this.rooms.set(room, seats);
-    }
+      if (this.rooms.size > this.maxRooms) {
+        const oldest = this.rooms.keys().next();
+        if (oldest.done !== true) {
+          evicted = oldest.value;
+          this.rooms.delete(evicted);
+        }
+      }
+    } else this.touch(room);
     seats.add(seat);
+    return evicted;
   }
   remove(room: string, seat: string): void {
-    const seats = this.rooms.get(room);
-    if (seats === undefined) return;
-    seats.delete(seat);
-    if (seats.size === 0) this.rooms.delete(room);
+    this.rooms.get(room)?.delete(seat);
+    this.touch(room);
   }
   clear(room: string): void {
     this.rooms.delete(room);
-  }
-  seats(room: string): string[] {
-    return [...(this.rooms.get(room) ?? [])];
   }
 }
 
@@ -370,6 +400,8 @@ export interface RouteOptions {
   warnings?: () => string[];
   processes?: 'single' | 'multiple';
   logger?: { warn(event: string, detail?: Record<string, string | number | boolean>): unknown };
+  /** Caps on the rooms and seats the service tracks. Defaults: `SERVICE_MAX_SEATS_PER_ROOM` and `SERVICE_MAX_ROOMS`. */
+  limits?: { maxSeatsPerRoom?: number; maxRooms?: number };
 }
 
 const WARNING_RE = /^[a-z][a-z_]{0,31}$/;
@@ -377,7 +409,7 @@ const MATCH_MODES = ['word', 'segment', 'contains'];
 
 /** The /v1 table over a kit: every description in `ROUTE_SPECS` wrapped by `svc` around its handler. */
 export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOptions): RouteTable {
-  const roster = new Roster();
+  const tally = new RoomTally(options.limits?.maxSeatsPerRoom ?? SERVICE_MAX_SEATS_PER_ROOM, options.limits?.maxRooms ?? SERVICE_MAX_ROOMS);
   const room = (c: ServiceCall): string => validId(c.params.room);
   const seat = (c: ServiceCall): string => validId(c.params.seat);
 
@@ -396,17 +428,9 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
 
   /** The answer for a kit verdict on a line or a phrase: the line to send, and the seats that must NOT be sent it (they muted or blocked the sender, or the sender blocked them). Or the author's refusal. */
   const delivered = (roomId: string, seatId: string, result: ChatResult): KitResponse => {
+    tally.touch(roomId);
     if (!('deliver' in result)) return ok({ ok: false, refused: lineRefusal(result.refuse) });
-    const hiddenFor = roster.seats(roomId).filter((viewer) => {
-      if (viewer === seatId) return false;
-      try {
-        return !cw.chat.visibleTo(roomId, viewer, seatId);
-      } catch (err) {
-        // A mute is a promise to the muter: what cannot be checked is hidden.
-        safeWarn(options.logger, 'chatwarden.service_visibility_failed', { error: errorClass(err) });
-        return true;
-      }
-    });
+    const hiddenFor = cw.chat.hiddenFor(roomId, seatId);
     const { lineId, text, phrase } = result.deliver;
     return ok({ ok: true, line: { id: lineId, text, ...(typeof phrase === 'string' && phrase !== '' ? { phrase } : {}) }, hiddenFor });
   };
@@ -438,6 +462,7 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
       const tags = parseTags(b.tags);
       const roomId = room(c);
       const seatId = seat(c);
+      if (!tally.canSeat(roomId, seatId)) throw new HttpError('invalid_value');
       try {
         cw.rooms.seat(roomId, seatId, who as RawWho, handle, tags);
       } catch (err) {
@@ -445,7 +470,12 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
         if (err instanceof RangeError || err instanceof TypeError) throw new ValidationError();
         throw err;
       }
-      roster.add(roomId, seatId);
+      const evicted = tally.add(roomId, seatId);
+      if (evicted !== undefined) {
+        // The room idle the longest makes way: closed in the kit like a DELETE. Class only in the log, never the room.
+        cw.rooms.close(evicted);
+        safeWarn(options.logger, 'chatwarden.service_room_evicted', { cap: options.limits?.maxRooms ?? SERVICE_MAX_ROOMS });
+      }
       const r = cw.chat.restricted(who as RawWho, { roomId, seatId });
       return ok({ ok: true, restriction: r.restricted ? { until: r.until, kind: r.kind } : null });
     },
@@ -454,14 +484,14 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
       const roomId = room(c);
       const seatId = seat(c);
       cw.rooms.unseat(roomId, seatId);
-      roster.remove(roomId, seatId);
+      tally.remove(roomId, seatId);
       return ok({ ok: true });
     },
 
     close: (c) => {
       const roomId = room(c);
       cw.rooms.close(roomId);
-      roster.clear(roomId);
+      tally.clear(roomId);
       return ok({ ok: true });
     },
 

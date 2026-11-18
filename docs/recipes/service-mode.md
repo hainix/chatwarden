@@ -44,7 +44,7 @@ rooms). Your game draws its own chat box and its own notice screen from `notices
 ## Running more than one
 
 One process is the default and the safe one. Seats, the recent chat the service keeps as evidence, the fixed per-seat rate and the idempotency table are in the process, so two processes work only if every call
-for one room reaches the same process (sticky routing, or a hash of the room id). The pacer's state (slow mode, the burst limit and repeats) can be shared through the database with `--shared-pacing`; tell the service
+for one room reaches the same process (sticky routing, or a hash of the room id). `hiddenFor` is read from the seats the process holds, so it is only right for a room one process serves; the roster is not in the database. The service also caps itself (5000 seats a room; 10000 rooms a process, the room idle the longest is closed past that), so close your rooms with `DELETE /rooms/{room}` when a match ends. The pacer's state (slow mode, the burst limit and repeats) can be shared through the database with `--shared-pacing`; tell the service
 how many you run with `CHATWARDEN_PROCESSES`, and its handshake warns `pacing_per_process` when you run several without sharing. The service does not promise a response time, and it is not a pager.
 
 ## What to check before you go live

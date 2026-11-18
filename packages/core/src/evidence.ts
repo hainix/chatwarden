@@ -153,7 +153,17 @@ export class EvidenceBuffer {
 
 interface RoomState {
   seats: Map<string, { subject: SubjectId | null; handle: string }>;
+  /** The inverse of `seats`: the stored subject id to the seats it holds (guest seats are under nobody). */
+  bySubject: Map<SubjectId, Set<string>>;
   tags: Record<string, string>;
+}
+
+function unindex(room: RoomState, seatId: string, subject: SubjectId | null): void {
+  if (subject === null) return;
+  const held = room.bySubject.get(subject);
+  if (held === undefined) return;
+  held.delete(seatId);
+  if (held.size === 0) room.bySubject.delete(subject);
 }
 
 /**
@@ -179,10 +189,17 @@ export class RoomRoster {
     this.checkTags(roomId, tags);
     let room = this.byRoom.get(roomId);
     if (!room) {
-      room = { seats: new Map(), tags: {} };
+      room = { seats: new Map(), bySubject: new Map(), tags: {} };
       this.byRoom.set(roomId, room);
     }
+    const before = room.seats.get(seatId);
+    if (before !== undefined) unindex(room, seatId, before.subject);
     room.seats.set(seatId, { subject, handle });
+    if (subject !== null) {
+      const held = room.bySubject.get(subject);
+      if (held === undefined) room.bySubject.set(subject, new Set([seatId]));
+      else held.add(seatId);
+    }
     if (tags) Object.assign(room.tags, tags);
   }
 
@@ -214,7 +231,26 @@ export class RoomRoster {
 
   /** Empty a seat. A no-op when the seat or room is unknown. Room tags are kept. */
   unseat(roomId: string, seatId: string): void {
-    this.byRoom.get(roomId)?.seats.delete(seatId);
+    const room = this.byRoom.get(roomId);
+    if (room === undefined) return;
+    const before = room.seats.get(seatId);
+    if (before !== undefined) unindex(room, seatId, before.subject);
+    room.seats.delete(seatId);
+  }
+
+  /** The seats of the room whose stored occupant is exactly `subject` (a stored id: ask for each alias of a person). Unsorted; [] for an unknown room or subject. O(seats held by that person). */
+  seatsOf(roomId: string, subject: SubjectId): string[] {
+    return [...(this.byRoom.get(roomId)?.bySubject.get(subject) ?? [])];
+  }
+
+  /** How many rooms the roster holds. */
+  roomCount(): number {
+    return this.byRoom.size;
+  }
+
+  /** How many seats the room holds now; 0 for an unknown room. */
+  seatCount(roomId: string): number {
+    return this.byRoom.get(roomId)?.seats.size ?? 0;
   }
 
   /** Seat ids currently held in the room, sorted; [] for an unknown room. A copy. */
@@ -246,7 +282,11 @@ export class RoomRoster {
   forget(subjects: ReadonlySet<SubjectId>): void {
     if (subjects.size === 0) return;
     for (const room of this.byRoom.values()) {
-      for (const seat of room.seats.values()) if (seat.subject !== null && subjects.has(seat.subject)) seat.subject = null;
+      for (const [seatId, seat] of room.seats) {
+        if (seat.subject === null || !subjects.has(seat.subject)) continue;
+        unindex(room, seatId, seat.subject);
+        seat.subject = null;
+      }
     }
   }
 }

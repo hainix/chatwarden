@@ -416,6 +416,11 @@ export interface Chatwarden {
     /** Should `viewerSeat` be shown a line `senderSeat` sent (mutes applied)? */
     visibleTo(roomId: string, viewerSeat: string, senderSeat: string): boolean;
     /**
+     * The seats of the room that must NOT be shown a line `senderSeat` sent (they muted or blocked its sender, or the sender blocked them): the other seats `visibleTo` is false for, sorted. It costs the people who
+     * muted or blocked the sender, not the seats in the room, so a line in a room of thousands is cheap. [] for an unknown room, an empty seat or a guest. This process's seats only, like `visibleTo`. Seat ids only. @experimental
+     */
+    hiddenFor(roomId: string, senderSeat: string): string[];
+    /**
      * Is this person chat-restricted right now (a chat restriction, a ban or an automatic timeout)? For a typing
      * indicator: show none while `restricted` is true. It runs the same decision as `accept`, and equals what
      * `accept` would answer for the seat when you pass BOTH `roomId` and `seatId`. Without them, an automatic
@@ -2022,6 +2027,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       accept: (roomId, seatId, text, o) => chat.accept(roomId, seatId, text, o),
       acceptPhrase: (roomId, seatId, phraseId, o) => chat.acceptPhrase(roomId, seatId, phraseId, o),
       visibleTo: (roomId, viewerSeat, senderSeat) => chat.visibleTo(roomId, viewerSeat, senderSeat),
+      hiddenFor: (roomId, senderSeat) => chat.hiddenFor(roomId, senderSeat),
       restricted: (who, o) => {
         try {
           return chat.restricted(personOf(who), o?.roomId, o?.seatId);

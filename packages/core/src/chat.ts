@@ -451,6 +451,29 @@ export class ChatService {
   }
 
   /**
+   * The seats of the room that must NOT be shown a line `senderSeat` sent: exactly the other seats `visibleTo` would hide it from, sorted. It costs the people who muted or blocked the sender (and those the sender
+   * blocked), not the seats in the room. An unknown room, an empty seat or a seat with no person (a guest) gives []. If the mute index cannot be read it falls back to asking `visibleTo` of every seat (which is
+   * slower and, like it, fails open). Never throws.
+   */
+  hiddenFor(roomId: string, senderSeat: string): string[] {
+    try {
+      const sender = this.roster.occupant(roomId, senderSeat);
+      if (sender === null || sender.subject === null) return [];
+      const seats = new Set<string>();
+      for (const viewer of this.mutes.unseenBy(sender.subject)) {
+        for (const alias of this.subjects.aliasesOf(viewer)) for (const seat of this.roster.seatsOf(roomId, alias)) if (seat !== senderSeat) seats.add(seat);
+      }
+      return [...seats].sort();
+    } catch (err) {
+      this.warn('chat.visibility_failed', { error: errName(err) });
+      return this.roster
+        .seats(roomId)
+        .filter((viewer) => viewer !== senderSeat && !this.visibleTo(roomId, viewer, senderSeat))
+        .sort();
+    }
+  }
+
+  /**
    * Is this person chat-restricted right now? For a typing indicator: show none while `restricted` is true. It runs
    * the same decision as `accept` (`resolveRestriction`), and equals what `accept` would answer for the seat when
    * `roomId` and `seatId` are both given. Without them the in-memory automatic timeout (the one that could not be

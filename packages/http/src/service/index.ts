@@ -38,6 +38,11 @@ export interface ServiceOptions extends ServiceWrapperOptions {
   warnings?: () => string[];
   /** `multiple` when the operator runs several service processes (the handshake says so). Default `single`. */
   processes?: 'single' | 'multiple';
+  /**
+   * Caps on what the service tracks (whole numbers of 1 or more). `maxSeatsPerRoom` (default 5000): a seat past it is refused (400 `invalid_value`); a seat the room already holds may change hands.
+   * `maxRooms` (default 10000): a new room past it closes the room idle the longest (as `DELETE /rooms/{room}`), logged as `chatwarden.service_room_evicted` without the room.
+   */
+  limits?: { maxSeatsPerRoom?: number; maxRooms?: number };
 }
 
 /**
@@ -52,6 +57,14 @@ export function serviceRoutes(cw: Chatwarden, options: ServiceOptions): RouteTab
   if (options.warnings !== undefined && typeof options.warnings !== 'function') throw new TypeError('serviceRoutes: warnings must be a function');
   if (options.processes !== undefined && options.processes !== 'single' && options.processes !== 'multiple') throw new RangeError('serviceRoutes: processes must be single or multiple');
   if (options.capabilities !== undefined && (typeof options.capabilities !== 'object' || options.capabilities === null)) throw new TypeError('serviceRoutes: capabilities must be an object');
+  if (options.limits !== undefined) {
+    const l = options.limits as unknown;
+    if (typeof l !== 'object' || l === null) throw new RangeError('serviceRoutes: limits must be an object');
+    for (const key of ['maxSeatsPerRoom', 'maxRooms'] as const) {
+      const v = (l as Record<string, unknown>)[key];
+      if (v !== undefined && (typeof v !== 'number' || !Number.isInteger(v) || v < 1)) throw new RangeError(`serviceRoutes: limits.${key} must be a whole number of 1 or more`);
+    }
+  }
   const { svc } = createServiceWrapper(options);
   return buildServiceTable(cw, svc, options);
 }
