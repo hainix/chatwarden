@@ -37,6 +37,7 @@ export type EraseMode = 'safety' | 'none';
  */
 export type PrivacyClock =
   | 'reportsMs'
+  | 'welfareReportsMs'
   | 'sanctionAfterEndMs'
   | 'strikesMs'
   | 'noticesMs'
@@ -63,6 +64,11 @@ export interface PrivacyRule {
   eraseNone: string;
   /** The clock the rows live on when nobody erases them. */
   retention: PrivacyClock;
+  /**
+   * A shorter clock for the rows of a report filed under the `welfare` reason (someone who may be at risk): the statement says both, so an owner who republishes it
+   * does not overstate how long the most sensitive reports stay. Only the report categories have one.
+   */
+  welfareClock?: 'welfareReportsMs';
   /**
    * The columns that hold a person INSIDE a JSON value (an id, a handle, a line, a sanction group), as `table.column`. A table can be claimed above and still hide a
    * person in such a column (a decision's result names every player it sanctioned), so the completeness test lists every `_json` column of the database and fails
@@ -120,6 +126,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'The person is removed from the report (who, seat, name and note); the report stays for the player it is about.',
     eraseNone: 'The person is removed from the report; the report stays for the player it is about.',
     retention: 'reportsMs',
+    welfareClock: 'welfareReportsMs',
     jsonColumns: [],
   },
   {
@@ -129,6 +136,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Deleted, with their decisions, AI reads, outcomes and links, except a report held for legal reasons. Where the decision of a report that stays names the person, that entry is removed.',
     eraseNone: 'Deleted, with their decisions, AI reads, outcomes and links, except a report held for legal reasons. Where the decision of a report that stays names the person, that entry is removed.',
     retention: 'reportsMs',
+    welfareClock: 'welfareReportsMs',
     jsonColumns: ['kit_decisions.result_json'],
   },
   {
@@ -138,6 +146,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseSafety: 'Lines of the person inside the reports of other players are replaced by a marker.',
     eraseNone: 'Lines of the person inside the reports of other players are replaced by a marker.',
     retention: 'reportsMs',
+    welfareClock: 'welfareReportsMs',
     jsonColumns: ['kit_reports.people_json', 'kit_reports.excerpt_json'],
   },
   {

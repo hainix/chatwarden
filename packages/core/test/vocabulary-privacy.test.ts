@@ -83,6 +83,31 @@ describe('statement(): every category with the live retention clock', () => {
     expect(st.categories.find((c) => c.category === 'reports_about')?.retentionMs).toBe(20 * DAY);
   });
 
+  it('names the welfare clock beside the reports clock for the three report categories, and null elsewhere', async () => {
+    const w = await privacyWorld();
+    const st = w.cw.privacy.statement();
+    for (const c of st.categories) {
+      const isReport = ['reports_filed', 'reports_about', 'report_lines'].includes(c.category);
+      expect(c.retentionWelfareMs, c.category).toBe(isReport ? RETENTION_DEFAULTS.welfareReportsMs : null);
+      if (isReport) expect(c.retentionMs, c.category).toBe(RETENTION_DEFAULTS.reportsMs);
+    }
+    expect(RETENTION_DEFAULTS.welfareReportsMs).toBe(30 * DAY);
+    expect(RETENTION_DEFAULTS.reportsMs).toBeGreaterThan(RETENTION_DEFAULTS.welfareReportsMs);
+  });
+
+  it('reads the live welfare clock, and never says more than the reports clock: the earlier deletion wins', async () => {
+    const shorter = (await privacyWorld({ retention: { welfareReportsMs: 7 * DAY } })).cw.privacy.statement();
+    expect(shorter.categories.find((c) => c.category === 'reports_about')?.retentionWelfareMs).toBe(7 * DAY);
+    expect(shorter.categories.find((c) => c.category === 'reports_about')?.retentionMs).toBe(RETENTION_DEFAULTS.reportsMs);
+    // Reports are kept 20 days and welfare reports 45: the general purge takes a welfare report at 20, so the statement says 20.
+    const longer = (await privacyWorld({ retention: { reportsMs: 20 * DAY, welfareReportsMs: 45 * DAY } })).cw.privacy.statement();
+    for (const cat of ['reports_filed', 'reports_about', 'report_lines']) {
+      expect(longer.categories.find((c) => c.category === cat)?.retentionMs, cat).toBe(20 * DAY);
+      expect(longer.categories.find((c) => c.category === cat)?.retentionWelfareMs, cat).toBe(20 * DAY);
+    }
+    expect(longer.categories.find((c) => c.category === 'strikes')?.retentionWelfareMs).toBeNull();
+  });
+
   it('a copy: editing the answer changes nothing', async () => {
     const w = await privacyWorld();
     const st = w.cw.privacy.statement();

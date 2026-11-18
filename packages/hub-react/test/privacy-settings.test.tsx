@@ -100,6 +100,19 @@ describe('the statement table lists categories with retention in days', () => {
     expect(panel()).toHaveTextContent('not legal advice');
   });
 
+  it('names the shorter welfare clock in the three report rows, and only there', async () => {
+    const w = await owner();
+    await open(w);
+    const table = await within(panel()).findByRole('table');
+    const welfare = (name: RegExp) => within(within(table).getByRole('row', { name })).queryByText(/30 days for reports of someone who may be at risk/);
+    for (const name of [/Reports they filed/, /Reports about them/, /Their lines in other reports/]) {
+      expect(welfare(name), String(name)).toBeInTheDocument();
+      expect(within(within(table).getByRole('row', { name })).getByText(/^90 days/), String(name)).toBeInTheDocument();
+    }
+    for (const name of [/Blocked lines/, /Legal holds/, /Signals/, /Audit trail/, /AI reads and marks/]) expect(welfare(name), String(name)).toBeNull();
+    expect(table).toHaveTextContent('30 days for reports of someone who may be at risk');
+  });
+
   it('follows the retention in force', async () => {
     const w = await owner({ signalsMs: 20 * 86_400_000 });
     await open(w);

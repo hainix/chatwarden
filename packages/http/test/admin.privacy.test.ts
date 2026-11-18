@@ -297,6 +297,18 @@ describe('GET /privacy/statement', () => {
     expect(r.headers?.['cache-control']).toBe('no-store');
     expect(w.routeAudit().length).toBe(0);
   });
+
+  it('names the welfare clock for the report categories only, read live', async () => {
+    const w = await world({ retention: { welfareReportsMs: 10 * 86_400_000 } });
+    const r = await w.call('GET', '/privacy/statement', OWNER);
+    const body = r.body as { categories: Array<{ category: string; retentionMs: number | null; retentionWelfareMs: number | null }> };
+    const by = (name: string) => body.categories.find((c) => c.category === name)!;
+    for (const name of ['reports_filed', 'reports_about', 'report_lines']) {
+      expect(by(name).retentionWelfareMs, name).toBe(10 * 86_400_000);
+      expect(by(name).retentionMs, name).toBeGreaterThan(10 * 86_400_000);
+    }
+    for (const name of ['strikes', 'holds', 'audit', 'ai']) expect(by(name).retentionWelfareMs, name).toBeNull();
+  });
 });
 
 describe('the bodies and the errors hold no line, handle, hash, key or secret', () => {

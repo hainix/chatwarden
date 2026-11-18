@@ -78,6 +78,7 @@ export const privacyEn = {
   'hub.privacy.statement.col.kept': 'Kept for',
   'hub.privacy.statement.days': '{count} days',
   'hub.privacy.statement.until': 'Until removed',
+  'hub.privacy.statement.welfare': '{count} days for reports of someone who may be at risk',
   'hub.privacy.statement.note': 'This describes what the kit stores. It is not legal advice and makes no claim that any law is met.',
   'hub.privacy.statement.cat.subjects': 'Person',
   'hub.privacy.statement.cat.identifiers': 'Accounts, keys, addresses',

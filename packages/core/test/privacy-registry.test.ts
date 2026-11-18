@@ -40,6 +40,18 @@ describe('registry: every PRIVACY_CATEGORIES entry has an export and an erase ru
     for (const r of PRIVACY_REGISTRY) if (r.retention !== null) expect(Object.keys(RETENTION_DEFAULTS), r.category).toContain(r.retention);
   });
 
+  it('the welfare clock: the report categories name it, as a real RetentionPolicy field, and nothing else does', () => {
+    const named = PRIVACY_REGISTRY.filter((r) => r.welfareClock !== undefined).map((r) => r.category);
+    expect(named).toEqual(['reports_filed', 'reports_about', 'report_lines']);
+    for (const r of PRIVACY_REGISTRY) {
+      if (r.welfareClock === undefined) continue;
+      expect(r.welfareClock, r.category).toBe('welfareReportsMs');
+      expect(Object.keys(RETENTION_DEFAULTS), r.category).toContain(r.welfareClock);
+      // It only means something beside the general reports clock.
+      expect(r.retention, r.category).toBe('reportsMs');
+    }
+  });
+
   it('the words never call a hold a legal duty, and the holds export says only that something is held', () => {
     const rule = (c: string) => PRIVACY_REGISTRY.find((r) => r.category === c)!;
     const all = PRIVACY_REGISTRY.flatMap((r) => [r.export, r.eraseSafety, r.eraseNone]).join(' ').toLowerCase();

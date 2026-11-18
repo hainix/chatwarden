@@ -91,7 +91,12 @@ export function PrivacySettings() {
                         <td>{c.export}</td>
                         <td>{c.eraseSafety}</td>
                         <td>{c.eraseNone}</td>
-                        <td>{c.retentionMs === null ? t('hub.privacy.statement.until') : t('hub.privacy.statement.days', { count: Math.round(c.retentionMs / DAY_MS) })}</td>
+                        <td>
+                          {c.retentionMs === null ? t('hub.privacy.statement.until') : <span>{t('hub.privacy.statement.days', { count: Math.round(c.retentionMs / DAY_MS) })}</span>}
+                          {c.retentionWelfareMs == null ? null : (
+                            <span className="cw-hint"> {t('hub.privacy.statement.welfare', { count: Math.round(c.retentionWelfareMs / DAY_MS) })}</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -23,6 +23,11 @@ export interface PrivacyStatement {
     eraseNone: string;
     /** How long the rows live when nobody erases them (ms), or null when they have no clock. Read live: it follows the retention policy in force. */
     retentionMs: number | null;
+    /**
+     * For the report categories only: how long the rows of a report filed under the `welfare` reason live (ms), never more than `retentionMs` (the earlier deletion wins). Null for every other
+     * category. Read live.
+     */
+    retentionWelfareMs: number | null;
   }>;
   /** Fixed words: the statement is a mechanism, not a legal conclusion. */
   disclaimer: string;
@@ -164,6 +169,13 @@ export function createPrivacy(deps: PrivacyDeps): PrivacyService {
     statement() {
       const live = { ...RETENTION_DEFAULTS, ...deps.retention() } as Record<string, number>;
       const clockOf = (c: PrivacyClock): number | null => (c === null ? null : (live[c] ?? null));
+      const welfareOf = (r: (typeof PRIVACY_REGISTRY)[number]): number | null => {
+        if (r.welfareClock === undefined) return null;
+        const own = live[r.welfareClock];
+        const general = clockOf(r.retention);
+        if (typeof own !== 'number') return null;
+        return general === null ? own : Math.min(own, general);
+      };
       return {
         categories: PRIVACY_REGISTRY.map((r) => ({
           category: r.category,
@@ -171,6 +183,7 @@ export function createPrivacy(deps: PrivacyDeps): PrivacyService {
           eraseSafety: r.eraseSafety,
           eraseNone: r.eraseNone,
           retentionMs: clockOf(r.retention),
+          retentionWelfareMs: welfareOf(r),
         })),
         disclaimer: PRIVACY_DISCLAIMER,
       };
