@@ -187,16 +187,18 @@ describe('GET /me says whether the community list is wired', () => {
   it('with community: features.community is true, whatever else is on, and nothing about it is a term', async () => {
     const w = await communityWorld();
     const me = await meOf(w);
-    expect(me.features).toEqual({ appeals: false, renames: false, keepBlocked: false, community: true });
+    expect(me.features).toEqual({ appeals: false, renames: false, keepBlocked: false, community: true, insights: false, rooms: true, workflow: false });
     noWords(me);
   });
 
-  it('without community the body is what it was: no features unless another is on, and never a community key', async () => {
+  it('without community the features are always there (0.2.0), never with a community key, and keepBlocked shows when on', async () => {
     const plain = await world();
-    expect((await meOf(plain)).features).toBeUndefined();
+    const plainFeatures = (await meOf(plain)).features;
+    expect(plainFeatures).toEqual({ appeals: false, renames: false, keepBlocked: false, insights: false, rooms: true, workflow: false });
+    expect(Object.hasOwn(plainFeatures as object, 'community')).toBe(false);
     const keep = await world({ overrides: { names: { keepBlocked: true } } });
     const features = (await meOf(keep)).features;
-    expect(features).toBeDefined();
+    expect(features?.keepBlocked).toBe(true);
     expect(Object.hasOwn(features as object, 'community')).toBe(false);
   });
 

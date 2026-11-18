@@ -2,7 +2,7 @@
 // order, and what else changes for the player. Part of the subpath `@chatwarden/core/notice-copy`, so the hub's "What the player sees" panel and
 // the services cannot disagree (a parity suite runs the real services over a matrix and compares).
 //
-// Pure: no store, no clock of its own (the time is passed in), no `node:` module. The input types carry NO moderator-only field: no reason,
+// Pure: no store, no clock of its own (the time is passed in), no Node built-in module. The input types carry NO moderator-only field: no reason,
 // evidence, gap note, actor, staff ref, group id, IP flag, AI read or appeal statement. A leak needs a type change.
 
 import type { PlayerNotice } from './notices.js';

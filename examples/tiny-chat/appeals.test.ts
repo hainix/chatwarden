@@ -206,8 +206,8 @@ describe('tiny-chat with CW_DEMO_APPEALS', () => {
     expect((await call(server, '/admin/appeals', { as: 'staff' })).status).toBe(404);
     expect((await call(server, '/admin/appeals/stats', { as: 'staff' })).status).toBe(404);
     expect((await call(server, '/admin/people/s_none/rename', { method: 'POST', as: 'staff', body: { reason: 'x', rule: 1 } })).status).toBe(404);
-    // 0.1.8's bodies: no features in /me, and no outcome notice kinds appear.
-    expect((await call(server, '/admin/me', { as: 'staff' })).json).not.toHaveProperty('features');
+    // 0.2.0: /me always carries features, and none of the appeals and names ones is on.
+    expect(((await call(server, '/admin/me', { as: 'staff' })).json as { features: Record<string, boolean> }).features).toMatchObject({ appeals: false, renames: false, keepBlocked: false });
   });
 
   it('the option wins over the environment, only the exact value 1 turns it on, and a profile override wins field by field', async () => {

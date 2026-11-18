@@ -148,11 +148,11 @@ describe('migration 19: the covering index for reporter outcomes', () => {
 
     const store = openStore({ db });
     expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
-    // Migration 26 adds columns (origin and the urgent-lane ones), all NULL or 0 on every old row: everything that was there is as it was.
-    const NEW_COLUMNS = ['origin', 'origin_key', 'urgent', 'handoff_at', 'handoff_by', 'escalated_to', 'escalated_by', 'escalated_at', 'evidence_ref'];
+    // Migration 26 adds columns (origin, the urgent-lane ones, scope and entity), all NULL or 0 on every old row: everything that was there is as it was.
+    const NEW_COLUMNS = ['origin', 'origin_key', 'urgent', 'handoff_at', 'handoff_by', 'escalated_to', 'escalated_by', 'escalated_at', 'evidence_ref', 'scope', 'entity_json'];
     const withoutNew = (rows: unknown[]): unknown[] => rows.map((r) => Object.fromEntries(Object.entries(r as Record<string, unknown>).filter(([k]) => !NEW_COLUMNS.includes(k))));
     expect(withoutNew(dump(db, 'kit_reports', 'rowid'))).toEqual(before);
-    const RECORD_FIELDS = ['urgent', 'evidenceRef', 'handoffAt', 'handoffBy', 'escalatedTo', 'escalatedBy', 'escalatedAt'];
+    const RECORD_FIELDS = ['urgent', 'evidenceRef', 'handoffAt', 'handoffBy', 'escalatedTo', 'escalatedBy', 'escalatedAt', 'scope', 'entity'];
     const oldShape = (rows: unknown[]): unknown[] => rows.map((r) => Object.fromEntries(Object.entries(r as Record<string, unknown>).filter(([k]) => !RECORD_FIELDS.includes(k))));
     expect({ tally: store.reporterTally(['s_rep3', 's_rep4']), list: oldShape(store.listReports({ limit: 50 })) }).toEqual({ tally: readsBefore.tally, list: oldShape(readsBefore.list) });
     expect(indexNames(db)).toContain(INDEX);

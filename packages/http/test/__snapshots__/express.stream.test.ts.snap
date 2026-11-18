@@ -7,9 +7,9 @@ cache-control: no-store
 content-type: application/json; charset=utf-8
 Date: <date>
 Connection: close
-Content-Length: 743
+Content-Length: 855
 
-{"actor":"ann","role":"moderator","can":{"reports.read":true,"reports.decide":true,"reports.decide.bulk":true,"sanctions.apply":true,"sanctions.apply.ban_permanent":false,"sanctions.revoke":true,"history.read":true,"blocked.read":true,"gaps.read":true,"gaps.close":false,"terms.read":true,"terms.write":true,"policy.read":true,"policy.write":false,"audit.read":false,"claims.override":false,"reasons.read":true,"reasons.write":false,"settings":false,"appeals.read":true,"appeals.decide":false,"ai.review":true,"ai.pause":false,"automation.write":false,"filters.read":true,"legal.hold":false,"reports.urgent":true,"reports.handoff":true,"reports.comment":true,"reports.escalate":true,"insights.read":true,"rooms.read":true,"rooms.manage":true}}",
+{"actor":"ann","role":"moderator","can":{"reports.read":true,"reports.decide":true,"reports.decide.bulk":true,"sanctions.apply":true,"sanctions.apply.ban_permanent":false,"sanctions.revoke":true,"history.read":true,"blocked.read":true,"gaps.read":true,"gaps.close":false,"terms.read":true,"terms.write":true,"policy.read":true,"policy.write":false,"audit.read":false,"claims.override":false,"reasons.read":true,"reasons.write":false,"settings":false,"appeals.read":true,"appeals.decide":false,"ai.review":true,"ai.pause":false,"automation.write":false,"filters.read":true,"legal.hold":false,"reports.urgent":true,"reports.handoff":true,"reports.comment":true,"reports.escalate":true,"insights.read":true,"rooms.read":true,"rooms.manage":true},"features":{"appeals":false,"renames":false,"keepBlocked":false,"rooms":true,"workflow":false,"insights":false}}",
   "head": "HTTP/1.1 200 OK
 content-type: application/json; charset=utf-8
 content-length: 3391

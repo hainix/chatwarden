@@ -13,7 +13,7 @@ describe('cw.policy and the reporting section', () => {
     const { cw } = await world();
     const s = cw.policy.get();
     expect(s.effective.reporting.flow).toBe('one_tap');
-    expect(s.effective.reporting.reasons).toHaveLength(12);
+    expect(s.effective.reporting.reasons).toHaveLength(13);
     expect(s.base.reporting).toEqual(s.effective.reporting);
   });
 
@@ -60,7 +60,7 @@ describe('cw.policy and the reporting section', () => {
     const { cw } = await world();
     cw.policy.save({ reporting: { reasons: reasons() }, customDuration: false }, { version: 0, ...OWNER });
     expect(cw.policy.reset('reporting')).toMatchObject({ ok: true, changed: ['reporting'] });
-    expect(cw.profile.reporting.reasons).toHaveLength(12);
+    expect(cw.profile.reporting.reasons).toHaveLength(13);
     expect(cw.profile.customDuration).toBe(false);
     expect(cw.policy.reset('reporting')).toMatchObject({ ok: true, changed: [] });
   });

@@ -275,7 +275,7 @@ describe('GET/PUT/DELETE /policy/profile and the reporting section', () => {
     const w = await world();
     const body = (await w.call('GET', '/policy/profile')).body as { effective: { reporting: { flow: string; reasons: unknown[]; thanks: string } }; base: { reporting: unknown }; layer: Record<string, unknown> };
     expect(body.effective.reporting.flow).toBe('one_tap');
-    expect(body.effective.reporting.reasons).toHaveLength(12);
+    expect(body.effective.reporting.reasons).toHaveLength(13);
     expect(body.effective.reporting.thanks).toBe("Thanks for the report. We'll look into it.");
     expect(body.base.reporting).toEqual(body.effective.reporting);
     expect(body.layer).toEqual({});
@@ -334,7 +334,7 @@ describe('GET/PUT/DELETE /policy/profile and the reporting section', () => {
     const res = await w.call('DELETE', '/policy/profile', { role: 'owner', actor: 'owner_ann', query: { section: 'reporting' }, body: { reason: 'back to defaults' } });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ ok: true, changed: ['reporting'] });
-    expect(w.cw.profile.reporting.reasons).toHaveLength(12);
+    expect(w.cw.profile.reporting.reasons).toHaveLength(13);
     expect(w.cw.profile.customDuration).toBe(false);
     expect(w.routeAudit().find((r) => r.action === 'policy.reset')?.detail).toEqual({ sections: ['reporting'], reason: 'back to defaults' });
   });

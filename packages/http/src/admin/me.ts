@@ -5,7 +5,7 @@ import type { RouteTable } from '../router.js';
 import { SCOPE_AWARE_PERMISSIONS } from './context.js';
 import type { AdminContext } from './context.js';
 
-/** Which of the optional staff features are on right now. Present in `GET /me` only when at least one is on. */
+/** Which of the optional staff features are on right now. Always present in `GET /me` since 0.2.0. */
 export interface MeFeatures {
   /** Appeals are on (`profile.appeals.enabled`, and the store can keep them). */
   appeals: boolean;

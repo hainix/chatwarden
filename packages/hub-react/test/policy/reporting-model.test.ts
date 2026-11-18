@@ -127,7 +127,7 @@ describe('reportingLayer', () => {
     const d = patchReason(fresh(), row(fresh(), 'hate').key, { label: 'Hate speech' });
     const layer = reportingLayer(d, base());
     expect(Object.keys(layer ?? {})).toEqual(['reasons']);
-    expect(layer?.reasons).toHaveLength(12);
+    expect(layer?.reasons).toHaveLength(13);
     expect(layer?.reasons?.find((r) => r.id === 'hate')?.label).toBe('Hate speech');
     expect(layer?.reasons?.[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', rules: [2], asksNote: false, enabled: true, urgent: false, thanks: null, showResources: false });
   });
@@ -154,7 +154,7 @@ describe('reportingLayer', () => {
     const d1 = patchReason(a.draft, a.key as string, { label: 'Hate' });
     const layer = reportingLayer(d1, base());
     const ids = layer?.reasons?.map((r) => r.id);
-    expect(ids).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'welfare', 'cheating', 'griefing', 'afk', 'hate_2', 'other']);
+    expect(ids).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'impersonation', 'welfare', 'cheating', 'griefing', 'afk', 'hate_2', 'other']);
   });
 
   it('"Something else" is always sent switched on', () => {
@@ -239,7 +239,7 @@ describe('the rows', () => {
 
   it('removes any other reason', () => {
     const d = fresh();
-    expect(removeReason(d, row(d, 'hate').key).reasons).toHaveLength(11);
+    expect(removeReason(d, row(d, 'hate').key).reasons).toHaveLength(12);
     expect(removeReason(d, 'no-such-key')).toBe(d);
   });
 
@@ -269,7 +269,7 @@ describe('the rows', () => {
   it('says where a row is after a move, one-based, out of the whole list', () => {
     const d = fresh();
     const moved = moveReason(d, row(d, 'hate').key, -1);
-    expect(positionOf(moved, row(moved, 'hate').key)).toEqual({ n: 1, total: 12 });
+    expect(positionOf(moved, row(moved, 'hate').key)).toEqual({ n: 1, total: 13 });
     expect(positionOf(moved, 'no-such-key')).toBeNull();
   });
 
@@ -287,7 +287,7 @@ describe('the rows', () => {
   it('adds a blank row on, before "Something else", up to 20 reasons, and then adds nothing', () => {
     let d = fresh();
     const a = addReason(d);
-    expect(a.draft.reasons).toHaveLength(13);
+    expect(a.draft.reasons).toHaveLength(14);
     expect(a.draft.reasons.at(-1)?.id).toBe('other');
     expect(a.draft.reasons.at(-2)).toMatchObject({ key: a.key, id: '', label: '', enabled: true, asksNote: false, rules: [] });
     d = a.draft;

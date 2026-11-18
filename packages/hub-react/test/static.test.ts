@@ -21,7 +21,8 @@ function walk(dir: string): string[] {
 const files = walk(src);
 const code = files.filter((f) => /\.tsx?$/.test(f));
 // The catalog itself and its comments name keys on purpose.
-const appCode = code.filter((f) => !f.endsWith('i18n.ts'));
+// The catalogues are data, not screens: i18n.ts (English) and the es and pt translations (checked by locales.*.test.ts against the English keys and placeholders).
+const appCode = code.filter((f) => !f.endsWith('i18n.ts') && !/[\\/]locales[\\/](es|pt)\.ts$/.test(f));
 const read = (f: string): string => readFileSync(f, 'utf8');
 const rel = (f: string): string => f.slice(pkg.length).replaceAll('\\', '/');
 /** The public name of a private default: `--cwd-bg` is what `--cw-bg` falls back to. */

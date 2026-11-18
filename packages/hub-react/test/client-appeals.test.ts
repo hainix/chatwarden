@@ -66,15 +66,15 @@ describe('the wire shapes', () => {
 });
 
 describe('against the real routes', () => {
-  it('me carries features only when appeals, renames or keepBlocked is on', async () => {
+  it('me always carries features: appeals, renames and keepBlocked follow the settings, and are false when off', async () => {
     const off = await hubWorld({ role: 'owner' });
-    expect(Object.keys(await off.client.me())).not.toContain('features');
+    expect((await off.client.me()).features).toMatchObject({ appeals: false, renames: false, keepBlocked: false });
     const on = await appealsHub({ role: 'owner', names: { renames: true } });
-    expect((await on.client.me()).features).toEqual({ appeals: true, renames: true, keepBlocked: false });
+    expect((await on.client.me()).features).toMatchObject({ appeals: true, renames: true, keepBlocked: false });
     const appealsOnly = await appealsHub({ role: 'owner' });
-    expect((await appealsOnly.client.me()).features).toEqual({ appeals: true, renames: false, keepBlocked: false });
+    expect((await appealsOnly.client.me()).features).toMatchObject({ appeals: true, renames: false, keepBlocked: false });
     const keeping = await appealsHub({ role: 'owner', names: { keepBlocked: true } });
-    expect((await keeping.client.me()).features).toEqual({ appeals: true, renames: false, keepBlocked: true });
+    expect((await keeping.client.me()).features).toMatchObject({ appeals: true, renames: false, keepBlocked: true });
   });
 
   it('changes carries the number of open appeals for a caller who may read them', async () => {

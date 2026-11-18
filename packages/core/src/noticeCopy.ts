@@ -1,7 +1,7 @@
 // The words and the view of a player notice: the one place that turns a `PlayerNotice` into text. The subpath `@chatwarden/core/notice-copy`.
 //
 // Player-react draws a notice with it, and the hub's "what the player sees" panel draws the same output, so the two cannot word a notice
-// differently. Pure: no React, no `node:` module, no clock of its own (the time is passed in), nothing read from a store.
+// differently. Pure: no React, no Node built-in module, no clock of its own (the time is passed in), nothing read from a store.
 //
 // The keys are player-react's (`player.notice.title.warning`, ...), so a studio's translation of those keys keeps working: spread
 // `NOTICE_WORDS` (or `englishWords()`) under yours and a key you leave out falls back to English.

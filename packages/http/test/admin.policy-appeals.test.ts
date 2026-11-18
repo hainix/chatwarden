@@ -6,7 +6,7 @@ import { errorOf, world } from './world.js';
 // DELETE ?section= resets one.
 
 const APPEALS_OFF = { enabled: false, perPlayerPerWeek: 3, allowSelfReview: false };
-const NAMES_OFF = { profanity: false, keepBlocked: false, renames: false, maskInHub: true };
+const NAMES_OFF = { profanity: false, keepBlocked: false, renames: false, maskInHub: true, reserved: [], reservedAllow: [], reservedRule: 2 };
 const PUT = (body: unknown, role: 'owner' | 'senior' | 'moderator' = 'owner', actor = 'owner_ann') => ({ role, actor, body });
 
 interface ProfileBody {

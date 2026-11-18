@@ -8,15 +8,26 @@ import { keysDeep } from './world.js';
 
 type World = Awaited<ReturnType<typeof appealsWorld>>;
 type Features = { appeals: boolean; renames: boolean; keepBlocked: boolean };
-const me = async (w: World, role: Role = 'moderator') => (await w.call('GET', '/me', { role })).body as { features?: Features; can: Record<string, boolean> };
+const OFF: Features = { appeals: false, renames: false, keepBlocked: false };
+type MeBody = { features: Features & Record<string, boolean>; can: Record<string, boolean> };
+const meRaw = async (w: World, role: Role = 'moderator') => (await w.call('GET', '/me', { role })).body as MeBody;
+/** `GET /me` with `features` narrowed to the three this file is about (0.2.0 always sends `features`, with `rooms`, `workflow` and `insights` besides). */
+const me = async (w: World, role: Role = 'moderator') => {
+  const body = await meRaw(w, role);
+  const { appeals, renames, keepBlocked } = body.features;
+  return { ...body, features: { appeals, renames, keepBlocked } as Features };
+};
 const changes = async (w: World, role: Role = 'moderator') => (await w.call('GET', '/changes', { role })).body as { token: string; changed: boolean; appeals?: number };
 const history = async (w: World, ref: string, role: Role = 'moderator') =>
   (await w.call('GET', `/people/${ref}/history`, { role })).body as { appeals?: Array<Record<string, unknown>>; renames?: Array<{ at: number; pending: boolean }> } & Record<string, unknown>;
 
-describe('GET /me has features only when on; GET /changes has appeals only for a caller with appeals.read', () => {
-  it('features is { appeals, renames, keepBlocked } when any is on, for every role, and absent when both are off', async () => {
+describe('GET /me features and appeals; GET /changes has appeals only for a caller with appeals.read', () => {
+  it('features is { appeals, renames, keepBlocked } for every role, all false when they are off, and always sent (0.2.0)', async () => {
     const off = await appealsWorld({ appeals: { enabled: false } });
-    for (const role of ['moderator', 'senior', 'owner'] as const) expect(Object.keys(await me(off, role)).sort(), role).toEqual(['actor', 'can', 'role']);
+    for (const role of ['moderator', 'senior', 'owner'] as const) {
+      expect(Object.keys(await meRaw(off, role)).sort(), role).toEqual(['actor', 'can', 'features', 'role']);
+      expect((await me(off, role)).features, role).toEqual(OFF);
+    }
     const appealsOnly = await appealsWorld();
     expect((await me(appealsOnly)).features).toEqual({ appeals: true, renames: false, keepBlocked: false });
     const renamesOnly = await appealsWorld({ appeals: { enabled: false }, names: { renames: true } });
@@ -30,7 +41,7 @@ describe('GET /me has features only when on; GET /changes has appeals only for a
     expect((await me(w)).features).toEqual({ appeals: false, renames: true, keepBlocked: false });
     // A store that cannot release a rename: the setting is on and the capability is not.
     (w.store as unknown as { withdrawNotice?: unknown }).withdrawNotice = undefined;
-    expect(Object.keys(await me(w))).not.toContain('features');
+    expect((await me(w)).features).toEqual(OFF);
     const withAppeals = await appealsWorld({ names: { renames: true } });
     (withAppeals.store as unknown as { withdrawNotice?: unknown }).withdrawNotice = undefined;
     expect((await me(withAppeals)).features).toEqual({ appeals: true, renames: false, keepBlocked: false });
@@ -38,11 +49,11 @@ describe('GET /me has features only when on; GET /changes has appeals only for a
 
   it('features is read live: turning a setting on or off in the policy changes the next answer', async () => {
     const w = await appealsWorld({ appeals: { enabled: false } });
-    expect(Object.keys(await me(w))).not.toContain('features');
+    expect((await me(w)).features).toEqual(OFF);
     w.cw.policy.save({ names: { renames: true } }, { version: 0, actor: 'owner', reason: 'on' });
     expect((await me(w)).features).toEqual({ appeals: false, renames: true, keepBlocked: false });
     w.cw.policy.save({ names: { renames: false } }, { version: 1, actor: 'owner', reason: 'off' });
-    expect(Object.keys(await me(w))).not.toContain('features');
+    expect((await me(w)).features).toEqual(OFF);
   });
 
   it('keepBlocked is in features: on alone it makes features present, it follows the policy live, and a store that cannot release a rename does not touch it', async () => {
@@ -53,17 +64,18 @@ describe('GET /me has features only when on; GET /changes has appeals only for a
     (all.store as unknown as { withdrawNotice?: unknown }).withdrawNotice = undefined;
     expect((await me(all)).features).toEqual({ appeals: true, renames: false, keepBlocked: true });
     const w = await appealsWorld({ appeals: { enabled: false } });
-    expect(Object.keys(await me(w))).not.toContain('features');
+    expect((await me(w)).features).toEqual(OFF);
     w.cw.policy.save({ names: { keepBlocked: true } }, { version: 0, actor: 'owner', reason: 'on' });
     expect((await me(w)).features).toEqual({ appeals: false, renames: false, keepBlocked: true });
     w.cw.policy.save({ names: { keepBlocked: false } }, { version: 1, actor: 'owner', reason: 'off' });
-    expect(Object.keys(await me(w))).not.toContain('features');
+    expect((await me(w)).features).toEqual(OFF);
   });
 
   it('keepBlocked is a boolean whatever the setting says, never a count or the setting object', async () => {
     const w = await appealsWorld({ names: { keepBlocked: true, maskInHub: false } });
-    const f = (await me(w)).features as Features;
-    expect(Object.keys(f).sort()).toEqual(['appeals', 'keepBlocked', 'renames']);
+    const f = (await meRaw(w)).features;
+    expect(Object.keys(f).sort()).toEqual(['appeals', 'insights', 'keepBlocked', 'renames', 'rooms', 'workflow']);
+    for (const value of Object.values(f)) expect(typeof value).toBe('boolean');
     expect(typeof f.keepBlocked).toBe('boolean');
   });
 

@@ -41,7 +41,7 @@ describe('who sees it and who edits', () => {
   it('is a panel of Advanced, after the others', async () => {
     const w = await owner();
     await open(w);
-    const names = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label') ?? within(r).queryByRole('heading')?.textContent);
+    const names = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label') ?? within(r).queryAllByRole('heading')[0]?.textContent);
     expect(names).toContain('Slow mode and flooding');
     expect(names.indexOf('Appeals')).toBeGreaterThan(names.indexOf('Slow mode and flooding'));
   });
