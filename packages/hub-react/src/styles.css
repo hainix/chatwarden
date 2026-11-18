@@ -4479,6 +4479,19 @@
 .cw-hub .cw-evidence {
   margin: 0;
 }
+.cw-hub .cw-context {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-contexts-list {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
 .cw-hub .cw-line-menu {
   display: inline-flex;
   flex-wrap: wrap;

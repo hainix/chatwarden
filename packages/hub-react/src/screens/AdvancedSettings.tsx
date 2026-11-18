@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { toHubError } from '../client.js';
 import { useHub } from '../context.js';
-import { LazyAppealSettings, LazyDeskSettings, LazyFilterSettings, LazyNameSettings, LazyRoomsSettings, LazyPaceSettings, LazyPrivacySettings, LazySafetySettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
+import { LazyAppealSettings, LazyDeskSettings, LazyFilterSettings, LazyNameSettings, LazyRoomsSettings, LazyPaceSettings, LazyPrivacySettings, LazyRoomContexts, LazySafetySettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
 import { usePolicy } from '../policyHooks.js';
 import { ErrorBlock, Fetched } from '../ui.js';
 import { YourView } from './YourView.js';
@@ -47,6 +47,8 @@ export function AdvancedSettingsScreen() {
               <LazyDeskSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               {/* The rooms this server knows, for a role that may read them: a lock or emergency mode per room. */}
               {can('rooms.read') && <LazyRoomsSettings onFailed={() => setFailed(true)} />}
+              {/* The room contexts the profile declares, read only (they are set in code): for a role that may read the policy; a scoped caller is not offered it. */}
+              {can('policy.read') && <LazyRoomContexts onFailed={() => setFailed(true)} />}
               {/* The owner's door to a person's data (privacy requests): nobody else is offered it. */}
               {me.role === 'owner' && <LazyPrivacySettings onFailed={() => setFailed(true)} />}
             </>

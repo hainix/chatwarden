@@ -17,7 +17,7 @@ import type { DecisionForm } from '../decision.js';
 import { LazyAiParts } from '../lazyParts.js';
 import { NameRevealContext } from '../names.js';
 import type { NameReveal } from '../names.js';
-import type { AiReadView, DecideInput, PersonHistory, ReportDetail } from '../types.js';
+import type { AiReadView, ContextRow, DecideInput, PersonHistory, ReportDetail } from '../types.js';
 import { QUICK_ACT_COOLDOWN_MS, hasAged, monotonicNow } from './actGuard.js';
 import { useCareOpen } from './useCare.js';
 import type { CareOpen } from './useCare.js';
@@ -79,6 +79,26 @@ export function useCase(): CaseValue {
   const value = useContext(CaseContext);
   if (value === null) throw new Error('useCase must be used inside <CaseProvider>');
   return value;
+}
+
+/**
+ * The room type chip: the label of the context the report's room had. It is drawn only when the report has a context, the caller may read the policy and the server declares at least one context
+ * (one context used in every room still shows: the kind of room is information); the label is the name when the context has none or the profile no longer declares it (a typo is visible).
+ * A report with no context, and a caller who may not read the policy (a scoped moderator among them), ask nothing.
+ */
+export function ContextChip() {
+  const { t, client, can } = useHub();
+  const { detail } = useCase();
+  const context = detail.data?.report.context ?? null;
+  const wants = context !== null && can('policy.read');
+  const list = useHubData<ContextRow[] | null>(wants ? 'contexts' : 'contexts:idle', () => (wants ? client.contexts().then((r) => r.contexts) : Promise.resolve(null)));
+  if (!wants || list.data === undefined || list.data === null || list.data.length === 0) return null;
+  const label = list.data.find((c) => c.name === context)?.label ?? context;
+  return (
+    <span className="cw-tag cw-tag--idle cw-context" role="note" aria-label={t('hub.case.context', { label })}>
+      {label}
+    </span>
+  );
 }
 
 /** Same, for the parts that also show without a case (the context pane on a screen with no case). */

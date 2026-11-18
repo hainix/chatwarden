@@ -43,6 +43,7 @@ import type {
   ListAuditQuery,
   InsightsView,
   PersonLinksView,
+  ContextRow,
   RoomMode,
   RoomRow,
   ListReportsQuery,
@@ -217,6 +218,11 @@ export interface HubClient {
    * @experimental
    */
   rooms(): Promise<{ rooms: RoomRow[] }>;
+  /**
+   * `GET /policy/contexts` (needs `policy.read`; 403 for a scoped caller): the room contexts the profile declares, as `{ name, label, overrides }` (the sections each sets, names only). They are declared in code, so the hub
+   * only lists them and shows the label of a case's room.
+   */
+  contexts(): Promise<{ contexts: ContextRow[] }>;
   /**
    * `POST /rooms/:room/mode` (needs `rooms.manage`): put the room in `normal` (at once), `locked` or `emergency` (each ends by itself after `forMs`, 60 000 to 86 400 000, else the profile's default).
    * Rejects with `invalid_mode`, `invalid_value` or `invalid_request` (400). A mode is never a sanction. @experimental
@@ -442,6 +448,7 @@ export function createHubClient(transport: Transport): HubClient {
     clearEscalation: (id) => call<ReportMarkResult>({ method: 'DELETE', path: `/reports/${enc(id)}/escalate` }),
     insights: (days) => get<InsightsView>('/insights', q({ days })),
     rooms: () => get<{ rooms: RoomRow[] }>('/rooms'),
+    contexts: () => get<{ contexts: ContextRow[] }>('/policy/contexts'),
     setRoomMode: (room, mode, forMs) => post(`/rooms/${enc(room)}/mode`, { mode, ...(forMs === undefined ? {} : { forMs }) }),
     retractLine: (room, line, options = {}) => post<{ count: number }>(`/rooms/${enc(room)}/lines/${enc(line)}/retract`, options.allFromAuthor === true ? { allFromAuthor: true } : undefined),
     personLinks: (ref) => get<PersonLinksView>(`/people/${enc(ref)}/links`),

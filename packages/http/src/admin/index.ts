@@ -6,6 +6,7 @@ import { auditRoutes } from './audit.js';
 import { blockedRoutes } from './blocked.js';
 import { communityRoutes } from './community.js';
 import type { CommunityAdmin } from './community.js';
+import { contextRoutes } from './contexts.js';
 import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
 import { filterRoutes } from './filters.js';
@@ -54,6 +55,7 @@ export { personRoutes } from './people.js';
 export { privacyRoutes } from './privacy.js';
 export { legalRoutes } from './legal.js';
 export type { Me, MeFeatures } from './me.js';
+export { contextRoutes } from './contexts.js';
 export { DEFAULT_GAME_NAME, policyRoutes } from './policy.js';
 export type { PolicyOptions } from './policy.js';
 export { reportRoutes } from './reports.js';
@@ -120,6 +122,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
       ...(options.contactUrl === undefined ? {} : { contactUrl: options.contactUrl }),
     }),
     ...policyProfileRoutes(ctx),
+    ...contextRoutes(ctx),
     ...filterRoutes(ctx, options.recentLines ?? (() => [])),
     ...aiRoutes(ctx),
     ...auditRoutes(ctx),

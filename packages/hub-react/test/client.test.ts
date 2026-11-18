@@ -286,6 +286,7 @@ describe('every staff route has a client method', () => {
       ['insights', () => c.insights(), { method: 'GET', path: '/insights' }],
       ['insights 7 days', () => c.insights(7), { method: 'GET', path: '/insights', query: { days: 7 } }],
       ['rooms', () => c.rooms(), { method: 'GET', path: '/rooms' }],
+      ['contexts', () => c.contexts(), { method: 'GET', path: '/policy/contexts' }],
       ['setRoomMode locked', () => c.setRoomMode('RX', 'locked', 120_000), { method: 'POST', path: '/rooms/RX/mode', body: { mode: 'locked', forMs: 120_000 } }],
       ['setRoomMode normal sends no length', () => c.setRoomMode('RX', 'normal'), { method: 'POST', path: '/rooms/RX/mode', body: { mode: 'normal' } }],
       ['personLinks', () => c.personLinks(person), { method: 'GET', path: `/people/${person}/links` }],

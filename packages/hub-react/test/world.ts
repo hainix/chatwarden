@@ -26,6 +26,8 @@ export const DAY = 24 * HOUR;
 export interface WorldOptions {
   role?: Role | null;
   actor?: string;
+  /** Make the caller a scoped moderator (`Authz.scope`): they see only the reports of rooms tagged with one of these labels. */
+  scope?: string[];
   permissions?: Partial<Record<PermissionKey, Role>>;
   /** Mount the term routes (default true). */
   terms?: boolean;
@@ -122,8 +124,8 @@ export async function hubWorld(opts: WorldOptions = {}) {
   });
   const community = opts.community === undefined ? undefined : makeCommunity(live, opts.community);
   // The caller is whoever `session` says: tests change it to see a role, or nobody (401).
-  const session: { who: { actor: string; role: Role } | null } = {
-    who: opts.role === null ? null : { actor: opts.actor ?? 'ann@example.test', role: opts.role ?? 'moderator' },
+  const session: { who: { actor: string; role: Role; scope?: string[] } | null } = {
+    who: opts.role === null ? null : { actor: opts.actor ?? 'ann@example.test', role: opts.role ?? 'moderator', ...(opts.scope === undefined ? {} : { scope: opts.scope }) },
   };
   // A second moderator: a client made by `clientFor` sends who it is in a header, so two people can act at once on one server.
   const routes: RouteTable = adminRoutes(cw, {

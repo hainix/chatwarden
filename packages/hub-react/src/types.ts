@@ -87,6 +87,16 @@ export type PolicyState = Omit<KitPolicyState, 'limits'> & { limits?: PolicyLimi
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 /** `GET /insights`: the team's numbers over 7, 30 or 90 days: counts and times only, no person and no staff member. @experimental */
 export type InsightsView = InsightsResult;
+/**
+ * One room context the profile declares (`GET /policy/contexts`): its name, the label on the case chip, and the chat-time sections it overrides (names only, never a value).
+ * @experimental
+ */
+export interface ContextRow {
+  name: string;
+  label: string;
+  overrides: string[];
+}
+
 /** One room `GET /rooms` lists: its id, the game's tags, how many players are seated and its mode now (`until`: when a mode other than normal ends). No seat id, no handle. @experimental */
 export interface RoomRow {
   roomId: string;
@@ -240,6 +250,8 @@ export interface Claim {
  * @experimental
  */
 export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
+  /** The context the report's room had (its `context` tag, as written), or null; absent from an older server. The case chip shows its label. */
+  context?: string | null;
   /** Who marked the case as passed to the game's safety team and when (the first mark only), or null. Staff ids, never a player's. @experimental */
   handoff?: { at: number; by: string | null } | null;
   /** With `desk.workflow` on: the staff thread, oldest first. Absent with it off. @experimental */

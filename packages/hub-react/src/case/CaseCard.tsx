@@ -15,7 +15,7 @@ import { UNDO_MS } from '../toasts.js';
 import type { QueueGroup } from '../queue.js';
 import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
-import { useCase } from './CaseContext.js';
+import { ContextChip, useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
 import { useFeatures } from '../features.js';
 import { LazyAiParts, LazyCommentThread, LazyPlayerPreview } from '../lazyParts.js';
@@ -442,6 +442,7 @@ export function CaseCard() {
             <NameToggle flagged={target.handleFlagged} place="head" />
             <CaseMenu />
             <p className="cw-scard-sub">
+              <ContextChip />{' '}
               {reportedLine(t, locale, report, people, now(), group === null ? null : { reports: group.reports, reasons: group.reasons })}
             </p>
           </header>

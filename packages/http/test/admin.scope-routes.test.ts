@@ -53,6 +53,7 @@ const DENIED_ROUTES = [
   'GET /people/:ref/links',
   'GET /people/:ref/privacy/export',
   'GET /policy',
+  'GET /policy/contexts',
   'GET /policy/profile',
   'GET /privacy/statement',
   'GET /reports/:id/bundle',

@@ -19,6 +19,9 @@ const HISTORY_REPORTS_DEFAULT = 20;
  */
 const ruleOf = (cw: Chatwarden, report: StaffReport) => suggestedRule(cw.profile.reporting.reasons, report.reportedReason, cw.rules);
 
+/** The context the report's room had (its `context` tag as written, even one the profile does not declare: the hub shows it), or null. */
+const contextOf = (r: Pick<StaffReport, 'tags'>): string | null => (Object.hasOwn(r.tags, 'context') && typeof r.tags['context'] === 'string' ? r.tags['context'] : null);
+
 /** The room for `suggest`: the report's own (an empty one is no room). Never from the request. */
 const roomOf = (report: StaffReport): string | null => (report.roomId === '' ? null : report.roomId);
 
@@ -315,6 +318,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
           : summarize(r, undefined, undefined, labelOf(r), undefined, undefined, false, originLabelOf(r), workflow)),
         ...flagKey(flagged, 'targetHandleFlagged', r.targetHandle),
         ...flagKey(flagged, 'reporterHandleFlagged', r.reporterHandle),
+        // The room's context, only for a room that had one (a queue of untagged rooms is byte-for-byte what it was).
+        ...(contextOf(r) === null ? {} : { context: contextOf(r) }),
       }));
       return { status: 200, body: { items, next: page.next } };
     }, { scoped: true }),
@@ -383,6 +388,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const shown = {
         ...plain,
         urgent: report.urgent,
+        context: contextOf(report),
         handoff: handoffAt === null ? null : { at: handoffAt, by: handoffBy },
         ...workflow,
         ...originOf(report),

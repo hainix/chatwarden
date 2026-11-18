@@ -8,7 +8,7 @@ import { SurgeLine } from '../case/SurgeLine.js';
 import { HiddenExcerpt } from '../case/HiddenExcerpt.js';
 import { CaseMenu } from '../case/CaseMenu.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
-import { useCase } from '../case/CaseContext.js';
+import { ContextChip, useCase } from '../case/CaseContext.js';
 import { DecisionBar } from '../case/DecisionBar.js';
 import { isWaiting } from '../decisions.js';
 import { RecordItem } from '../case/Record.js';
@@ -58,6 +58,7 @@ function Header({ detail }: { detail: ReportDetail }) {
           {reasons.map((r) => (
             <Tag key={r.id ?? 'none'}>{reasonSaid(t, r.label)}</Tag>
           ))}
+          <ContextChip />
         </span>
         <span className="cw-casehead-gap" />
         <Viewing />

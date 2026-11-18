@@ -81,6 +81,7 @@ export const partLoaders: {
   commentThread: () => Promise<ComponentType<Record<string, never>>>;
   deskPanel: () => Promise<ComponentType<PanelProps>>;
   roomsPanel: () => Promise<ComponentType<Record<string, never>>>;
+  contextsPanel: () => Promise<ComponentType<Record<string, never>>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
@@ -106,6 +107,7 @@ export const partLoaders: {
   commentThread: () => import('./case/CommentThread.js').then((m) => m.CommentThread),
   deskPanel: () => import('./screens/DeskSettings.js').then((m) => m.DeskSettings),
   roomsPanel: () => import('./screens/RoomsSettings.js').then((m) => m.RoomsSettings),
+  contextsPanel: () => import('./policy/RoomContexts.js').then((m) => m.RoomContexts),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -191,6 +193,7 @@ const whatToDo = lazyPart(() => partLoaders.whatToDo(), true);
 const commentThread = lazyPart(() => partLoaders.commentThread());
 const deskPanel = lazyPart(() => partLoaders.deskPanel());
 const roomsPanel = lazyPart(() => partLoaders.roomsPanel());
+const contextsPanel = lazyPart(() => partLoaders.contextsPanel());
 const playerPreview = lazyPart(() => partLoaders.playerPreview(), true, <p className="cw-hint cw-pv-hold" aria-hidden="true">{'\u00a0'}</p>, <PreviewUnavailable />);
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
@@ -259,6 +262,9 @@ export const LazyDeskSettings = deskPanel.Part;
 /** The "Rooms" panel of Settings > Advanced (lock or emergency mode per room): loaded when that screen is opened by a role that may read rooms. */
 export const LazyRoomsSettings = roomsPanel.Part as ComponentType<FailureAware>;
 
+/** The "Room contexts" list of Settings > Advanced (read only, for a role that may read the policy): loaded when that screen is opened. */
+export const LazyRoomContexts = contextsPanel.Part as ComponentType<FailureAware>;
+
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
@@ -285,6 +291,7 @@ export function resetLazyParts(): void {
   commentThread.reset();
   deskPanel.reset();
   roomsPanel.reset();
+  contextsPanel.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */
