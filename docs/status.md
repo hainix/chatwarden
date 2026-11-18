@@ -2,7 +2,7 @@
 
 Updated 2026-11-18. The full roadmap and the reasoning behind it: [design/2026-11-09-product-scope.md](design/2026-11-09-product-scope.md).
 
-## 0.2.1: built on branch `appeals-landing`, not yet published
+## 0.2.1: published (2026-11-18, all ten packages on npm, tag `v0.2.1`, PR #42)
 
 A patch release, additive: nothing in it breaks a 0.2.0 input. Appeal links, a landing page, delivery and feedback. Not tagged, not published; the owner's steps are in [RELEASING.md](../RELEASING.md).
 
