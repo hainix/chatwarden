@@ -147,6 +147,12 @@ selector. The element is `display: block` and `hidden` hides it.
 **The font.** The hub uses the system UI font. A `@font-face` rule inside a shadow root is ignored by browsers, so to use Instrument
 Sans, load `@chatwarden/hub-react/font.css` in your page (the page's own CSS) and set `--cw-font: 'Instrument Sans', system-ui, sans-serif` on the element.
 
+## Languages
+
+Spanish and Portuguese are machine-drafted (by an AI model) and have not been reviewed by a person. Read them with someone who speaks the language before you turn one on for your team.
+
+`locale="es"` (or `es-419`, `pt`, `pt-BR`) loads that language's catalogue; changing the attribute loads the new one, and a bad value falls back to English as before. A `t` property you set always wins. The standalone script carries both catalogues (it holds every lazy part in one file, about 74 KB gzipped more); with the module and your own bundler each language is a chunk loaded on demand. The words, the keys to review first and how a community adds a language are in [the translator's guide](https://github.com/hainix/chatwarden/blob/main/docs/recipes/translations.md).
+
 ## Keyboard shortcuts
 
 The hub's shortcuts (J and K to move between cases, N to take the next, `?` for help, Ctrl or Cmd+K for the command bar) work while

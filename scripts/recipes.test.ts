@@ -17,7 +17,7 @@ const cases = join(root, 'examples', 'recipes', 'cases');
 const recipes = join(root, 'docs', 'recipes');
 const PAGES = ['express', 'fastify', 'nextjs', 'socketio', 'colyseus'];
 // Guides for the person who runs the moderation (0.2.0): prose with at most a short snippet, not a framework recipe, so the golden-file rules above do not apply to them.
-const GUIDES = ['urgent-and-welfare', 'raids', 'digest', 'kids-rooms', 'creator-channels', 'service-mode'];
+const GUIDES = ['urgent-and-welfare', 'raids', 'digest', 'kids-rooms', 'creator-channels', 'service-mode', 'translations'];
 const MARKER = /^<!-- golden: (\S+) -->$/;
 const FENCE = /^```(\w*)$/;
 

@@ -24,8 +24,12 @@ import { bundle } from '../build/build.mjs';
 // automate" part count in full, after the appeals and names screens of 0.1.9 had brought it to the old cap (measured 892,021 raw). The gzip budget holds.
 // Raised to 264 KB gzipped at 0.2.0 (names and "What the player sees"): the standalone bundle inlines every lazy chunk, so the panel, its words and the shared
 // notice code of core's notice-copy subpath count in full (measured 253,777 gzipped, 940,159 raw: the raw cap holds).
-const BUDGET_GZIP = 264 * 1024;
-const BUDGET_RAW = 960 * 1024;
+// Raised to 400 KB gzipped and 1.5 MB raw at 0.2.0 (Spanish and Portuguese): the standalone script inlines every lazy chunk, so both catalogues of the hub (about 2,260 words each, the hub, the AI parts and the
+// privacy parts) count in full, whichever one a page uses: +74 KB gzipped, +312 KB raw (measured 377,273 gzipped, 1,446,564 raw). The script was already past the old caps before them (302,958 gzipped,
+// 1,133,896 raw, measured with the catalogues left out): the urgent desk, the rooms, the privacy parts, the filters and the community list all landed since the last raise and this test was not run
+// without a built hub. A page that wants one language and a small script uses the module with its own bundler, where each catalogue is a lazy chunk.
+const BUDGET_GZIP = 400 * 1024;
+const BUDGET_RAW = 1536 * 1024;
 
 interface Built {
   standalone: { text: string; bytes: number; gzip: number };

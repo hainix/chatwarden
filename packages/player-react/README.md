@@ -472,6 +472,15 @@ player components, the chat entry on its own is about 15 KB, and `chat.css` is a
 `ChatClosedWhy`, `SseTransportOptions`, `ChatFrame`, `WireLine`, `WireMode`, `WireMuted`, `WirePhrase`, `WirePhrases`, `WireReadOnly`, `WireRefusal`, `WireRestriction`, `SendResult`,
 `MuteResult`, `MuteTarget`, `ChatState`, `StateLine` and `ChatAction`. All are `@experimental` until 0.2.
 
+## Languages
+
+Spanish and Portuguese are machine-drafted (by an AI model) and have not been reviewed by a person. Have someone who speaks the language read the notice, refusal and appeal words before you turn one on for players; English is the safe choice until then.
+
+- **What ships.** `@chatwarden/player-react/locales/es` and `/pt`, each exporting the words (235 keys: the player components, the chat box and the default report reasons and thank-you) and a `meta` that says `machine-draft`. They are lazy chunks, not part of the main entry.
+- **Turn one on.** `const t = await loadPlayerT(navigator.language)`, then pass `t` and the same `locale` to the components and the chat box. `matchLocale(tag)` answers `'es'`, `'pt'` or `null` (`es-MX`, `es-419`, `pt-BR` and `pt-PT` match); any other language, and a catalogue that cannot load, give the English `t`.
+- **Report reasons.** The default reasons' labels and hints and the default thank-you come from `GET /rules` in English. The dialog shows the catalogue's words only while the server's text is still that English default; a reason you renamed, or a thank-you you wrote, is shown as sent. Rule titles and text, the summary and the code of conduct stay yours to translate.
+- **Review them, or add a language.** See [the translator's guide](https://github.com/hainix/chatwarden/blob/main/docs/recipes/translations.md): the keys to read first, the test, the allowlist and how `meta` changes in a pull request.
+
 ## Theming
 
 The components ship one stylesheet, `@chatwarden/player-react/styles.css`. Import it once (a bundler, or a `<link>`). Every colour, size,

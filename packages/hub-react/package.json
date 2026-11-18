@@ -37,12 +37,26 @@
       "default": "./dist/src/headless/index.js"
     },
     "./styles.css": "./src/styles.css",
-    "./font.css": "./font.css"
+    "./font.css": "./font.css",
+    "./locales/es": {
+      "types": "./dist/src/locales/es.d.ts",
+      "default": "./dist/src/locales/es.js"
+    },
+    "./locales/pt": {
+      "types": "./dist/src/locales/pt.d.ts",
+      "default": "./dist/src/locales/pt.js"
+    }
   },
   "typesVersions": {
     "*": {
       "headless": [
         "dist/src/headless/index.d.ts"
+      ],
+      "locales/es": [
+        "dist/src/locales/es.d.ts"
+      ],
+      "locales/pt": [
+        "dist/src/locales/pt.d.ts"
       ]
     }
   },

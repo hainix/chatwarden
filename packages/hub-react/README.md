@@ -890,6 +890,15 @@ All of this is `@experimental` until the release settles it, and each part sits 
 - **Protected names.** Settings, Advanced, Names gains "Protected names" and "Allowed exceptions" (one name per line, at most 200 each); the owner edits, everyone else reads. A name that reads as a protected one, ignoring look-alike letters, digits and punctuation, is refused `name_reserved`.
 - **Match.** Add or edit a term in Chinese, Japanese, Thai, Lao, Khmer or Burmese and a "Match" choice appears, only once such a word is typed: "Whole words (recommended)" or "Anywhere in the text", each with a line on what it catches (`matchMode`: `segment` or `contains`; a plain a-z term has no choice). A term that matches anywhere carries the tag "Matches anywhere" in the list, and the dry run (`checkTerm({ term, language, matchMode })`) reads it the same way, so the lines it would have blocked are the ones the saved term blocks.
 
+## Languages
+
+Spanish and Portuguese are machine-drafted (by an AI model) and have not been reviewed by a person. Read the words with someone who speaks the language before you turn one on for your team: the notice, refusal, appeal and sanction words matter most.
+
+- **What ships.** `@chatwarden/hub-react/locales/es` and `/pt` (neutral Latin American Spanish with `tu`, Brazilian Portuguese with `voce`; `pt-PT` is matched to it). Each file exports the hub's words (`es`, 1,955 keys), the AI parts' (`esAi`, 202), the privacy parts' (`esPrivacy`, 104) and a `meta` that says `machine-draft`. They are lazy chunks: the first load carries none of their words.
+- **Turn one on.** Give `locale` and no `t`: `<Hub client={client} locale="es" />`. The hub loads the catalogue, shows its quiet loading state until the words arrive (no flash of English), and keeps English if the chunk cannot load. A `t` you give always wins, and any other language reads English. `matchLocale(locale)` answers `'es'`, `'pt'` or `null`; `loadHubCatalog(locale)` returns the merged catalogue to hand to `createT` when you build your own `t`.
+- **Review them.** The keys to read first (notices, refusals, appeals, the words for sanctions) are listed in [the translator's guide](https://github.com/hainix/chatwarden/blob/main/docs/recipes/translations.md), with the test to run, the allowlist and how `meta` changes in a pull request.
+- **Add a language.** Copy a locale file, translate every key, add the tag to `locales/match.ts` and `locales/load.ts`, and add it to the loops of the locale tests. The guide has the steps.
+
 ## Theming
 
 The hub ships one stylesheet, `@chatwarden/hub-react/styles.css`. Import it once (a bundler, or a `<link>`). Every colour, size,

@@ -132,6 +132,15 @@ describe('bundle size', () => {
     expect(eagerInputs.filter((i) => ['person/Privacy', 'person/ErasePreview', 'screens/PrivacySettings', 'case/Hold', 'privacy/i18n', 'privacy/download'].some((part) => i.includes(part)))).toEqual([]);
   });
 
+  it('the Spanish and Portuguese catalogues are lazy chunks: each is its own chunk, and a first load carries none of their words (the budgets above are unchanged)', async () => {
+    const { eagerInputs, entryInputs, chunkRoots, text } = await bundle();
+    for (const root of ['locales/es.ts', 'locales/pt.ts']) expect(chunkRoots.some((r) => r.endsWith(root)), root).toBe(true);
+    expect(eagerInputs.filter((i) => /src\/locales\/(es|pt)\.ts$/.test(i))).toEqual([]);
+    expect(entryInputs.filter((i) => /src\/locales\/(es|pt)\.ts$/.test(i))).toEqual([]);
+    // Only the matching and loading code (a few hundred bytes) is in the first load, not a word of either language.
+    expect(text).not.toMatch(/Resumen|Regla de la comunidad|Regra da comunidade/);
+  });
+
   it('bundles none of React, React DOM or the kit', async () => {
     const { inputs } = await bundle();
     expect(inputs.filter((i) => /node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(i))).toEqual([]);

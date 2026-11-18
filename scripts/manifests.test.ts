@@ -457,7 +457,19 @@ describe('hub-react', () => {
     // A subpath that is ESM and types only: no `require` condition, no CSS, no side effects.
     expect(Object.keys(hub().exports?.['./headless'] as object)).toEqual(['types', 'default']);
     // ...and older module resolution (node10) finds the types through typesVersions.
-    expect((hub() as { typesVersions?: unknown }).typesVersions).toEqual({ '*': { headless: ['dist/src/headless/index.d.ts'] } });
+    expect((hub() as { typesVersions?: unknown }).typesVersions).toEqual({
+      '*': { headless: ['dist/src/headless/index.d.ts'], 'locales/es': ['dist/src/locales/es.d.ts'], 'locales/pt': ['dist/src/locales/pt.d.ts'] },
+    });
+  });
+  it('has the lazy ./locales/es and ./locales/pt subpaths (ESM and types only, with typesVersions), and the main entry does not point at them', () => {
+    for (const name of ['@chatwarden/hub-react', '@chatwarden/player-react']) {
+      const pkg = published.find((p) => p.pkg.name === name)!.pkg as Manifest & { exports?: Record<string, unknown>; typesVersions?: { '*': Record<string, string[]> } };
+      for (const l of ['es', 'pt']) {
+        expect(pkg.exports?.[`./locales/${l}`], `${name} ${l}`).toEqual({ types: `./dist/src/locales/${l}.d.ts`, default: `./dist/src/locales/${l}.js` });
+        expect(pkg.typesVersions?.['*'][`locales/${l}`], `${name} ${l} typesVersions`).toEqual([`dist/src/locales/${l}.d.ts`]);
+      }
+      expect(JSON.stringify(pkg.exports?.['.']), name).not.toContain('locales');
+    }
   });
   it('dev-depends on the kit the tests run on and on the test tools, not as peers', () => {
     for (const d of ['@chatwarden/matcher', '@chatwarden/store-memory', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {

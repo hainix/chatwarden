@@ -44,6 +44,12 @@ export type { FetchTransportOptions, RouterTransportOptions, Transport, Transpor
 
 export { createT, en } from './i18n.js';
 export type { HubCatalog, HubParams, HubT, HubText } from './i18n.js';
+/** Which shipped language (`es`, `pt`) a locale tag asks for, or `null`. @experimental */
+export { matchLocale } from './locales/match.js';
+export type { ShippedLocale } from './locales/match.js';
+/** The hub's words for a locale as one catalogue for `createT` (the English under Spanish or Portuguese; English for anything else). Loaded on demand. @experimental */
+export { loadHubCatalog } from './locales/load.js';
+export type { LocaleMeta } from './locales/meta.js';
 import type { HubCatalog as AiCatalog } from './i18n.js';
 
 /**
