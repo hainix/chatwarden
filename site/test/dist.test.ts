@@ -190,7 +190,10 @@ describe('built dist', () => {
   // (@chatwarden/player-react), with their stylesheets. Measured: JS 177.5 KB (600 KB raw), CSS 14.8 KB (105 KB raw); it was JS 77.6
   // KB and CSS 5.0 KB with the hand-built console. The hub alone is most of the growth (its own README budgets it at about 140 KB
   // gzip with React). React itself stays in the first-load chunk, shared. Budgets leave about 7% room.
-  const DEMO_JS_GZ = 190 * 1024;
+  // Raised to 222 KB at 0.2.0 (raised generously, never trimmed): measured 207.9 KB gzip (713 KB raw). Per-module sizes from a sourcemap build: the hub's English catalogue
+  // (1,962 core + 202 AI + 104 privacy keys, 125 KB raw, eager by design: es and pt are the lazy chunks), then the kit's new 0.2.0 code the real engine runs (filters, privacy,
+  // legal holds, rooms and insights routes, the shared pacer). Nothing the demo cannot reach was found; cutting the catalogue would need a lazy English in hub-react (a later change).
+  const DEMO_JS_GZ = 222 * 1024;
   // Raised to 18 KB at 0.1.13 (same rule: raised generously, never trimmed): measured 16,495 bytes, the gate table and the do-not-automate line, and the global `.cw-scroll` rule.
   const DEMO_CSS_GZ = 18 * 1024;
 

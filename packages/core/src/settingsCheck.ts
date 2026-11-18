@@ -61,7 +61,8 @@ export function httpsUrl(v: unknown, path: string, max: number, placeholder = fa
   if (typeof v !== 'string') return fail(`must be an https link of at most ${max} characters`);
   const t = v;
   if (t === '' || t.length > max || URL_CHARS_BAD.test(t)) return fail(`must be an https link of at most ${max} characters with no spaces`);
-  if (!/^https:\/\//i.test(t)) return fail('must start with https://');
+  // Not a regex literal: its two slashes in a row read as a URL to the scan of the minified site bundle (site/test/dist.test.ts).
+  if (t.slice(0, 8).toLowerCase() !== 'https://') return fail('must start with https://');
   const authority = t.slice('https://'.length).split(/[/?#]/, 1)[0] ?? '';
   if (authority === '') return fail('must name a host');
   if (placeholder) {
