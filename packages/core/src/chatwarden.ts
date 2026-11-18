@@ -15,7 +15,7 @@ import { checkInsightsDays, computeInsights, INSIGHTS_READ_DAYS, INSIGHTS_ROW_CA
 import type { InsightsDays, InsightsResult } from './insights.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
-import type { ChatResult, RestrictedAnswer } from './chat.js';
+import type { ChatResult, RestrictedAnswer, RoomChatRules } from './chat.js';
 import { bindDocuments } from './documents.js';
 import type { Documents } from './documents.js';
 import { DoorService } from './doors.js';
@@ -41,13 +41,15 @@ import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
-import { checkFilterRules, resolveFilters } from './filters.js';
+import { checkFilterRules, mergeFilters, resolveFilters } from './filters.js';
 import type { FilterSettings } from './filters.js';
 import { FilterHits } from './filters/counters.js';
 import type { FilterStats } from './filters/counters.js';
 import { checkLines, createFilterEngine, shiftTestSpans, testLine } from './filters/engine.js';
 import type { FilterCheckResult, FilterTestResult } from './filters/engine.js';
 import { checkPace, mergePace } from './pace.js';
+import { Contexts, effectiveOf } from './contexts.js';
+import type { EffectiveContext } from './contexts.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
 import type { NameCheckResult } from './names.js';
@@ -416,6 +418,21 @@ export interface Chatwarden {
      * @experimental
      */
     restrictedBySubject(subject: SubjectId, opts?: { roomId?: string | null; seatId?: string | null }): RestrictedAnswer;
+  };
+  /**
+   * Room contexts (`profile.contexts`): rules per room, selected by the room's `context` tag at `rooms.seat`. Read-only lookups.
+   */
+  contexts: {
+    /** The declared context names, in declaration order. Empty when the profile declares none. */
+    names(): string[];
+    /** The room's context tag when it is well formed, else null (no tag, or an unknown room). The name need not be declared. */
+    of(roomId: string): string | null;
+    /**
+     * What a room in the context runs with, over the profile in force (code, then the stored layer, then the context): profanity, pace, chat (`phrases`,
+     * `minAccountAgeDays`) and filters, every value filled in. `null` is the base. A pure lookup: the values are frozen copies that share nothing with the profile
+     * (a `cw.rooms.setPace` override on a room is not part of it). Throws `ProfileError` for a name the profile does not declare.
+     */
+    effective(name: string | null): EffectiveContext;
   };
   mutes: {
     /** `viewerSeat`'s occupant mutes (`on`) or unmutes `targetSeat`'s occupant. Does nothing if either seat has no subject. */
@@ -1200,6 +1217,26 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const policy = new PolicyService({ store, clock, logger, base: baseProfile, isActiveRule: isActiveRule, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store), workflowKept: hasWorkflowMethods(store), accountAge: typeof opts.signals?.accountAgeDays === 'function' });
   policy.load();
 
+  // Room contexts: the lookup over the profile in force and the room's tag. The profanity handling of each context is built once, here: it is code-only, so a stored layer never
+  // changes it. A context that sets no `profanity` or `chat` key runs the base path exactly (null rules).
+  for (const [name, ctx] of Object.entries(baseProfile.contexts)) {
+    if (ctx.filters !== undefined) checkFilterRules(mergeFilters(baseProfile.filters, ctx.filters, `profile.contexts.${name}.filters`), isActiveRule, `profile.contexts.${name}.filters`);
+  }
+  const contexts = new Contexts({ profile: () => policy.profileNow(), tag: (roomId) => roster.tag(roomId, 'context') });
+  const contextRules = new Map<string, RoomChatRules | null>();
+  for (const [name, ctx] of Object.entries(baseProfile.contexts)) {
+    if (ctx.profanity === undefined && (ctx.chat === undefined || ctx.chat.minAccountAgeDays === undefined)) {
+      contextRules.set(name, null);
+      continue;
+    }
+    const eff = effectiveOf(baseProfile, name);
+    const sameLists = (['add', 'remove', 'only', 'languages'] as const).every((k) => JSON.stringify(eff.profanity[k]) === JSON.stringify(baseProfile.profanity[k]));
+    // The base filter is reused when the context changes neither the word lists nor the style; a context with its own word lists gets its own filter.
+    const filter = eff.profanity.mode === 'allow' ? undefined : sameLists && ctx.profanity?.style === undefined && profanity !== undefined ? profanity : buildProfanityFilter(opts, eff.profanity);
+    if (filter === undefined && eff.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
+    contextRules.set(name, { profanityMode: eff.profanity.mode, profanity: filter, minAccountAgeDays: eff.chat.minAccountAgeDays });
+  }
+
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and
   // decisions all write to and read from it, and `platform.notify` hears of every new notice through it.
   const platformNotify = platform.notify;
@@ -1222,12 +1259,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   /** The merged pace of a room with an override, with the profile pace it was merged onto: valid while that object is the one in force. */
   const paceMerged = new Map<string, { base: ResolvedPace; merged: ResolvedPace }>();
   /**
-   * The pace in force for a room: the override over the profile's (the layer over the code). A room without an override gets the
-   * profile's own object; one with an override is merged once per change of the profile's pace (it is a new object on every layer
+   * The pace in force for a room: the override over the room's context over the profile's (the layer over the code). A room without an override gets the
+   * profile's own object (or its context's merged one); one with an override is merged once per change of the profile's pace (it is a new object on every layer
    * change), not once per line.
    */
   const profilePaceOf = (roomId: string): ResolvedPace => {
-    const base = policy.profileNow().pace;
+    const base = contexts.paceOf(roomId);
     const over = paceOverrides.get(roomId);
     if (over === undefined) return base;
     const cached = paceMerged.get(roomId);
@@ -1292,6 +1329,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const chat = new ChatService({
     counter: chatCounter,
     rooms: { state: (roomId) => roomModes.get(roomId), settings: () => policy.profileNow().rooms, accountAge: (subject) => accountAges.ageOf(subject) },
+    contexts: {
+      rules: (roomId) => {
+        const name = contexts.resolveTag(roomId);
+        return name === 'unknown' ? 'unknown' : name === null ? null : (contextRules.get(name) ?? null);
+      },
+    },
     roster,
     buffer,
     subjects,
@@ -1313,7 +1356,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     autoRestrictRule,
     limits: { maxLength: limits.chatMaxLength, rate: limits.chatRate },
     filters: {
-      settings: () => policy.profileNow().filters,
+      settings: (roomId) => contexts.filtersOf(roomId),
       accountIsNew: (subject, days) => filterEngine.accountIsNew(subject, days),
       count: (hit) => filterHits.count(hit),
     },
@@ -1491,6 +1534,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   };
 
   const seat: Chatwarden['rooms']['seat'] = (roomId, seatId, who, handle, tags) => {
+    // The tags are checked first, so a malformed or changed context seats nobody and creates no person.
+    roster.checkTags(roomId, tags);
     const subject = subjects.resolve(hashWho(hasher, who));
     roster.seat(roomId, seatId, subject, handle, tags);
   };
@@ -1858,6 +1903,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         const subject = roster.occupant(roomId, seatId)?.subject ?? null;
         return chat.modeRefusal(roomId, subject, o?.staff === true)?.reason ?? 'ok';
       },
+    },
+    contexts: {
+      names: () => contexts.names(),
+      of: (roomId) => (typeof roomId === 'string' ? contexts.of(roomId) : null),
+      effective: (name) => contexts.effective(name),
     },
     filters: {
       stats: (q) => {

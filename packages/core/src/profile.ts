@@ -37,6 +37,8 @@ import { resolveNames } from './names.js';
 import type { NameSettings, ResolvedNames } from './names.js';
 import { checkSignalFeeds, resolveSignals } from './signals.js';
 import type { ResolvedSignals, SignalFeeds, SignalSettings } from './signals.js';
+import { resolveContexts } from './contexts.js';
+import type { ContextSettings, ResolvedContexts } from './contexts.js';
 import { ProfileError } from './profileError.js';
 
 /**
@@ -220,6 +222,12 @@ export interface ModerationProfile extends ModerationProfileBase {
    * @experimental
    */
   rooms?: RoomsSettings;
+  /**
+   * Rules per room, by name: a room tagged `{ context: 'kids' }` at `cw.rooms.seat` runs with that context's chat-time settings
+   * (profanity, pace, filters, phrase-only chat, the least account age) over the profile's. Declared in code only: the stored layer
+   * never holds it and the hub only lists it. A room tagged with a name that is not declared refuses every line. See {@link ContextSettings}.
+   */
+  contexts?: Record<string, ContextSettings>;
 }
 
 /**
@@ -285,6 +293,8 @@ export interface ResolvedProfile extends ModerationProfileBase {
   safety: ResolvedSafety;
   /** The room settings in force, every field filled in. @experimental */
   rooms: ResolvedRooms;
+  /** The declared contexts, validated, with the labels filled in (`{}` when none). Code only: a stored layer never changes it. */
+  contexts: ResolvedContexts;
 }
 
 /** @deprecated The same as {@link ModerationProfile}, which now has the two fields optional. */
@@ -330,12 +340,13 @@ const TOP_KEYS = [
   'desk',
   'safety',
   'rooms',
+  'contexts',
   'levels',
   'guidelines',
 ] as const;
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
-const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms'];
+const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms', 'contexts'];
 const AI_KEYS = ['level', 'learn', 'dailyCalls', 'actExcludeRules'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
@@ -634,6 +645,7 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   if (Object.hasOwn(p, 'desk')) resolveDesk(p['desk'] as DeskSettings, 'profile.desk');
   if (Object.hasOwn(p, 'safety')) resolveSafety(p['safety'] as SafetySettings, 'profile.safety');
   if (Object.hasOwn(p, 'rooms')) resolveRooms(p['rooms'] as RoomsSettings, 'profile.rooms');
+  if (Object.hasOwn(p, 'contexts')) resolveContexts(p['contexts'] as Record<string, ContextSettings>, 'profile.contexts');
 
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
   oneOf(prof['mode'], 'profile.profanity.mode', PROFANITY_MODES, "must be 'allow', 'star' or 'refuse'");
@@ -754,6 +766,7 @@ function finalize(value: unknown): ResolvedProfile {
     setOwn(copy, 'desk', resolveDesk(copy['desk'] as DeskSettings | undefined, 'profile.desk'));
     setOwn(copy, 'safety', resolveSafety(copy['safety'] as SafetySettings | undefined, 'profile.safety'));
     setOwn(copy, 'rooms', resolveRooms(copy['rooms'] as RoomsSettings | undefined, 'profile.rooms'));
+    setOwn(copy, 'contexts', resolveContexts(copy['contexts'] as Record<string, ContextSettings> | undefined, 'profile.contexts'));
   }
   return deepFreeze(copy as ResolvedProfile);
 }
@@ -777,6 +790,7 @@ export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
     desk: resolveDesk(p.desk),
     safety: resolveSafety(p.safety),
     rooms: resolveRooms(p.rooms),
+    contexts: resolveContexts(p.contexts),
   };
 }
 

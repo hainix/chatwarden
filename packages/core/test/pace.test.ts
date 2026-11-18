@@ -17,7 +17,7 @@ function failure(fn: () => unknown): ProfileError {
 
 describe('constants', () => {
   it('has the spec values', () => {
-    expect(PACE_REASONS).toEqual(['slow_mode', 'flood', 'duplicate']);
+    expect(PACE_REASONS).toEqual(['slow_mode', 'flood', 'duplicate', 'probation']);
     expect(DUPLICATE_MIN_CHARS).toBe(3);
     expect(DUPLICATE_RECENT).toBe(8);
     expect(PACE_KEYS_MAX).toBe(50_000);

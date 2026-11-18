@@ -2,6 +2,7 @@
 // lines, kept so a report can snapshot the conversation around the reported line).
 // Both are pure in-memory: the buffer holds raw chat text, so it lives exactly as long
 // as the room does and nothing here is persisted.
+import { checkRoomTags, MAX_ROOM_TAGS, ROOM_TAG_KEYS } from './contexts.js';
 import type { Clock, SubjectId } from './types.js';
 
 /** Production window: the last 100 lines or 15 minutes, whichever is smaller. */
@@ -175,6 +176,7 @@ export class RoomRoster {
     handle: string,
     tags?: Record<string, string>,
   ): void {
+    this.checkTags(roomId, tags);
     let room = this.byRoom.get(roomId);
     if (!room) {
       room = { seats: new Map(), tags: {} };
@@ -182,6 +184,32 @@ export class RoomRoster {
     }
     room.seats.set(seatId, { subject, handle });
     if (tags) Object.assign(room.tags, tags);
+  }
+
+  /**
+   * Check `tags` as {@link checkRoomTags} does and against the room's own: the merged room may carry at most 8 tags, and a room's `context`
+   * and `scope` cannot change once set (a room does not switch rules or owners mid-conversation: close it and open it again). Throws
+   * RangeError and changes nothing.
+   */
+  checkTags(roomId: string, tags?: Record<string, string>): void {
+    if (tags === undefined) return;
+    checkRoomTags(tags);
+    const room = this.byRoom.get(roomId);
+    if (room === undefined) return;
+    for (const key of ROOM_TAG_KEYS) {
+      const next = Object.hasOwn(tags, key) ? tags[key] : undefined;
+      if (next !== undefined && Object.hasOwn(room.tags, key) && room.tags[key] !== next) {
+        throw new RangeError(`a room's ${key} tag cannot change while it is open`);
+      }
+    }
+    const keys = new Set([...Object.keys(room.tags), ...Object.keys(tags)]);
+    if (keys.size > MAX_ROOM_TAGS) throw new RangeError(`a room may carry at most ${MAX_ROOM_TAGS} tags`);
+  }
+
+  /** One tag of the room, or undefined (an unknown room or a tag it does not have). */
+  tag(roomId: string, key: string): string | undefined {
+    const room = this.byRoom.get(roomId);
+    return room !== undefined && Object.hasOwn(room.tags, key) ? room.tags[key] : undefined;
   }
 
   /** Empty a seat. A no-op when the seat or room is unknown. Room tags are kept. */

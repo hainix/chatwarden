@@ -635,6 +635,24 @@ A `flag` files one report with no reporter through `cw.reports.fileSystem({ orig
 `FilterVerdict`, `FilterHit`, `FilterRefusal`, `FilterStats`, `FilterTestResult`, `FilterCheckResult`, `FilterHitRow`, `ReportOrigin`, `SystemReportInput`, `SystemReportResult`, `cw.filters`, `cw.reports.fileSystem`, `ChatServiceDeps.filters` and the three new
 `RefuseReason` values `link`, `personal_info` and `filter` (an exhaustive `switch` over the reasons needs the new cases to compile).
 
+## Room contexts
+
+Rules per room, declared in code (`profile.contexts`, never in the stored layer, never in the hub) and picked by a room tag: `cw.rooms.seat(room, seat, who, handle, { context: 'kids' })`.
+
+```ts
+const cw = await createChatwarden({
+  // ...
+  overrides: {
+    contexts: {
+      kids: { label: 'Kids rooms', profanity: { mode: 'refuse' }, pace: { slowModeMs: 3000 } },
+      whisper: { chat: { minAccountAgeDays: 7 } },
+    },
+  },
+});
+```
+
+A context overrides only the chat-time sections (`CONTEXT_SECTIONS`: `profanity`, `pace`, `chat`, `filters`); the ladder, durations, reporting, appeals, signals and names stay the game's one policy. The precedence for a room is the profile in code, the stored layer, the context, then `cw.rooms.setPace`. A tag the profile does not declare refuses every line `gate` and logs one `chatwarden.context_unknown` per room, so a typo in a kids room fails shut. `chat.minAccountAgeDays` refuses a younger account, a guest or an age the game cannot tell with `account_too_new`. `cw.contexts.names()`, `of(roomId)` and `effective(name | null)` read it. The room tags `context` and `scope` are validated at `seat` (`checkRoomTags`, `RangeError`): at most 8 tags, a key that starts with a letter, a value of at most 64 characters, and a room's `context` and `scope` cannot change while it is open. Names: `ContextSettings`, `ResolvedContexts`, `EffectiveContext`, `CONTEXT_SECTIONS`, `ROOM_TAG_KEYS`, `checkRoomTags`, `resolveContexts`, `RefuseReason` gains `account_too_new`.
+
 ## Privacy requests and legal hold
 
 > Not legal advice, not a compliance claim. This describes what the kit stores and does. The adopter checks who is asking and decides what to answer; the kit never does either, never tells the player and never reports to anyone. The runbook is [docs/privacy-requests.md](https://github.com/hainix/chatwarden/blob/main/docs/privacy-requests.md).

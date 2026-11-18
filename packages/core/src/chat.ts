@@ -35,10 +35,11 @@ import type {
 // The chat acceptance pipeline: one call decides whether a line is delivered, and keeps the evidence and the
 // strikes that go with the decision. The order is Moxgate's `handleChat`:
 //   1. trim; empty                       -> 'empty' (the caller stays silent)
-//   2. the seat's occupant, then the gate hook
+//   2. the seat's occupant, then the gate hook, then the room's context (a tag the profile does not declare -> 'gate', fail closed)
 //   3. active restriction                -> 'restricted' (chat, ban, or the in-memory automatic one)
 //   4. length > 200                      -> 'length'
 //   4b. the room's mode (staff exempt)   -> 'locked' | 'new_account' (a pause for the room, never a sanction: no strike, not kept, spends nothing; before pacing and the matcher)
+//   4c. the context's minAccountAgeDays  -> 'account_too_new' (a young, unknown or guest account; staff exempt; no strike, spends nothing)
 //   5. pacing, when configured           -> 'slow_mode' | 'flood' | 'duplicate' (read only: a refusal writes nothing and
 //                                           spends nothing; it carries `retryAfterMs`)
 //   6. rate, 3 per 5 s per room:seat     -> 'rate' (spent even when the line is then blocked)
@@ -51,6 +52,9 @@ import type {
 //  11. buffer the delivered line         -> its lineId, then a `flag` hands the line to `onFilterFlag`
 // It never throws. Everything on this path reads in-memory state; the only store writes are the strike
 // (inside StrikeService) and the automatic timeout, and a failure of either is logged and absorbed.
+
+/** The most rooms whose unknown context is remembered as logged; past it the memory is cleared, so a flood of typos cannot grow it. */
+const UNKNOWN_LOGGED_MAX = 10_000;
 
 /** Longest line, in characters after trimming. The default of `limits.chatMaxLength`. */
 export const MAX_LEN = 200;
@@ -93,7 +97,7 @@ interface BlockedLine {
  * `rooms.emergency.newAccountDays`. Both carry `until`, when the mode ends, and nothing else. They are checked after the person's own restriction and the length, and before pacing, the rate
  * budget and the matcher: a line refused for the mode is never matched, earns no strike, is not kept and spends nothing. @experimental
  */
-export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason | 'link' | 'personal_info' | 'filter' | 'locked' | 'new_account';
+export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason | 'link' | 'personal_info' | 'filter' | 'locked' | 'new_account' | 'account_too_new';
 
 export type ChatResult =
   | { deliver: { lineId: string; text: string } }
@@ -212,6 +216,25 @@ export interface ChatServiceDeps {
     settings: () => ResolvedRooms;
     accountAge: (subject: SubjectId | null) => number | null;
   };
+  /**
+   * Room contexts (`profile.contexts`). `rules` is read on every line: `null` for a room that runs on the base (no `context` tag, or a context
+   * that sets no chat-time rule), the room's own rules, or `'unknown'` for a tag the profile does not declare, which refuses every line `gate`
+   * (fail closed) and logs `chatwarden.context_unknown` once per room. A throw refuses `gate` too. The room's pace and filters come from the
+   * `pace.settings` and `filters.settings` getters, which take the room. Without `contexts` every room is the base.
+   */
+  contexts?: {
+    rules: (roomId: string) => RoomChatRules | 'unknown' | null;
+  };
+}
+
+/** What a room's context decides on the chat path itself: the profanity handling and the least account age. */
+export interface RoomChatRules {
+  /** The profanity mode in force for the room. */
+  profanityMode: ProfanityConfig['mode'];
+  /** The filter for that mode (the context's own word lists), or undefined for none. */
+  profanity: ProfanityFilter | undefined;
+  /** A player whose account is younger, or whose age is not known, is refused `account_too_new`. `null`: no rule. */
+  minAccountAgeDays: number | null;
 }
 
 /** What pacing says about a line: a refusal, or the key to commit under; neither when nothing is paced. */
@@ -296,6 +319,9 @@ export class ChatService {
   private readonly onFilterFlag: ChatServiceDeps['onFilterFlag'];
   private readonly counter: ChatServiceDeps['counter'];
   private readonly rooms: ChatServiceDeps['rooms'];
+  private readonly contexts: ChatServiceDeps['contexts'];
+  /** Rooms whose unknown context has been logged: one line per room, not per line. */
+  private readonly unknownLogged = new Set<string>();
   /** The filters run on every line: a failure of them is limited to one log line a minute. */
   private readonly filterWarn: ThrottledWarn;
 
@@ -336,6 +362,7 @@ export class ChatService {
     this.onFilterFlag = deps.onFilterFlag;
     this.counter = deps.counter;
     this.rooms = deps.rooms;
+    this.contexts = deps.contexts;
     this.filterWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.pacer = deps.pace === undefined ? undefined : createPacer({ clock: deps.clock, settings: deps.pace.settings, ...(deps.pace.floorMax === undefined ? {} : { floorMax: deps.pace.floorMax }) });
     this.notices = deps.notices;
@@ -452,6 +479,7 @@ export class ChatService {
   /** Forget a room's pacing state (the room is closing). */
   dropPaceRoom(roomId: string): void {
     this.pacer?.dropRoom(roomId);
+    this.unknownLogged.delete(roomId);
   }
 
   // --- internals -----------------------------------------------------------
@@ -466,6 +494,9 @@ export class ChatService {
     if (occupant === null) return refuse('gate');
     const { subject, handle } = occupant;
     if (!this.gateAllows(roomId, subject)) return refuse('gate');
+    // The room's context: a tag the profile does not declare fails shut (a typo in a kids room must not fall back to the relaxed base).
+    const rules = this.roomRules(roomId);
+    if (rules === 'refuse') return refuse('gate');
 
     const now = this.clock.now();
     const rateKey = memKey(roomId, seatId);
@@ -485,6 +516,8 @@ export class ChatService {
     // matched, so it earns no strike and no automatic timeout, is not kept as evidence and spends no pacing or rate budget. Only the facade's option makes a caller staff.
     const mode = this.modeRefusal(roomId, subject, opts?.staff === true);
     if (mode !== null) return refuse(mode.reason, { until: mode.until });
+    // The context's least account age: a pause for a young or unknown account, never a sanction (no strike, nothing kept, nothing spent). Staff is exempt, as for the mode.
+    if (rules !== null && rules.minAccountAgeDays !== null && opts?.staff !== true && !this.oldEnough(subject, rules.minAccountAgeDays)) return refuse('account_too_new');
 
     // Pacing asks before `rate` so the specific, retryable message wins over the blunt one; it only reads, so a refusal spends nothing.
     // With every check off it builds nothing (no key, no canonical lookup) and there is nothing to commit.
@@ -550,12 +583,13 @@ export class ChatService {
 
     // Profanity is softening or a house rule, never a violation: a refusal here is not buffered as a blocked line,
     // earns no strike, note or notice, and (the rate check having passed) has spent the line's rate budget. It reads the masked text.
-    const swearing = this.applyProfanity(filtered);
-    if (swearing !== null && swearing.hit && this.profanityMode === 'refuse') {
+    const profanityMode = rules === null ? this.profanityMode : rules.profanityMode;
+    const swearing = this.applyProfanity(filtered, profanityMode, rules === null ? this.profanity : rules.profanity);
+    if (swearing !== null && swearing.hit && profanityMode === 'refuse') {
       if (pendingFlag !== null) this.countHit({ ...pendingFlag, action: 'count' });
       return refuse('profanity');
     }
-    const delivered = swearing === null || this.profanityMode !== 'star' ? filtered : swearing.text;
+    const delivered = swearing === null || profanityMode !== 'star' ? filtered : swearing.text;
     const lineId = this.buffer.append(roomId, {
       ts: now,
       seatId,
@@ -681,6 +715,38 @@ export class ChatService {
     }
   }
 
+  /**
+   * The room's chat rules: `null` for the base, the context's rules, or `'refuse'` for a room whose context the profile does not declare (one log line per room)
+   * or a lookup that threw (logged by class): both fail closed.
+   */
+  private roomRules(roomId: string): RoomChatRules | null | 'refuse' {
+    if (this.contexts === undefined) return null;
+    try {
+      const rules = this.contexts.rules(roomId);
+      if (rules !== 'unknown') return rules;
+      if (!this.unknownLogged.has(roomId)) {
+        if (this.unknownLogged.size >= UNKNOWN_LOGGED_MAX) this.unknownLogged.clear();
+        this.unknownLogged.add(roomId);
+        this.warn('chatwarden.context_unknown', {});
+      }
+      return 'refuse';
+    } catch (err) {
+      this.warn('chat.context_failed', { error: errName(err) });
+      return 'refuse';
+    }
+  }
+
+  /** Is the speaker's account at least `days` old? A guest, an unknown age and a failing lookup all say no (fail closed). */
+  private oldEnough(subject: SubjectId | null, days: number): boolean {
+    try {
+      const age = this.rooms?.accountAge(subject) ?? null;
+      return age !== null && age >= days;
+    } catch (err) {
+      this.warn('chat.context_failed', { error: errName(err) });
+      return false;
+    }
+  }
+
   /** The gate hook; a throw is a refusal (it is access control, so it fails closed). */
   private gateAllows(roomId: string, subject: SubjectId | null): boolean {
     if (this.gate === undefined) return true;
@@ -694,10 +760,10 @@ export class ChatService {
   }
 
   /** The filter's verdict, or null when there is nothing to apply (mode allow, no filter) or it failed (logged). */
-  private applyProfanity(trimmed: string): { hit: boolean; text: string } | null {
-    if (this.profanity === undefined || this.profanityMode === 'allow') return null;
+  private applyProfanity(trimmed: string, mode: ProfanityConfig['mode'], filter: ProfanityFilter | undefined): { hit: boolean; text: string } | null {
+    if (filter === undefined || mode === 'allow') return null;
     try {
-      const result: unknown = this.profanity.apply(trimmed);
+      const result: unknown = filter.apply(trimmed);
       const r = result as { hit?: unknown; text?: unknown } | null | undefined;
       if (typeof r !== 'object' || r === null || typeof r.hit !== 'boolean' || typeof r.text !== 'string') {
         throw new TypeError('profanity filter returned a malformed result');

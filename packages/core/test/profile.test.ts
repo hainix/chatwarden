@@ -493,7 +493,7 @@ describe('defineProfile', () => {
   it('round-trips a custom profile', () => {
     const d = defineProfile(custom);
     // A profile with no reporting section gets the default reporting settings.
-    expect(d).toEqual({ ...custom, reporting: defaultReporting(), ai: { level: 0, learn: true, dailyCalls: 5000 }, pace: { slowModeMs: null, burst: null, duplicateWindowMs: null }, signals: resolveSignals(undefined), appeals: resolveAppeals(undefined), names: resolveNames(undefined), filters: resolveFilters(undefined), desk: resolveDesk(undefined), safety: resolveSafety(undefined), rooms: resolveRooms(undefined) });
+    expect(d).toEqual({ ...custom, reporting: defaultReporting(), ai: { level: 0, learn: true, dailyCalls: 5000 }, pace: { slowModeMs: null, burst: null, duplicateWindowMs: null }, signals: resolveSignals(undefined), appeals: resolveAppeals(undefined), names: resolveNames(undefined), filters: resolveFilters(undefined), desk: resolveDesk(undefined), safety: resolveSafety(undefined), rooms: resolveRooms(undefined), contexts: {} });
     expect(d.id).toBe('mygame');
     expect(resolveProfile(d, { name: 'Renamed' }).name).toBe('Renamed');
     expect(resolveProfile(d)).toEqual(d);
