@@ -60,7 +60,7 @@ What it writes is a starter, and says so. Every starter hook carries a `TODO(aut
 
 ### Flags
 
-This table is generated from the option list in the code, and a test checks it.
+This table is generated from the option list in the code, and a test checks it. `--game` stands in for the "Which standard?" question: `competitive` starts from relaxed, `social` from standard, `kids` from strict and `creator` from standard with a team note about protecting the creator and their guests; `--profile` still wins when you give both.
 
 <!-- flags:start -->
 | Flag | Values | Default | What it does |
@@ -71,6 +71,7 @@ This table is generated from the option list in the code, and a test checks it.
 | `--chat-transport <value>` | `sse`, `socketio` | socketio if installed | How the chat box reaches the server |
 | `--hub <value>` | `element`, `react`, `none` | react for next | How moderators open the hub |
 | `--discord`, `--no-discord` | - | no | Post reports to a Discord forum |
+| `--game <value>` | `competitive`, `social`, `kids`, `creator` | - | Kind of game; picks the standard and its notes |
 | `--profile <value>` | `relaxed`, `standard`, `strict` | standard | How strict the standard is |
 | `--base <value>` | - | /chatwarden | URL prefix everything lives under |
 | `--dir <value>` | - | detected | Folder to write into, inside the project |

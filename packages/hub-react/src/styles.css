@@ -4392,6 +4392,10 @@
 }
 .cw-hub .cw-field-warn {
   margin: 0;
+  /* A warning line under a field ("left out of the AI's reading"): the warning pair, yellow ink on the soft yellow, as the warning tag and notice draw it (contrast is checked there). */
+  padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-yellow-soft, var(--cwd-yellow-soft));
   color: var(--cw-yellow-ink, var(--cwd-yellow-ink));
   font-size: var(--cw-text-s, var(--cwd-text-s));
 }

@@ -374,9 +374,11 @@ describe('design v2: the palette', () => {
     // Green: the live dot, nothing else.
     '--cw-live': [/^\.cw-hub \.cw-live-dot$/],
     // Yellow: a warning (a warning tag or notice, the connection banner) and the yellow side of a referee card.
-    '--cw-yellow': [/cw-tag--warn$/, /cw-card--(warning|restriction)$/, /cw-notice--warn$/, /cw-banner$/],
-    '--cw-yellow-soft': [/cw-tag--warn$/, /cw-notice--warn$/, /cw-banner$/],
-    '--cw-yellow-ink': [/cw-tag--warn$/, /cw-notice--warn$/, /cw-banner$/],
+    // A field's warning line (`cw-field-warn`, the "left out of the AI's reading" hint under a text field) is the inline form of the warning notice: the same pair, yellow ink on
+    // the soft yellow (the pair the contrast table below checks), where a boxed notice would be too heavy for one line under a field. The sibling of `cw-field-error` in red.
+    '--cw-yellow': [/cw-tag--warn$/, /cw-card--(warning|restriction)$/, /cw-notice--warn$/, /cw-banner$/, /cw-field-warn$/],
+    '--cw-yellow-soft': [/cw-tag--warn$/, /cw-notice--warn$/, /cw-banner$/, /cw-field-warn$/],
+    '--cw-yellow-ink': [/cw-tag--warn$/, /cw-notice--warn$/, /cw-banner$/, /cw-field-warn$/],
     // Red: overdue, the reported line, a ban, a failure.
     '--cw-red': [
       /cw-tag--bad$/,
