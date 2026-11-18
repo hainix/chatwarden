@@ -38,6 +38,10 @@
       "default": "./dist/src/chat/index.js"
     },
     "./chat.css": "./src/chat.css",
+    "./appeal": {
+      "types": "./dist/src/appeal/index.d.ts",
+      "default": "./dist/src/appeal/index.js"
+    },
     "./locales/es": {
       "types": "./dist/src/locales/es.d.ts",
       "default": "./dist/src/locales/es.js"
@@ -51,6 +55,9 @@
     "*": {
       "chat": [
         "dist/src/chat/index.d.ts"
+      ],
+      "appeal": [
+        "dist/src/appeal/index.d.ts"
       ],
       "locales/es": [
         "dist/src/locales/es.d.ts"

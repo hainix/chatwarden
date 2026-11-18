@@ -358,6 +358,14 @@ describe('player-react', () => {
     expect(pkg.typesVersions?.['*'].chat?.[0]).toBe(chat?.types?.replace(/^\.\//, ''));
     expect(JSON.stringify(pkg.exports?.['.'])).not.toContain('chat');
   });
+  it('has the lazy ./appeal subpath (the appeal page), with types for both resolution modes, and the main entry does not point at it', () => {
+    const pkg = player() as Manifest & { exports?: Record<string, { types?: string; default?: string } | string>; typesVersions?: { '*': Record<string, string[]> } };
+    const appeal = pkg.exports?.['./appeal'] as { types?: string; default?: string } | undefined;
+    expect(appeal?.default).toBe('./dist/src/appeal/index.js');
+    expect(appeal?.types).toBe('./dist/src/appeal/index.d.ts');
+    expect(pkg.typesVersions?.['*'].appeal?.[0]).toBe(appeal?.types?.replace(/^\.\//, ''));
+    expect(JSON.stringify(pkg.exports?.['.'])).not.toContain('appeal');
+  });
   it('dev-depends on the kit the tests run on, on hub-react for the transport type check, and on the test tools, not as peers', () => {
     for (const d of ['@chatwarden/http', '@chatwarden/store-memory', '@chatwarden/hub-react', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {
       expect(player().devDependencies?.[d], d).toBeDefined();

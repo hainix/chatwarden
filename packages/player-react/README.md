@@ -472,6 +472,52 @@ player components, the chat entry on its own is about 15 KB, and `chat.css` is a
 `ChatClosedWhy`, `SseTransportOptions`, `ChatFrame`, `WireLine`, `WireMode`, `WireMuted`, `WirePhrase`, `WirePhrases`, `WireReadOnly`, `WireRefusal`, `WireRestriction`, `SendResult`,
 `MuteResult`, `MuteTarget`, `ChatState`, `StateLine` and `ChatAction`. All are part of the API.
 
+## Appeal page
+
+New in 0.2.1. When a sanction has an appeal link (`appealUrl` on a notice, or the link in the message your game sent), the link opens a page that shows the sanction as the player
+was shown it, the appeal form, and later the outcome. `@chatwarden/http` serves that page itself at `/appeal` (see its README); `AppealPage` is the same page as a component, for a game
+that wants it inside its own screens. It lives at its own subpath, `@chatwarden/player-react/appeal`, so the main entry and its size are untouched: a page that never shows an appeal
+page never loads it (about 4.2 KB gzipped, React and the kit external). Every name here is part of the API.
+
+```tsx
+import '@chatwarden/player-react/styles.css';
+import { AppealPage, readAppealToken } from '@chatwarden/player-react/appeal';
+
+export function AppealScreen() {
+  const token = readAppealToken(location.search);
+  return token === null ? <p>This link is not valid.</p> : <AppealPage endpoint="https://game.example/appeal/case" token={token} />;
+}
+```
+
+- **Props.** `endpoint` is the full address of the case route your server mounts (`GET` and `POST` `/appeal/case`); `token` is the link's `t`; `client` replaces the client made from
+  `endpoint` (for a test, or to send your own way); `fetch` is the `fetch` that client uses; `words` is your own wording by language (`appeals.words` in the profile); `contact` is the line
+  shown under "this link is no longer valid" (the case that would carry the contact did not open). It also takes `t`, `locale`, `now`, `timeZone`, `theme` and `className`. The times are
+  written in UTC, as on the served page, unless you pass another `timeZone`; then the sentence that says "UTC" is left out.
+- **The token.** The token is a capability: whoever holds the link can appeal that sanction, so never log it, put it in a shared place or send it to analytics. `readAppealToken(location.search)`
+  reads the `t` of an address and returns `null` unless it is up to 512 of the characters a token has (letters, digits, `.`, `_`, `-`). The page writes the token nowhere into its markup.
+- **The client.** `createAppealPageClient` (`{ endpoint, fetch? }`) makes a client with `load(token)` (the case, or `'invalid'` for a link that does not open; any other failure rejects) and `send(token, statement)` (a value for
+  every answer: `ok`, or a refusal `invalid`, `already`, `rate` with `retryAfterMs`, `link` or `failed`). Each request is made with no cookie, no `Authorization` header, no referrer and no cache, and it keeps only
+  the documented fields of the answer. There is no sign-in and the page does not identify the player: the link is the whole proof.
+```ts
+import { createAppealPageClient, readAppealToken } from '@chatwarden/player-react/appeal';
+
+/** `search` is `location.search` of your appeal page. */
+export async function readCase(search: string) {
+  const token = readAppealToken(search);
+  if (token === null) return 'invalid';
+  const client = createAppealPageClient({ endpoint: 'https://game.example/appeal/case' });
+  return client.load(token);
+}
+```
+
+- **CORS.** When the page and the server are on different origins, the server must list the page's origin in `appeals.landingOrigins` (`CHATWARDEN_LANDING_ORIGINS` on `chatwarden serve`); it never answers `*`
+  and never sends credentials. A game that does not want any of this sends the player to the served `/appeal` page instead, which works without a script.
+- **What it shows.** The same states, in the same order and the same words, as the served page: Loading, the notice (the sanction, its facts and the player's own lines, as text), the form
+  (a labelled field, the hint with the limit, a live count and Send), or "Appeal sent", or the decision with the reason and "As it stands now", then when the link works until and the contact line. A refusal is
+  read out in an alert and keeps what was typed; a second click while a send is on its way does nothing; focus goes to the heading when the case loads, to the alert on a refusal and to the "Appeal sent" line after a send.
+- **Words.** They come from `noticeWordsFor` (`(locale, words)`) of `@chatwarden/core/notice-locales` (English, Spanish and Portuguese, with your own over them), not from the catalog of this package. A `t` you pass must carry the
+  `player.appealPage.*` words too; the English ones are `APPEAL_WORDS` in the same subpath.
+
 ## Languages
 
 Spanish and Portuguese are machine-drafted (by an AI model) and have not been reviewed by a person. Have someone who speaks the language read the notice, refusal and appeal words before you turn one on for players; English is the safe choice until then.
