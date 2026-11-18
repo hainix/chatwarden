@@ -543,7 +543,7 @@ error class only.
 | `share_refused` | 422 | The community service did not take the term (rejected, or a language it does not support). No service text is passed on. |
 | `rate_limited` | 429 | Too many name checks, or too many read-again requests; `retry-after` says how long. |
 | `ai_budget` | 429 | The AI has reached its daily limit; reads resume at 00:00 UTC. |
-| `not_supported` | 501 | The store cannot save profile settings (it has no `savePolicyLayer`). |
+| `not_supported` | 501 | The store cannot do this: it cannot save profile settings (no `savePolicyLayer`), or it lacks the urgent-lane methods that `POST /reports/:id/urgent` and `POST /reports/:id/handoff` use (`setReportUrgent`, `setHandoff`; the kit warns once at start, naming what is missing). |
 | `share_unavailable` | 502 | The community service could not be reached, or the share object failed. |
 | `ai_unavailable` | 503 | `POST /reports/:id/ai/read` while no call can be made (the breaker is open, or the minute's calls are used). The body also has `retryAfterMs`; `retry-after` says the same in seconds. |
 | `internal` | 500 | Anything else. No detail is sent. |

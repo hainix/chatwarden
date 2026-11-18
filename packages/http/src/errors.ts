@@ -9,6 +9,7 @@ import {
   safeWarn,
   SanctionError,
   SanctionQueryError,
+  StoreCapabilityError,
 } from '@chatwarden/core';
 import type { Logger } from '@chatwarden/core';
 import type { KitResponse } from './types.js';
@@ -62,7 +63,7 @@ const TABLE = {
   share_refused: { status: 422, message: 'The community list did not take this term.' },
   rate_limited: { status: 429, message: 'Too many requests. Try again later.' },
   ai_budget: { status: 429, message: 'The AI has reached its limit for today.' },
-  not_supported: { status: 501, message: 'This store cannot save settings.' },
+  not_supported: { status: 501, message: 'The store behind this server does not support this.' },
   share_unavailable: { status: 502, message: 'The community list could not be reached.' },
   ai_unavailable: { status: 503, message: 'The AI cannot be called right now.' },
 } as const;
@@ -173,6 +174,8 @@ const codeFor = (err: unknown): ErrorCode | null => {
   if (err instanceof ExcerptError) return 'invalid_excerpt';
   if (err instanceof ReasonError) return err.field === 'limit' ? 'invalid_value' : 'invalid_request';
   if (err instanceof RangeError) return 'invalid_value';
+  // A call that needs an optional store method the store lacks (the urgent lane over an older custom store): the store cannot do it, which is not a bug in the request or the kit.
+  if (err instanceof StoreCapabilityError) return 'not_supported';
   return null;
 };
 
@@ -180,6 +183,7 @@ const codeFor = (err: unknown): ErrorCode | null => {
  * Wrap a handler so that nothing it throws (or rejects with) escapes:
  * - a validation-type error (`ReportQueryError`, `AuditQueryError`, `SanctionQueryError`, `RangeError`, `ProfileError`, `SanctionError`,
  *   `RulesError`, `ExcerptError`, `ReasonError`, `ValidationError`) -> 400
+ * - `StoreCapabilityError` -> 501 `not_supported` (a store without the methods the call needs; the missing names are in the startup warning, not the body)
  * - `ClaimedError` -> 409 `claimed`, whose body also names the holder (`by`) and when the claim lapses (`until`)
  * - `NotFoundError` -> 404; `HttpError` -> its own status and headers (401, 403, 413, ...); a `RangeError` is
  *   also logged, class only

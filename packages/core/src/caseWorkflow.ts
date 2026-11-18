@@ -1,5 +1,6 @@
 import { isValidAuditActor } from './audit.js';
 import type { KitEvent } from './events.js';
+import { StoreCapabilityError } from './storeCapability.js';
 import type { Clock, Store } from './types.js';
 
 // The urgent lane's two marks on a case (spec section 5.2): a moderator may raise or lower `urgent` on an open report, and may mark it as passed to the game's safety team (the
@@ -24,8 +25,8 @@ const needActor = (actor: unknown): string => {
   return actor;
 };
 
-const unsupported = (method: string): never => {
-  throw new TypeError(`cases.${method}: the store does not support the urgent lane (it lacks the optional report methods)`);
+const unsupported = (method: string, missing: string): never => {
+  throw new StoreCapabilityError(`cases.${method}`, [missing]);
 };
 
 /** `cw.cases.setUrgent`, `cw.cases.handoff` and `cw.cases.urgentCount`. */
@@ -42,13 +43,14 @@ export class CaseWorkflow {
 
   /**
    * Mark an open report urgent or not urgent. Any moderator, both directions. `ok: true` also for a report already in that state (nothing changes). A decided report is `closed` and an
-   * unknown id `not_found`. Moves the change token when it changed something; announces nothing; touches no claim and nothing about a person. A store failure throws.
+   * unknown id `not_found`. Moves the change token when it changed something; announces nothing; touches no claim and nothing about a person. A store failure throws; a store without
+   * `setReportUrgent` throws a `StoreCapabilityError`.
    */
   setUrgent(reportId: string, actor: string, on: boolean): CaseMarkResult {
     needActor(actor);
     if (typeof on !== 'boolean') throw new RangeError('cases: urgent must be true or false');
     const set = this.store.setReportUrgent;
-    if (typeof set !== 'function') return unsupported('setUrgent');
+    if (typeof set !== 'function') return unsupported('setUrgent', 'setReportUrgent');
     return this.store.transaction(() => {
       const report = typeof reportId === 'string' && reportId !== '' ? this.store.loadReport(reportId) : null;
       if (report === null) return { ok: false, refused: 'not_found' } as const;
@@ -66,7 +68,7 @@ export class CaseWorkflow {
   handoff(reportId: string, actor: string): CaseMarkResult {
     needActor(actor);
     const set = this.store.setHandoff;
-    if (typeof set !== 'function') return unsupported('handoff');
+    if (typeof set !== 'function') return unsupported('handoff', 'setHandoff');
     const now = this.clock.now();
     const done = this.store.transaction((): { refused: 'not_found' | 'closed' } | { first: boolean } => {
       const report = typeof reportId === 'string' && reportId !== '' ? this.store.loadReport(reportId) : null;

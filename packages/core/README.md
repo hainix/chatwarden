@@ -704,7 +704,9 @@ and to follow your studio's legal procedure. The default guidance is a safe floo
 
 - **The urgent lane.** The reason flag `reporting.reasons[].urgent`, `cw.cases.setUrgent`, `cw.cases.handoff` (an ids-only `report.handoff`), take next, the bulk dismissal and the `welfare`
   reason are described under "What is experimental in 0.1.9" below. Settings: `safety.guidance` (at most 1 500 characters), `safety.contact` (staff only, 300) and `safety.resources`
-  (at most five, https links only).
+  (at most five, https links only). A custom store written before the lane may lack `setReportUrgent`, `setHandoff` and `countOpenUrgent`: the kit warns once at start (`chatwarden.store_no_urgent_lane`,
+  naming them), `cw.cases.setUrgent` and `cw.cases.handoff` throw a `StoreCapabilityError` (not a `TypeError`; `hasUrgentMethods` and `missingUrgentMethods` tell a store apart) and the staff API answers 501
+  `not_supported`.
 - **The desk.** `desk.workflow` (comments, a second look, escalation: `cw.comments`, `cw.cases.escalate`), `desk.insights` (`cw.insights`) and `desk.surge`. The Insights numbers are team
   numbers only: counts and times, never a per-person figure.
 - **Rooms under attack.** `cw.rooms.setMode`, `mode`, `list`, `postingState` and `retract`, `rooms.probation`, `rooms.emergency`, `cw.people.links` and `ReportInput.evidenceRef`. A mode is

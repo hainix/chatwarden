@@ -34,6 +34,7 @@ import { hmacSha256Hex } from './crypto.js';
 import type { AutomationFacade } from './automation.js';
 import { CaseWorkflow } from './caseWorkflow.js';
 import { CommentService, hasWorkflowMethods } from './commentService.js';
+import { missingUrgentMethods } from './storeCapability.js';
 import type { ClearEscalationResult, CommentRemoveResult, CommentResult, EscalateResult } from './commentService.js';
 import type { CaseMarkResult } from './caseWorkflow.js';
 import { dismissMany } from './dismissMany.js';
@@ -1173,6 +1174,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (baseProfile.desk.workflow && !hasWorkflowMethods(store)) {
     throw new Error('desk.workflow needs a store that keeps staff comments and escalation (insertComment, listComments, deleteComment, countComments, setEscalation, countOpenEscalated); this store lacks them');
   }
+  // The urgent lane's store methods are optional: a store without them still runs, but a report's urgent flag is lost, take next has no urgent pass and marking or handing off a case fails with a
+  // named error. Say so once, by method name.
+  const noUrgent = missingUrgentMethods(store);
+  if (noUrgent.length > 0) safeWarn(logger, 'chatwarden.store_no_urgent_lane', { missing: noUrgent.join(',') });
   if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
   const profanity = buildProfanityFilter(opts, baseProfile.profanity);
   if (profanity === undefined && baseProfile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');

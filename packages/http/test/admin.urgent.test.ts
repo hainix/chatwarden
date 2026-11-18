@@ -303,3 +303,40 @@ describe('POST /reports/:id/handoff', () => {
     expect(w.cw.notices.pending({ clientKey: f.key })).toEqual([]);
   });
 });
+
+describe('a store without the urgent-lane methods', () => {
+  /** The first-party store with the named methods taken off, as a custom store written before the lane would be. */
+  const without = (...names: string[]) => (store: object) => {
+    for (const name of names) Object.defineProperty(store, name, { value: undefined, configurable: true });
+  };
+
+  it.each([
+    ['POST', (id: string) => `/reports/${id}/urgent`, { on: true }, 'setReportUrgent'],
+    ['POST', (id: string) => `/reports/${id}/handoff`, {}, 'setHandoff'],
+  ] as const)('%s %s answers 501 not_supported (not a bare 500), writes no audit row, and logs the class by name', async (method, path, body, missing) => {
+    const w = await world({ editStore: without(missing) });
+    const f = await fileUnder(w, 'harassment');
+    w.logged.length = 0;
+    const res = await w.call(method, path(f.id), { body });
+    expect([res.status, errorOf(res)]).toEqual([501, 'not_supported']);
+    expect(JSON.stringify(res.body)).not.toContain(missing);
+    expect(w.routeAudit()).toEqual([]);
+    expect(w.logged.filter(([event]) => event === 'chatwarden.http_error')).toEqual([]);
+    expect(res.headers?.['cache-control']).toBe('no-store');
+  });
+
+  it('a route that needs only the other method still works (each answers for its own method)', async () => {
+    const w = await world({ editStore: without('setHandoff') });
+    const f = await fileUnder(w, 'harassment');
+    expect((await w.call('POST', `/reports/${f.id}/urgent`, { body: { on: true } })).status).toBe(200);
+    expect((await w.call('POST', `/reports/${f.id}/handoff`, { body: {} })).status).toBe(501);
+  });
+
+  it('control: a full store answers 200 and logs no capability line', async () => {
+    const w = await world();
+    const f = await fileUnder(w, 'harassment');
+    expect((await w.call('POST', `/reports/${f.id}/urgent`, { body: { on: true } })).status).toBe(200);
+    expect((await w.call('POST', `/reports/${f.id}/handoff`, { body: {} })).status).toBe(200);
+    expect(w.logged.filter(([event]) => event === 'chatwarden.store_no_urgent_lane')).toEqual([]);
+  });
+});

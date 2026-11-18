@@ -23,6 +23,8 @@ export const SECRET = 'admin-world-secret';
 export type Logged = Array<[string, Record<string, string | number | boolean> | undefined]>;
 
 export interface WorldOptions {
+  /** Change the real store before the kit starts (for example, take methods off it to stand in for a custom store written before a feature). */
+  editStore?: (store: ReturnType<typeof openStore>) => void;
   wrap?: (cw: Chatwarden) => Chatwarden;
   permissions?: Parameters<typeof adminRoutes>[1]['permissions'];
   /** Build the term routes (default true). */
@@ -55,6 +57,7 @@ export interface WorldOptions {
 export async function world(over: WorldOptions = {}) {
   const db = new DatabaseSync(':memory:');
   const store = openStore({ db });
+  over.editStore?.(store);
   const clock = { t: NOW, now: () => clock.t };
   const logged: Logged = [];
   const logger: Logger = { warn: (event, detail) => void logged.push([event, detail]) };
