@@ -122,6 +122,22 @@ Design: [design/2026-11-17-names-in-reports-and-player-preview.md](design/2026-1
 - **"What the player sees".** A lazy panel in every action that sends or withholds a notice: the decision bar and Simple's card, the Person forms, revoke and the appeal card (now a choice plus "Send decision"). No moderator-only field is ever an input to it.
 - **Not done here:** a real-browser pass at desktop and 360 px, light and dark (the tests hold the structure, the wrapping rules and axe), and everything in follow-ups under "Names and the preview (0.2.0), parked".
 
+## Urgent lane, a kinder desk and rooms under attack (0.2.0 theme; built on branch `release-0.2.0`; not released)
+
+Design: [design/2026-11-17-urgent-desk-and-rooms.md](design/2026-11-17-urgent-desk-and-rooms.md); plan: [plans/2026-11-17-urgent-desk-and-rooms.md](plans/2026-11-17-urgent-desk-and-rooms.md); adopter guides:
+[recipes/urgent-and-welfare.md](recipes/urgent-and-welfare.md), [recipes/raids.md](recipes/raids.md) and [recipes/digest.md](recipes/digest.md). Part of the 0.2.0 release; the release prep does the changelog, the peer floors and the version.
+
+- **The urgent lane.** A report is urgent from its reason (`threat` by default) or when a moderator marks it; urgent cases sort first in the queue and in take next (never over a claim), are never closed
+  by a bulk dismissal, and a default `welfare` reason (switched off) is never held against the reporter. The hub has one chip, a case strip and a "What to do" panel (the owner's guidance and
+  studio contact); "I passed this to our safety team" records who and when and emits an ids-only `report.handoff`. The kit decides nothing and contacts no one.
+- **The desk.** Staff comments, a second look and escalation (`desk.workflow`), Insights and a digest (`desk.insights`; the adopter calls `emitDigest`), a careful view that hides excerpts until opened
+  (browser-only), and a Desk, Safety and Rooms panel in Settings, Advanced.
+- **Rooms under attack.** Lock, emergency mode and retraction (`cw.rooms`, per process, always expiring), probation for new accounts, a report-surge hint, linked-account counts and a gameplay-evidence
+  link. Chat wire version 2 carries the `mode` and `retract` frames; the chat box shows the mode and a removed line.
+- **Store and migration 26.** One shared migration for the release: this theme's block holds the urgent, hand-off, escalation and evidence columns, `kit_report_comments` and `kit_chat_days`.
+- **Not done here:** a real-browser pass at desktop and 360 px, light and dark, for the chip, the strip, the careful view and the Rooms panel (the tests hold the structure, the wrapping rules and axe),
+  and everything under "Urgent lane, desk and rooms (0.2.0), parked" in [plans/follow-ups.md](plans/follow-ups.md).
+
 ## Next
 - **K3c: AI levels 1-2** (read and recommend), **done**: merged as 0.1.7 (PR #26; tag and publish are the owner's). The AI reads a report after the
   player's ack, shows a strip in the hub and, at level 2, pre-fills a mild decision the moderator accepts or edits; it never writes a sanction. Off by

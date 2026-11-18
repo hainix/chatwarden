@@ -79,7 +79,7 @@ import { useEffect, useState } from 'react';
 import type { PlayerClient, PlayerReporting } from '@chatwarden/player-react';
 
 /** One tap, no reasons to offer, the dialog's own thank-you: what a player gets when the settings cannot be loaded. */
-const ONE_TAP: PlayerReporting = { flow: 'one_tap', thanks: '', reasons: [] };
+const ONE_TAP: PlayerReporting = { flow: 'one_tap', thanks: '', reasons: [], resources: [] };
 
 /** The studio's reporting settings from `GET /rules`: `undefined` while they load, the one-tap fallback if that fails. */
 export function useReporting(client: PlayerClient): PlayerReporting | undefined {
@@ -469,8 +469,8 @@ player components, the chat entry on its own is about 15 KB, and `chat.css` is a
 
 `ChatBox`, `sseTransport`, `chatReducer`, `createChatState`, `initialChatState` and `readFrame` (the pure parts, for a game's own UI),
 `enChat`, and the types `ChatBoxProps`, `ChatRefusal`, `ChatTransport`, `ChatConnection`, `ChatTransportEvents`, `ChatStatus`,
-`ChatClosedWhy`, `SseTransportOptions`, `ChatFrame`, `WireLine`, `WireMuted`, `WireRefusal`, `WireRestriction`, `SendResult`,
-`MuteResult`, `MuteTarget`, `ChatState` and `ChatAction`. All are `@experimental` until 0.2.
+`ChatClosedWhy`, `SseTransportOptions`, `ChatFrame`, `WireLine`, `WireMode`, `WireMuted`, `WireReadOnly`, `WireRefusal`, `WireRestriction`, `SendResult`,
+`MuteResult`, `MuteTarget`, `ChatState`, `StateLine` and `ChatAction`. All are `@experimental` until 0.2.
 
 ## Theming
 

@@ -841,8 +841,7 @@ describe('the appeals and names docs (0.1.9)', () => {
   it('http: the appeal and name routes, the new bodies, the limiter and the webhook option are described', () => {
     for (const needle of [
       '| `GET /appeals?status&cursor&limit` |', '| `GET /appeals/:id` |', '| `POST /appeals/:id/decide` |', '| `POST /people/:ref/rename` |', '| `GET /appeals` |', '| `POST /appeals { noticeId, statement }` |',
-      '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (`@experimental`, new in 0.1.9) is `{ appeals, renames, keepBlocked }`',
-      'With all three off the body is what 0.1.8 sent.', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
+      '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (`@experimental`, new in 0.1.9) is `{ appeals, renames, keepBlocked, rooms, workflow, insights }`', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
       '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.1.9`',
       '`name_profane`', 'Also `POST /people/:ref/rename`.',
     ]) {

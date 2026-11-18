@@ -11,6 +11,8 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const cases = join(root, 'examples', 'recipes', 'cases');
 const recipes = join(root, 'docs', 'recipes');
 const PAGES = ['express', 'fastify', 'nextjs', 'socketio', 'colyseus'];
+// Three guides for the person who runs the moderation (0.2.0): prose with at most a short snippet, not a framework recipe, so the golden-file rules above do not apply to them.
+const GUIDES = ['urgent-and-welfare', 'raids', 'digest'];
 const MARKER = /^<!-- golden: (\S+) -->$/;
 const FENCE = /^```(\w*)$/;
 
@@ -77,8 +79,8 @@ const page = (name: string): string => lf(readFileSync(pageOf(name), 'utf8'));
 const prose = (name: string): string => page(name).replace(/```[\s\S]*?```/g, '');
 
 describe('docs/recipes', () => {
-  it('has the five pages and nothing else', () => {
-    expect(readdirSync(recipes).filter((f) => f.endsWith('.md')).sort()).toEqual(PAGES.map((p) => `${p}.md`).sort());
+  it('has the five pages and the three guides, and nothing else', () => {
+    expect(readdirSync(recipes).filter((f) => f.endsWith('.md')).sort()).toEqual([...PAGES, ...GUIDES].map((p) => `${p}.md`).sort());
   });
 
   it('every golden marker resolves to a committed file and the page contains its exact text', () => {
@@ -202,5 +204,55 @@ describe('docs/recipes', () => {
       expect(prose(name), name).not.toMatch(/\b(blazing|seamless|powerful|robust|world-class|cutting-edge|revolutionary|effortless)\b/i);
       expect(page(name), name).not.toMatch(/[A-Za-z]:\\|\/Users\/|\/home\//);
     }
+  });
+});
+
+describe('docs/recipes: the three guides say what the kit does not do', () => {
+  const guide = (name: string): string => lf(readFileSync(join(recipes, `${name}.md`), 'utf8')).replace(/\s+/g, ' ');
+  const all = GUIDES.map(guide).join(' ');
+
+  // Each limit of the kit's safety statement (design 3): it is said in the adopter guide, in words an adopter can quote.
+  const LIMITS: Array<[string, RegExp]> = [
+    ['it does not decide whether anyone is at risk or a threat is real', /does not decide whether anyone is at risk, or whether a threat is real/],
+    ['it does not message anyone', /does not message the person reported/],
+    ['it does not ring, email or post by itself', /does not ring, email or post anywhere by itself/],
+    ['it does not report to any authority', /does not report to any authority/],
+    ['it does not store, copy, fetch or forward images or link targets', /does not store, copy, fetch or forward images, link targets or media/],
+    ['it does not promise a response time and is not a pager', /does not promise a response time, and it is not a pager/],
+    ['the child line: stop, do not copy, follow your legal procedure', /stop\. Do not save, copy, screenshot or forward it\. Follow your studio's legal procedure/],
+    ['not legal advice', /not legal advice/i],
+  ];
+
+  it.each(LIMITS)('the urgent guide says: %s', (_name, pattern) => {
+    expect(guide('urgent-and-welfare')).toMatch(pattern);
+  });
+
+  it('every guide says it is not legal advice, and none promises a response time', () => {
+    for (const name of GUIDES) {
+      expect(guide(name), name).toMatch(/not legal advice/i);
+      expect(guide(name), name).not.toMatch(/within \d+ (minutes|hours)|guarantee/i);
+    }
+    expect(all).toMatch(/promise a response time/);
+  });
+
+  it('the raids guide says a mode always expires, is per process, and is not a sanction; the digest guide says the kit has no scheduler', () => {
+    expect(guide('raids')).toMatch(/every mode ends by itself/);
+    expect(guide('raids')).toMatch(/There is no "until I turn it off"/);
+    expect(guide('raids')).toMatch(/memory of the process that serves the room/);
+    expect(guide('raids')).toMatch(/None of them is a sanction/);
+    expect(guide('digest')).toMatch(/The kit has no scheduler/);
+    expect(guide('digest')).toMatch(/cw\.insights\.emitDigest/);
+  });
+
+  it('a guide holds no more code than a short snippet, in a fenced block', () => {
+    for (const name of GUIDES) {
+      const text = lf(readFileSync(join(recipes, `${name}.md`), 'utf8'));
+      expect((text.match(/^```/gm) ?? []).length % 2, `${name}: unclosed fence`).toBe(0);
+      for (const block of text.matchAll(/```(\w*)\n([\s\S]*?)```/g)) expect((block[2] as string).split('\n').length, `${name}: a snippet is a few lines`).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it('no guide names a real slur, key or token', () => {
+    expect(all).not.toMatch(/sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{10,}|https:\/\/discord\.com\/api\/webhooks\/\d+/);
   });
 });

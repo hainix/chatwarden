@@ -77,6 +77,21 @@ CW_DEMO_PACE=1 npm start -w @chatwarden/example-tiny-chat
   a `pace` in `overrides` wins field by field. A real app sets `pace` in its profile, or the owner sets it in the hub (Settings, Advanced).
 - It is per process, like the fixed rate limit: this demo is one process.
 
+## Rooms under attack (demo, optional)
+
+Off unless `CW_DEMO_ROOMS=1`. With it, a key that starts `demo-staff-` is a staff member (the game's word, never the player's) and can lock the lobby, unlock it and take a line back for
+everyone. Open the chat page with `?staff=mod` in one tab (it shows a small "Staff tools (demo)" box) and a plain tab beside it: lock the lobby and the plain tab's lines are refused (`locked`,
+with the end time) while the staff tab's are delivered; the lock ends by itself after 30 minutes. Paste a line's id into the box and "Remove the line": it disappears for everyone, and a report filed
+afterwards still holds its text, marked taken back. The routes are `POST /demo/rooms/lobby/lock { forMs? }`, `POST /demo/rooms/lobby/unlock` and
+`POST /demo/rooms/lobby/lines/:line/retract { allFromAuthor? }`; the real staff API does the same (`POST /admin/rooms/:room/mode`), and the hub's Rooms panel and a case's menu use it.
+
+```sh
+CW_DEMO_ROOMS=1 npm start -w @chatwarden/example-tiny-chat
+```
+
+- `startServer({ demoRooms })` takes the same switch as an option (`false` forces it off). Without it the three routes do not exist and no key is staff. A mode is per process and forgotten on a
+  restart. A real app marks staff from its own session. See `docs/recipes/raids.md`.
+
 ## Chat filters (demo, optional)
 
 Off unless `CW_DEMO_FILTERS=1`. With it, tiny-chat turns on three chat filters (`overrides.filters`): a link is refused (the box says "Links are not allowed in

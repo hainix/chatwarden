@@ -43,6 +43,7 @@
 //              POST /chat/rooms/:room/lines { text }   -> { ok: true, line } | { ok: false, refused: { reason, until?, rule?, noticeId?, ... } }
 //              (CW_DEMO_FILTERS=1 turns on three chat filters: a link is refused `link`, a phone number is masked, "buy gold" files a report with no reporter)
 //              (CW_DEMO_PRIVACY=1 signs evidence bundles with a demo secret, so GET /admin/reports/:id/bundle verifies; the privacy and hold routes are the owner's either way)
+//              (CW_DEMO_ROOMS=1: a key that starts `demo-staff-` is staff; POST /demo/rooms/lobby/lock|unlock and .../lines/:line/retract let it lock the lobby and take a line back; the page shows the tools for `?staff=name`)
 //              POST /chat/rooms/:room/mute { lineId | ref, on }       -> { ok, hiddenIds }
 //              POST /chat/rooms/:room/report { lineId, reason?, note? } -> { ok: true, remaining } | { ok: false, refused }
 //              DEMO ONLY identity, as for /api: the `x-chatwarden-key` header, or `?key=`. The name other players see is `Player N`, N a
@@ -159,6 +160,16 @@ export interface TinyChatOptions {
    * claim of compliance: this is a demonstration of what the kit stores and does.
    */
   demoPrivacy?: boolean;
+  /**
+   * DEMO ONLY: room control with no setup (rooms under attack). A key that starts `demo-staff-` is a staff member (the game's word: the chat's `join` hook says `staff: true`, and the WebSocket
+   * accepts its lines as staff), and three routes let that key lock the lobby (`POST /demo/rooms/:room/lock { forMs? }`), unlock it (`POST /demo/rooms/:room/unlock`) and take a line back for
+   * everyone (`POST /demo/rooms/:room/lines/:line/retract { allFromAuthor? }`), so a lock, a refused line, a staff line and a removed line can be seen with the chat box. The same things are the
+   * staff API's `POST /admin/rooms/:room/mode` and `.../retract`, which the hub's Rooms panel and the case menu use. Default: on when the `CW_DEMO_ROOMS` environment variable is exactly `1`. An
+   * explicit `false` forces it off; without it the three routes do not exist and no key is staff. A real app marks staff from its own session, never from what a player sends.
+   */
+  demoRooms?: boolean;
+  /** The clock the kit runs on. Default: the system clock. For tests (a lock that expires). */
+  clock?: { now: () => number };
 }
 
 /** The demo's bundle signing secret: 64 hex characters derived from the server secret (so a restart with the same secret signs the same way). A demo only: a real app keeps its own. */
@@ -333,7 +344,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   const send = (ws: WebSocket, frame: object): void => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(frame));
   };
-  const clock = { now: () => Date.now() };
+  const clock = opts.clock ?? { now: () => Date.now() };
   const store = openStore({ path: ':memory:' });
   // The demo AI: only when asked (the option, else CW_DEMO_AI=1). A fake with a scripted rule, so there is no key and no network call.
   const demoAi = opts.demoAi !== undefined ? opts.demoAi : process.env.CW_DEMO_AI === '1';
@@ -348,6 +359,10 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   const demoFilters = opts.demoFilters !== undefined ? opts.demoFilters : process.env.CW_DEMO_FILTERS === '1';
   if (demoFilters) console.warn('tiny-chat: CW_DEMO_FILTERS is on: links are refused, phone numbers and emails are masked, and "buy gold" files a report for a moderator. They are demo settings; the owner can change them in the hub (Settings, Advanced).');
   // The demo privacy flow: only when asked (the option, else CW_DEMO_PRIVACY=1). Off, bundles are unsigned.
+  // The demo room control: only when asked (the option, else CW_DEMO_ROOMS=1). Off, no key is staff and there are no /demo routes.
+  const demoRooms = opts.demoRooms !== undefined ? opts.demoRooms : process.env.CW_DEMO_ROOMS === '1';
+  if (demoRooms) console.warn('tiny-chat: CW_DEMO_ROOMS is on: a key that starts demo-staff- is staff and may lock the lobby and take a line back. It is a demo: a real app marks staff from its own session.');
+  const isStaffKey = (key: string | undefined): boolean => demoRooms && key !== undefined && key.startsWith('demo-staff-');
   const demoPrivacy = opts.demoPrivacy !== undefined ? opts.demoPrivacy : process.env.CW_DEMO_PRIVACY === '1';
   if (demoPrivacy) console.warn('tiny-chat: CW_DEMO_PRIVACY is on: evidence bundles are signed with a demo secret derived from the server secret. A real app keeps its own bundleSecret out of the code.');
   const terms = new LiveTerms({ store, pack: opts.pack ?? syntheticTermPack(), clock });
@@ -563,12 +578,50 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
             n = players.size + 1;
             players.set(key, n);
           }
-          return { name: `Player ${n}` };
+          // Staff is the game's word, never the player's: only a demo key with the prefix, and only with CW_DEMO_ROOMS on.
+          return { name: `Player ${n}`, ...(isStaffKey(key) ? { staff: true as const } : {}) };
         },
       }),
       { fallthrough: false },
     ),
   );
+
+  // DEMO ONLY room control (CW_DEMO_ROOMS=1): the three routes for a `demo-staff-` key. Without the switch they are not mounted, so they answer like any path that is not there.
+  if (demoRooms) {
+    const staffOnly = (req: Request, res: Response): boolean => {
+      const raw = req.headers['x-chatwarden-key'] ?? req.query.key;
+      const key = Array.isArray(raw) ? raw[0] : raw;
+      if (isStaffKey(typeof key === 'string' ? key : undefined)) return true;
+      res.status(403).json({ ok: false, refused: 'not_staff' });
+      return false;
+    };
+    const small = express.json({ limit: '1kb' });
+    app.post('/demo/rooms/:room/lock', small, (req, res) => {
+      if (!staffOnly(req, res)) return;
+      if (req.params.room !== ROOM) return void res.status(404).json({ ok: false, refused: 'no_room' });
+      const forMs = (req.body as { forMs?: unknown } | undefined)?.forMs;
+      try {
+        const state = chatwarden.rooms.setMode(ROOM, 'locked', typeof forMs === 'number' ? { forMs } : undefined);
+        res.status(200).json({ ok: true, mode: state.mode, until: state.until });
+      } catch {
+        res.status(400).json({ ok: false, refused: 'bad_request' });
+      }
+    });
+    app.post('/demo/rooms/:room/unlock', (req, res) => {
+      if (!staffOnly(req, res)) return;
+      if (req.params.room !== ROOM) return void res.status(404).json({ ok: false, refused: 'no_room' });
+      const state = chatwarden.rooms.setMode(ROOM, 'normal');
+      res.status(200).json({ ok: true, mode: state.mode, until: state.until });
+    });
+    app.post('/demo/rooms/:room/lines/:line/retract', small, (req, res) => {
+      if (!staffOnly(req, res)) return;
+      if (req.params.room !== ROOM) return void res.status(404).json({ ok: false, refused: 'no_room' });
+      const allFromAuthor = (req.body as { allFromAuthor?: unknown } | undefined)?.allFromAuthor === true;
+      const result = chatwarden.rooms.retract(ROOM, String(req.params.line), { allFromAuthor });
+      if (!result.ok) return void res.status(404).json({ ok: false, refused: 'not_found' });
+      res.status(200).json({ ok: true, count: result.lineIds.length });
+    });
+  }
 
   // The page and its bundle (built into dist/web by `npm start`). Static, no data; a strict CSP.
   const asset = async (res: Response, file: string, type: string, csp?: string): Promise<void> => {
@@ -584,7 +637,8 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     }
   };
   // With CW_DEMO_APPEALS the page is told so (a meta tag), so it passes `appeals` to the notices without asking a route that answers 404 when they are off.
-  const chatPage = demoAppeals ? CHAT_PAGE.replace('</head>', '<meta name="tiny-chat-appeals" content="on">\n</head>') : CHAT_PAGE;
+  const metas = [demoAppeals ? '<meta name="tiny-chat-appeals" content="on">' : '', demoRooms ? '<meta name="tiny-chat-rooms" content="on">' : ''].filter((m) => m !== '');
+  const chatPage = metas.length === 0 ? CHAT_PAGE : CHAT_PAGE.replace('</head>', `${metas.join('\n')}\n</head>`);
   app.get('/', (_req, res) => void res.status(200).set({ 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': CHAT_PAGE_CSP }).type('html').send(chatPage));
   app.get('/chat.js', (_req, res) => void asset(res, 'chat.js', 'text/javascript; charset=utf-8'));
   app.get('/chat.css', (_req, res) => void asset(res, 'chat.css', 'text/css; charset=utf-8'));
@@ -668,7 +722,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       }
       if (m.type !== 'chat' || typeof m.text !== 'string') return;
 
-      const result = chatwarden.chat.accept(ROOM, seatId, m.text);
+      const result = chatwarden.chat.accept(ROOM, seatId, m.text, isStaffKey(who.clientKey) ? { staff: true } : undefined);
       if ('refuse' in result) {
         const { reason, until, rule, noticeId, retryAfterMs } = result.refuse;
         if (reason !== 'empty') {

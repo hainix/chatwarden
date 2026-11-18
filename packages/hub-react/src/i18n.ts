@@ -1774,7 +1774,7 @@ export const en = {
   'hub.safety.panel': 'What to do',
   'hub.safety.contact': 'Who to reach in your studio',
   'hub.safety.handoff': 'I passed this to our safety team',
-  'hub.safety.handoff.hint': 'This is a note for your colleagues and your own process. It contacts no one.',
+  'hub.safety.handoff.hint': 'This is a note for your colleagues and for your studio\u2019s own procedure. It contacts no one.',
   'hub.safety.notUrgent': 'Mark as not urgent',
   'hub.safety.limits': 'Chatwarden does not judge risk, contact anyone or forward images. It holds text only.',
   'hub.case.menu': 'More actions on this case',

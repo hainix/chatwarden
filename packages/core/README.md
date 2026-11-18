@@ -685,6 +685,34 @@ not throw. `AUDIT_ACTIONS` gains `privacy.find`, `privacy.export`, `privacy.eras
 `isRestrictingKind`, `LegalService`, `HoldCode`, `HOLD_CODES`, `isHoldCode`, `HoldRow`, `HeldSet`, `HoldResult`, `EvidenceBundle`, `BundlePerson`, `BundleIntegrity`, `BUNDLE_DISCLAIMER`, `CANONICALIZATION`,
 `canonicalJson`, `signBundle`, `verifyBundle`, the `bundleSecret` option, `retention`'s receipt clock, `PurgeResult.erasuresFinished` and `.strayRows`, the `report.escalated` event and the new required `Store` methods above.
 
+## Urgent cases, the desk and rooms under attack (0.2.0)
+
+Everything in this section is `@experimental` until the release settles it, and every switch in it is off until an owner turns it on (the one exception: `threat` is an urgent reason out of the box).
+
+### What the kit does and does not do for safety
+
+The kit **does**: mark a report urgent from its reason (or by a moderator), sort it first, show one chip while any is open, post a role mention in the Discord feed if you set one, emit
+`report.created` with `urgent: true` (ids and the reason id only), show the moderator your own guidance and studio contact text, show the reporter your own thank-you and resource list,
+record when a moderator marked the case as passed to your safety team, and keep welfare reports for a shorter time.
+
+The kit **does not**: decide whether anyone is at risk or a threat is real; message the person reported or anyone else; ring, email or post anywhere by itself except the staff channels you
+wired; report to any authority; store, copy, fetch or forward images, link targets or media; or promise a response time. It is not a pager: for round-the-clock cover, route `report.created`
+with `urgent: true` into your own on-call tool. If anything involves a child in danger or sexual material involving minors, the moderator is told to stop, not to save, copy or forward it,
+and to follow your studio's legal procedure. The default guidance is a safe floor, not legal advice. The adopter guide is `docs/recipes/urgent-and-welfare.md`.
+
+### Where each part is
+
+- **The urgent lane.** The reason flag `reporting.reasons[].urgent`, `cw.cases.setUrgent`, `cw.cases.handoff` (an ids-only `report.handoff`), take next, the bulk dismissal and the `welfare`
+  reason are described under "What is experimental in 0.1.9" below. Settings: `safety.guidance` (at most 1 500 characters), `safety.contact` (staff only, 300) and `safety.resources`
+  (at most five, https links only).
+- **The desk.** `desk.workflow` (comments, a second look, escalation: `cw.comments`, `cw.cases.escalate`), `desk.insights` (`cw.insights`) and `desk.surge`. The Insights numbers are team
+  numbers only: counts and times, never a per-person figure.
+- **Rooms under attack.** `cw.rooms.setMode`, `mode`, `list`, `postingState` and `retract`, `rooms.probation`, `rooms.emergency`, `cw.people.links` and `ReportInput.evidenceRef`. A mode is
+  per process, in memory, and always expires (see `docs/recipes/raids.md`). A retraction keeps the line as evidence and writes no sanction.
+- **Events.** `report.handoff`, `case.escalated`, `room.mode`, `line.retracted` and `insights.digest`. None carries a chat line, a comment, a note, a handle, an evidence ref or the studio contact.
+- **Retention.** `retention.welfareReportsMs` (30 days, never under 1 day) and `retention.chatCountsMs` (400 days, never under 31): see `docs/recipes/urgent-and-welfare.md`.
+- **A digest on a timer.** The kit has no scheduler: call `cw.insights.emitDigest()` from your own timer or cron (`docs/recipes/digest.md`).
+
 ## Upgrading to 0.1.9
 
 - **From 0.1.8.** SQLite migration 22 is one-way: a database it has run on cannot be opened by 0.1.8 or older. Back it up first.

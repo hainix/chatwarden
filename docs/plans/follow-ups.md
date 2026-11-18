@@ -307,6 +307,26 @@ Found building R2 (shadow mode), 2026-11. Design: [design/2026-11-12-ai-levels-3
 - **Done in R2: retention of the action rows, `kit_ai_reads.purpose`, the store parity on a transition's edge input** (an empty patch is false, a state outside the closed set throws, an unknown key is ignored, in both stores).
 - **Migration 25 is open until 0.1.14 ships.** Anything that needs another index or column before then goes into migration 25; after the tag it is migration 26.
 
+## Urgent lane, desk and rooms (0.2.0), parked
+
+Found building the urgent lane, the desk and rooms (design: `docs/design/2026-11-17-urgent-desk-and-rooms.md`). The spec's own open items first.
+
+- **A per-moderator break reminder that syncs.** The careful view's counter and break note live in one browser (`localStorage`); a moderator on two machines has two counts. Syncing them would put a
+  count of what a person opened on a server, which the design refuses; if it is wanted, it needs its own design and the person's choice.
+- **Export of Insights.** The page has no export in 0.2.0 (a table of counts and times, no names). A CSV, if asked for, must stay team numbers only.
+- **Unlink for linked accounts.** `cw.people.links` counts only and there is no way to take a link back; a wrong link between two people (a shared device) can only be read as a hint.
+- **A pager integration.** The kit does not wake anyone; round-the-clock cover is the adopter's own on-call tool fed by `report.created` with `urgent: true`. A first-party Opsgenie, PagerDuty or similar
+  adapter is not built.
+- **Welfare is not diagnosed or answered by the kit.** The design refuses to tell the person reported anything; a game's own flow, fed by the event, may. No first-party example of such a flow exists.
+- **Room modes are per process and forgotten on a restart.** A durable or shared mode (several processes, a restart) would need a store method and a design for who may set it where.
+- **The retraction window is the evidence buffer** (15 minutes, 100 lines a room): an older line cannot be taken back, only reported and decided as usual.
+- **Insights `byRule` needs `countSanctionsByRule`** on the store; a custom store without it shows an empty table. The read fetches 90 days whatever the window.
+- **Linked accounts has no `firstLinkedAt`**: the kit holds no link time.
+- **Comments and a thread are plain text only**, 50 entries a report, no editing. Threads of more than that, mentions and notifications are not built.
+- **The break note and the careful view count an opened excerpt once per case**; an appeal's statement opened outside a case is counted but shows no break note.
+- **A real-browser check** of the urgent chip, the strip, the careful view, the Rooms panel and the thread at desktop and 360 px, light and dark.
+- **The Rooms panel's `Refresh` is manual**: the list is read when the panel opens and after a change, not on a timer.
+
 ## Names and the preview (0.2.0), parked
 
 Found building the names-and-preview theme, 2026-11. Design: [design/2026-11-17-names-in-reports-and-player-preview.md](../design/2026-11-17-names-in-reports-and-player-preview.md); plan: [2026-11-17-names-and-preview.md](2026-11-17-names-and-preview.md).

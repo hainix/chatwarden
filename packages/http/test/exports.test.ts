@@ -105,7 +105,7 @@ describe('the public exports an adapter author needs', () => {
   });
 
   it('exports: the chat wire types, the broadcaster and the chat routes are on the root', () => {
-    expect(http.CHAT_WIRE_VERSION).toBe(1);
+    expect(http.CHAT_WIRE_VERSION).toBe(2);
     expect(http.CHAT_WIRE_VERSION).toBe(wire.CHAT_WIRE_VERSION);
     expectTypeOf<http.ChatFrame>().toEqualTypeOf<wire.ChatFrame>();
     expectTypeOf<http.WireLine>().toEqualTypeOf<wire.WireLine>();
