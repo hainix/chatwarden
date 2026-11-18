@@ -343,6 +343,21 @@ Found building the names-and-preview theme, 2026-11. Design: [design/2026-11-17-
 - A real-browser check of the panel, the rename row and the appeal choice at desktop and 360 px, light and dark.
 
 
+## Service mode and shared pacing (0.2.0), parked
+
+Found building the service API, `chatwarden serve`, the Docker recipe and shared pacing (design: `docs/design/2026-11-17-any-server-rooms-languages.md`, sections 3 and 15).
+
+- **A real `docker build`.** The Dockerfile is verified by a static test and the C# job in CI; it is built and run for real only once the version is on npm (it installs the packages at the CLI's own version). The maintainer's check, then a smoke job.
+- **Regenerate the recipe at the release.** `examples/service/*` and `examples/service/cases/*` carry the version in the Dockerfile's `ARG`; after the version sync run `UPDATE_GOLDEN=1 npx vitest run packages/http/test/cli.service-golden.test.ts` and copy `cases/standard` over `examples/service`.
+- **The C# sample is not built by the contributors' tests.** A local test checks its paths against `SERVICE_OPENAPI`; the compile and the live run are CI's (`service-csharp`). A local .NET SDK was not available while it was written.
+- **A shared evidence buffer, Postgres and Redis (K14).** Seats, the evidence buffer, the fixed per-seat rate, the mute index and the idempotency table stay in the process, so several service processes need sticky routing by room.
+- **People first seen by another process.** A process learns the people the store holds when it starts; a person first seen by a sibling later is a person of its own there until its next start, so shared pacing does not yet share state for them. A reload on a miss would fix it for every table keyed by person.
+- **Idempotency is in memory.** Ten minutes, 20 000 entries, per process; persisting it needs a table and was judged not worth it for a single-process service.
+- **No per-route key scopes, request signing or mTLS.** One scope of bearer keys; a signature header can be added within `v1` later.
+- **The seat roster is unbounded.** The service keeps the game's seat ids per room to answer `hiddenFor`; a trusted caller can seat without limit. A cap would be a small change.
+- **The service has no appeals or chat-box transport routes**, no webhook `signal` action for non-Node games, and no engine SDKs (K14).
+- **Staff sign-in is the starter's shared token.** `CHATWARDEN_AUTH_MODULE` is the way to your own; no OIDC or per-moderator login ships.
+
 ## Rooms, many players and unspaced scripts (0.2.0), parked
 
 Found building contexts, scope, block, phrases, reserved names and unspaced matching (design: `docs/design/2026-11-17-any-server-rooms-languages.md`, section 15 and what the build turned up).

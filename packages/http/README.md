@@ -9,6 +9,7 @@ HTTP routes for Chatwarden, the open-source chat moderation kit for games. It gi
 - an **Express adapter** (`toExpress`, from `@chatwarden/http/express`);
 - a **Web fetch adapter** (`toFetch`, from `@chatwarden/http/fetch`) for Next.js, Hono, Bun, Deno and anything else on `Request` and `Response`;
 - a **`chatwarden` command** (`npx -p @chatwarden/http chatwarden init`) that writes the wiring for you, with the recipes in [`docs/recipes`](../../docs/recipes);
+- **service mode** for a game server in any language (`@chatwarden/http/service`: the `/v1` API, `SERVICE_OPENAPI` and a typed client; `chatwarden serve`, the process; `chatwarden init --service`, the Docker recipe): see [Service mode](#service-mode);
 - a **browser-safe entry** (`@chatwarden/http/admin`): the staff API, `createRouter` and the error, role and permission exports, with nothing that imports a Node builtin, so a browser app can run the staff routes in the page.
 
 The routes are plain functions over a small request and response type, so the package has no web framework in it. Express
@@ -76,6 +77,7 @@ This table is generated from the option list in the code, and a test checks it.
 | `--lang <value>` | `ts`, `js` | from tsconfig.json | Language of the generated files |
 | `--on-conflict <value>` | `skip`, `overwrite`, `new` | skip | What to do with a file that exists and differs |
 | `--force` | - | - | Overwrite every file that exists and differs |
+| `--service` | - | - | Write a Docker recipe for the service API (no project needed) |
 | `--install` | - | - | Run the package manager for you |
 | `--dry-run` | - | - | Print the plan and write nothing |
 | `--json` | - | - | Print one JSON document; ask nothing |
@@ -1364,6 +1366,90 @@ This adapter was written from EOS's public Web API pages and tested against a fa
 - What EOS answers to the user query for a player who has no sanctions at all. The adapter reads a `404` as "none found" and goes on to create the sanction. If EOS answers something else, the first sanction for a player is not created and the log shows the status.
 - The link of an EOS sanction that is still `active`, and the poll cursor, are never purged by age. A link marked `removed` is purged with the reports (90 days by default).
 - A restart between the kit's revoke and the delete leaves the EOS sanction in place until it expires. A sweep that fixes this is not built.
+
+## Service mode
+
+For a game server that is not written in Node (Unity, Unreal, Godot, a Go or Python server), Chatwarden runs as a small service your server talks to over HTTP: `@chatwarden/http/service` is the `/v1` API over the kit, `chatwarden serve` is the process that runs it, and `chatwarden init --service` writes the Docker recipe. The kit keeps its own database; your server says who each seat is and asks "may this line go out?". It is browser-safe (`@chatwarden/http/service` imports nothing from `node:`); the process and its Node bridge are separate files the entry never loads.
+
+```ts
+import { toFetch } from '@chatwarden/http/fetch';
+import { serviceRoutes } from '@chatwarden/http/service';
+
+const handle = toFetch({ '/v1': serviceRoutes(cw, { keys: [process.env.SERVICE_KEY!] }) });
+```
+
+`serviceRoutes(cw, { keys })` is a route table to mount at `/v1`. Options: `keys` (one to five service keys, or your own `Authenticate` hook), `rateLimit` (default 3000 per 10 s per key), `authFailureLimit` (20 failed attempts a minute per address), `maxBody` (default 64 KiB), `warnings` (a function that returns the warning codes the handshake lists), `capabilities` and `processes` (what the handshake says), `logger` and `now`. `SERVICE_API_VERSION` is `1`; within `v1` a change is additive only (new optional fields, routes, refusal reasons and error codes), so a client ignores fields it does not know and treats a refusal reason it does not know as unknown. `SERVICE_OPENAPI` is the API as an OpenAPI 3.1 document, built from the same descriptions the routes are built from (`chatwarden serve --print-openapi` prints it); `createServiceClient` (`createServiceClient({ baseUrl, key })`) is a typed `fetch` client with one method per route, a generated `Idempotency-Key` reused across its own retries, and a bounded retry on network errors and 5xx (never on a 4xx). Every type, route and answer is `@experimental` until the release is on npm.
+
+### The routes
+
+Every route is under `/v1`. A read that names a person is a `POST`, so a raw account id or address is never in a URL, an access log or a proxy cache. A `who` is `{ clientKey?, accountId?, ip? }`, each 1 to 256 characters; a seat or room id is 1 to 128 characters of `A-Za-z0-9_.:@~-`. The answer of every route is 200 with the shape below; a refusal is a 200 with `ok: false`.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `GET /v1` | none | The handshake: `{ api, kit, mode: "service", processes, capabilities: { phrases, blocks, contexts, sharedPacing, matchModes }, warnings }`. `warnings` holds `synthetic_terms` (the starter word list is in use), `pacing_per_process` (more than one process, no shared pacing) and `plain_http` (this request came through a proxy over plain HTTP). |
+| `PUT /v1/rooms/{room}/seats/{seat}` | `{ who, handle, tags? }` | `{ ok: true, restriction: { until, kind } \| null }`. Seats a person; a repeat replaces. `who` needs a `clientKey` or an `accountId` (an address alone cannot chat). `tags`: at most 8, `context` and `scope` are the reserved ones (a bad one is 400). |
+| `DELETE /v1/rooms/{room}/seats/{seat}` | none | `{ ok: true }`. Empties the seat; a no-op when unknown. |
+| `DELETE /v1/rooms/{room}` | none | `{ ok: true }`. The seats, tags, evidence and pace state of the room go. |
+| `POST /v1/rooms/{room}/seats/{seat}/lines` | `{ text }` | `{ ok: true, line: { id, text }, hiddenFor: [seat] }` or `{ ok: false, refused: { reason, until?, byModerator?, rule?, noticeId?, retryAfterMs? } }`. Broadcast `line.text` to every seat except those in `hiddenFor` (they muted or blocked the sender, or the sender blocked them). Honours `Idempotency-Key`. |
+| `POST /v1/rooms/{room}/seats/{seat}/phrases` | `{ phraseId }` | As a line, with `line.phrase`. For a phrase-only room; text there is refused `phrases_only`. Honours `Idempotency-Key`. |
+| `GET /v1/rooms/{room}/seats/{seat}/mutes` | none | `{ muted: [seat], blocked: [seat] }`: seat ids only. |
+| `PUT /v1/rooms/{room}/seats/{seat}/mutes/{target}` | `{ kind?: "mute" \| "block" }` | `{ ok: true }`, or `{ ok: false, limit: true }` when the seat holds as many blocks as is allowed. Muting oneself or an empty seat does nothing. |
+| `DELETE /v1/rooms/{room}/seats/{seat}/mutes/{target}` | none | `{ ok: true }`. Removes a mute or a block. |
+| `POST /v1/rooms/{room}/seats/{seat}/reports` | `{ target, lineId?, reason?, note?, entity? }` | `{ ok: true, remaining, detailUntil? }` or `{ ok: false, refused, remaining? }`. No report id is returned. Honours `Idempotency-Key`. |
+| `POST /v1/notices/pending` | `{ who }` | `{ notices }`: the notices the person has not acknowledged. An unknown person has none. |
+| `POST /v1/notices/{id}/ack` | `{ who }` | `{ ok }`. `false` for a notice that is not theirs, so ids cannot be probed. |
+| `POST /v1/record` | `{ who }` | `{ record }`: "my record". |
+| `POST /v1/restriction` | `{ who, roomId?, seatId? }` | `{ restricted, until, kind }`. |
+| `POST /v1/names/check` | `{ name, kind?, who? }` | `{ ok: true }` or `{ ok: false, reason, rule }`. |
+| `POST /v1/doors/check` | `{ kind: "join" \| "create" \| "public" \| "matchmaking", who }` | `{ ok: true }` or `{ ok: false, refusal: { kind, until, refCode, noticeId? } }`. The login and matchmaking check. |
+| `POST /v1/blocks/between` | `{ who, others }` (1 to 50) | `{ blocked: [boolean] }`: has the first person blocked, or been blocked by, each of the others? Found, never created. For matchmaking. |
+
+No answer holds a subject id, a person id, a hash, a seat-to-person mapping, a moderator, a reason a moderator wrote, a rule's private note or the matched term. `noticeId` and `refCode` are the player's own handles.
+
+### How a call is judged
+
+- **Authentication.** `Authorization: Bearer <key>`. A service key is 32 to 256 characters of `A-Za-z0-9_-.~+/=`. The service holds the SHA-256 of each key, compares the presented key's digest with every configured digest (all of them, so timing says nothing about which matched), and never logs, echoes or stores a key; the log carries `kid`, the first 8 hex characters of the digest. A missing or wrong key is 401 `unauthorized` with `www-authenticate: Bearer` and no hint of which. An address that fails 20 times inside a one-minute window (the socket's address, one shared bucket when the adapter gives none) is 429 until the window ends, correct key or not. There is one scope: a key may call every route. A staff token is not a service key, and the process refuses to start when they are equal.
+- **Limits.** Per key 3000 requests per 10 seconds; over it is 429 `rate_limited` with `retry-after`. A body is read with a 64 KiB cap (413 `payload_too_large`); a line over 2000 characters is refused `length` without asking the kit. The kit's own per-seat limits still apply and answer as refusals (`rate`, `slow_mode`, `flood`, `duplicate`).
+- **Idempotency.** `Idempotency-Key: <1 to 64 characters of A-Za-z0-9_.:->` on lines, phrases and reports. The service keeps `(key, method, path, Idempotency-Key)` with a fingerprint of the body and the answer for 10 minutes, in memory, at most 20 000 entries. The same key and body replays the stored answer with the header `idempotent-replay` set to `true` and runs nothing again, so a retried slur is struck once and a retried report files once; the same key with another body is 409 `idempotency_mismatch`, and while the first call is running 409 `in_progress`. A 5xx, a 401 and a 429 are not stored.
+- **Errors.** `{ "error": "code", "message": "fixed text" }`: 400 `invalid_request`, `invalid_json`, `forbidden_key`, `invalid_idempotency_key`; 401; 404 `not_found`; 405 with `allow` (HEAD is not supported); 409; 413; 429. The message never echoes input. Every response carries `chatwarden-api: 1`, `x-request-id` (your own when it is 1 to 64 characters of `A-Za-z0-9_.:-`, else made), `cache-control: no-store` and `x-content-type-options: nosniff`.
+
+### Rotating a service key
+
+Keys come from `CHATWARDEN_SERVICE_KEYS` (comma separated, one to five) or the `keys` option. To rotate: add the new key beside the old one and restart the service, deploy the new key to your game servers, then remove the old one and restart. Two keys are accepted at once, so nothing is refused in between. A key is made with `openssl rand -base64 32`. A service key is a database password: keep it in the environment of your game server, never in a client build, and put the service on a private network or behind a TLS proxy (it adds no TLS of its own, and says `plain_http` when a proxy reports plain HTTP).
+
+### The process: `chatwarden serve`
+
+```
+chatwarden serve [--port 8787] [--host 127.0.0.1] [--db ./chatwarden.db] [--profile-file profile.json]
+                 [--terms-file terms.json] [--hub element|none] [--shared-pacing] [--print-openapi]
+```
+
+Every flag has an environment twin (`CHATWARDEN_PORT`, `CHATWARDEN_HOST`, `CHATWARDEN_DB`, `CHATWARDEN_PROFILE_FILE`, `CHATWARDEN_TERMS_FILE`, `CHATWARDEN_HUB`, `CHATWARDEN_SHARED_PACING` as `1` or `0`); a flag beats the variable, which beats the default. The secrets are environment only:
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `CHATWARDEN_SECRET` | yes | The kit's hashing secret, 32 or more characters. No default in service mode: a missing one is exit 2. Changing it makes every returning player a new person. |
+| `CHATWARDEN_SERVICE_KEYS` | yes | The service keys above. |
+| `CHATWARDEN_ADMIN_TOKEN` | no | The staff sign-in (the init starter's shared token: header `x-admin-token` or the cookie the sign-in form sets; role `owner`, actor `admin`), 24 or more characters and not equal to a service key. Unset: every staff route is 401 and the hub page is not served. |
+| `CHATWARDEN_AUTH_MODULE` | no | A path to an ES module whose default export is `{ authorize(req) }`, your own staff auth (as `adminRoutes` takes it). Beats the token. The only place `serve` runs your code. |
+| `CHATWARDEN_PROCESSES` | no | How many service processes you run (default 1). Above 1 without `--shared-pacing` the handshake warns `pacing_per_process`. |
+
+It serves `/v1/*` (service keys), `/admin/*` (staff), `/mod` and the hub script (when staff auth exists and `--hub element`, the default), `/healthz` and `/readyz`. Startup validates in a fixed order (the packages, the secret, the service keys, the admin token, the profile file, the terms file, then the store and the kit, then listen); any failure is exit 2 with one sentence that names the variable and never its value. `SIGTERM` and `SIGINT` stop accepting, wait up to 10 seconds for open requests, close the kit and the store and exit 0; a second signal exits at once. Logs are JSON lines on standard error: the event and the error class, plus one line per request with `rid`, `kid`, the route pattern, the status and the milliseconds, and never a key, a `who`, a line, a name or an id.
+
+`profile.json` is a moderation profile (or `{ "preset": "strict", ...overrides }`, the standard by default), plus a `phrases` key for phrase books; room contexts and `names.reserved` are written in it. `terms.json` is a term pack; without one the starter test words are used and the handshake says `synthetic_terms`. The packages `serve` needs are loaded from your project: `@chatwarden/store-sqlite`, `@chatwarden/matcher`, `@chatwarden/profanity` and `@chatwarden/hub-element` are optional peers of this package, and `serve` says which is missing and the install command.
+
+### `chatwarden init --service` and the samples
+
+`chatwarden init --service` writes a self-contained folder (default `chatwarden-service/`, `--dir` to change; no `package.json` needed): a `Dockerfile` (`node:22-slim`, the packages installed at the CLI's own version, a non-root user, a volume, a health check), `compose.yaml` (port 8787 bound to `127.0.0.1`; the three variables read from the environment), `.env.example` (names only), `profile.json`, a `README.txt` and a `.dockerignore`. It is a usage error with `--framework`, `--chat`, `--hub`, `--discord`, `--base`, `--lang`, `--install` and `--check`; `--store` and `--profile` still apply. It follows the rules of every init: new files only, a file that differs is skipped, no secret is written, no network, safe to run twice. It is a recipe, not an image: nothing is built or pushed. The repository's `examples/service/` holds the same files plus `curl.sh` (the five core calls) and `conformance.mjs` (the same conversation as a Node script that exits 1 on any surprise), and `examples/service-csharp/` is a C# client of about 150 lines and a demo; CI builds the sample and runs it against a live service.
+
+### What it does not do
+
+- **Seats are the game's to keep.** The service forgets seats on a restart, so every line is refused `gate` until your game seats its players again. Seat again on reconnect, and once more when a line comes back `gate` for a seat you know.
+- **One process per room set.** Seats, the evidence buffer, the fixed `rate`, in-memory automatic restrictions, the mute index, the idempotency table and `setPace` overrides live in the process. Run one process, or route every call for a room to the same process (consistent hashing on the room id, or sticky routing). The pacer's state can be shared through the store (`--shared-pacing`); nothing else is. A shared evidence buffer, Postgres and Redis are not built.
+- **Idempotency is in memory.** It is not a guarantee across a restart or between processes: the same call has to reach the same process.
+- **No player routes.** The service has no notice screen, chat box or appeals: your game draws its own, from `notices/pending`, `record` and `restriction`. Appeals and the chat box transport are not on the service.
+- **It does not read a game's own accounts.** `who` is the game's word; the service hashes it on arrival and keeps nothing raw, including in the idempotency table.
+- **A staff hook is yours.** `CHATWARDEN_ADMIN_TOKEN` is a starter for one or two moderators; replace it with your own sign-in (`CHATWARDEN_AUTH_MODULE`) before a team uses it.
 
 ## Health probes
 

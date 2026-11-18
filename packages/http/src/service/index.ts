@@ -10,6 +10,8 @@ export { SERVICE_API_VERSION } from './contract.js';
 export type { ServiceWho } from './contract.js';
 export { SERVICE_OPENAPI } from './openapi.js';
 export type { ServiceCall, ServiceHandler, ServiceWrapperOptions, Svc } from './wrap.js';
+export { createServiceClient, ServiceError } from './client.js';
+export type { Handshake, Line, LineAnswer, Notice, ReportAnswer, ReportInput, Refusal, Restriction, ServiceClient, ServiceClientOptions } from './client.js';
 
 /** What the handshake says the service can do. */
 export interface ServiceCapabilities {

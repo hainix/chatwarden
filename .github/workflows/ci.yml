@@ -118,6 +118,40 @@ jobs:
       - run: npm ci
       - run: npx vitest run packages/http/test/cli- packages/store-memory/test/testing-
 
+  # The service API (/v1) from a game server in another language: the C# sample is built, the built `chatwarden serve` is started with keys made on the runner, and the
+  # sample runs the whole conversation against it (examples/service-csharp), then the same conversation as a Node script (examples/service/conformance.mjs). The keys never
+  # leave the runner and are written nowhere. A real `docker build` of examples/service is the maintainer's check after the version is on npm.
+  service-csharp:
+    name: Service API (C# sample against a live service)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: npm ci
+      - run: npm run build
+      - run: dotnet build examples/service-csharp
+      - name: Start the service, run the sample against it, then the conformance script
+        run: |
+          export CHATWARDEN_SECRET="$(openssl rand -base64 32)"
+          export KEY="$(openssl rand -base64 32)"
+          export CHATWARDEN_SERVICE_KEYS="$KEY"
+          export CHATWARDEN_DB=":memory:"
+          export BASE="http://127.0.0.1:8787"
+          node packages/http/dist/src/cli/bin.js serve --hub none &
+          SERVICE_PID=$!
+          trap 'kill $SERVICE_PID' EXIT
+          for i in $(seq 1 30); do curl -fsS "$BASE/readyz" > /dev/null && break; sleep 1; done
+          curl -fsS "$BASE/readyz"
+          dotnet run --project examples/service-csharp --no-build
+          node examples/service/conformance.mjs
+
   smoke:
     name: Smoke (consumer install) Node ${{ matrix.node }}
     runs-on: ubuntu-latest

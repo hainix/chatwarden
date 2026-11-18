@@ -141,8 +141,8 @@ Design: [design/2026-11-17-urgent-desk-and-rooms.md](design/2026-11-17-urgent-de
 ## Many rooms, many players and unspaced scripts (0.2.0 theme; built on branch `release-0.2.0`; not released)
 
 Design: [design/2026-11-17-any-server-rooms-languages.md](design/2026-11-17-any-server-rooms-languages.md); plan: [plans/2026-11-17-any-server-rooms-languages.md](plans/2026-11-17-any-server-rooms-languages.md); adopter guides:
-[recipes/kids-rooms.md](recipes/kids-rooms.md) and [recipes/creator-channels.md](recipes/creator-channels.md). Part of the 0.2.0 release; the release prep does the changelog, the peer floors and the version. This entry covers
-tasks M1 to M7, L1 and L2; the service (S1 to S6) and the Spanish and Portuguese catalogues (L3, L4) are later tasks of the same plan and add to it.
+[recipes/kids-rooms.md](recipes/kids-rooms.md), [recipes/creator-channels.md](recipes/creator-channels.md) and [recipes/service-mode.md](recipes/service-mode.md). Part of the 0.2.0 release; the release prep does the changelog, the peer floors and the version. This entry covers
+tasks M1 to M7, L1, L2 and S1 to S6; the Spanish and Portuguese catalogues (L3, L4) are later tasks of the same plan and add to it.
 
 - **Contexts.** Rules per room, declared in code (`profile.contexts`) and chosen by a room's `context` tag: profanity handling, pace, filters and `chat.phrases`, a minimum account age, and nothing else. A tag
   the profile does not declare refuses every line `gate`. The hub shows the label on a case and a read-only "Room contexts" list in Settings, Advanced (contexts are never edited in the hub).
@@ -155,7 +155,14 @@ tasks M1 to M7, L1 and L2; the service (S1 to S6) and the Spanish and Portuguese
   entity (a clan, guild, team, deck, pet or item): `ReportInput.entity`, `kind` on `POST /names/check`, an entity row on the case, and a rename that writes no notice. The `impersonation` reason ships switched off.
 - **Terms without spaces.** Matching for Chinese, Japanese, Thai, Lao, Khmer and Burmese: NFKC (not NFKD), kana folded, segmenter-aligned `segment` by default and `contains` by choice (`matchMode`), stored on the
   term (`kit_terms.match_mode`), in the staff routes, the hub's "Match" choice and the corpus loader. A missing `Intl.Segmenter` is a build error.
-- **Store and migration 26.** The same shared migration: this theme's blocks add `kit_reports.scope`, `kit_reports.entity_json`, `kit_mutes.block` and `kit_terms.match_mode`. A store missing an optional method answers 501 `not_supported`.
+- **Service mode.** `@chatwarden/http/service` is the `/v1` API over the kit for a game server in any language: service keys (one to five, compared by digest, a throttle on failures), a per-key rate limit, a 64 KiB body cap,
+  `Idempotency-Key` on lines, phrases and reports, a handshake with warnings, sixteen routes (seats, lines, phrases, mutes and blocks, reports, notices, record, restriction, names, doors, blocks between), `SERVICE_OPENAPI`
+  built from the same route descriptions, and `createServiceClient`. `chatwarden serve` is the process (the Node bridge with a byte cap and a read timeout, the init starter's shared-token staff sign-in or your own auth module, the hub page,
+  `/healthz` and `/readyz`, a fixed startup order that refuses with one sentence and never a value, a graceful stop); `chatwarden init --service` writes the Docker recipe folder. `examples/service` (the recipe, `curl.sh`, `conformance.mjs`,
+  `expectations.json`) and `examples/service-csharp` (a client and a demo that read the same expectations); CI builds the sample and runs it against a live service. A scoped moderator reads `GET /policy/rules` (the rule list alone) to act on a case.
+- **Shared pacing.** `createChatwarden({ sharedPacing: true })` keeps the pacer's state in the store (`kit_pace`, `paceLoad`, `paceUpdate`, `paceDropRoom`, `paceSweep`), so several processes judge one player's lines together; `decide` and
+  `commitState` are pure functions both pacers call and a test runs one script through both. It is a deployment flag, not a profile setting; `setPace` overrides, seats, evidence and the fixed rate stay per process.
+- **Store and migration 26.** The same shared migration: this theme's blocks add `kit_reports.scope`, `kit_reports.entity_json`, `kit_mutes.block`, `kit_terms.match_mode` and `kit_pace`. A store missing an optional method answers 501 `not_supported`.
 - **Not done here:** everything under "Rooms, many players and unspaced scripts (0.2.0), parked" in [plans/follow-ups.md](plans/follow-ups.md).
 
 ## Next

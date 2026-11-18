@@ -1339,6 +1339,17 @@ describe('the rooms sections (0.2.0)', () => {
     expect(http).toMatch(/`kind` is `player` \(the default\) or `entity`/);
   });
 
+  it('the readme checks pass for the service mode: http says the /v1 table, the keys and their rotation, the process and its variables, the client, the description and the honest limits; core says shared pacing', () => {
+    has(http, ['## Service mode', '`serviceRoutes(cw, { keys })`', '`@chatwarden/http/service`', '`SERVICE_OPENAPI`', '`createServiceClient`', '`chatwarden serve`', '`chatwarden init --service`', '`GET /v1`', '`POST /v1/rooms/{room}/seats/{seat}/lines`', '`POST /v1/blocks/between`']);
+    has(http, ['`CHATWARDEN_SECRET`', '`CHATWARDEN_SERVICE_KEYS`', '`CHATWARDEN_ADMIN_TOKEN`', '`CHATWARDEN_AUTH_MODULE`', '`CHATWARDEN_PROCESSES`', '`Idempotency-Key`', '`idempotent-replay`', '`synthetic_terms`', '`pacing_per_process`', '`plain_http`']);
+    has(http, ['### Rotating a service key', '### What it does not do']);
+    expect(http).toMatch(/A service key is a database password/);
+    expect(http).toMatch(/Seats are the game's to keep/);
+    expect(http).toMatch(/one process per room set/i);
+    has(core, ['## Shared pacing', '`createChatwarden({ sharedPacing: true })`', '`paceLoad`', '`paceUpdate`', '`paceDropRoom`', '`paceSweep`', '`PaceStateRow`', '`PurgeResult.pace`']);
+    expect(core).toMatch(/setPace` overrides stay per process/);
+  });
+
   it('the readme checks pass for the changed packages: player-react says Block, the phrase picker, the phrase catalogue keys and the name words', () => {
     has(player, ['phrase picker', '`phrase.<id>`', '`player.chat.phrases`', '`player.chat.refused.phrases_only`', '`player.chat.refused.phrase_unknown`', '`ChatTransport.sendPhrase(id)`', '`player.name.reserved`', '`player.report.refused.entity_invalid`']);
     has(player, ['Block']);
