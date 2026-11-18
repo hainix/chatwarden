@@ -1,4 +1,4 @@
-import type { Role } from '@chatwarden/core';
+import type { Role, SanctionKind } from '@chatwarden/core';
 import { PERMISSION_KEYS, roleAtLeast } from '../permissions.js';
 import type { PermissionKey } from '../permissions.js';
 import type { RouteTable } from '../router.js';
@@ -35,6 +35,11 @@ export interface Me {
    * (and the role holds), so a hub shows nothing the server would refuse.
    */
   scope?: readonly string[];
+  /**
+   * What a scoped caller may apply (present only with `scope`): the sanction kinds and the longest length of a restriction or a ban, in milliseconds (a permanent one never). A hub offers no more than this; the
+   * server refuses the rest with 400 `invalid_sanction`. A scoped caller also never places an IP sanction, and `features.renames` is `false` for them.
+   */
+  scopedLimits?: { kinds: readonly SanctionKind[]; maxDurationMs: number };
 }
 
 /**
@@ -43,6 +48,7 @@ export interface Me {
  * `features: { appeals, renames, keepBlocked, community?, rooms, workflow, insights }` is always there (`community`: the shared term list is wired, present only then) (appeals: the profile says so and the store
  * can keep them; renames: `names.renames` is on and the store can release one; keepBlocked: `names.keepBlocked`, so a hub learns it without reading the policy; `rooms`: always true, the room tools are part of every kit;
  * `workflow`: `desk.workflow`; `insights`: `desk.insights` and a store that can read the rows), read live.
+ * For a scoped caller `scope` and `scopedLimits` (the kinds and longest length they may apply) are there too, `can` is trimmed to what a scoped caller may do, and `features.renames` is `false`.
  * It needs no permission beyond being authenticated (401 otherwise), holds no ids or text, and writes no audit row.
  */
 export function meRoutes(ctx: AdminContext, options: { community?: boolean } = {}): RouteTable {
@@ -51,11 +57,17 @@ export function meRoutes(ctx: AdminContext, options: { community?: boolean } = {
     'GET /me': ctx.authenticated(({ authz, scope }) => {
       const can = {} as Record<PermissionKey, boolean>;
       for (const key of PERMISSION_KEYS) can[key] = roleAtLeast(authz.role, permissions[key]) && (scope === undefined || SCOPE_AWARE_PERMISSIONS.includes(key));
-      const body: Me = { actor: authz.actor, role: authz.role, can, ...(scope === undefined ? {} : { scope: [...scope] }) };
+      const body: Me = {
+        actor: authz.actor,
+        role: authz.role,
+        can,
+        ...(scope === undefined ? {} : { scope: [...scope], scopedLimits: { kinds: [...ctx.scopedLimits.kinds], maxDurationMs: ctx.scopedLimits.maxDurationMs } }),
+      };
       const community = options.community === true;
       const features: MeFeatures = {
         appeals: cw.appeals.enabled(),
-        renames: cw.names.renamesEnabled(),
+        // A scoped decision with a rename is refused whole (403), so a scoped caller is never told renames work.
+        renames: scope === undefined && cw.names.renamesEnabled(),
         keepBlocked: cw.profile.names.keepBlocked === true,
         ...(community ? { community: true } : {}),
         rooms: true,

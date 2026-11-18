@@ -28,8 +28,8 @@ import { termRoutes } from './terms.js';
 import { workflowRoutes } from './workflow.js';
 import type { TermsAdmin } from './terms.js';
 
-export { AuditFailedError, BadActorError, createAdminContext } from './context.js';
-export type { AdminCall, AdminContext, AdminOptions } from './context.js';
+export { AuditFailedError, BadActorError, createAdminContext, SCOPED_DEFAULT_LIMITS } from './context.js';
+export type { AdminCall, AdminContext, AdminOptions, ScopedLimits } from './context.js';
 export { aiRoutes } from './ai.js';
 export { appealRoutes } from './appeals.js';
 export type { AiReadAgainBody, AiUnavailableBody } from './ai.js';

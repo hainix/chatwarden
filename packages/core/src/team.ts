@@ -555,10 +555,12 @@ export class CaseDesk {
     return true;
   }
 
-  /** Does the person have a report, open or decided, filed in a room of one of these staff scopes? The test a scoped caller's id route makes before it answers (an empty list says no). */
-  inScope(person: SubjectId, scope: readonly string[]): boolean {
+  /** Does the person have a report, open or decided (with `open: true`, only an open one), filed in a room of one of these staff scopes? The test a scoped caller's id route makes before it answers (an empty list says no). */
+  inScope(person: SubjectId, scope: readonly string[], opts: { open?: boolean } = {}): boolean {
     const canonical = this.subjects.canonical(needPerson(person));
-    return this.store.listReportsByPerson(this.subjects.aliasesOf(canonical), 1, checkScope(scope, 'cases.inScope: scope')).length > 0;
+    const checked = checkScope(scope, 'cases.inScope: scope');
+    const aliases = this.subjects.aliasesOf(canonical);
+    return (opts.open === true ? this.store.listOpenReportsByPerson(aliases, 1, checked) : this.store.listReportsByPerson(aliases, 1, checked)).length > 0;
   }
 
   /** Who has the person's case open now, sorted, leaving `except` out. */

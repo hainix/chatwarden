@@ -23,6 +23,13 @@ interface Entry {
   block: boolean;
 }
 
+/** A stored row whose viewer id or target id has been merged away since it was written, found by the canonical pair it now means. */
+interface StaleRow {
+  viewer: SubjectId;
+  target: SubjectId;
+  entry: Entry;
+}
+
 type Op = { put: true; viewer: SubjectId; target: SubjectId; createdAt: number; block: boolean } | { put: false; viewer: SubjectId; target: SubjectId };
 
 const present = (id: SubjectId | null): id is SubjectId => typeof id === 'string' && id !== '';
@@ -38,6 +45,15 @@ export class MuteService {
    * was written; every lookup canonicalises. `set` re-files a person's rows under their canonical viewer id.
    */
   private byViewer = new Map<SubjectId, Map<SubjectId, Entry>>();
+
+  /**
+   * The rows stored under an id that was merged away, found by the canonical viewer and the canonical target they mean now; with `absorbed` (the stored viewer ids that are no longer canonical, by
+   * their canonical viewer) it is what lets a lookup be two map reads instead of a scan of every viewer. Rows written by `set` sit under canonical ids and are never in it. It is rebuilt, lazily
+   * and in one pass, when the subject index says a merge happened (`mergeVersion`), and after a change to the rows while it holds anything. Empty (the usual case) it costs nothing.
+   */
+  private stale = new Map<SubjectId, Map<SubjectId, StaleRow[]>>();
+  private absorbed = new Map<SubjectId, SubjectId[]>();
+  private staleAt = -1;
 
   constructor(store: Store, clock: Clock, subjects: SubjectIndex, opts?: { logger?: Logger }) {
     this.store = store;
@@ -57,6 +73,7 @@ export class MuteService {
         bucket.set(row.target, { at: row.createdAt, block: row.block === true });
       }
       this.byViewer = next;
+      this.staleAt = -1;
       return Promise.resolve();
     } catch (err) {
       return Promise.reject(err);
@@ -150,15 +167,13 @@ export class MuteService {
       if (e.at > at) at = e.at;
       if (e.block) block = true;
     };
-    // Fast path: rows written by `set` sit under canonical ids.
+    // Rows written by `set` sit under canonical ids: one direct read.
     const direct = this.byViewer.get(cv)?.get(ct);
     if (direct !== undefined) take(direct);
+    // Rows filed under an id that was merged away since: the index of those, again two reads.
     if (!block) {
-      // Slow path: a row filed under an id that was merged away since.
-      for (const [sv, targets] of this.byViewer) {
-        if (sv !== cv && this.subjects.canonical(sv) !== cv) continue;
-        for (const [st, e] of targets) if (st === ct || this.subjects.canonical(st) === ct) take(e);
-      }
+      this.refreshStale();
+      for (const row of this.stale.get(cv)?.get(ct) ?? []) take(row.entry);
     }
     return any ? { at, block } : null;
   }
@@ -174,8 +189,10 @@ export class MuteService {
 
     // 1. Rows filed under viewer ids that were merged into this person move to the canonical id; where both
     //    held the same target, the newer time wins and a block wins over a mute.
-    for (const [sv, targets] of this.byViewer) {
-      if (sv === cv || this.subjects.canonical(sv) !== cv) continue;
+    this.refreshStale();
+    for (const sv of this.absorbed.get(cv) ?? []) {
+      const targets = this.byViewer.get(sv);
+      if (targets === undefined) continue;
       absorbed.push(sv);
       for (const [st, e] of targets) {
         const current = bucket.get(st);
@@ -212,26 +229,21 @@ export class MuteService {
     for (const target of evicted) bucket.delete(target);
     for (const sv of absorbed) this.byViewer.delete(sv);
     this.byViewer.set(cv, bucket);
+    this.touched();
     return 'ok';
   }
 
   /** Is there a stored block for this canonical pair, under any id of either person (age does not matter)? */
   private isBlockedStored(cv: SubjectId, ct: SubjectId): boolean {
-    for (const [sv, targets] of this.byViewer) {
-      if (sv !== cv && this.subjects.canonical(sv) !== cv) continue;
-      for (const [st, e] of targets) if (e.block && (st === ct || this.subjects.canonical(st) === ct)) return true;
-    }
-    return false;
+    this.refreshStale();
+    return this.byViewer.get(cv)?.get(ct)?.block === true || (this.stale.get(cv)?.get(ct) ?? []).some((r) => r.entry.block);
   }
 
   private unmute(cv: SubjectId, ct: SubjectId): void {
     const ops: Array<{ viewer: SubjectId; target: SubjectId }> = [];
-    for (const [sv, targets] of this.byViewer) {
-      if (sv !== cv && this.subjects.canonical(sv) !== cv) continue;
-      for (const st of targets.keys()) {
-        if (st === ct || this.subjects.canonical(st) === ct) ops.push({ viewer: sv, target: st });
-      }
-    }
+    this.refreshStale();
+    if (this.byViewer.get(cv)?.has(ct) === true) ops.push({ viewer: cv, target: ct });
+    for (const row of this.stale.get(cv)?.get(ct) ?? []) ops.push({ viewer: row.viewer, target: row.target });
     if (ops.length === 0) return;
     this.store.transaction(() => {
       for (const op of ops) this.store.deleteMute(op.viewer, op.target);
@@ -241,5 +253,39 @@ export class MuteService {
       bucket?.delete(op.target);
       if (bucket?.size === 0) this.byViewer.delete(op.viewer);
     }
+    this.touched();
+  }
+
+  /** Bring the stale-row index up to date with the subject index: nothing to do unless a merge (or a change of rows while it held something) happened since it was built. */
+  private refreshStale(): void {
+    const version = this.subjects.mergeVersion;
+    if (version === this.staleAt) return;
+    const stale = new Map<SubjectId, Map<SubjectId, StaleRow[]>>();
+    const absorbed = new Map<SubjectId, SubjectId[]>();
+    for (const [sv, targets] of this.byViewer) {
+      const cv = this.subjects.canonical(sv);
+      if (cv !== sv) {
+        const list = absorbed.get(cv);
+        if (list === undefined) absorbed.set(cv, [sv]);
+        else list.push(sv);
+      }
+      for (const [st, entry] of targets) {
+        const ct = this.subjects.canonical(st);
+        if ((cv === sv && ct === st) || cv === ct) continue;
+        let byTarget = stale.get(cv);
+        if (byTarget === undefined) stale.set(cv, (byTarget = new Map()));
+        const rows = byTarget.get(ct);
+        if (rows === undefined) byTarget.set(ct, [{ viewer: sv, target: st, entry }]);
+        else rows.push({ viewer: sv, target: st, entry });
+      }
+    }
+    this.stale = stale;
+    this.absorbed = absorbed;
+    this.staleAt = version;
+  }
+
+  /** The rows changed: an index that holds anything is rebuilt at the next lookup (one that holds nothing stays right, since `set` writes canonical ids only). */
+  private touched(): void {
+    if (this.stale.size > 0 || this.absorbed.size > 0) this.staleAt = -1;
   }
 }

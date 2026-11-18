@@ -82,8 +82,8 @@ import { VERSION } from './version.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
-import { APPEALS_START_TOKEN, applySanction, isInternalSource, normalizeRefCode, SanctionError, SanctionIndex, validateSanctionInput } from './sanctions.js';
-import type { SanctionInput } from './sanctions.js';
+import { APPEALS_START_TOKEN, applySanction, checkRevokeWithin, isInternalSource, normalizeRefCode, SanctionError, SanctionIndex, validateSanctionInput } from './sanctions.js';
+import type { RevokeWithin, SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
 import {
   blockedCountsByTerm,
@@ -664,9 +664,9 @@ export interface Chatwarden {
     view(person: SubjectId, actor: string, scope?: readonly string[]): boolean;
     /**
      * Does the person have a report, open or decided, filed in a room of one of these staff scopes? What a scoped caller's id routes ask before they answer: a person with none is
-     * answered as a person nobody holds. An empty list says no.
+     * answered as a person nobody holds. An empty list says no. With `open: true` only an OPEN report counts (what a claim needs).
      */
-    inScope(person: SubjectId, scope: readonly string[]): boolean;
+    inScope(person: SubjectId, scope: readonly string[], opts?: { open?: boolean }): boolean;
     /** Who has the person's case open now (sorted), leaving `except` out. In this process's memory: other processes are not seen. */
     viewers(person: SubjectId, except?: string): string[];
     /** `viewers` for several people at once; people nobody is viewing are absent. */
@@ -745,9 +745,11 @@ export interface Chatwarden {
     apply(input: SanctionInput, opts?: { forReport?: string }): Promise<{ groupId: string; refCode: string }>;
     /**
      * Revoke a whole group and withdraw its player notice in the same transaction: an unseen notice is never shown,
-     * a seen one leaves "My record". Resolves true when this call revoked something.
+     * a seen one leaves "My record". Resolves true when this call revoked something. With a `scope`, only a sanction made from a report filed in one of its rooms can be revoked (else `false`).
+     * With `within` (a scoped moderator's limits), a sanction of a kind not listed, a permanent one (for a kind with a length), or one longer than `maxDurationMs` is not revoked: it throws a
+     * {@link SanctionError}, after the group is known to exist (and to be in scope), so an unknown or out-of-scope group is still `false`. A warning has no length.
      */
-    revoke(groupId: string, actor: string, reason: string, opts?: { scope?: readonly string[] }): Promise<boolean>;
+    revoke(groupId: string, actor: string, reason: string, opts?: { scope?: readonly string[]; within?: RevokeWithin }): Promise<boolean>;
     /**
      * A person's sanctions as staff see them, newest first: the last 90 days plus every unrevoked permanent one, across
      * the aliases merged into them, at most 200. Each is a {@link SanctionGroupView} built from the group's subject row
@@ -2106,7 +2108,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       askedCount: () => commentService.askedCount(),
       urgentCount: (scope) => caseWorkflow.urgentCount(scope),
       view: (person, actor, scope) => desk.view(person, actor, scope),
-      inScope: (person, scope) => desk.inScope(person, scope),
+      inScope: (person, scope, o) => desk.inScope(person, scope, o),
       viewers: (person, except) => desk.viewers(person, except),
       viewersOf: (people, except) => desk.viewersOf(people, except),
     },
@@ -2173,9 +2175,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       },
       revoke: async (groupId, actor, reason, o) => {
         // With a staff scope, only a sanction made from a report filed in one of its rooms can be revoked: a direct or an automatic one, another scope's and an unknown group are all "not found".
-        if (o?.scope !== undefined) {
-          const scope = checkScope(o.scope, 'sanctions.revoke: scope');
-          if (typeof groupId !== 'string' || groupId === '' || store.listSubjectSanctions({ groupId, scope, limit: 1 }).length === 0) return false;
+        const within = o?.within === undefined ? undefined : checkRevokeWithin(o.within);
+        if (o?.scope !== undefined || within !== undefined) {
+          const scope = o?.scope === undefined ? undefined : checkScope(o.scope, 'sanctions.revoke: scope');
+          const found = typeof groupId !== 'string' || groupId === '' ? [] : store.listSubjectSanctions({ groupId, ...(scope === undefined ? {} : { scope }), limit: 1 });
+          const row = found[0];
+          if (row === undefined) return false;
+          if (within !== undefined && !(within.kinds as readonly string[]).includes(row.kind)) throw new SanctionError('sanctions.revoke: outside the limits');
+          if (within !== undefined && row.kind !== 'warning' && row.kind !== 'note' && (row.endsAt === null || row.endsAt - row.startsAt > within.maxDurationMs)) throw new SanctionError('sanctions.revoke: outside the limits');
         }
         // One instant for the stored revokedAt and the event, so a consumer correlating the two sees the same time.
         const at = clock.now();

@@ -316,6 +316,8 @@ export class AppealService {
               rule: appeal.rule === null ? 'uncovered' : (ruleRefOf(appeal.rule) ?? 'uncovered'),
               roomId: group.roomId,
               startsAt: group.startsAt,
+              // The same report as the original, so the replacement stays in the scoped views the original was in.
+              ...(typeof group.reportId === 'string' && group.reportId !== '' ? { reportId: group.reportId } : {}),
               startsAtToken: APPEALS_START_TOKEN,
             },
             now,

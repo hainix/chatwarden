@@ -93,10 +93,12 @@ export function checkDurationsOffered(cw: Chatwarden, actions: readonly Decision
 
 /**
  * What a scoped moderator may apply: only the kinds of `limits.kinds`, and a restriction or ban only for a length of at most `limits.maxDurationMs` (a permanent one, `durationMs: null`, never).
- * A warning or a note has no length. 400 `invalid_sanction` otherwise. Called after the report is known to be in scope, so an out-of-scope id is still the 404 of an unknown id.
+ * A warning or a note has no length. Never `includeIp: true`: an IP row lands on every account behind that address, in every scope, which is more than the report's person. 400 `invalid_sanction`
+ * otherwise. Called after the report is known to be in scope, so an out-of-scope id is still the 404 of an unknown id.
  */
 export function checkScopedLimits(actions: readonly DecisionAction[], limits: Readonly<ScopedLimits>): void {
   for (const a of actions) {
+    if (a.includeIp === true) throw new HttpError('invalid_sanction');
     if (!(limits.kinds as readonly string[]).includes(a.kind)) throw new HttpError('invalid_sanction');
     if (a.kind === 'warning' || a.kind === 'note') continue;
     if (a.durationMs === null || a.durationMs > limits.maxDurationMs) throw new HttpError('invalid_sanction');

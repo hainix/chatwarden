@@ -76,6 +76,8 @@ export class SubjectIndex {
   private created = new Map<SubjectId, number>();
   /** Absorbed subject -> the subject it was merged into (compressed lazily). */
   private parent = new Map<SubjectId, SubjectId>();
+  /** Bumped whenever the answer of `canonical` can change for some id: a merge, a reload from the store, a forget. A reader that indexes by canonical id rebuilds when it moved. */
+  private structure = 0;
   /** Key / account value -> the (stored) subject it belongs to. */
   private keyOwner = new Map<string, SubjectId>();
   private accountOwner = new Map<string, SubjectId>();
@@ -114,9 +116,18 @@ export class SubjectIndex {
     this.logger = opts?.logger;
   }
 
+  /**
+   * A counter that moves whenever `canonical` may answer differently for some id than it did before (a merge, a reload from the store, subjects forgotten). A reader that keeps
+   * something keyed by canonical ids (the mute index) compares it to the value it built at, and rebuilds only when it differs. Looking an id up never moves it.
+   */
+  get mergeVersion(): number {
+    return this.structure;
+  }
+
   /** Rebuild the in-memory index from the store. Call once before `resolve`. */
   async load(): Promise<void> {
     const { subjects, ids } = await this.store.loadSubjects();
+    this.structure += 1;
     this.created = new Map();
     this.parent = new Map();
     this.keyOwner = new Map();
@@ -258,6 +269,7 @@ export class SubjectIndex {
   }
 
   private drop(set: ReadonlySet<SubjectId>): void {
+    this.structure += 1;
     for (const id of set) {
       const owned = this.owned.get(id);
       for (const k of owned?.keys ?? []) if (this.keyOwner.get(k) === id) this.keyOwner.delete(k);
@@ -512,6 +524,7 @@ export class SubjectIndex {
     const loser = aWins ? b : a;
 
     this.parent.set(loser, winner);
+    this.structure += 1;
     const winners = this.members.get(winner) ?? new Set([winner]);
     for (const m of this.members.get(loser) ?? [loser]) winners.add(m);
     this.members.set(winner, winners);

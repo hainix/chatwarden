@@ -109,7 +109,7 @@ export {
   SanctionIndex,
   validateSanctionInput,
 } from './sanctions.js';
-export type { ActiveSanction, SanctionInput, WrittenSanction } from './sanctions.js';
+export type { ActiveSanction, RevokeWithin, SanctionInput, WrittenSanction } from './sanctions.js';
 export { MAX_MUTES_PER_VIEWER, MUTE_TTL_MS, MuteService } from './mutes.js';
 export type { MuteOutcome } from './mutes.js';
 export {

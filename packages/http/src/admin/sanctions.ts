@@ -24,7 +24,8 @@ import { bodyId, bodyObject, bodyTakeOver, bodyText, has, queryLimit } from './v
  *   always `moderator`. Audits `sanction.apply` with the group id. Another moderator's live claim on the person is 409
  *   `claimed` unless `takeOver: true` and the caller holds `claims.override` (audited as `case.takeover`, first); the claim then
  *   stays with the caller. Revoking is never held up by a claim.
- * - `POST /sanctions/:groupId/revoke { reason }`: revoke the whole group (`sanctions.revoke`). Audits `sanction.revoke`.
+ * - `POST /sanctions/:groupId/revoke { reason }`: revoke the whole group (`sanctions.revoke`). Audits `sanction.revoke`. A scoped caller revokes only a sanction from a report in their scope that is within their own
+ *   limits (the kinds and the longest length they may apply): any other is 400 `invalid_sanction`, and nothing is revoked.
  * `durationMs` is required: a whole number of milliseconds up to the 365 day cap, or an explicit `null` (permanent).
  */
 export function sanctionRoutes(ctx: AdminContext): RouteTable {
@@ -87,7 +88,9 @@ export function sanctionRoutes(ctx: AdminContext): RouteTable {
       const reason = bodyText(body.reason);
       if (reason.trim() === '') throw new ValidationError();
       // False: no such group, or it was revoked already; for a scoped caller also a sanction that did not come from a report in their scope.
-      if (!(await cw.sanctions.revoke(groupId, c.authz.actor, reason, c.scope === undefined ? undefined : { scope: c.scope }))) throw new NotFoundError();
+      // A scoped caller revokes only a sanction they could have applied (their kinds and length limits): another is 400 `invalid_sanction` (the facade throws it, once the group is known to be in scope).
+      const scoped = c.scope === undefined ? undefined : { scope: c.scope, within: { kinds: ctx.scopedLimits.kinds, maxDurationMs: ctx.scopedLimits.maxDurationMs } };
+      if (!(await cw.sanctions.revoke(groupId, c.authz.actor, reason, scoped))) throw new NotFoundError();
       c.audit('sanction.revoke', { type: 'sanction', ref: groupId }, 'best-effort');
       return { status: 200, body: { ok: true } };
     }, { scoped: true }),

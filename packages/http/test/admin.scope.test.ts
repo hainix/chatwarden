@@ -56,7 +56,7 @@ describe('GET /me', () => {
 
     const scoped = body(await w.call('GET', '/me', { role: 'senior', scope: [A, B] }));
     expect(scoped.scope).toEqual([A, B]);
-    expect(Object.keys(scoped).sort()).toEqual(['actor', 'can', 'features', 'role', 'scope']);
+    expect(Object.keys(scoped).sort()).toEqual(['actor', 'can', 'features', 'role', 'scope', 'scopedLimits']);
     expect(Object.keys(scoped.can).sort()).toEqual([...PERMISSION_KEYS].sort());
     const on = Object.entries(scoped.can as Record<string, boolean>).filter(([, v]) => v).map(([k]) => k).sort();
     // exactly the scope-aware permissions the senior holds, and the ones a scoped caller may never use are false even where the senior holds them

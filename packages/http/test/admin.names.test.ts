@@ -135,7 +135,8 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
     const f = await w.file();
     expect(((await w.call('GET', '/me')).body as { features?: { renames: boolean } }).features?.renames).toBe(true);
     (w.store as unknown as { withdrawNotice?: unknown }).withdrawNotice = undefined;
-    expect(Object.keys((await w.call('GET', '/me')).body as object)).not.toContain('features');
+    // `features` is always sent now (rooms is always true): the capability shows as `renames: false`, which is what hides the row in the hub.
+    expect(((await w.call('GET', '/me')).body as { features?: { renames: boolean } }).features?.renames).toBe(false);
     const res = await rename(w, f.target);
     expect(res.status).toBe(404);
     expect(w.cw.names.pendingRename({ clientKey: f.key })).toBe(false);

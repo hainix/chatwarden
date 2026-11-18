@@ -88,7 +88,8 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
       if (c.scope !== undefined && !cw.cases.inScope(ref, c.scope)) throw new NotFoundError();
       // Only a live claim of somebody else is a takeover; it is recorded before it happens, so an unrecorded one cannot.
       let moving = false;
-      if (takeOver && canOverrideClaims(ctx, c)) {
+      // A scoped caller can take a case over only where it has an OPEN report in their scope: otherwise the claim answers 404 and the takeover must not have been recorded.
+      if (takeOver && canOverrideClaims(ctx, c) && (c.scope === undefined || cw.cases.inScope(ref, c.scope, { open: true }))) {
         const holder = cw.cases.holder(ref);
         if (holder !== null && holder.by !== actor) {
           c.audit('case.takeover', { type: 'person', ref: cw.people.canonical(ref) }, 'required');

@@ -37,6 +37,20 @@ export class SanctionError extends Error {
   }
 }
 
+/** What a scoped moderator may apply: the kinds, and the longest length of a restriction or a ban (a permanent one never). `sanctions.revoke` takes it as `within`. */
+export interface RevokeWithin {
+  kinds: readonly SanctionKind[];
+  maxDurationMs: number;
+}
+
+/** Check a {@link RevokeWithin} (a `RangeError` for anything else, naming the field only), and take a copy. */
+export function checkRevokeWithin(given: unknown): RevokeWithin {
+  const w = given as { kinds?: unknown; maxDurationMs?: unknown } | null;
+  if (typeof w !== 'object' || w === null || !Array.isArray(w.kinds) || w.kinds.some((k) => !SANCTION_KINDS.includes(k as SanctionKind))) throw new RangeError('sanctions.revoke: within.kinds must list sanction kinds');
+  if (typeof w.maxDurationMs !== 'number' || !Number.isFinite(w.maxDurationMs) || w.maxDurationMs <= 0) throw new RangeError('sanctions.revoke: within.maxDurationMs must be a positive number');
+  return { kinds: [...(w.kinds as SanctionKind[])], maxDurationMs: w.maxDurationMs };
+}
+
 /** Every source a sanction can come from. */
 export const SANCTION_SOURCES: readonly Source[] = ['moderator', 'auto_filter', 'coop', 'api', 'ai'];
 
