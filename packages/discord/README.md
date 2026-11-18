@@ -82,6 +82,8 @@ or `revoked`), each with an "Open in the hub" link on the person. The length com
 the post names the kind and no length. An appeal made moot by someone else's revoke posts nothing, and neither does `rename.required`, which is for your game. With
 `severeOnly`, only appeals under a severe rule post. A post never carries the statement, the moderator's reason or a handle.
 
+**Overturned on appeal (0.2.1).** When a granted appeal overturns a decision, `sanction.overturned` posts one line to the shared "Unattributed reports" thread (the event names no person), pings no one and has no link: `Overturned on appeal: an automatic restriction from the slur list.` for a term or an automatic filter decision, `Overturned on appeal: a decision that came from the links filter.` for a chat filter (also "the personal information filter", "the caps and repeats filter" and "a phrase rule": the family of the filter key and nothing more; "a chat filter" for a family it does not know), `Overturned on appeal: a decision made by the AI.` and `Overturned on appeal: a moderator decision.` The post never carries the term, the term id, the filter key beyond its family, the group id or any person. `severeOnly` does not hold it back, because the event carries no rule.
+
 **What a post says.** Plain staff text: the kind of event, the category, the Community Rule (number and title), the conduct level
 when the report carries one, the reference code, the length of a sanction, and the links. Examples: `**New report**`,
 `**Report closed** · Upheld`, `**Sanction applied** · Chat restriction · 24 hours`, `**Automatic timeout** · 30 minutes`,

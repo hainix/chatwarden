@@ -516,7 +516,8 @@ export async function readCase(search: string) {
   (a labelled field, the hint with the limit, a live count and Send), or "Appeal sent", or the decision with the reason and "As it stands now", then when the link works until and the contact line. A refusal is
   read out in an alert and keeps what was typed; a second click while a send is on its way does nothing; focus goes to the heading when the case loads, to the alert on a refusal and to the "Appeal sent" line after a send.
 - **Words.** They come from `noticeWordsFor` (`(locale, words)`) of `@chatwarden/core/notice-locales` (English, Spanish and Portuguese, with your own over them), not from the catalog of this package. A `t` you pass must carry the
-  `player.appealPage.*` words too; the English ones are `APPEAL_WORDS` in the same subpath.
+  `player.appealPage.*` words too; the English ones are `APPEAL_WORDS` in the same subpath. Spanish and Portuguese are machine-drafted (by an AI model) and have not been reviewed by a person: have someone who speaks the language read
+  the appeal page words and the nine reasons (`player.appeal.reason.*`), and the line that says a decision is final, before you turn them on for players.
 
 ## Languages
 

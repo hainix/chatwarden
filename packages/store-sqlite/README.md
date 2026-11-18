@@ -137,6 +137,15 @@ Migration 26 is the one migration of the whole 0.2.0 release: every theme's bloc
 - **Rooms, names and languages.** `kit_reports.scope` with `kit_reports_by_scope` (filled in for the reports already stored), `kit_reports.entity_json`, `kit_mutes.block` and `kit_terms.match_mode`, described in the bullet above.
 - **Shared pacing.** `kit_pace` is one row per room and person with the pacer's times and short fingerprints of the last lines (never text), swept after an hour (`kit_pace_by_touched`) and erased with the person (`kit_pace_by_who` serves that lookup).
 
+### Migration 27 (0.2.1, one-way)
+
+Migration 27 is the one migration of the whole 0.2.1 release: every task's block is in it, and nothing adds a 28. It only adds, apart from one index it swaps (below), and it runs in one transaction with the version bump, so a failure leaves version 26. **It is one-way: a 0.2.0 or older build refuses a database at version 27, so back up the database file before you upgrade.**
+
+- **Overturns.** `kit_overturns` is one row for each sanction group whose decision was overturned on appeal (a revoke or a reduction): the group (the primary key), the time, the person's subject id, the source, and the term id or filter key that made the decision, plus the report id. No text. It has four indexes: `kit_overturns_by_term` (term and time, only rows with a term), `kit_overturns_by_filter` (filter key and time, only rows with a filter), `kit_overturns_by_subject` (an export and an erase find a person's rows by it) and `kit_overturns_by_at` (retention). It is in the privacy registry with the appeals, so an export shows it, an erase removes it and `retention.appealsMs` purges it.
+- **Where the decision came from.** `kit_sanctions.term_id` is the term id of an automatic restriction (null for every earlier row and every other source), and `kit_sanctions.overturned_at` is when the group was overturned (null while it stands). `kit_strikes.overturned` (0 or 1) marks the strikes an overturned restriction earned, so a restart does not count them again, and `kit_reports.overturned_at` marks the report behind an overturned decision, so the reporter's record leaves it out.
+- **Fixed reasons.** `kit_appeals.reason_code` is the fixed reason of a decided appeal (null for an appeal decided before 0.2.1).
+- **One index swapped.** `kit_reports_by_reporter_outcome_reason` (migration 26) is dropped and `kit_reports_by_reporter_outcome_overturned` replaces it: the same columns with `overturned_at` added, so the reporter-accuracy read stays covered. `kit_reports_by_reporter_outcome` (migration 19) stays, because the open-reports-by-reporter read names it.
+
 ## Links
 
 - [Chatwarden on GitHub](https://github.com/hainix/chatwarden) and the [root README](https://github.com/hainix/chatwarden#readme)

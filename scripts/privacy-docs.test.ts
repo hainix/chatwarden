@@ -52,3 +52,20 @@ describe('every doc and README', () => {
     expect(read('docs/status.md')).toMatch(/not legal advice/i);
   });
 });
+
+describe('the privacy runbook on overturned appeals (0.2.1)', () => {
+  const runbook = read('docs', 'privacy-requests.md').replace(/\s+/g, ' ');
+
+  it('names kit_overturns and says what it holds, what the export shows and that an erase removes the rows', () => {
+    expect(runbook).toContain('`kit_overturns`');
+    expect(runbook).toMatch(/one row for each decision overturned on appeal/);
+    expect(runbook).toMatch(/the group, the time, the source, the person's subject id, and the term id or filter key that made the decision, never a word, a line or a statement/);
+    expect(runbook).toMatch(/export shows (the time of the overturn|when a decision was overturned) on the appeal/i);
+    expect(runbook).toMatch(/erase removes the person's overturn rows/);
+  });
+
+  it('says the retention clock is the appeals one (retention.appealsMs), and that an overturn on a held group stays', () => {
+    expect(runbook).toMatch(/`retention\.appealsMs`/);
+    expect(runbook).toMatch(/held for legal reasons/);
+  });
+});

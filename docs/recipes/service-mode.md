@@ -12,6 +12,7 @@ This is not legal advice. What you may keep about a player, for how long, and wh
 - **Takes reports, mutes and blocks.** A report snapshots the chat the service itself saw; a mute or a block hides a player's lines from the muter, and `hiddenFor` says so on every later line.
 - **Tells your game about a player.** Their notices, their record, what they are restricted from, whether they may join, and whether two players have blocked each other (for matchmaking).
 - **Runs the staff side.** The same hub and staff routes as the library, behind the staff sign-in you choose.
+- **Gives a sanctioned player a way to appeal.** A link to a page the service itself serves (`/appeal`), and, when you set a delivery address, the words of the message for your game to email (0.2.1; see below).
 
 Every answer is JSON, every refusal is a 200 with `ok: false`, and no answer holds an id of a person, a hash, a moderator or the word that matched. The API description is `chatwarden serve --print-openapi`.
 
@@ -39,7 +40,18 @@ Try it with the script of the five core calls, `examples/service/curl.sh`, or it
 4. **Keep the key in your server's environment.** A service key is a database password. It is never in a client build, and the service belongs on a private network or behind a TLS proxy.
 
 What the service cannot know: who a player is (you tell it), how old they are (it never learns), and which rooms are special (you tag them: `context` picks a rule set, `scope` limits a moderator to one creator's
-rooms). Your game draws its own chat box and its own notice screen from `notices/pending` and `record`; the service has no player routes.
+rooms). Your game draws its own chat box and its own notice screen from `notices/pending` and `record`; it serves no notice screen of its own. The one page it serves to players is the appeal page, which a link opens without a sign-in (see "Appeals and email").
+
+## Appeals and email (0.2.1)
+
+A sanction notice carries `appealUrl`, the signed link to the appeal page, when the service knows where it is reached from; the guide [appeal-emails](appeal-emails.md) is the long version of this section.
+
+- **Turn it on.** Appeals must be enabled in the profile for `/appeal` to show: `"appeals": { "enabled": true }` in `profile.json` (`appeals.enabled`). Set `CHATWARDEN_PUBLIC_URL` to where the service is reached from outside (the page is `<it>/appeal`), and `CHATWARDEN_LANDING_ORIGINS` only if a page of your own on another origin reads the case as JSON. Without `CHATWARDEN_PUBLIC_URL` no link is made.
+- **Three routes.** `POST /v1/appeals/link` with `{ noticeId }` answers `{ url }`, a fresh link or `null`. `POST /v1/appeals` with `{ who, noticeId, statement }` files an appeal for a person against their own sanction notice, and `POST /v1/appeals/mine` with `{ who }` lists theirs. `appealUrl` is on the sanction notices of `notices/pending` and `record`, and on the refusal of `doors/check`: put it on your banned screen.
+- **Email.** The service never sends email and never stores an email address. Set `CHATWARDEN_DELIVERY_URL` and `CHATWARDEN_DELIVERY_SECRET` (its own secret of 32 or more characters, both or neither) and it POSTs each message, signed, to your url: `X-Chatwarden-Signature: sha256=<hex HMAC of the body>`, and `x-chatwarden-delivery` with the notice id. Deduplicate on that id. A failed delivery is retried after 1, 3 and 6 minutes, in memory, and lost on a restart; ask again with `POST /v1/appeals/link`.
+- **Keep query strings out of your access logs.** The token is in the link's query string, and it is a capability for one sanction. The same goes for the click tracking of your mail service.
+- **Behind a proxy**, set `CHATWARDEN_TRUST_PROXY` to the number of proxies of your own in front of the service (`1` for one TLS proxy), or the page's per-address rate limits see every player as the proxy.
+- **Strike forgiveness is per process.** A granted appeal on an automatic restriction no longer counts toward the next one, but only the process that decided it forgives at once; another process keeps counting until it restarts. If you run several, decide appeals on one.
 
 ## Running more than one
 

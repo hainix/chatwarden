@@ -32,6 +32,8 @@ about or by them are held (`holds: { reports: n }`: only that something is held,
 
 The export is audited (`privacy.export`) before it is returned: if the audit row cannot be written, nothing is exported.
 
+**Overturned appeals (0.2.1).** `kit_overturns` holds one row for each decision overturned on appeal: the group, the time, the source, the person's subject id, and the term id or filter key that made the decision, never a word, a line or a statement. The export shows the time of the overturn on the appeal (`overturnedAt`) and the fixed reason of the decision (`reasonCode`) in the appeals section; it does not list the row itself.
+
 ## 3. Erase
 
 `cw.privacy.erase(person, { keep, actor })` (or "Erase data..." on the person's page, or `POST /people/:ref/privacy/erase`). The hub's dialog counts first, in words, and asks for the word
@@ -45,6 +47,7 @@ What goes, in one database transaction, then in memory:
   (which can quote the note) is deleted. Their lines inside other players' reports become the marker `[erased]`. The text of a staff comment on a report that stays (they filed it, or wrote a line in it) becomes the same marker; comments on a deleted report go with it.
 - Their name inside what other records stored: the entry for them in the stored decision of a report that stays (a decision can sanction a speaker or the reporter), the stored answer of a
   webhook that applied one of their sanctions (blanked), and the EOS link that pushed it. An EOS report link is only a hash of the report, names no person and ages out with the other links.
+- The person's overturn rows (`kit_overturns`): an erase removes the person's overturn rows with their appeals.
 - In memory: their seats become guests, their evidence lines lose text, name and subject, and every cache forgets them. A player who is still connected and speaks again makes a new,
   unlinked person, never a row under the old id.
 
@@ -71,10 +74,12 @@ is removed by the next `purge()` (rows of a subject that does not exist, older t
 Each pass that removes such rows logs `chatwarden.stray_rows_swept` with the count (never an id or a line): a count that keeps showing up means an integration writes rows for people it never
 saved. A person this process made but could not write to the store (a failed save) is retried, and the sweep waits while one is still unsaved, so a store hiccup never costs that player their rows.
 
+Retention deletes the overturn rows on the appeals clock (`retention.appealsMs`, 365 days by default, never less than 90), with the appeals themselves; the hold above is the only thing that keeps one longer.
+
 ## 5. Legal hold
 
 A senior can hold one report (`cw.legal.hold`, `PUT /reports/:id/hold`, "Hold for legal..." on the case) with one of five codes: `law_enforcement_request`, `legal_proceeding`,
-`platform_request`, `safety_review`, `other`. There is no free text. A hold keeps the report with its decisions, the sanctions decided from it (every row), their notices, the appeals on them, the
+`platform_request`, `safety_review`, `other`. There is no free text. A hold keeps the report with its decisions, the sanctions decided from it (every row), their notices, the appeals on them, the overturn rows of those sanctions (`kit_overturns`: an overturn on a sanction group held for legal reasons stays with the hold), the
 AI reads and outcomes for it and its audit rows out of every retention purge and out of an erase, at any age. Only the owner releases a hold. The case shows a quiet "Held for legal reasons" line.
 
 A hold emits `report.escalated` (ids and the code, never text). The kit forwards it to no one. Your game finds the player with `cw.people.accountIds(target)`, or opt a webhook in to

@@ -1447,3 +1447,253 @@ describe('the rooms sections (0.2.0)', () => {
     has(sqlite, ['Migration 26', '`kit_reports.scope`', '`kit_reports.entity_json`', '`kit_terms.match_mode`', '`kit_mutes.block`']);
   });
 });
+
+describe('the appeals landing docs (0.2.1)', () => {
+  const core = flat(readme('core'));
+  const sqliteReadme = readme('store-sqlite');
+  const memory = flat(readme('store-memory'));
+  const hub = flat(readme('hub-react'));
+  const player = flat(readme('player-react'));
+  const discord = flat(readme('discord'));
+  const serviceMode = flat(read('docs', 'recipes', 'service-mode.md'));
+  const has = (doc: string, needles: string[]): void => {
+    for (const needle of needles) expect(doc, needle).toContain(needle);
+  };
+  const part = (doc: string, heading: string): string => {
+    const start = doc.indexOf(`\n${heading}\n`);
+    expect(start, heading).toBeGreaterThanOrEqual(0);
+    const level = heading.match(/^#+/)?.[0].length ?? 2;
+    const next = doc.slice(start + 1).search(new RegExp(`\\n#{1,${level}} `));
+    return flat(next === -1 ? doc.slice(start) : doc.slice(start, start + 1 + next));
+  };
+
+  it('core: has the section, and names the link, the page, the delivery hook, the fixed reasons and the feedback calls', () => {
+    const text = part(readme('core'), '## Appeal links, delivery and feedback (0.2.1)');
+    has(text, [
+      '`cw.appeals.link(noticeId, { ttlMs? })`',
+      '`cw.appeals.openLink(token)`',
+      '`cw.appeals.caseByLink(token)`',
+      '`cw.appeals.fileByLink(token, { statement })`',
+      '`cw.appeals.landingOrigins()`',
+      '`AppealCase`',
+      '`AppealCaseResult`',
+      '`appeals.landingUrl`',
+      '`appeals.landingOrigins`',
+      '`appeals.linkTtlMs`',
+      '`appeals.contact`',
+      '`appeals.emailsOutcome`',
+      '`appeals.words`',
+      '`notices.deliver`',
+      '`notices.localeOf`',
+      '`NoticeDelivery`',
+      '`AppealReasonCode`',
+      '`APPEAL_REASONS`',
+      '`reasonCode`',
+      '`sanction.overturned`',
+      '`AppealCause`',
+      '`cw.terms.reviewFlags({ days?, min? })`',
+      '`cw.filters.overturned({ days? })`',
+      '`ReporterAccuracy.overturned`',
+      '`@chatwarden/core/notice-locales`',
+      '`PlayerNotice.appealUrl`',
+      '`DoorRefusal.appealUrl`',
+      '`resolveLandingOptions`',
+      '`kit_overturns`',
+      'migration 27',
+    ]);
+  });
+
+  it('core: has the table of the nine fixed reasons by outcome, with every code', async () => {
+    const { APPEAL_REASONS } = await import('@chatwarden/core');
+    const text = part(readme('core'), '## Appeal links, delivery and feedback (0.2.1)');
+    for (const [outcome, codes] of Object.entries(APPEAL_REASONS)) {
+      for (const code of codes) expect(text, `${outcome} ${code}`).toContain(`\`${code}\``);
+    }
+    expect(text).toMatch(/`context_considered`.*the default/);
+  });
+
+  it('core: says what the link is (a capability for one sanction, not a login), keep query strings out of logs, and that appeals must be on', () => {
+    const text = part(readme('core'), '## Appeal links, delivery and feedback (0.2.1)');
+    expect(text).toMatch(/capability for one sanction/);
+    expect(text).toMatch(/not a login/);
+    expect(text).toMatch(/keep query strings out of (your )?access logs/i);
+    expect(text).toMatch(/appeals must be enabled in the profile/i);
+    expect(text).toMatch(/never sends email and never stores an email address/);
+  });
+
+  it('core: says a granted appeal on an automatic restriction no longer counts toward the next, and that the forgiveness is per process until a restart', () => {
+    const text = part(readme('core'), '## Appeal links, delivery and feedback (0.2.1)');
+    expect(text).toMatch(/no longer counts toward the next/);
+    expect(text).toMatch(/per process/i);
+    expect(text).toMatch(/until (it|that process|the other process) restarts/);
+    expect(text).toMatch(/never changes a term by itself/);
+  });
+
+  it('core: says the Spanish and Portuguese appeal and delivery words are machine drafts that a person has not read', () => {
+    const text = part(readme('core'), '## Appeal links, delivery and feedback (0.2.1)');
+    expect(text).toMatch(/Spanish and Portuguese are machine-drafted/);
+    expect(text).toMatch(/not been reviewed by a person/);
+  });
+
+  it('core: the privacy section names kit_overturns, what export shows and that erase removes the rows', () => {
+    const text = part(readme('core'), '## Privacy requests and legal hold');
+    has(text, ['`kit_overturns`']);
+    expect(text).toMatch(/overturn/i);
+  });
+
+  it('http: has the section for the page and the delivery, and names the routes, headers, limits, options and variables', () => {
+    const text = part(readme('http'), '### The appeal page and its delivery (0.2.1)');
+    has(text, [
+      '`GET /appeal`',
+      '`GET /appeal/case`',
+      '`POST /appeal/case`',
+      '`OPTIONS /appeal/case`',
+      '`appealLandingRoutes`',
+      '`APPEAL_PAGE_CSP`',
+      '`landingReadRateLimit`',
+      '`appealsRateLimit`',
+      '`trustProxy`',
+      '`CHATWARDEN_TRUST_PROXY`',
+      '`chatwarden.landing_shared_address`',
+      '`CHATWARDEN_PUBLIC_URL`',
+      '`CHATWARDEN_LANDING_ORIGINS`',
+      '`CHATWARDEN_DELIVERY_URL`',
+      '`CHATWARDEN_DELIVERY_SECRET`',
+      '`createDeliveryWebhook`',
+      '`x-chatwarden-delivery`',
+      '`x-chatwarden-signature`',
+      '`sha256=`',
+      '`POST /v1/appeals/link`',
+      '`POST /v1/appeals`',
+      '`POST /v1/appeals/mine`',
+      '`appealUrl`',
+      '`reasonCode`',
+      '`invalid_reason`',
+      '`reviewFlags`',
+      '`overturned`',
+      '`cache-control: no-store`',
+      '`landingOrigins`',
+    ]);
+    expect(text).toMatch(/keep query strings out of (your )?access logs/i);
+    expect(text).toMatch(/60 reads and 10 writes an hour/);
+    expect(text).toMatch(/303/);
+    expect(text).toMatch(/appeals must be enabled in the profile/i);
+  });
+
+  it('http: says the limits are always per token, and per address only when a real client address is known, with the proxy setting', () => {
+    const text = part(readme('http'), '### The appeal page and its delivery (0.2.1)');
+    expect(text).toMatch(/always per token/);
+    expect(text).toMatch(/only when a real client address is known/);
+    expect(text).toMatch(/never by one shared bucket/);
+    expect(text).toMatch(/right-most|from the right/);
+  });
+
+  it('http: says the receiver must deduplicate on x-chatwarden-delivery, use its own endpoint, and that the scheme is sha256= with no timestamp', () => {
+    const text = part(readme('http'), '### The appeal page and its delivery (0.2.1)');
+    expect(text).toMatch(/deduplicate on `x-chatwarden-delivery`/);
+    expect(text).toMatch(/its own endpoint|separate endpoint/);
+    expect(text).toMatch(/no timestamp/);
+    expect(text).toMatch(/`v1=`/);
+    expect(text).toMatch(/1, 3 and 6 minutes/);
+  });
+
+  it('http: the service routes and the process variables are in the service mode section too', () => {
+    const text = part(readme('http'), '## Service mode');
+    has(text, ['`POST /v1/appeals/link`', '`POST /v1/appeals`', '`POST /v1/appeals/mine`', '`CHATWARDEN_TRUST_PROXY`', '`CHATWARDEN_DELIVERY_URL`', '`CHATWARDEN_PUBLIC_URL`', '`appealUrl`']);
+  });
+
+  it('http: every name and route the section names exists in the sources', () => {
+    const src = (...p: string[]): string => read('packages', 'http', 'src', ...p);
+    expect(src('index.ts')).toContain('appealLandingRoutes');
+    expect(src('index.ts')).toContain('createDeliveryWebhook');
+    expect(src('index.ts')).toContain('APPEAL_PAGE_CSP');
+    expect(src('player.ts')).toContain('landingReadRateLimit');
+    expect(src('player.ts')).toContain('trustProxy');
+    for (const route of ['GET /appeal', 'GET /appeal/case', 'POST /appeal/case', 'OPTIONS /appeal/case']) expect(src('appealLanding.ts'), route).toContain(`'${route}'`);
+    expect(src('service', 'serve.ts')).toContain('CHATWARDEN_TRUST_PROXY');
+    expect(src('appealLanding.ts')).toContain('chatwarden.landing_shared_address');
+  });
+
+  it('service mode recipe: the three routes, appealUrl, the delivery webhook and its variables, the proxy setting, and no longer says the service has no appeals', () => {
+    has(serviceMode, ['`POST /v1/appeals/link`', '`POST /v1/appeals`', '`POST /v1/appeals/mine`', '`appealUrl`', '`CHATWARDEN_PUBLIC_URL`', '`CHATWARDEN_LANDING_ORIGINS`', '`CHATWARDEN_DELIVERY_URL`', '`CHATWARDEN_DELIVERY_SECRET`', '`CHATWARDEN_TRUST_PROXY`', '`appeals.enabled`', '`/appeal`']);
+    expect(serviceMode).not.toMatch(/the service has no player routes/);
+    expect(serviceMode).not.toMatch(/Appeals and the chat box transport are not on the service/);
+    expect(serviceMode).toMatch(/appeal-emails/);
+    expect(serviceMode).toMatch(/keep query strings out of (your )?access logs/i);
+  });
+
+  it('discord: the overturned post, what it never carries, and that severeOnly does not hold it back', () => {
+    has(discord, ['`sanction.overturned`', 'Overturned on appeal: an automatic restriction from the slur list.', 'Overturned on appeal: a decision that came from the links filter.', 'Overturned on appeal: a decision made by the AI.', 'Overturned on appeal: a moderator decision.']);
+    expect(discord).toMatch(/shared (thread|"Unattributed reports" thread)/);
+    expect(discord).toMatch(/never (carries|names|holds) the term/);
+    expect(discord).toMatch(/`severeOnly` does not hold it back/);
+  });
+
+  it('store-memory: names the optional methods the appeals wrapper gained in 0.2.1', () => {
+    has(memory, ['`recordOverturn`', '`loadAppealByGroup`', '`latestAutoChatStart`', '`overturnedTermCounts`', '`overturnedFilterCounts`', '`purgeOverturns`']);
+    expect(memory).toMatch(/optional/);
+  });
+
+  it('hub-react: the reason radio, the cause disclosure, the term flag, the filter count and the three settings', () => {
+    has(hub, ['What caused this', 'Overturned on appeal', 'We email the person when it is decided', 'how long an appeal link works', 'the support contact shown on the appeal page', '`reviewFlags`', '`overturned`', '`reasonCode`']);
+    expect(hub).toMatch(/radio group of the three fixed reasons/);
+    expect(hub).toMatch(/Overturned on appeal \(90 days\)/);
+  });
+
+  it('player-react: the Appeal page section says the words are machine drafts for Spanish and Portuguese', () => {
+    const text = part(readme('player-react'), '## Appeal page');
+    expect(text).toMatch(/Spanish and Portuguese are machine-drafted/);
+    expect(text).toMatch(/not been reviewed by a person/);
+    has(player, ['`AppealPage`', '`readAppealToken(location.search)`']);
+  });
+
+  // Migration 27 is shared by every task of 0.2.1, so its README list is judged against the SQL itself, like migration 26.
+  describe('migration 27 in the READMEs, against the migration itself', () => {
+    const migrations = read('packages', 'store-sqlite', 'src', 'migrations.ts');
+    const at = migrations.indexOf('version: 27,');
+    const sql = migrations.slice(at, migrations.indexOf('`,', migrations.indexOf('sql: `', at)));
+    const tables = [...sql.matchAll(/CREATE TABLE (kit_[a-z_]+)/g)].map((m) => m[1] as string);
+    const columns = [...sql.matchAll(/ALTER TABLE (kit_[a-z_]+) ADD COLUMN ([a-z_]+)/g)].map((m) => `${m[1]}.${m[2]}`);
+    const created = [...new Set([...sql.matchAll(/CREATE (?:UNIQUE )?INDEX (kit_[a-z_]+)/g)].map((m) => m[1] as string))];
+    const dropped = [...new Set([...sql.matchAll(/DROP INDEX (kit_[a-z_]+)/g)].map((m) => m[1] as string))];
+    const start = sqliteReadme.indexOf('### Migration 27');
+    const section27 = flat(start === -1 ? '' : sqliteReadme.slice(start, sqliteReadme.indexOf('\n#', start + 5) === -1 ? undefined : sqliteReadme.indexOf('\n#', start + 5)));
+
+    it('control: the scan finds the table, the columns, the indexes and the dropped index of the migration', () => {
+      expect(tables).toEqual(['kit_overturns']);
+      expect(columns).toEqual(expect.arrayContaining(['kit_sanctions.term_id', 'kit_sanctions.overturned_at', 'kit_strikes.overturned', 'kit_reports.overturned_at', 'kit_appeals.reason_code']));
+      expect(created.length).toBeGreaterThanOrEqual(5);
+      expect(dropped).toEqual(['kit_reports_by_reporter_outcome_reason']);
+    });
+
+    it('store-sqlite has a "Migration 27" section that says it is one-way, to back up first, and that it is the one migration of the release', () => {
+      expect(start).toBeGreaterThan(-1);
+      expect(section27).toMatch(/one-way/);
+      expect(section27).toMatch(/back up/i);
+      expect(section27).toMatch(/the one migration of the whole 0\.2\.1 release/);
+      expect(section27).toMatch(/nothing adds a 28/);
+    });
+
+    it.each(tables)('the section names the table %s', (table) => {
+      expect(section27).toContain(`\`${table}\``);
+    });
+    it.each(columns)('the section names the column %s', (column) => {
+      expect(section27).toContain(`\`${column}\``);
+    });
+    it.each(created)('the section names the index %s it creates', (index) => {
+      expect(section27).toContain(`\`${index}\``);
+    });
+    it.each(dropped)('the section names the index %s it drops, and says what replaces it', (index) => {
+      expect(section27).toContain(`\`${index}\``);
+      expect(section27).toContain('`kit_reports_by_reporter_outcome_overturned`');
+    });
+    it('the section says the migration-19 reporter index stays (a read names it)', () => {
+      expect(section27).toContain('`kit_reports_by_reporter_outcome`');
+    });
+    it('the core README names no table or index the migrations do not create', () => {
+      for (const name of new Set([...core.matchAll(/`(kit_[a-z_]+)`/g)].map((m) => m[1] as string))) {
+        expect(new RegExp(`CREATE (?:UNIQUE )?(?:TABLE|INDEX)(?: IF NOT EXISTS)? ${name}\\b`).test(migrations), `${name} is a table or index the migrations create`).toBe(true);
+      }
+    });
+  });
+});

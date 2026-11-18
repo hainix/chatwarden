@@ -17,7 +17,7 @@ const cases = join(root, 'examples', 'recipes', 'cases');
 const recipes = join(root, 'docs', 'recipes');
 const PAGES = ['express', 'fastify', 'nextjs', 'socketio', 'colyseus'];
 // Guides for the person who runs the moderation (0.2.0): prose with at most a short snippet, not a framework recipe, so the golden-file rules above do not apply to them.
-const GUIDES = ['urgent-and-welfare', 'raids', 'digest', 'kids-rooms', 'creator-channels', 'service-mode', 'translations'];
+const GUIDES = ['urgent-and-welfare', 'raids', 'digest', 'kids-rooms', 'creator-channels', 'service-mode', 'translations', 'appeal-emails'];
 const MARKER = /^<!-- golden: (\S+) -->$/;
 const FENCE = /^```(\w*)$/;
 
@@ -359,5 +359,82 @@ return { queue, policy, me, ban };
     expect((out.policy as { status: number }).status).toBe(403);
     expect((out.me as { body: { scope: string[] } }).body.scope).toEqual(['creator:alice']);
     expect((out.ban as { status: number }).status).toBe(400);
+  });
+});
+
+describe('docs/recipes: appeal-emails (0.2.1)', () => {
+  const guide = lf(readFileSync(join(recipes, 'appeal-emails.md'), 'utf8')).replace(/\s+/g, ' ');
+  const tsBlocks = (): string =>
+    blocksOf(page('appeal-emails'))
+      .filter((b) => b.language === 'ts')
+      .map((b) => b.text)
+      .join('\n');
+
+  it('says the kit never sends email and never stores an email address, in those words', () => {
+    expect(guide).toContain('The kit never sends email and never stores an email address.');
+  });
+
+  it('says what the link is and how to keep it: a capability, query strings out of access logs, never in a public channel, and when it stops working', () => {
+    for (const needle of ['capability', 'query string', 'access log', 'referrer', 'public channel', '`appeals.linkTtlMs`', 'not a login']) expect(guide, needle).toContain(needle);
+    expect(guide).toMatch(/keep (the )?query strings out of (your )?access logs/i);
+  });
+
+  it('says appeals must be enabled in the profile for /appeal to show, and that switching them off breaks the mailed links', () => {
+    expect(guide).toMatch(/Appeals must be enabled in the profile/);
+    expect(guide).toContain('`appeals.enabled`');
+    expect(guide).toMatch(/switching appeals off/i);
+  });
+
+  it('names the hook, the settings and the page options', () => {
+    for (const needle of ['`notices.deliver`', '`notices.localeOf`', '`d.to.accountId`', '`d.sanction.automated`', '`d.sanction.until`', '`appeals.landingUrl`', '`landingOrigins`', '`appeals.contact`', '`appeals.emailsOutcome`', '`appeals.words`', '`appealUrl`', 'sendMail']) {
+      expect(guide, needle).toContain(needle);
+    }
+  });
+
+  it('says what a good email says, and what it must not do', () => {
+    for (const needle of ['What a good appeal email says', 'what happened', 'until when', 'the rule', 'the link', 'a way to reach a person', 'does not promise an outcome', 'private reason', 'no excerpt']) {
+      expect(guide.toLowerCase(), needle).toContain(needle.toLowerCase());
+    }
+  });
+
+  it('service mode: the delivery variables, the signature header and scheme, dedupe on x-chatwarden-delivery, the retry schedule, a separate endpoint, and how to ask again', () => {
+    for (const needle of ['`CHATWARDEN_DELIVERY_URL`', '`CHATWARDEN_DELIVERY_SECRET`', '`CHATWARDEN_PUBLIC_URL`', 'X-Chatwarden-Signature', '`sha256=`', 'x-chatwarden-delivery', '1, 3 and 6 minutes', '/v1/appeals/link', '`CHATWARDEN_TRUST_PROXY`']) {
+      expect(guide, needle).toContain(needle);
+    }
+    expect(guide).toMatch(/[Dd]eduplicate on `?x-chatwarden-delivery`?/);
+    expect(guide).toMatch(/separate endpoint/);
+    expect(guide).toMatch(/lost on a restart|lost when the service restarts/);
+  });
+
+  it('says what feedback an appeal gives, and that strike forgiveness is per process until a restart', () => {
+    expect(guide).toMatch(/no longer counts toward the next restriction/);
+    expect(guide).toMatch(/never changes a term by itself/);
+    expect(guide).toMatch(/per process/);
+    expect(guide).toMatch(/until it restarts/);
+  });
+
+  it('says the Spanish and Portuguese words are machine drafts that a person has not read', () => {
+    expect(guide).toMatch(/Spanish and Portuguese are machine-drafted/);
+    expect(guide).toMatch(/not been reviewed by a person/);
+    expect(guide).toContain('`appeals.words`');
+  });
+
+  it('holds two short typed snippets that compile: the hook, and the signature check; a deliberate error is caught (control)', { timeout: 120_000 }, () => {
+    const code = tsBlocks();
+    expect(code).toContain('sendMail(');
+    expect(code).toContain('d.to.accountId');
+    expect(code).toContain('d.sanction.automated');
+    expect(code).toContain('d.sanction.until');
+    expect(code).toContain('timingSafeEqual');
+    expect(code).toContain('sha256=');
+    expect(code).not.toMatch(/console\.(log|info|warn|error)/);
+    const stubs = `
+declare function sendMail(mail: { to: string; subject: string; text: string; html: string }): Promise<void>;
+declare function emailOf(accountId: string): Promise<string | null>;
+`;
+    const diagnostics = compileSnippets([{ file: 'appeal-emails.ts', code }, { file: 'control.ts', code: "const n: number = 'not a number';" }], stubs);
+    expect(diagnostics.get('control.ts')?.length, 'the control must fail to compile').toBe(1);
+    diagnostics.delete('control.ts');
+    expect(Object.fromEntries(diagnostics)).toEqual({});
   });
 });

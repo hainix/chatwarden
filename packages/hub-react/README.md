@@ -451,6 +451,8 @@ for its Undo survives it.
 The tabs a role cannot use are not shown: Audit appears for a senior and above, and every tab follows the permission table the
 server reports in `GET /me` (so a `permissions` override on the server is respected).
 
+**What a granted appeal shows the hub (0.2.1).** The hub reads four additions of the staff API, all optional, so an older server renders exactly as before. The decision bar sends `reasonCode` (one of the three fixed reasons the player is shown, the first chosen; an `invalid_reason` refusal is read out in words). The appeal card's **What caused this** disclosure reads `cause`. `GET /terms` carries `reviewFlags` (the Terms screen's quiet flag and Review button) and `GET /filters/stats` carries `overturned` (the count under a rule, over a fixed 90 days). A person's reporter record carries `overturned` when it is above zero. The hub never changes a term by itself: the flag is a line, and Review moves the focus to the row's own Edit action, where the word is dry-run before it is saved.
+
 **Hidden names (0.1.9).** A player's handle the word list flags is hidden the way a blocked chat line is, while `names.maskInHub` is on (the default):
 the server marks it (`handleFlagged`, `targetHandleFlagged` and so on, `true` or absent), and the hub draws "Blocked words, hidden" in its place. Where a
 moderator is reading a case (a transcript line, the people list, the case and person titles, an appeal) the label has a **Show** beside it, one place at a
