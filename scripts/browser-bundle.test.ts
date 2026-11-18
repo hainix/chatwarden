@@ -210,6 +210,14 @@ describe('browser bundle: static scan', () => {
     }
   });
 
+  it('bundles @chatwarden/http/service too (the /v1 routes, keys, idempotency), and neither the Node bridge nor the process', () => {
+    const inputs = Object.keys(chatMetafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    for (const file of ['service/index', 'service/wrap', 'service/auth', 'service/contract', 'service/idempotency', 'service/digest']) {
+      expect(inputs, file).toContain(`packages/http/dist/src/${file}.js`);
+    }
+    for (const nodeSide of ['service/node', 'service/serve', 'cli/serve']) expect(inputs, nodeSide).not.toContain(`packages/http/dist/src/${nodeSide}.js`);
+  });
+
   it('chat entry: has no node: import or export specifier', () => {
     expect(chatEsm).not.toMatch(/\b(?:from|import)\s*\(?\s*["']node:/);
     expect(chatEsm).not.toMatch(/\bexport\s*\*?\s*(?:\{[^}]*\}\s*)?from\s*["']node:/);

@@ -45,6 +45,10 @@
       "types": "./dist/src/chat/index.d.ts",
       "default": "./dist/src/chat/index.js"
     },
+    "./service": {
+      "types": "./dist/src/service/index.d.ts",
+      "default": "./dist/src/service/index.js"
+    },
     "./express": {
       "types": "./dist/src/express.d.ts",
       "default": "./dist/src/express.js"
@@ -77,6 +81,9 @@
       ],
       "chat": [
         "dist/src/chat/index.d.ts"
+      ],
+      "service": [
+        "dist/src/service/index.d.ts"
       ],
       "express": [
         "dist/src/express.d.ts"
