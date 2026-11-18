@@ -3,15 +3,22 @@ import {
   foldForExceptions,
   foldPhrase,
   foldTerm,
+  normaliseUnspaced,
   stripInvisible,
   type Folded,
 } from './normalise.js';
+import { MatcherBuildError } from './matcherError.js';
 import { matchName, matchReserved } from './names.js';
 import { mergeSpans, stripWithMap, toOriginal, type Span } from './spans.js';
+import { buildUnspaced, checkLatinMode, readUnspacedException, readUnspacedTerm, scanLetters } from './unspaced.js';
+import type { UnspacedException, UnspacedTerm } from './unspaced.js';
 import { compileWords, type EngineHit } from './vendored/wordEngine.js';
 
-/** A row of the term list: one whole word the matcher refuses. */
-export interface TermRow { id: string; term: string; language: string; active: boolean }
+/**
+ * A row of the term list: one whole word the matcher refuses. `matchMode` is how it is matched: `word` (a plain a-z term, the only mode for one), `segment` (the default for a term in a script written without spaces:
+ * it must occupy whole segments of the text) or `contains` (anywhere in a run of those scripts). `null` or absent picks by script. A mode that does not fit the term's script is refused at build.
+ */
+export interface TermRow { id: string; term: string; language: string; active: boolean; matchMode?: 'word' | 'segment' | 'contains' | null }
 /** A row of the exception list: a phrase whose match is suppressed. */
 export interface ExceptionRow { id: string; phrase: string; language: string; active: boolean }
 export type { Span } from './spans.js';
@@ -28,21 +35,7 @@ export interface Matcher {
   matchReserved?(name: string, entries: readonly string[], allow: readonly string[]): boolean;
 }
 
-/** Thrown for a malformed active term or exception row; the message names the row id. */
-export class MatcherBuildError extends Error {
-  /** `rowId` lets a caller log which row failed without logging the message, which quotes the term. */
-  readonly rowId?: string;
-  /** A short fixed description of what is wrong. Unlike the message it never quotes the term, so it is safe to
-   *  log or show next to a row id. */
-  readonly reason?: string;
-  // No parameter property: erasableSyntaxOnly forbids it.
-  constructor(message: string, rowId?: string, reason?: string) {
-    super(message);
-    this.name = 'MatcherBuildError';
-    this.rowId = rowId;
-    this.reason = reason;
-  }
-}
+export { MatcherBuildError } from './matcherError.js';
 
 const MIN_TERM_LENGTH = 3;
 
@@ -123,14 +116,29 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
   // The engine numbers its words by position, so the row ids are kept in the same order.
   const words: string[] = [];
   const rowIds: string[] = [];
+  const unspacedTerms: UnspacedTerm[] = [];
   for (const row of terms) {
     if (!row.active) continue;
-    words.push(normaliseTerm(row));
+    // A term with letters of a script written without spaces (or of one this matcher cannot read) is read by the unspaced path; every other term is a Latin word, as before.
+    const letters = typeof row.term === 'string' ? scanLetters(normaliseUnspaced(row.term)) : { unspaced: false, foreign: false };
+    if (letters.unspaced || letters.foreign) {
+      unspacedTerms.push(readUnspacedTerm(row.id, row.term, row.language, row.matchMode));
+      continue;
+    }
+    const word = normaliseTerm(row);
+    checkLatinMode(row.id, row.matchMode);
+    words.push(word);
     rowIds.push(row.id);
   }
   const phrases: string[] = [];
+  const unspacedExceptions: UnspacedException[] = [];
   for (const row of exceptions) {
     if (!row.active) continue;
+    const unspacedPhrase = readUnspacedException(row.id, row.phrase, row.language);
+    if (unspacedPhrase !== null) {
+      unspacedExceptions.push(unspacedPhrase);
+      continue;
+    }
     phrases.push(normalisePhrase(row));
   }
 
@@ -139,6 +147,8 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
   // The engine reads text the way obscenity's English preset does (see ./vendored/wordEngine.ts) and has no whitelist:
   // exceptions are applied by isExcepted (word-bounded), not by the engine.
   const engine = compileWords(words);
+  // The unspaced half: null (and never consulted) unless a term in one of those scripts is active.
+  const unspaced = buildUnspaced(unspacedTerms, unspacedExceptions);
 
   /** Every non-excepted hit of the text, as the matcher reads it (`stripInvisible` already applied), in
    *  the order the passes find them. Lazy, so `match` can stop at the first. */
@@ -164,7 +174,8 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
       // Everything below, hit ranges and exception edges included, works on this one view, so a hidden
       // character can neither split a term nor make an exception phrase look cleanly bounded.
       for (const hit of hits(stripInvisible(raw))) return { termId: hit.termId };
-      return null;
+      const other = unspaced?.first(raw) ?? null;
+      return other === null ? null : { termId: other };
     },
     spans(raw: string) {
       // stripInvisible changes indices, so the view keeps where each of its characters came from.
@@ -173,6 +184,8 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
       for (const hit of hits(view.text)) {
         found.push({ ...toOriginal(view, hit.startIndex, hit.endIndex), termId: hit.termId });
       }
+      // A Latin hit and a hit in a script written without spaces in one line both appear, in order; overlapping ones merge.
+      if (unspaced !== null) for (const h of unspaced.hits(raw)) found.push(h);
       return mergeSpans(found);
     },
     matchName(name: string) {

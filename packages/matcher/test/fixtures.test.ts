@@ -7,7 +7,7 @@ import { LiveTerms, buildMatcher, loadTermPack } from '../src/index.js';
 describe('@chatwarden/matcher/fixtures (shipped synthetic fixtures)', () => {
   it('exports the synthetic pack, its data and the in-memory term store', () => {
     expect(Object.keys(fixtures).sort()).toEqual(
-      ['MemoryTermStore', 'SYNTHETIC_EXCEPTIONS', 'SYNTHETIC_TERMS', 'UNLISTED_WORDS', 'syntheticTermPack'].sort(),
+      ['MemoryTermStore', 'SYNTHETIC_EXCEPTIONS', 'SYNTHETIC_TERMS', 'SYNTHETIC_UNSPACED_TERMS', 'UNLISTED_WORDS', 'syntheticTermPack'].sort(),
     );
   });
   it('syntheticTermPack loads and blocks its own invented terms', () => {

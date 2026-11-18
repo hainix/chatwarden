@@ -216,6 +216,22 @@ options of the share client are `endpoint`, `sign`, `publicKey`, `fetch`, `clock
 A release is a signed zip with `terms.json`, `exceptions.json`, `positive.json`, `negative.<lang>.json` and a manifest. See the
 [design note](https://github.com/hainix/chatwarden/blob/main/docs/design/2026-11-12-k7-term-corpus.md) for the formats.
 
+## Terms in scripts written without spaces (0.2.0)
+
+A term in Chinese, Japanese, Thai, Lao, Khmer or Burmese has no spaces to read whole words by, so these scripts have their own path (`@chatwarden/matcher` reads Han, Hiragana, Katakana, Thai, Lao, Khmer and Myanmar; any other script, Cyrillic, Arabic and Hangul included, is a `MatcherBuildError` "not supported yet", naming the row and never the term). A Latin term is exactly what it was.
+
+| Row field | Rule |
+| --- | --- |
+| `term` | Letters of one script family and nothing else: no space, punctuation, digit or Latin letter. Han, Hiragana and Katakana may mix for Japanese; Han with Thai is refused. 2 to 24 code points (3 to 24 for `contains`). |
+| `language` | `zh`, `ja`, `th`, `lo`, `km` or `my`, and one that fits the script (kana is `ja`, Han alone is `zh` or `ja`, Thai is `th`). It picks the segmenter. |
+| `matchMode` | `segment` (the default for such a term), `contains`, or for a plain a-z term `word` (the only mode it has). A mode that does not fit the script is refused at build. |
+
+- **segment.** The term must occupy whole segments: the text is cut into runs of those letters (a space, punctuation, a digit, a Latin letter or an emoji ends a run) and each run is cut by `Intl.Segmenter(language, { granularity: 'word' })`; a hit starts and ends on segment edges, so the same characters inside a longer dictionary word do not hit, and a slang term the dictionary splits into single characters still does. A runtime without `Intl.Segmenter` and an active `segment` term fails `buildMatcher` (a missing capability is not silently weaker).
+- **contains.** Hits anywhere inside a run, for a severe term an owner would rather match everywhere than risk missing. It never cuts a grapheme cluster (a Thai letter is not read without its tone mark).
+- **Reading text.** NFKC, not NFKD (decomposing would turn a voiced Japanese kana into an unvoiced one and Thai vowel signs and tone marks are marks that carry the word); only format characters, the blank fillers and variation selectors are removed; hiragana and katakana are one spelling (`foldKana`, `normaliseUnspaced`). `spans()` still gives exact ranges on the text as typed.
+- **Exceptions.** An exception phrase in these scripts suppresses a hit inside it only when its own edges are segment edges; one that mixes Latin and Han is refused at build.
+- **Honest limits.** Segmentation is a dictionary algorithm and moves between ICU versions, so the corpus gate (every term ships with lines it must and must not match) runs on both Node versions in CI, and the hub's dry run shows a term's effect before it is saved. Characters inserted between letters, homophones, pinyin and simplified/traditional conversion are not read: add the term in each form that matters. `isUnspacedTerm`, `UNSPACED_SCRIPTS` and `UNSPACED_LANGUAGES` are exported; `@chatwarden/matcher/fixtures` gains `SYNTHETIC_UNSPACED_TERMS` (invented transliterations, never a real term).
+
 ## Options
 
 The main parts of the API:

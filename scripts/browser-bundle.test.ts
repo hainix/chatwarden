@@ -53,7 +53,10 @@ const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.
 // builder and the registry could load behind an `import()` the way the signal service does, if a later theme needs the room.
 // Raised to 192 KB at 0.2.0 (the urgent lane and the desk): the memory store gains the urgent, hand-off, comment and day-count methods, and core carries the desk, safety and room
 // settings, the case workflow and the comment service (about 4 KB gzip together; the bundle measured 180.5 KB just before this raise). Still a guard against large accidental growth.
-const SIZE_BUDGET_GZIP = 192 * 1024;
+// Raised to 224 KB at 0.2.0 (rooms, names and languages): the chat path gains phrase books and the phrase-only room, the names path gains reserved names (the skeleton and the whole-word comparison)
+// and report entities, and the matcher gains the unspaced-script path (the runs, the clusters and the segmenter glue, about 3 KB gzip); the bundle measured 197.3 KB gzip just before this raise.
+// Still a guard against large accidental growth, not small features.
+const SIZE_BUDGET_GZIP = 224 * 1024;
 
 /**
  * The browser build without the server-only AI module, as a bundler that splits at `import()` gives a page that never passes an adapter:
