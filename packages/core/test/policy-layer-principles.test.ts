@@ -43,7 +43,7 @@ const tier = (over: Partial<GuidelineTier> = {}): GuidelineTier => ({
   title: 'Everything',
   description: 'How we read all of it.',
   examples: ['ez'],
-  covers: ['banter', 'rude', 'hostile', 'severe'],
+  covers: ['banter', 'rude', 'hostile', 'severe', 'repeated', 'after_warning'],
   outcome: 'A human decides.',
   ...over,
 });

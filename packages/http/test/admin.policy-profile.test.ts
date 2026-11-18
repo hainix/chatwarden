@@ -676,7 +676,7 @@ describe('principles, team notes and the AI standard (0.2.2)', () => {
     title: 'Everything',
     description: 'How we read all of it.',
     examples: ['an example'],
-    covers: ['banter', 'rude', 'hostile', 'severe'],
+    covers: ['banter', 'rude', 'hostile', 'severe', 'repeated', 'after_warning'],
     outcome: 'A human decides.',
     ...over,
   });
@@ -769,7 +769,7 @@ describe('principles, team notes and the AI standard (0.2.2)', () => {
       '/policy/profile',
       save(
         {
-          guidelines: { tiers: [tier({ title: 'A', covers: ['banter', 'rude'] }), tier({ title: 'B', description: FLAGGED, covers: ['hostile', 'severe'] })] },
+          guidelines: { tiers: [tier({ title: 'A', covers: ['banter', 'rude'] }), tier({ title: 'B', description: FLAGGED, covers: ['hostile', 'severe', 'repeated', 'after_warning'] })] },
           teamNotes: [{ text: 'fine note' }, { text: FLAGGED }],
           aiContext: FLAGGED,
         },

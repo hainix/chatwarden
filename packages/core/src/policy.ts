@@ -6,7 +6,8 @@ import { promptPrinciples } from './principles.js';
 import type { PromptExcluded } from './principles.js';
 import { CREATOR_TEAM_NOTE, isGameKind, recommendFor } from './recommend.js';
 import type { GameKind } from './recommend.js';
-import { checkTeamNoteRules } from './teamNotes.js';
+import { checkTeamNoteRules, resolveTeamNotes } from './teamNotes.js';
+import type { TeamNote } from './teamNotes.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
 import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
 import { playerReporting } from './reporting.js';
@@ -257,8 +258,10 @@ export class PolicyService {
     const rec = recommendFor(game).layer;
     const next: PolicyLayer = { ...current, guidelines: rec.guidelines, firstOffense: rec.firstOffense, repeat: rec.repeat, ladder: rec.ladder, aiContext: rec.aiContext };
     if (game === 'creator') {
-      const notes = [...(current.teamNotes ?? [])];
-      if (!notes.some((n) => n.text === CREATOR_TEAM_NOTE)) notes.push({ text: CREATOR_TEAM_NOTE });
+      // The notes in force (the layer's, or the code profile's when the layer sets none), cleaned: a code profile's notes are kept, never replaced by the one note.
+      const notes: TeamNote[] = this.state.effective.teamNotes.map((n) => ({ ...n }));
+      const creator = resolveTeamNotes([{ text: CREATOR_TEAM_NOTE }])[0]!;
+      if (!notes.some((n) => n.text === creator.text)) notes.push(creator);
       next.teamNotes = notes;
     }
     return this.save(next, ctx);

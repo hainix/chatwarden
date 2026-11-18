@@ -1,3 +1,4 @@
+import { stripInvisible } from './appeals.js';
 import { DEFAULT_AREA_RULES, DEFAULT_SEVERE_RULES, lengthLabel, outcomeLabel } from './ladder.js';
 import type { LadderCell } from './ladder.js';
 import { validateProfile, withDurationDefaults } from './profile.js';
@@ -79,18 +80,21 @@ type Block =
 
 const FORMATS: readonly string[] = ['markdown', 'html', 'text'];
 
-/** Collapse every run of whitespace and control characters (line breaks included) to one space. */
+/**
+ * Collapse every run of whitespace and control characters (line breaks included) to one space. Bidi, zero-width and other invisible characters are removed first (the
+ * same set as for a team note), so a team-edited tier title or example cannot reorder or hide text in a document.
+ */
 function flat(v: string): string {
-  return v.replace(/[\p{Cc}\s]+/gu, ' ');
+  return stripInvisible(v).replace(/[\p{Cc}\s]+/gu, ' ');
 }
 
-/** A value from outside this file (team text, a name, a rule): one trimmed line. */
 /** ` (CR 3)` for a note that cites a rule, ` (CR 3, retired)` when that rule is retired, nothing for a note with no rule. */
 function noteSuffix(rule: number | undefined, rules: CommunityRules): string {
   if (rule === undefined) return '';
   return rules.get(rule)?.retired === true ? ` (CR ${rule}, retired)` : ` (CR ${rule})`;
 }
 
+/** A value from outside this file (team text, a name, a rule): one trimmed line. */
 function clean(v: string): string {
   return flat(v).trim();
 }

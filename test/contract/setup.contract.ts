@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { SetupState, Store } from '@chatwarden/core';
 
 // The contract of the stored setup state (0.2.2): `getSetupState` and `saveSetupState`, the optional pair that remembers the first-run panel was
-// dismissed. One suite, run against every Store. The methods are optional on the interface (a custom store may leave them out); every store in this
-// repo implements them.
+// dismissed. One suite, run against every Store. The methods are optional on the interface (a custom store may leave them out, and then the suite is skipped);
+// every store in this repo implements them.
 
 interface WithSetup {
   getSetupState(): SetupState | null;
@@ -16,7 +16,10 @@ const setup = (s: Store): WithSetup => {
 };
 
 export function setupContract(name: string, make: () => Store): void {
-  describe(`setup state contract: ${name}`, () => {
+  // The pair is optional on the interface: a store with neither skips the suite (as the appeal and link areas do). A store with only one of the two still runs it, and fails "has both methods".
+  const probe = make();
+  const maybe = probe.getSetupState === undefined && probe.saveSetupState === undefined ? describe.skip : describe;
+  maybe(`setup state contract: ${name}`, () => {
     it('has both methods', () => {
       const s = make();
       expect(typeof s.getSetupState).toBe('function');

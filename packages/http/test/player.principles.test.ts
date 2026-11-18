@@ -33,7 +33,7 @@ async function setup() {
   const saved = cw.policy.save(
     {
       guidelines: {
-        tiers: [{ title: TITLE, description: DESCRIPTION, examples: [EXAMPLE], covers: ['banter', 'rude', 'hostile', 'severe'], outcome: OUTCOME }],
+        tiers: [{ title: TITLE, description: DESCRIPTION, examples: [EXAMPLE], covers: ['banter', 'rude', 'hostile', 'severe', 'repeated', 'after_warning'], outcome: OUTCOME }],
       },
     },
     { version: 0, actor: 'owner_ann', reason: 'principles' },

@@ -1237,7 +1237,14 @@ function tierCap(v: unknown, cap: number, path: string): void {
   if (typeof v === 'string' && codePoints(v) > cap) fail(path, `must be at most ${cap} characters`);
 }
 
-/** The whole form: `{ tiers }` and nothing else, each tier within the layer caps. The cross-tier rules are `validateGuidelines`'s, run by `finalize`. */
+/** Every cover a whole-form layer must place in some tier (the four conduct levels, then the two things the code of conduct states a consequence for). */
+const ALL_COVERS: readonly string[] = [...CONDUCT_LEVELS, 'repeated', 'after_warning'];
+
+/**
+ * The whole form: `{ tiers }` and nothing else, each tier within the layer caps, and (0.2.2 spec 5.1) every one of the six covers placed in a tier: 1 to 6 tiers, each
+ * cover exactly once. A cover left out would silently drop the code of conduct's "if you do it again" text. The duplicate and per-tier rules are `validateGuidelines`'s,
+ * run by `finalize`; a 0.2.1 code profile and a positional layer are not held to the six-cover rule (they never were).
+ */
 function wholeGuidelines(v: Record<string, unknown>): unknown {
   for (const k of Object.keys(v)) if (k !== 'tiers') fail(`profile.guidelines.${k}`, 'is not an editable setting');
   if (!Object.hasOwn(v, 'tiers')) fail('profile.guidelines.tiers', 'is required');
@@ -1255,6 +1262,23 @@ function wholeGuidelines(v: Record<string, unknown>): unknown {
     }
     tierCap(t['outcome'], MAX_GUIDELINE_OUTCOME, `${tp}.outcome`);
   });
+  // Only a form whose covers are otherwise well formed (known, none twice, none empty) gets this message; anything else is named by `validateGuidelines` at its own path.
+  const placed = new Set<unknown>();
+  let wellFormed = true;
+  for (const t of tiers) {
+    const covers: unknown = isPlain(t) ? t['covers'] : undefined;
+    if (!Array.isArray(covers) || covers.length === 0) wellFormed = false;
+    else {
+      for (const c of covers as unknown[]) {
+        if (!ALL_COVERS.includes(c as string) || placed.has(c)) wellFormed = false;
+        placed.add(c);
+      }
+    }
+  }
+  const missing = ALL_COVERS.filter((c) => !placed.has(c));
+  if (wellFormed && missing.length > 0) {
+    fail('profile.guidelines', `must place every cover (${ALL_COVERS.join(', ')}) in a tier; ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not covered`);
+  }
   return clone(tiers);
 }
 
