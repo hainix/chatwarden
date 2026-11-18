@@ -33,6 +33,8 @@ function run(path: string, gate: SharedArrayBuffer, size: number): Promise<Outco
 /** A file at the schema of the previous release (version 25): the shipped migrations up to 25. */
 function oldFile(path: string): void {
   const db = new DatabaseSync(path);
+  // A file the kit opened by path is in WAL mode from its first open (0.1.x did it too), so the connections below do not race to switch the journal mode: that is not what this tests.
+  db.exec('PRAGMA journal_mode = WAL');
   openStore({ db, migrations: MIGRATIONS.filter((m) => m.version <= 25) });
   db.close();
 }

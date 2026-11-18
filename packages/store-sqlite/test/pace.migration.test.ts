@@ -34,6 +34,9 @@ describe('migration 26, the pace block', () => {
     expect(info.find((c) => c.name === 'flood_signal_at')?.notnull).toBe(0);
     for (const name of ['room_id', 'who', 'last_at', 'stamps_json', 'recent_json', 'touched_at']) expect(info.find((c) => c.name === name)?.notnull, name).toBe(1);
     expect(indexes(db)).toContain('kit_pace_by_touched');
+    // the export and the erase of a person look rows up by person: the primary key leads with the room, so that needs its own index
+    expect(indexes(db)).toContain('kit_pace_by_who');
+    expect(String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_pace_by_who'").get()?.sql)).toMatch(/\(who\)/);
     expect(String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_pace_by_touched'").get()?.sql)).toMatch(/touched_at/);
   });
 

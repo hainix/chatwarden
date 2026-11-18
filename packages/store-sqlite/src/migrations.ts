@@ -880,7 +880,7 @@ CREATE TABLE kit_chat_days (
 
 -- any-server-rooms-languages: kit_pace. The shared pacer's state (spec 3.7): one row per (room, person), what the in-memory pacer keeps (the time of the last committed line, the times of the last
 -- committed lines, short fingerprints of the last lines, the last flood signal) so two processes judge one player's lines together. who is the canonical subject id, or seat:<id> for a guest. Times
--- and fingerprints only, never text; operational state swept after an hour (kit_pace_by_touched), erased with the person.
+-- and fingerprints only, never text; operational state swept after an hour (kit_pace_by_touched), erased with the person (kit_pace_by_who serves the export and the erase, which look rows up by person, not by room).
 CREATE TABLE kit_pace (
   room_id         TEXT    NOT NULL,
   who             TEXT    NOT NULL,
@@ -892,6 +892,7 @@ CREATE TABLE kit_pace (
   PRIMARY KEY (room_id, who)
 ) WITHOUT ROWID;
 CREATE INDEX kit_pace_by_touched ON kit_pace (touched_at);
+CREATE INDEX kit_pace_by_who ON kit_pace (who);
 `,
   },
 ];
