@@ -246,7 +246,7 @@ export class PolicyService {
    * Save the recommended setup for a kind of game (see `recommendFor`) as ONE layer: the current layer with `guidelines`, `firstOffense`, `repeat`, `ladder` and
    * `aiContext` replaced by the recommendation's (always, even when they equal the base), every other section untouched, and for `creator` the team note
    * added to the existing notes unless it is already there. It goes through {@link PolicyService.save}, so `version`, `actor` and `reason` are checked as for any save
-   * and the answer carries `changed`. An unknown game is `invalid` at path `game`; a store that cannot save is `unsupported`. A layer the kit could not use is
+   * and the answer carries `changed`: only the sections whose value in force differs from the base. An unknown game is `invalid` at path `game`; a store that cannot save is `unsupported`. A layer the kit could not use is
    * replaced, not merged (it was ignored anyway). A store failure while looking at the store throws, as `reset` does.
    */
   applyRecommendation(game: GameKind, ctx: PolicySaveContext): PolicySaveResult {
@@ -261,7 +261,13 @@ export class PolicyService {
       if (!notes.some((n) => n.text === CREATOR_TEAM_NOTE)) notes.push({ text: CREATOR_TEAM_NOTE });
       next.teamNotes = notes;
     }
-    return this.save(next, ctx);
+    const res = this.save(next, ctx);
+    if (!res.ok) return res;
+    // The recommendation is stored whole, but `changed` names only what really differs from the base: a section that equals it (the ladder is shared by the
+    // three presets) was stored without changing what is in force.
+    const eff = this.state.effective as unknown as Record<string, unknown>;
+    const base = this.base as unknown as Record<string, unknown>;
+    return { ...res, changed: res.changed.filter((s) => JSON.stringify(eff[s]) !== JSON.stringify(base[s])) };
   }
 
   /** Read the stored layer once, at creation. A store failure here is the caller's (like every other load). */
