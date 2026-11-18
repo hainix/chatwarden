@@ -88,6 +88,8 @@ export const WEBHOOK_KEYS_BLANK_SQL = `UPDATE kit_webhook_keys SET result_json =
 /** A sanction or an appeal that cited a deleted report no longer does. Binds: the ids. */
 export const SANCTIONS_UNLINK_SQL = `UPDATE kit_sanctions SET report_id = NULL WHERE report_id IN ${IN_ARG}`;
 export const APPEALS_UNLINK_SQL = `UPDATE kit_appeals SET report_id = NULL WHERE report_id IN ${IN_ARG}`;
+/** An overturn record that cited a deleted report no longer does. Binds: the ids. */
+export const OVERTURNS_UNLINK_SQL = `UPDATE kit_overturns SET report_id = NULL WHERE report_id IN ${IN_ARG}`;
 /** One report whose reporter and lines are rewritten. Binds: the reporter value, the reporter seat, the handle, the note flag, the excerpt, the people, the id. */
 export const REPORT_SCRUB_SQL = `UPDATE kit_reports SET reporter_subject = ?, reporter_seat = ?, reporter_handle = ?, note = CASE WHEN ? = 1 THEN NULL ELSE note END,
   entity_json = CASE WHEN ? = 1 THEN NULL ELSE entity_json END, excerpt_json = ?, people_json = ? WHERE id = ?`;
@@ -105,6 +107,8 @@ export const MUTES_DELETE_SQL = `DELETE FROM kit_mutes WHERE viewer_id IN ${IN_A
 export const BLOCKED_NAMES_DELETE_SQL = `DELETE FROM kit_blocked_names WHERE subject_id IN ${IN_ARG}`;
 /** Appeals of the set, except those on a sanction group a hold protects. Binds: the set, the protected groups. */
 export const APPEALS_DELETE_SQL = `DELETE FROM kit_appeals WHERE subject_id IN ${IN_ARG} AND group_id NOT IN ${IN_ARG}`;
+/** The overturn records of the set, except those of a sanction group a hold protects (they belong to the appeals above and are not counted on their own). Binds: the set, the protected groups. */
+export const OVERTURNS_DELETE_SQL = `DELETE FROM kit_overturns WHERE subject_id IN ${IN_ARG} AND group_id NOT IN ${IN_ARG}`;
 export const SIGNALS_DELETE_SQL = `DELETE FROM kit_signals WHERE subject_id IN ${IN_ARG} OR by_subject IN ${IN_ARG}`;
 export const NOAUTO_DELETE_SQL = `DELETE FROM kit_ai_noauto WHERE subject_id IN ${IN_ARG}`;
 export const CLAIMS_DELETE_SQL = `DELETE FROM kit_claims WHERE person IN ${IN_ARG}`;
@@ -162,7 +166,9 @@ export const EXPORT_ABOUT_SQL = `SELECT created_at, category, reported_reason, s
   ORDER BY created_at DESC, id DESC LIMIT ?`;
 export const EXPORT_STRIKES_SQL = `SELECT at, room_id, raw_line FROM kit_strikes WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
 export const EXPORT_NAMES_SQL = `SELECT at, name, reason FROM kit_blocked_names WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
-export const EXPORT_APPEALS_SQL = `SELECT created_at, kind, rule, status, statement, decided_at FROM kit_appeals WHERE subject_id IN ${IN_ARG} ORDER BY created_at DESC, id DESC LIMIT ?`;
+export const EXPORT_APPEALS_SQL = `SELECT a.created_at, a.kind, a.rule, a.status, a.statement, a.decided_at, o.at AS overturned_at
+  FROM kit_appeals a LEFT JOIN kit_overturns o ON o.group_id = a.group_id
+  WHERE a.subject_id IN ${IN_ARG} ORDER BY a.created_at DESC, a.id DESC LIMIT ?`;
 export const EXPORT_SIGNALS_SQL = `SELECT at, kind FROM kit_signals WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
 /** In how many rooms the pacer holds state for the set. Binds: the set. */
 export const EXPORT_PACE_SQL = `SELECT COUNT(*) AS n FROM kit_pace WHERE who IN ${IN_ARG}`;
@@ -296,6 +302,7 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bu
     addCount(removed, 'workflow', num(db.prepare(LINKS_DELETE_SQL).run(ids).changes));
     db.prepare(SANCTIONS_UNLINK_SQL).run(ids);
     db.prepare(APPEALS_UNLINK_SQL).run(ids);
+    db.prepare(OVERTURNS_UNLINK_SQL).run(ids);
     addCount(removed, 'reports_about', num(db.prepare(REPORTS_DELETE_SQL).run(ids).changes));
   }
 
@@ -350,6 +357,8 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bu
   addCount(removed, 'pace', num(db.prepare(PACE_DELETE_SQL).run(setJ).changes));
   addCount(removed, 'blocked_names', num(db.prepare(BLOCKED_NAMES_DELETE_SQL).run(setJ).changes));
   addCount(removed, 'appeals', num(db.prepare(APPEALS_DELETE_SQL).run(setJ, j(heldGroups)).changes));
+  // The overturn record of the person goes with them (the held groups' stay). It belongs to an appeal that is counted above, so it adds nothing to the counts.
+  db.prepare(OVERTURNS_DELETE_SQL).run(setJ, j(heldGroups));
   addCount(removed, 'signals', num(db.prepare(SIGNALS_DELETE_SQL).run(setJ, setJ).changes));
   addCount(removed, 'ai', num(db.prepare(NOAUTO_DELETE_SQL).run(setJ).changes));
   addCount(removed, 'workflow', num(db.prepare(CLAIMS_DELETE_SQL).run(setJ).changes));
@@ -540,6 +549,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
         status: String(r.status),
         statement: r.statement === null ? null : String(r.statement),
         decidedAt: r.decided_at === null ? null : num(r.decided_at),
+        overturnedAt: r.overturned_at === null ? null : num(r.overturned_at),
       })),
       signals: section('signals', EXPORT_SIGNALS_SQL, (r) => ({ at: num(r.at), kind: String(r.kind) })),
       mutes: { placed: num(mutes?.placed), received: num(mutes?.received) },

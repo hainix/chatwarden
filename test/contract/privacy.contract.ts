@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AiActionRow, AppealRow, ErasePlan, NoticeRow, SanctionRow, Store, StoredReport, StrikeRow } from '@chatwarden/core';
+import type { AiActionRow, AppealRow, ErasePlan, NoticeRow, OverturnInput, SanctionRow, Store, StoredReport, StrikeRow } from '@chatwarden/core';
 
 // The contract of the privacy methods of the Store (0.2.0, design section 5): `exportSubjects`, `eraseSubjects`, `insertErasure`, `loadPendingErasures`,
 // `finishErasure` and `erasureEpoch`. One suite, run against every Store; SqliteStore is the reference. `dump` (optional) turns a whole store into one string:
@@ -23,9 +23,9 @@ export const WHO = {
 };
 export const OTHER = { id: 's_qq', account: 'acct-qq', handle: 'QQHandle', line: 'tarvo qq line' };
 
-type Opt = Required<Pick<Store, 'insertAppeal' | 'insertBlockedName' | 'insertSignal' | 'setNoAutomation' | 'insertAiAction' | 'reserveAiRead' | 'completeAiRead' | 'insertAiOutcome' | 'putLink' | 'listLinks'>>;
+type Opt = Required<Pick<Store, 'insertAppeal' | 'recordOverturn' | 'insertBlockedName' | 'insertSignal' | 'setNoAutomation' | 'insertAiAction' | 'reserveAiRead' | 'completeAiRead' | 'insertAiOutcome' | 'putLink' | 'listLinks'>>;
 const opt = (s: Store): Store & Opt => {
-  for (const m of ['insertAppeal', 'insertBlockedName', 'insertSignal', 'setNoAutomation', 'insertAiAction', 'reserveAiRead', 'completeAiRead', 'insertAiOutcome', 'putLink', 'listLinks'] as const) {
+  for (const m of ['insertAppeal', 'recordOverturn', 'insertBlockedName', 'insertSignal', 'setNoAutomation', 'insertAiAction', 'reserveAiRead', 'completeAiRead', 'insertAiOutcome', 'putLink', 'listLinks'] as const) {
     if (s[m] === undefined) throw new Error(`this store has no ${m}`);
   }
   return s as Store & Opt;
@@ -127,6 +127,19 @@ const appeal = (id: string, subject: string, groupId: string): AppealRow => ({
   replacementGroupId: null,
 });
 
+/** An overturn of one group as the appeal service records it (0.2.1): the person's appeal on `groupId` was granted. `filterKey` tells the rows apart in the counts. */
+const overturn = (groupId: string, subject: string, aliases: string[], filterKey: string, reportId: string | null): OverturnInput => ({
+  groupId,
+  at: NOW - 500,
+  subject,
+  aliases,
+  source: 'moderator',
+  termId: null,
+  filterKey,
+  reportId,
+  strikes: null,
+});
+
 export interface WorldOptions {
   /** A ban in force on the person's ALIAS subject (default false: only an ended chat sanction). */
   ban?: boolean;
@@ -219,6 +232,9 @@ export async function seedWorld(s: Store, o: WorldOptions = {}): Promise<void> {
   x.insertBlockedName({ id: 'bn2', subject: 's_qq', name: 'qqname', termId: null, reason: 'name_profane', at: NOW - DAY });
   x.insertAppeal(appeal('ap-pp', 's_pp', 'gEnded'));
   x.insertAppeal(appeal('ap-qq', 's_qq', 'gQ'));
+  // Both appeals were granted: an overturn row each (both cite rAbout, which the person's erase deletes, so the other person's row must lose its report id).
+  x.recordOverturn(overturn('gEnded', 's_pp', ['s_pp', 's_pp2'], 'link.unlisted', 'rAbout'));
+  x.recordOverturn(overturn('gQ', 's_qq', ['s_qq'], 'caps.shout', 'rAbout'));
   const sig = (id: string, subject: string, by: string | null, kind = 'muted_by_player') => ({
     id,
     kind,
@@ -339,6 +355,7 @@ export async function seedWorld(s: Store, o: WorldOptions = {}): Promise<void> {
     s.insertSanctionGroup(group('gHeld', 'M-HELDD', 's_pp', 'iphash-pp', { reportId: 'rHeld' }));
     s.insertNotice(notice('n-held', 's_pp', 'gHeld', { refCode: 'M-HELDD' }));
     x.insertAppeal(appeal('ap-held', 's_pp', 'gHeld'));
+    x.recordOverturn(overturn('gHeld', 's_pp', ['s_pp', 's_pp2'], 'held.key', 'rHeld'));
     const r = x.reserveAiRead({ reportId: 'rHeld', inputHash: 'h-rHeld', promptVersion: 1, adapter: 'fake:one' }, NOW + 60_000, NOW - 3000);
     if (!r.reserved) throw new Error('expected a reservation');
     x.insertAiOutcome({
@@ -1199,6 +1216,61 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
         s.exportSubjects(['s_pp', 's_pp2']);
         expect(s.erasureEpoch()).toBe(0);
         if (dump !== undefined) expect(dump(s)).toBe(before);
+      });
+    });
+
+    describe('overturns (0.2.1)', () => {
+      const filterCounts = (s: Store): Record<string, number> => Object.fromEntries((s.overturnedFilterCounts?.(0) ?? []).map((r) => [r.filterKey, r.overturned]));
+
+      it('the export shows when a decision on the person was overturned on appeal, and null for an appeal that was not', async () => {
+        const s = make();
+        await seedWorld(s, { held: true });
+        const x = opt(s);
+        x.insertAppeal({ ...appeal('ap-extra', 's_pp', 'gNotOverturned'), createdAt: NOW - 800 });
+        const out = s.exportSubjects(['s_pp', 's_pp2']);
+        expect(out.appeals.map((r) => r.overturnedAt)).toEqual([null, NOW - 500, NOW - 500]);
+        expect(JSON.stringify(out)).not.toContain('link.unlisted');
+      });
+
+      it("erase (none) removes the overturn rows of the person, keeps another person's and a held group's, and does not count them", async () => {
+        const s = make();
+        await seedWorld(s, { held: true });
+        expect(filterCounts(s)).toEqual({ 'link.unlisted': 1, 'caps.shout': 1, 'held.key': 1 });
+        const counts = s.eraseSubjects(plan({ heldReportIds: new Set(['rHeld']) }));
+        expect(filterCounts(s)).toEqual({ 'caps.shout': 1, 'held.key': 1 });
+        // the overturn row belongs to the appeal that is counted: it adds nothing of its own
+        expect(counts.removed.appeals).toBe(1);
+        expect(Object.keys(counts.removed)).not.toContain('overturns');
+      });
+
+      it('erase (safety) removes the overturn rows of the person too', async () => {
+        const s = make();
+        await seedWorld(s, { ban: true });
+        s.eraseSubjects(plan({ mode: 'safety' }));
+        expect(filterCounts(s)).toEqual({ 'caps.shout': 1 });
+      });
+
+      it("without the report held, the person's overturn of the held group goes too", async () => {
+        const s = make();
+        await seedWorld(s, { held: true });
+        s.eraseSubjects(plan());
+        expect(filterCounts(s)).toEqual({ 'caps.shout': 1 });
+      });
+
+      it('a dry run removes nothing', async () => {
+        const s = make();
+        await seedWorld(s, { held: true });
+        const before = dump?.(s);
+        s.eraseSubjects(plan({ dryRun: true }));
+        expect(filterCounts(s)).toEqual({ 'link.unlisted': 1, 'caps.shout': 1, 'held.key': 1 });
+        if (dump !== undefined) expect(dump(s)).toBe(before);
+      });
+
+      it('erasing someone with no overturn leaves every overturn row', async () => {
+        const s = make();
+        await seedWorld(s);
+        s.eraseSubjects(plan({ subjects: ['s_xx'] }));
+        expect(filterCounts(s)).toEqual({ 'link.unlisted': 1, 'caps.shout': 1 });
       });
     });
   });

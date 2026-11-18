@@ -171,7 +171,7 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
     expect(indexSql(db, 'kit_notices')).toEqual(noticeIdx);
     expect(names(db, 'index').filter((i) => i.startsWith('kit_notices'))).toEqual(NOTICE_INDEXES);
     // (kit_links, kit_ai_noauto, kit_ai_acting, kit_ai_actions and kit_filter_hits, kit_erasures and kit_legal_holds come from later migrations)
-    expect(names(db, 'table').filter((x) => !tables.includes(x) && !['kit_links', 'kit_ai_noauto', 'kit_ai_acting', 'kit_ai_actions', 'kit_filter_hits', 'kit_erasures', 'kit_legal_holds', 'kit_report_comments', 'kit_chat_days', 'kit_pace'].includes(x))).toEqual(['kit_appeals', 'kit_blocked_names']);
+    expect(names(db, 'table').filter((x) => !tables.includes(x) && !['kit_links', 'kit_ai_noauto', 'kit_ai_acting', 'kit_ai_actions', 'kit_filter_hits', 'kit_erasures', 'kit_legal_holds', 'kit_report_comments', 'kit_chat_days', 'kit_pace', 'kit_overturns'].includes(x))).toEqual(['kit_appeals', 'kit_blocked_names']);
     // the same rows through the store, in the same order
     expect(store.loadNotices(['s_0', 's_1', 's_2', 's_3']).map((r) => r.id)).toEqual(
       (before as { notices: Array<{ id: string; created_at: number }> }).notices

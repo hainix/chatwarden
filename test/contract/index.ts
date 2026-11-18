@@ -16,6 +16,7 @@ import { linksContract } from './links.contract.js';
 import { mutesContract } from './mutes.contract.js';
 import { namesContract } from './names.contract.js';
 import { noticesContract } from './notices.contract.js';
+import { overturnsContract } from './overturns.contract.js';
 import { paceContract } from './pace.contract.js';
 import { policyContract } from './policy.contract.js';
 import { privacyContract } from './privacy.contract.js';
@@ -46,6 +47,7 @@ export {
   mutesContract,
   namesContract,
   noticesContract,
+  overturnsContract,
   paceContract,
   policyContract,
   privacyContract,
@@ -85,6 +87,7 @@ export const CONTRACT_AREAS = [
   'ai shadow',
   'signals',
   'appeals',
+  'overturns',
   'names',
   'links',
   'filters',
@@ -120,6 +123,7 @@ export function storeContract(name: string, make: () => Store, dump?: (s: Store)
   aiShadowContract(name, make);
   signalsContract(name, make);
   appealsContract(name, make);
+  overturnsContract(name, make);
   namesContract(name, make);
   linksContract(name, make);
   filtersContract(name, make);

@@ -25,6 +25,12 @@ import {
   FILTER_HITS_LIST_SQL,
   FILTER_HITS_PURGE_SQL,
   INSIGHT_ROWS_SQL,
+  OVERTURN_FILTER_COUNTS_SQL,
+  OVERTURN_INSERT_SQL,
+  OVERTURN_PURGE_SQL,
+  OVERTURN_REPORT_SQL,
+  OVERTURN_SANCTION_SQL,
+  OVERTURN_TERM_COUNTS_SQL,
   ORIGIN_REPORTS_COUNT_SQL,
   PACE_DROP_ROOM_SQL,
   PACE_LOAD_SQL,
@@ -37,6 +43,8 @@ import {
   REPORT_URGENT_SET_SQL,
   URGENT_COUNT_SQL,
   filterHitArgs,
+  latestAutoChatStartSql,
+  overturnStrikesSql,
   reportInsertArgs,
   aiActionInsertArgs,
   aiActionListSql,
@@ -280,6 +288,70 @@ describe('the desk statements (migration 26, the urgent-lane block) bind exactly
   });
 });
 
+// Overturn statements (migration 27, block 1): one plain ? per bound value, the lists in IN (...) sized to the list.
+describe('the overturn statements (migration 27) bind exactly as many values as they have placeholders', () => {
+  it('each fixed statement has the number of plain ? placeholders its method binds', () => {
+    const counts: Array<[string, string, number]> = [
+      ['OVERTURN_INSERT_SQL', OVERTURN_INSERT_SQL, 7],
+      ['OVERTURN_SANCTION_SQL', OVERTURN_SANCTION_SQL, 2],
+      ['OVERTURN_REPORT_SQL', OVERTURN_REPORT_SQL, 2],
+      ['OVERTURN_TERM_COUNTS_SQL', OVERTURN_TERM_COUNTS_SQL, 1],
+      ['OVERTURN_FILTER_COUNTS_SQL', OVERTURN_FILTER_COUNTS_SQL, 1],
+      ['OVERTURN_PURGE_SQL', OVERTURN_PURGE_SQL, 1],
+    ];
+    for (const [name, sql, n] of counts) {
+      expect(placeholders(sql), name).toBe(n);
+      expect(sql, name).not.toMatch(/\?\d/);
+      expect(sql, name).not.toMatch(/\s[:@$][a-z]\w*/i);
+    }
+  });
+
+  it('the sized statements have one ? per listed id plus their fixed values', () => {
+    for (const n of [1, 2, 5, 500]) {
+      expect(placeholders(overturnStrikesSql(n)), `strikes ${n}`).toBe(n + 2);
+      expect(placeholders(latestAutoChatStartSql(n)), `latest ${n}`).toBe(n);
+      expect(overturnStrikesSql(n)).not.toMatch(/\?\d/);
+      expect(latestAutoChatStartSql(n)).not.toMatch(/\?\d/);
+    }
+  });
+
+  it('the statements run on a real database and every bind count matches (a spy on each prepared statement)', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    const known = new Set<string>();
+    const real = db.prepare.bind(db);
+    db.prepare = ((text: string) => {
+      const st = real(text);
+      const n = placeholders(text);
+      known.add(text);
+      return new Proxy(st, {
+        get(target, prop) {
+          const v = (target as unknown as Record<string | symbol, unknown>)[prop];
+          if (typeof v !== 'function') return v;
+          if (prop === 'run' || prop === 'all' || prop === 'get') {
+            return (...args: unknown[]) => {
+              expect(args.length, text.slice(0, 70)).toBe(n);
+              return (v as (...a: unknown[]) => unknown).apply(target, args);
+            };
+          }
+          return v.bind(target);
+        },
+      });
+    }) as typeof db.prepare;
+    const o = { groupId: 'g1', at: 5, subject: 's_a', aliases: ['s_a', 's_b', 's_c'], source: 'auto_filter' as const, termId: 't1', filterKey: null, reportId: 'r1', strikes: { from: 1, to: 9 } };
+    expect(store.recordOverturn?.(o)).toBe(true);
+    expect(store.recordOverturn?.(o)).toBe(false);
+    expect(store.recordOverturn?.({ ...o, groupId: 'g2', reportId: null, strikes: null })).toBe(true);
+    store.latestAutoChatStart?.(['s_a', 's_b']);
+    store.overturnedTermCounts?.(0);
+    store.overturnedFilterCounts?.(0);
+    store.purgeOverturns?.(100);
+    for (const sql of [OVERTURN_INSERT_SQL, OVERTURN_SANCTION_SQL, OVERTURN_REPORT_SQL, OVERTURN_TERM_COUNTS_SQL, OVERTURN_FILTER_COUNTS_SQL, OVERTURN_PURGE_SQL, overturnStrikesSql(3), latestAutoChatStartSql(2)]) {
+      expect(known.has(sql), sql.slice(0, 60)).toBe(true);
+    }
+  });
+});
+
 // Privacy statements (0.2.0): each takes its lists as ONE JSON value bound to json_each(?), so the number of placeholders is fixed whatever the size of the set.
 describe('the privacy statements bind exactly as many values as they have placeholders', () => {
   const texts = new Map<string, string>([
@@ -306,6 +378,9 @@ describe('the privacy statements bind exactly as many values as they have placeh
     NOTICES_CLEAR_SQL: 2,
     MUTES_DELETE_SQL: 2,
     APPEALS_DELETE_SQL: 2,
+    OVERTURNS_DELETE_SQL: 2,
+    OVERTURNS_UNLINK_SQL: 1,
+    EXPORT_APPEALS_SQL: 2,
     SIGNALS_DELETE_SQL: 2,
     AUDIT_REWRITE_SQL: 2,
     EPOCH_BUMP_SQL: 1,

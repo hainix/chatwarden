@@ -94,14 +94,16 @@ describe('migration 26, the desk block, from a version-25 database', () => {
   it('the reporter-outcome index gains the reason, so the accuracy read that leaves out a welfare report is still one covering index', () => {
     const db = memDb();
     const store = openStore({ db });
-    expect(names(db, 'index')).toContain('kit_reports_by_reporter_outcome_reason');
-    expect(String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_reports_by_reporter_outcome_reason'").get()?.sql)).toMatch(/\(reporter_subject, created_at, status, bad_faith, reported_reason\)/);
+    // Migration 27 (0.2.1) replaced it with the same index plus `overturned_at`: it is the one the accuracy read uses now.
+    expect(names(db, 'index')).toContain('kit_reports_by_reporter_outcome_overturned');
+    expect(names(db, 'index')).not.toContain('kit_reports_by_reporter_outcome_reason');
+    expect(String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_reports_by_reporter_outcome_overturned'").get()?.sql)).toMatch(/\(reporter_subject, created_at, status, bad_faith, reported_reason, overturned_at\)/);
     const plan = db
-      .prepare("EXPLAIN QUERY PLAN SELECT reporter_subject, SUM(status = 'actioned') FROM kit_reports WHERE reporter_subject IN (?) AND created_at >= ? AND status != 'open' AND (reported_reason IS NULL OR reported_reason <> 'welfare') GROUP BY reporter_subject")
+      .prepare("EXPLAIN QUERY PLAN SELECT reporter_subject, SUM(status = 'actioned' AND overturned_at IS NULL), SUM(status = 'actioned' AND overturned_at IS NOT NULL) FROM kit_reports WHERE reporter_subject IN (?) AND created_at >= ? AND status != 'open' AND (reported_reason IS NULL OR reported_reason <> 'welfare') GROUP BY reporter_subject")
       .all('s_a', 0)
       .map((r) => String(r.detail))
       .join(' | ');
-    expect(plan).toMatch(/COVERING INDEX kit_reports_by_reporter_outcome_reason/);
+    expect(plan).toMatch(/COVERING INDEX kit_reports_by_reporter_outcome_overturned/);
     expect(store.reporterOutcomes?.(['s_a'], 0)).toEqual([]);
   });
 

@@ -56,7 +56,8 @@ describe('migration 5: kit_strikes', () => {
     const { db, store } = env();
     expect(store.schemaVersion()).toBeGreaterThanOrEqual(5);
     const cols = db.prepare('PRAGMA table_info(kit_strikes)').all().map((c) => String(c.name));
-    expect(cols).toEqual(['id', 'at', 'subject_id', 'room_id', 'term_id', 'raw_line']);
+    // The six columns migration 5 made, then `overturned` (migration 27, release 0.2.1: a strike set aside when its restriction is overturned on appeal).
+    expect(cols).toEqual(['id', 'at', 'subject_id', 'room_id', 'term_id', 'raw_line', 'overturned']);
     db.close();
   });
 

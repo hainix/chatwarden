@@ -90,6 +90,8 @@ describe('migration 3: kit_sanctions', () => {
       'id', 'group_id', 'ref_code', 'kind', 'target_type', 'target_value', 'starts_at', 'ends_at', 'reason',
       'rule', 'actor', 'source', 'automated', 'pending', 'revoked_by', 'revoked_at', 'revoke_reason',
       'gap_note', 'gap_status', 'gap_ref', 'room_id', 'report_id',
+      // migration 27 (release 0.2.1): the term of the strike that tipped an automatic restriction, and when an appeal overturned the group
+      'term_id', 'overturned_at',
     ]);
     db.close();
   });
@@ -491,14 +493,16 @@ describe('migration 11: kit_sanctions rebuild (kind CHECK gains note, room_id ad
     expect(MIGRATIONS.at(-1)?.version).toBeGreaterThanOrEqual(11);
   });
 
-  it('a fresh database has room_id then report_id as the last columns, nullable TEXT', () => {
+  it('a fresh database has room_id then report_id after the gap columns, nullable TEXT, and migration 27 adds term_id and overturned_at after them', () => {
     const db = new DatabaseSync(':memory:');
     openStore({ db });
     const info = db.prepare('PRAGMA table_info(kit_sanctions)').all();
-    expect(info).toHaveLength(22);
-    expect(info.at(-1)).toMatchObject({ name: 'report_id', type: 'TEXT', notnull: 0, dflt_value: null });
-    expect(info.at(-2)).toMatchObject({ name: 'room_id', type: 'TEXT', notnull: 0, dflt_value: null });
-    expect(info.slice(-5, -2).map((c) => String(c.name))).toEqual(['gap_note', 'gap_status', 'gap_ref']);
+    expect(info).toHaveLength(24);
+    expect(info.at(-2)).toMatchObject({ name: 'term_id', type: 'TEXT', notnull: 0, dflt_value: null });
+    expect(info.at(-1)).toMatchObject({ name: 'overturned_at', type: 'INTEGER', notnull: 0, dflt_value: null });
+    expect(info.at(-3)).toMatchObject({ name: 'report_id', type: 'TEXT', notnull: 0, dflt_value: null });
+    expect(info.at(-4)).toMatchObject({ name: 'room_id', type: 'TEXT', notnull: 0, dflt_value: null });
+    expect(info.slice(-7, -4).map((c) => String(c.name))).toEqual(['gap_note', 'gap_status', 'gap_ref']);
     db.close();
   });
 

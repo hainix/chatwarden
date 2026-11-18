@@ -46,6 +46,7 @@ import type {
   NoAutomationRow,
   NoticeKind,
   NoticeRow,
+  OverturnInput,
   OpenReportQuery,
   PolicyLayer,
   ReasonRow,
@@ -229,6 +230,34 @@ export const filterHitArgs = (r: FilterHitRow): [number, string, string, number]
 export const FILTER_HITS_LIST_SQL = 'SELECT day, key, action, hits FROM kit_filter_hits WHERE day >= ? AND day <= ? ORDER BY day, key, action';
 /** Delete the counter rows of days before the one given. */
 export const FILTER_HITS_PURGE_SQL = 'DELETE FROM kit_filter_hits WHERE day < ?';
+
+// Overturns (migration 27, block 1). Plain `?` placeholders only, each statement binds exactly as many values as it has.
+/** The overturn row of one group; ignored when the group already has one. Binds: group, at, subject, source, term, filter key, report. */
+export const OVERTURN_INSERT_SQL =
+  'INSERT OR IGNORE INTO kit_overturns (group_id, at, subject_id, source, term_id, filter_key, report_id) VALUES (?, ?, ?, ?, ?, ?, ?)';
+/** Mark every row of the group overturned, once. Binds: the time, the group. */
+export const OVERTURN_SANCTION_SQL = 'UPDATE kit_sanctions SET overturned_at = ? WHERE group_id = ? AND overturned_at IS NULL';
+/** Mark the report overturned, once. Binds: the time, the report. */
+export const OVERTURN_REPORT_SQL = 'UPDATE kit_reports SET overturned_at = ? WHERE id = ? AND overturned_at IS NULL';
+/** Overturned groups per term since a time. Binds: since. */
+export const OVERTURN_TERM_COUNTS_SQL =
+  'SELECT term_id, COUNT(*) AS n, MAX(at) AS last_at FROM kit_overturns WHERE term_id IS NOT NULL AND at >= ? GROUP BY term_id ORDER BY term_id';
+/** Overturned groups per filter key since a time. Binds: since. */
+export const OVERTURN_FILTER_COUNTS_SQL =
+  'SELECT filter_key, COUNT(*) AS n FROM kit_overturns WHERE filter_key IS NOT NULL AND at >= ? GROUP BY filter_key ORDER BY filter_key';
+/** Delete overturn rows before a time. Binds: before. */
+export const OVERTURN_PURGE_SQL = 'DELETE FROM kit_overturns WHERE at < ?';
+/** Set aside the strikes of `n` subject ids in a window (inclusive). Binds: the ids, then from, then to. */
+export const overturnStrikesSql = (n: number): string =>
+  `UPDATE kit_strikes SET overturned = 1 WHERE subject_id IN (${Array.from({ length: n }, () => '?').join(', ')}) AND at >= ? AND at <= ?`;
+/**
+ * The latest start of an automatic chat sanction not overturned, over `n` subject ids. Binds: the ids. Left to itself SQLite answers MAX(starts_at) by walking
+ * kit_sanctions_by_start across every subject row; the person's own rows are few, so it is told to seek them through the target index.
+ */
+export const latestAutoChatStartSql = (n: number): string =>
+  `SELECT MAX(starts_at) AS latest FROM kit_sanctions INDEXED BY kit_sanctions_by_target
+   WHERE kind = 'chat' AND source = 'auto_filter' AND target_type = 'subject' AND overturned_at IS NULL
+     AND target_value IN (${Array.from({ length: n }, () => '?').join(', ')})`;
 
 /** A reporter value that can be a person. A filter's report names `filter:<report id>`, which no tally or outcome is ever kept under. */
 // A report a system filed (`origin` set) carries the reporter value `<origin>:<id>`, which is never a person: the reporter readers leave it out
@@ -875,13 +904,13 @@ export class SqliteStore implements Store, TermStore {
       const ins = this.db.prepare(
         `INSERT INTO kit_sanctions
            (id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source, automated, pending,
-            gap_note, gap_status, room_id, report_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            gap_note, gap_status, room_id, report_id, term_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const r of rows) {
         ins.run(
           r.id, r.groupId, r.refCode, r.kind, r.targetType, r.value, r.startsAt, r.endsAt, r.reason, r.rule,
-          r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0, r.gapNote, r.gapStatus, r.roomId, r.reportId ?? null,
+          r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0, r.gapNote, r.gapStatus, r.roomId, r.reportId ?? null, r.termId ?? null,
         );
       }
       this.bump();
@@ -1862,12 +1891,21 @@ export class SqliteStore implements Store, TermStore {
   loadSanctionSubjectRow(groupId: string): SanctionRow | null {
     const r = this.transaction(() =>
       this.db
-        .prepare(`SELECT ${SANCTION_COLUMNS}, report_id, revoked_at AS rv FROM kit_sanctions WHERE group_id = ? AND target_type = 'subject' ORDER BY rowid LIMIT 1`)
+        .prepare(
+          `SELECT ${SANCTION_COLUMNS}, report_id, term_id, revoked_at AS rv, overturned_at AS ov FROM kit_sanctions WHERE group_id = ? AND target_type = 'subject' ORDER BY rowid LIMIT 1`,
+        )
         .get(groupId),
     );
     if (r === undefined) return null;
-    // The one read that carries the report id and the revocation time (each omitted when there is none, so every other load keeps the shape it had).
-    return { ...toSanctionRow(r), ...(r.report_id === null ? {} : { reportId: String(r.report_id) }), ...(r.rv === null ? {} : { revokedAt: Number(r.rv) }) };
+    // The one read that carries the report id, the term id, the revocation time and the overturn time (each omitted when there is none, except the term id, which reads null,
+    // so every other load keeps the shape it had).
+    return {
+      ...toSanctionRow(r),
+      ...(r.report_id === null ? {} : { reportId: String(r.report_id) }),
+      termId: r.term_id === null ? null : String(r.term_id),
+      ...(r.rv === null ? {} : { revokedAt: Number(r.rv) }),
+      ...(r.ov === null ? {} : { overturnedAt: Number(r.ov) }),
+    };
   }
 
   clearAppealStatements(before: number): number {
@@ -2298,7 +2336,7 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() =>
       this.db
         .prepare(
-          'SELECT id, at, subject_id, room_id, term_id, raw_line FROM kit_strikes WHERE at >= ? ORDER BY at, rowid',
+          'SELECT id, at, subject_id, room_id, term_id, raw_line FROM kit_strikes WHERE at >= ? AND overturned = 0 ORDER BY at, rowid',
         )
         .all(since)
         .map((r) => ({
@@ -2345,12 +2383,62 @@ export class SqliteStore implements Store, TermStore {
       this.db
         .prepare(
           `SELECT target_value, MAX(starts_at) AS latest FROM kit_sanctions
-           WHERE kind = 'chat' AND source = 'auto_filter' AND target_type = 'subject'
+           WHERE kind = 'chat' AND source = 'auto_filter' AND target_type = 'subject' AND overturned_at IS NULL
            GROUP BY target_value ORDER BY MIN(rowid)`,
         )
         .all()
         .map((r) => ({ subject: String(r.target_value), startsAt: Number(r.latest) })),
     );
+  }
+
+  // Overturns (migration 27, block 1). SYNCHRONOUS like the appeal methods; recordOverturn runs inside the decision's transaction and moves the change token in it.
+
+  recordOverturn(o: OverturnInput): boolean {
+    return this.transaction(() => {
+      // One row per group: the primary key decides, so of two connections overturning one group exactly one writes (and the other changes nothing).
+      const wrote = Number(this.db.prepare(OVERTURN_INSERT_SQL).run(o.groupId, o.at, o.subject, o.source, o.termId, o.filterKey, o.reportId).changes) > 0;
+      if (!wrote) return false;
+      this.db.prepare(OVERTURN_SANCTION_SQL).run(o.at, o.groupId);
+      // A person's aliases are few; the list is not chunked.
+      if (o.strikes !== null && o.aliases.length > 0) this.db.prepare(overturnStrikesSql(o.aliases.length)).run(...o.aliases, o.strikes.from, o.strikes.to);
+      if (o.reportId !== null) this.db.prepare(OVERTURN_REPORT_SQL).run(o.at, o.reportId);
+      this.bump();
+      return true;
+    });
+  }
+
+  latestAutoChatStart(subjects: readonly SubjectId[]): number | null {
+    const unique = [...new Set(subjects)];
+    if (unique.length === 0) return null;
+    // SQLite caps the variables of one statement, so a long list is asked for in chunks, like reporterOutcomes.
+    const CHUNK = 500;
+    return this.transaction(() => {
+      let latest: number | null = null;
+      for (let i = 0; i < unique.length; i += CHUNK) {
+        const part = unique.slice(i, i + CHUNK);
+        const r = this.db.prepare(latestAutoChatStartSql(part.length)).get(...part);
+        if (r?.latest !== null && r?.latest !== undefined) latest = Math.max(latest ?? Number(r.latest), Number(r.latest));
+      }
+      return latest;
+    });
+  }
+
+  overturnedTermCounts(since: number): Array<{ termId: string; overturned: number; lastAt: number }> {
+    return this.transaction(() =>
+      this.db.prepare(OVERTURN_TERM_COUNTS_SQL).all(since).map((r) => ({ termId: String(r.term_id), overturned: Number(r.n), lastAt: Number(r.last_at) })),
+    );
+  }
+
+  overturnedFilterCounts(since: number): Array<{ filterKey: string; overturned: number }> {
+    return this.transaction(() => this.db.prepare(OVERTURN_FILTER_COUNTS_SQL).all(since).map((r) => ({ filterKey: String(r.filter_key), overturned: Number(r.n) })));
+  }
+
+  purgeOverturns(before: number): number {
+    return this.transaction(() => {
+      const n = Number(this.db.prepare(OVERTURN_PURGE_SQL).run(before).changes);
+      if (n > 0) this.bump();
+      return n;
+    });
   }
 
   // Reports. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never
@@ -2497,7 +2585,7 @@ export class SqliteStore implements Store, TermStore {
     const unique = [...new Set(reporters)].filter(isPersonReporter);
     if (unique.length === 0) return [];
     // SQLite caps the variables of one statement, so a long list is asked for in chunks. The columns after `reporter_subject` are
-    // all in kit_reports_by_reporter_outcome (migration 19), so each chunk is answered from that index alone.
+    // all in kit_reports_by_reporter_outcome_overturned (migration 27; the migration 19 index with the reason and the overturn time added), so each chunk is answered from that index alone.
     const CHUNK = 500;
     return this.transaction(() => {
       const out: ReporterOutcomeRow[] = [];
@@ -2505,7 +2593,8 @@ export class SqliteStore implements Store, TermStore {
         const part = unique.slice(i, i + CHUNK);
         const marks = part.map(() => '?').join(', ');
         const sql = `SELECT reporter_subject AS reporter,
-                SUM(status = 'actioned') AS actioned,
+                SUM(status = 'actioned' AND overturned_at IS NULL) AS actioned,
+                SUM(status = 'actioned' AND overturned_at IS NOT NULL) AS overturned,
                 SUM(status = 'dismissed' AND bad_faith = 0) AS no_action,
                 SUM(status = 'dismissed' AND bad_faith = 1) AS bad_faith
          FROM kit_reports
@@ -2513,7 +2602,7 @@ export class SqliteStore implements Store, TermStore {
            AND (reported_reason IS NULL OR reported_reason <> 'welfare')
          GROUP BY reporter_subject`;
         for (const r of this.db.prepare(sql).all(...part, since)) {
-          out.push({ reporter: String(r.reporter), actioned: Number(r.actioned), noAction: Number(r.no_action), badFaith: Number(r.bad_faith) });
+          out.push({ reporter: String(r.reporter), actioned: Number(r.actioned), noAction: Number(r.no_action), badFaith: Number(r.bad_faith), overturned: Number(r.overturned) });
         }
       }
       return out;

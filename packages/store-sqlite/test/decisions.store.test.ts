@@ -92,11 +92,11 @@ describe('migration 10: kit_reports.bad_faith_evidence', () => {
     const info = db.prepare('PRAGMA table_info(kit_reports)').all();
     const col = info.find((c) => c.name === 'bad_faith_evidence');
     expect(col).toMatchObject({ type: 'TEXT', notnull: 0, dflt_value: null });
-    // It was the last column when it was added; the columns of later migrations (17, then 26) follow it in the order they were added, and none sits before it.
+    // It was the last column when it was added; the columns of later migrations (17, 26, then 27) follow it in the order they were added, and none sits before it.
     const names = info.map((c) => String(c.name));
     const at = names.indexOf('bad_faith_evidence');
     expect(names.slice(at, at + 5)).toEqual(['bad_faith_evidence', 'reported_reason', 'detail_at', 'origin', 'origin_key']);
-    expect(names.slice(at + 5)).toEqual(['urgent', 'handoff_at', 'handoff_by', 'escalated_to', 'escalated_by', 'escalated_at', 'evidence_ref', 'scope', 'entity_json']);
+    expect(names.slice(at + 5)).toEqual(['urgent', 'handoff_at', 'handoff_by', 'escalated_to', 'escalated_by', 'escalated_at', 'evidence_ref', 'scope', 'entity_json', 'overturned_at']);
     db.close();
   });
 

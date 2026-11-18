@@ -63,6 +63,7 @@ export type {
   SubjectIdRecord,
   StoredReport,
   StrikeRow,
+  OverturnInput,
   SubjectRecord,
   FilterHitRow,
   ReportOrigin,

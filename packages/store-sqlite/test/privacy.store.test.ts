@@ -46,7 +46,9 @@ describe('the differential script gives the same counts in memory and sqlite', (
     expect(b.exportSubjects(['s_qq'])).toEqual(a.exportSubjects(['s_qq']));
     expect(b.eraseSubjects(plan(over))).toEqual(a.eraseSubjects(plan(over)));
     expect(b.erasureEpoch()).toBe(a.erasureEpoch());
-    for (const id of ['rAbout', 'rFiled', 'rThird', 'rFilter', 'rHeld']) expect(b.loadReport(id), id).toEqual(a.loadReport(id));
+    // The memory store keeps `overturnedAt` on a report record (the seed overturns two); SQLite keeps the column and shows it only through reporterOutcomes.
+    const plain = (r: ReturnType<typeof a.loadReport>) => (r === null ? null : Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'overturnedAt')));
+    for (const id of ['rAbout', 'rFiled', 'rThird', 'rFilter', 'rHeld']) expect(plain(b.loadReport(id)), id).toEqual(plain(a.loadReport(id)));
     expect(b.loadSanctions(NOW).map((r) => [r.groupId, r.targetType, r.value, r.reportId ?? null])).toEqual(a.loadSanctions(NOW).map((r) => [r.groupId, r.targetType, r.value, r.reportId ?? null]));
     expect(b.loadNotices(['s_pp', 's_pp2', 's_qq']).map((n) => [n.id, n.excerpt])).toEqual(a.loadNotices(['s_pp', 's_pp2', 's_qq']).map((n) => [n.id, n.excerpt]));
     expect(b.listAudit({ limit: 50 })).toEqual(a.listAudit({ limit: 50 }));
@@ -78,6 +80,8 @@ describe('one prepared statement per category, with the indexes the lookups need
       // The export's count of comments on reports that name the person reads the people list inside each report (json): the same scan, once per export.
       'EXPORT_COMMENTS_SQL',
       'APPEALS_UNLINK_SQL',
+      // The same link on the overturn record (granted appeals only; a table the size of the appeals' granted subset).
+      'OVERTURNS_UNLINK_SQL',
       'ERASURES_PURGE_SQL',
       'ERASURE_INSERT_SQL',
       'EPOCH_BUMP_SQL',

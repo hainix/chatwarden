@@ -380,5 +380,46 @@ export function sanctionsContract(name: string, make: () => Store): void {
         );
       });
     });
+
+    describe('termId and overturnedAt (0.2.1)', () => {
+      const has = make().loadSanctionSubjectRow !== undefined;
+      const maybe = has ? describe : describe.skip;
+      maybe('on the subject row', () => {
+        const subjectRow = (s: Store, groupId: string) => {
+          if (s.loadSanctionSubjectRow === undefined) throw new Error('this store has no loadSanctionSubjectRow');
+          return s.loadSanctionSubjectRow(groupId);
+        };
+
+        it('termId round-trips through insertSanctionGroup and loadSanctionSubjectRow; a row without one reads null', () => {
+          const s = make();
+          s.insertSanctionGroup(group('g1', 'M-AAAAA', { source: 'auto_filter', termId: 'term-77' }));
+          s.insertSanctionGroup(group('g2', 'M-BBBBB'));
+          expect(subjectRow(s, 'g1')?.termId).toBe('term-77');
+          expect(subjectRow(s, 'g2')?.termId).toBeNull();
+          expect(subjectRow(s, 'g2')).toHaveProperty('termId', null);
+        });
+
+        it('the address row of a group carrying a termId does not change the subject row read', () => {
+          const s = make();
+          s.insertSanctionGroup(group('g1', 'M-AAAAA', { termId: 'term-1' }));
+          expect(subjectRow(s, 'g1')?.targetType).toBe('subject');
+          expect(subjectRow(s, 'g1')?.termId).toBe('term-1');
+        });
+
+        it('overturnedAt appears only after recordOverturn, on the subject row read only', () => {
+          const s = make();
+          s.insertSanctionGroup(group('g1', 'M-AAAAA', { source: 'auto_filter', termId: 'term-77' }));
+          expect(subjectRow(s, 'g1')).not.toHaveProperty('overturnedAt');
+          if (s.recordOverturn === undefined) throw new Error('this store has no recordOverturn');
+          s.recordOverturn({ groupId: 'g1', at: NOW + 99, subject: 's_a', aliases: ['s_a'], source: 'auto_filter', termId: 'term-77', filterKey: null, reportId: null, strikes: null });
+          expect(subjectRow(s, 'g1')?.overturnedAt).toBe(NOW + 99);
+          // Every other load keeps the plain shape.
+          for (const r of s.loadSanctions(NOW)) {
+            expect(r).not.toHaveProperty('overturnedAt');
+            expect(r).not.toHaveProperty('termId');
+          }
+        });
+      });
+    });
   });
 }

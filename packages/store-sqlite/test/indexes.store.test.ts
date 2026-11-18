@@ -148,9 +148,11 @@ describe('migration 18: indexes for sanctions by start time and strikes by time'
     const tables = ['kit_sanctions', 'kit_strikes'];
     const order = { kit_sanctions: 'rowid', kit_strikes: 'rowid' } as const;
     const before = tables.map((t) => dump(db, t, order[t as keyof typeof order]));
+    // The strike window is read straight from the table: the store of today asks for `overturned` (migration 27), which a version-17 database does not have yet.
+    const strikesSince = (): unknown[] => db.prepare('SELECT id, at, subject_id, room_id, term_id, raw_line FROM kit_strikes WHERE at >= ? ORDER BY at, rowid').all(NOW - 10 * DAY);
     const readsBefore = {
       actions: old.loadSubjectActions(NOW - 10 * DAY),
-      strikes: old.loadStrikes(NOW - 10 * DAY),
+      strikes: strikesSince(),
       listed: old.listSubjectSanctions({ limit: 50 }),
       list: old.listStrikes(0, 50),
       counts: old.countStrikesByTerm(0),
@@ -165,7 +167,7 @@ describe('migration 18: indexes for sanctions by start time and strikes by time'
     expect(tables.map((t) => dump(db, t, order[t as keyof typeof order]))).toEqual(before);
     expect({
       actions: store.loadSubjectActions(NOW - 10 * DAY),
-      strikes: store.loadStrikes(NOW - 10 * DAY),
+      strikes: strikesSince(),
       listed: store.listSubjectSanctions({ limit: 50 }),
       list: store.listStrikes(0, 50),
       counts: store.countStrikesByTerm(0),
@@ -299,7 +301,8 @@ describe('the hot read queries use the new indexes (EXPLAIN QUERY PLAN, as issue
   it('the same queries on the version 17 schema do not (the control: the test sees the difference)', () => {
     const db = memDb();
     const store = openAt17(db);
-    const plan = planOf(db, record(db, () => store.loadStrikes(NOW - 30 * DAY)), 'kit_strikes');
+    // The strike window as the store asked it before migration 27 (a version-17 database has no `overturned` column to ask about).
+    const plan = db.prepare('EXPLAIN QUERY PLAN SELECT id, at, subject_id, room_id, term_id, raw_line FROM kit_strikes WHERE at >= ? ORDER BY at, rowid').all(NOW - 30 * DAY).map((r) => String(r.detail));
     expect(plan.join(' | ')).toMatch(/SCAN kit_strikes/);
     const sPlan = planOf(db, record(db, () => store.loadSubjectActions(NOW - 30 * DAY)), 'kit_sanctions');
     expect(sPlan.join(' | ')).not.toContain('kit_sanctions_by_start');

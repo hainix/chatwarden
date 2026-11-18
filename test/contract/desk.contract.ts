@@ -492,7 +492,7 @@ export function deskContract(name: string, make: () => Store): void {
           s.closeReport(id, status, false, 'mod', NOW + 1, 'n');
         }
         s.insertReport(report('e', { reporterSubject: 's_same', reportedReason: 'welfare', targetSubject: 's_t_e' }));
-        expect(s.reporterOutcomes?.(['s_same'], 0)).toEqual([{ reporter: 's_same', actioned: 1, noAction: 1, badFaith: 0 }]);
+        expect(s.reporterOutcomes?.(['s_same'], 0)).toEqual([{ reporter: 's_same', actioned: 1, noAction: 1, badFaith: 0, overturned: 0 }]);
       });
 
       it('a reporter with only welfare reports has no row at all', () => {

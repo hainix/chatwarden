@@ -11,8 +11,8 @@ storeContract('MemoryStore', make, dumpMemory);
 
 // The appeal, blocked-name and link contract areas skip a store without the methods; MemoryStore (with its wrappers) must never be skipped.
 describe('MemoryStore is not skipped by the optional contract areas', () => {
-  it('has the appeal, blocked-name and link methods', () => {
+  it('has the appeal, overturn, blocked-name and link methods', () => {
     const s = make();
-    for (const m of ['insertAppeal', 'decideAppeal', 'closeOrphanAppeals', 'purgeAppeals', 'insertBlockedName', 'purgeBlockedNames', 'getLink', 'putLink', 'listLinks', 'purgeLinks'] as const) expect(typeof s[m], m).toBe('function');
+    for (const m of ['insertAppeal', 'decideAppeal', 'closeOrphanAppeals', 'purgeAppeals', 'recordOverturn', 'latestAutoChatStart', 'overturnedTermCounts', 'overturnedFilterCounts', 'purgeOverturns', 'insertBlockedName', 'purgeBlockedNames', 'getLink', 'putLink', 'listLinks', 'purgeLinks'] as const) expect(typeof s[m], m).toBe('function');
   });
 });

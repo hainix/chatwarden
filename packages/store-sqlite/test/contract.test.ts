@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { describe, expect, it } from 'vitest';
 import { storeContract } from '../../../test/contract/index.js';
 import { openStore } from '../src/index.js';
 
@@ -18,3 +19,11 @@ export const dumpSqlite = (store: object): string => {
   return names.map((n) => `${n}: ${JSON.stringify(db.prepare(`SELECT * FROM ${n}`).all())}`).join('\n');
 };
 storeContract('SqliteStore', make, dumpSqlite);
+
+// The optional overturn and notice-lookup areas skip a store without the methods; SqliteStore must never be skipped.
+describe('SqliteStore is not skipped by the optional contract areas', () => {
+  it('has the overturn methods', () => {
+    const s = make();
+    for (const m of ['recordOverturn', 'latestAutoChatStart', 'overturnedTermCounts', 'overturnedFilterCounts', 'purgeOverturns'] as const) expect(typeof s[m], m).toBe('function');
+  });
+});

@@ -31,6 +31,19 @@ describe('registry: every PRIVACY_CATEGORIES entry has an export and an erase ru
     for (const t of rule.tables) expect(t).toMatch(/^kit_[a-z_]+$/);
   });
 
+  it('the appeals rule claims the overturn table too, and says so in the export and in both erase rules (0.2.1)', () => {
+    const rule = PRIVACY_REGISTRY.find((r) => r.category === 'appeals');
+    expect(rule?.tables).toEqual(['kit_appeals', 'kit_overturns']);
+    expect(rule?.export).toContain('overturned on appeal');
+    expect(rule?.eraseSafety).toContain('overturn record');
+    expect(rule?.eraseNone).toContain('overturn record');
+    // the old words stay
+    expect(rule?.eraseNone).toContain('held for legal reasons');
+    expect(rule?.retention).toBe('appealsMs');
+    // no other category claims the table
+    expect(PRIVACY_REGISTRY.filter((r) => r.tables.includes('kit_overturns')).map((r) => r.category)).toEqual(['appeals']);
+  });
+
   it('the words never claim compliance, legality or advice', () => {
     const all = PRIVACY_REGISTRY.flatMap((r) => [r.export, r.eraseSafety, r.eraseNone]).join(' ').toLowerCase();
     for (const bad of ['complian', 'gdpr', 'legally', 'lawful', 'ccpa', 'guarantee']) expect(all, bad).not.toContain(bad);

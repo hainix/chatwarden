@@ -196,6 +196,17 @@ export interface SanctionRow {
    * type-checks; read an absent value as null. Private.
    */
   reportId?: string | null;
+  /**
+   * The term (a blocked-term id, never its text) of the strike that tipped an automatic restriction into force, as written by the chat path; null or absent for
+   * every other sanction. Optional so a store written for an older kit still type-checks; read an absent value as null. `loadSanctionSubjectRow` returns it (null
+   * when none); every other load leaves the property off. Private: staff channels only.
+   */
+  termId?: string | null;
+  /**
+   * Epoch ms the sanction was overturned on appeal (a granted appeal: revoked or reduced). Set only by `loadSanctionSubjectRow`, and only when the group was
+   * overturned; absent otherwise. See {@link Store.recordOverturn}.
+   */
+  overturnedAt?: number | null;
 }
 
 /**
@@ -246,9 +257,15 @@ export interface ReporterTally {
  */
 export interface ReporterOutcomeRow {
   reporter: SubjectId;
+  /** Upheld or noted reports whose sanction still stands: one that was overturned on appeal is counted in `overturned` instead. */
   actioned: number;
   noAction: number;
   badFaith: number;
+  /**
+   * Actioned reports whose sanction was overturned on appeal (see {@link Store.recordOverturn}): neither upheld nor dismissed, never bad faith. Every first-party
+   * store returns it; optional so a store written for 0.2.0 still type-checks, and an absent value reads as 0.
+   */
+  overturned?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -654,6 +671,31 @@ export interface StrikeRow {
   rawLine: string;
 }
 
+/**
+ * What `Store.recordOverturn` is given for one granted appeal (0.2.1): the sanction group that was overturned, when, whose it was, where it came from and what
+ * it was made from, so the strikes and the report behind it can be set aside and the counts (which term, which filter) can be read later. `aliases` is every
+ * subject id of the person, `subject` included. Staff channels only: it names a person.
+ */
+export interface OverturnInput {
+  groupId: string;
+  /** Epoch ms of the decision. */
+  at: number;
+  /** The canonical subject of the person. */
+  subject: SubjectId;
+  /** Every subject id that folds into the person (the canonical one included): the strikes of any of them are set aside. */
+  aliases: readonly SubjectId[];
+  /** The source of the sanction that was overturned. */
+  source: Source;
+  /** The term of the strike that tipped an automatic restriction, or null. */
+  termId: string | null;
+  /** The counter key of the filter report the decision came from, or null. */
+  filterKey: string | null;
+  /** The report whose decision made the sanction, or null. */
+  reportId: string | null;
+  /** The window (inclusive, epoch ms) of the person's strikes to set aside, or null for none. */
+  strikes: { from: number; to: number } | null;
+}
+
 // ---------------------------------------------------------------------------
 // Reports (storage shapes)
 // ---------------------------------------------------------------------------
@@ -774,6 +816,11 @@ export interface StoredReport {
    * extra row. Omitted or null reads as null. A store returns it on every record. The label may be a name a player chose: it goes with the report when the report is erased.
    */
   entity?: ReportEntity | null;
+  /**
+   * Epoch ms an appeal against the sanction this report's decision made was granted (see {@link Store.recordOverturn}), or null/omitted when none was. Written by
+   * `recordOverturn` only, never by a caller. The memory store keeps it on the record; the SQLite store keeps the column and reads it only inside `reporterOutcomes`.
+   */
+  overturnedAt?: number | null;
   status: 'open';
 }
 
@@ -1211,12 +1258,16 @@ export interface Store {
   /** Append one strike row. */
   insertStrike(row: StrikeRow): void;
 
-  /** Every strike at or after `since` (epoch ms), oldest first, for rebuilding the tally. */
+  /**
+   * Every strike at or after `since` (epoch ms), oldest first, for rebuilding the tally. A strike set aside by `recordOverturn` (its restriction was
+   * overturned on appeal) is left out: `listStrikes` and `countStrikesByTerm` still show it, as they show what the filter blocked.
+   */
   loadStrikes(since: number): StrikeRow[];
 
   /**
    * For each subject id a `chat` sanction from source `auto_filter` was written against: the latest
-   * `startsAt` of those rows, revoked or expired ones included. Subject rows only (never IP rows).
+   * `startsAt` of those rows, revoked or expired ones included. Subject rows only (never IP rows). A group overturned on appeal
+   * (`recordOverturn`) is left out.
    */
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }>;
 
@@ -1756,6 +1807,37 @@ export interface Store {
    * Returns how many were deleted.
    */
   purgeAppeals?(before: number): number;
+
+  // Overturns (0.2.1, appeals landing). OPTIONAL: a kit that never grants an appeal never calls them, and a store that leaves them out records nothing (strikes
+  // stay in the tally, the reporter counts do not move). SYNCHRONOUS like the appeal methods, so they run inside the decision's transaction; a write that changes
+  // something moves the change token.
+
+  /**
+   * OPTIONAL. Record that the sanction group `o.groupId` was overturned on appeal (revoked or reduced), in ONE transaction: write the overturn row (one per
+   * group), mark every row of the group overturned (`overturnedAt` on `loadSanctionSubjectRow`; `loadAutoChatStarts` and `latestAutoChatStart` leave it out),
+   * and, when `o.strikes` is set, mark the strikes of `o.aliases` with `at` in that window (inclusive) so `loadStrikes` leaves them out, and, when `o.reportId` is
+   * set, mark that report overturned (`reporterOutcomes` counts it in `overturned`, not `actioned`). Returns false, changing nothing else, when the group already
+   * has an overturn row. A group or report that is not there is not an error. Moves the change token.
+   */
+  recordOverturn?(o: OverturnInput): boolean;
+
+  /**
+   * OPTIONAL. The latest `startsAt` of an automatic (`auto_filter`) `chat` sanction of any of the given subjects that is not overturned, revoked and ended
+   * rows included; null when there is none or the list is empty. Subject rows only.
+   */
+  latestAutoChatStart?(subjects: readonly SubjectId[]): number | null;
+
+  /**
+   * OPTIONAL. Overturned groups per term, from the overturn rows (never from strikes, so a purge of strikes does not change it): one row per term that has at
+   * least one overturn with `at >= since`, `overturned` counting groups, `lastAt` the latest, ordered by term id. A row with no term is left out.
+   */
+  overturnedTermCounts?(since: number): Array<{ termId: string; overturned: number; lastAt: number }>;
+
+  /** OPTIONAL. The same by filter key (the counter key of the filter report the decision came from), ordered by key. */
+  overturnedFilterCounts?(since: number): Array<{ filterKey: string; overturned: number }>;
+
+  /** OPTIONAL. Delete overturn rows with `at < before` (strict). Returns how many. Moves the change token when above 0. */
+  purgeOverturns?(before: number): number;
 
   // Blocked names (offensive names, design 5.2 and 6.3). OPTIONAL: a kit with `names.keepBlocked` needs them. Synchronous. They do not move
   // the change token: a kept name is evidence on a short clock, not a queue item.
