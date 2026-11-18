@@ -255,6 +255,52 @@ export interface Unspaced {
   hits(raw: string): UnspacedHit[];
 }
 
+/**
+ * The most term and exception comparisons one `match`, `first` or `hits` call makes. A normal line against a normal list makes a few thousand; a list of thousands of terms that share their first two characters
+ * against a long line of that prefix would make millions. Past the budget the scan stops and answers with the hits found so far, so no line can keep the event loop for more than a few tens of milliseconds.
+ */
+export const UNSPACED_WORK_MAX = 4_000_000;
+
+/** Is a range inside one of a set of covers? Built once from the covers (any order); a query is a binary search, not a scan of every cover. */
+export function coverIndex(covers: ReadonlyArray<readonly [number, number]>): { covers(start: number, end: number): boolean } {
+  const sorted = [...covers].sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  const starts = sorted.map((c) => c[0]);
+  // The furthest end of any cover that starts at or before this one: a range is covered when a cover starts at or before it and ends at or after it, which is exactly when that furthest end reaches it.
+  const reach: number[] = [];
+  let furthest = -Infinity;
+  for (const [, y] of sorted) {
+    furthest = Math.max(furthest, y);
+    reach.push(furthest);
+  }
+  return {
+    covers(start, end) {
+      let lo = 0;
+      let hi = starts.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if ((starts[mid] as number) <= start) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo > 0 && (reach[lo - 1] as number) >= end;
+    },
+  };
+}
+
+/** Terms by their first code point, and within it by their second (every term has at least two): a position only meets the terms that begin with the two characters there. Order inside a sub-bucket is the list's. */
+const bucketByTwo = <T extends { text: string }>(items: readonly T[]): Map<number, Map<number, T[]>> => {
+  const out = new Map<number, Map<number, T[]>>();
+  for (const item of items) {
+    const first = item.text.codePointAt(0) as number;
+    const second = item.text.codePointAt(first > 0xffff ? 2 : 1) ?? -1;
+    let sub = out.get(first);
+    if (sub === undefined) out.set(first, (sub = new Map()));
+    const list = sub.get(second);
+    if (list === undefined) sub.set(second, [item]);
+    else list.push(item);
+  }
+  return out;
+};
+
 const bucketOf = <T extends { text: string }>(items: readonly T[]): Map<number, T[]> => {
   const out = new Map<number, T[]>();
   for (const item of items) {
@@ -280,7 +326,7 @@ export function buildUnspaced(terms: readonly UnspacedTerm[], exceptions: readon
       'needs Intl.Segmenter, which this runtime does not have',
     );
   }
-  const byFirst = bucketOf(terms.map((t) => ({ ...t, text: t.term })));
+  const byFirst = bucketByTwo(terms.map((t) => ({ ...t, text: t.term })));
   const exceptionsByFirst = bucketOf(exceptions.map((e) => ({ ...e, text: e.phrase })));
   const segmenters = new Map<string, Intl.Segmenter>();
   const segmenterOf = (language: string): Intl.Segmenter => {
@@ -297,6 +343,7 @@ export function buildUnspaced(terms: readonly UnspacedTerm[], exceptions: readon
     const view = unspacedView(raw);
     const { folded, clusterStart } = view;
     const found: UnspacedHit[] = [];
+    let work = 0;
     for (const [a, b] of runsOf(view.text)) {
       const edges = new Map<string, Set<number>>();
       const edgesOf = (language: string): Set<number> => {
@@ -313,32 +360,40 @@ export function buildUnspaced(terms: readonly UnspacedTerm[], exceptions: readon
       };
       const onCluster = (at: number): boolean => at === view.text.length || clusterStart[at] === true;
       // Every occurrence of an exception phrase in this run whose own edges are segment edges: what a hit may sit inside.
-      let covers: Array<[number, number]> | null = null;
-      const coverage = (): Array<[number, number]> => {
+      let covers: { covers(start: number, end: number): boolean } | null = null;
+      const coverage = (): { covers(start: number, end: number): boolean } => {
         if (covers !== null) return covers;
-        covers = [];
+        const found: Array<[number, number]> = [];
         for (let i = a; i < b; i += 1) {
           const list = exceptionsByFirst.get(folded.codePointAt(i) as number);
           if (list === undefined || !clusterStart[i]) continue;
           for (const e of list) {
+            work += 1;
             const end = i + e.phrase.length;
-            if (end <= b && folded.startsWith(e.phrase, i) && onCluster(end) && edgesOf(e.language).has(i) && edgesOf(e.language).has(end)) covers.push([i, end]);
+            if (end <= b && folded.startsWith(e.phrase, i) && onCluster(end) && edgesOf(e.language).has(i) && edgesOf(e.language).has(end)) found.push([i, end]);
           }
+          if (work > UNSPACED_WORK_MAX) break;
         }
+        covers = coverIndex(found);
         return covers;
       };
       for (let i = a; i < b; i += 1) {
         if (!clusterStart[i]) continue;
-        const list = byFirst.get(folded.codePointAt(i) as number);
+        const first = folded.codePointAt(i) as number;
+        const sub = byFirst.get(first);
+        if (sub === undefined) continue;
+        const list = sub.get(folded.codePointAt(i + (first > 0xffff ? 2 : 1)) ?? -1);
         if (list === undefined) continue;
         for (const t of list) {
+          work += 1;
+          if (work > UNSPACED_WORK_MAX) return found;
           const end = i + t.term.length;
           if (end > b || !folded.startsWith(t.term, i) || !onCluster(end)) continue;
           if (t.mode === 'segment') {
             const e = edgesOf(t.language);
             if (!e.has(i) || !e.has(end)) continue;
           }
-          if (exceptions.length > 0 && coverage().some(([x, y]) => x <= i && end <= y)) continue;
+          if (exceptions.length > 0 && coverage().covers(i, end)) continue;
           found.push({ start: view.from[i] as number, end: view.to[end - 1] as number, termId: t.id });
           if (firstOnly) return found;
         }
