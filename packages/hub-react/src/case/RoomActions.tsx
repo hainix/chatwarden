@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, Ref } from 'react';
 import type { HubError } from '../client.js';
 import { useHub } from '../context.js';
 import { onPage } from '../dom.js';
@@ -30,12 +30,12 @@ export function roomErrorText(t: HubT, error: HubError): string {
 }
 
 /** The duration select: a labelled select of the four lengths. */
-export function DurationSelect({ id, value, onChange }: { id: string; value: number; onChange: (ms: number) => void }) {
+export function DurationSelect({ id, value, onChange, selectRef }: { id: string; value: number; onChange: (ms: number) => void; selectRef?: Ref<HTMLSelectElement> }) {
   const { t } = useHub();
   return (
     <div className="cw-field">
       <label htmlFor={id}>{t('hub.rooms.duration')}</label>
-      <select id={id} value={String(value)} onChange={(e) => onChange(Number(e.target.value))}>
+      <select id={id} ref={selectRef} value={String(value)} onChange={(e) => onChange(Number(e.target.value))}>
         {ROOM_DURATIONS.map((d) => (
           <option key={d.ms} value={String(d.ms)}>
             {t(d.key)}
@@ -51,6 +51,11 @@ export function RoomModeForm({ room, mode, done }: { room: string; mode: 'locked
   const { t, client } = useHub();
   const [ms, setMs] = useState(DEFAULT_ROOM_MS);
   const id = useId();
+  // The menu's item that opened this form is gone from the page: the focus goes to the form's first control, not to the page.
+  const first = useRef<HTMLSelectElement>(null);
+  useEffect(() => {
+    first.current?.focus();
+  }, []);
   const set = useHubAction(async (): Promise<void> => {
     await client.setRoomMode(room, mode, ms);
   });
@@ -58,7 +63,7 @@ export function RoomModeForm({ room, mode, done }: { room: string; mode: 'locked
   const label = t(mode === 'locked' ? 'hub.rooms.menu.lock' : 'hub.rooms.menu.emergency');
   return (
     <div className="cw-case-menu-form" role="group" aria-label={label}>
-      <DurationSelect id={`${id}-for`} value={ms} onChange={setMs} />
+      <DurationSelect id={`${id}-for`} value={ms} onChange={setMs} selectRef={first} />
       <p>{t(mode === 'locked' ? 'hub.rooms.confirm.lock' : 'hub.rooms.confirm.emergency', { room, duration: length })}</p>
       <div className="cw-whattodo-actions">
         <button
@@ -117,7 +122,15 @@ export function LineMenu({ room, lineId, time }: { room: string; lineId: string;
   };
   const run = async (all: boolean): Promise<void> => {
     const res = await retract.run(all);
-    if (res.ok) setOpen(false);
+    if (!res.ok) return;
+    setOpen(false);
+    // The button that was pressed is gone with the panel, and the line's own menu goes once it is taken back: the focus goes to the line, which stays (it now reads "Removed from the room").
+    const line = box.current?.closest('li') ?? null;
+    if (line === null) button.current?.focus();
+    else {
+      if (!line.hasAttribute('tabindex')) line.setAttribute('tabindex', '-1');
+      line.focus();
+    }
   };
   return (
     <span className="cw-line-menu" ref={box} onKeyDown={onKeyDown}>

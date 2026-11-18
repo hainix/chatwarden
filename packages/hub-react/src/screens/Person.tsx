@@ -138,6 +138,7 @@ export function Person({ person }: { person: string }) {
 function PersonBody({ person, onMarked, history, revoking, setRevoking, onRevoked }: { person: string; onMarked: () => void; history: PersonHistory; revoking: string | null; setRevoking: (id: string | null) => void; onRevoked: () => void }) {
   const { t, can, me } = useHub();
   const standing = history.sanctions.filter((s) => s.active && s.revokedAt === null);
+  const asReporter = history.asReporter as PersonHistory['asReporter'] | undefined;
   const entries = useMemo(() => timelineOf(history), [history]);
   const canRevoke = can('sanctions.revoke');
   // "Do not automate" (AI levels 3 and 4): a quiet line while the person is marked, and a `...` item for a senior. Its code is its own chunk, fetched only when one of the two applies.
@@ -176,14 +177,17 @@ function PersonBody({ person, onMarked, history, revoking, setRevoking, onRevoke
         )}
         {Array.isArray(history.signals) && history.signals.length > 0 && <LazySignalLines signals={history.signals} />}
       </Panel>
-      <Panel title={t('hub.person.reporter.title')}>
-        <div className="cw-panel-pad">
-          <p>
-            <ReporterTotals record={history.asReporter} />
-          </p>
-          {history.asReporter.reports > 0 && <ReporterStanding record={history.asReporter} />}
-        </div>
-      </Panel>
+      {/* A scoped caller's history carries no reporter record (it spans every room): no panel. */}
+      {asReporter !== undefined && (
+        <Panel title={t('hub.person.reporter.title')}>
+          <div className="cw-panel-pad">
+            <p>
+              <ReporterTotals record={asReporter} />
+            </p>
+            {asReporter.reports > 0 && <ReporterStanding record={asReporter} />}
+          </div>
+        </Panel>
+      )}
     </>
   );
 }

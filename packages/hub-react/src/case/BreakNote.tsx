@@ -16,6 +16,12 @@ export function BreakNote() {
     // Heard before the hub's own handler (back to the queue): while the note is up, this Escape is the note's.
     return onPageFirst('keydown', (e) => {
       if ((e as KeyboardEvent).key !== 'Escape' || e.defaultPrevented) return;
+      // An Escape pressed inside an OPEN menu (the case's or a line's) or a dialog is theirs: they close themselves and give the focus back, and the note waits for the next one.
+      const origin = e.composedPath()[0];
+      if (origin instanceof Element) {
+        const menu = origin.closest('.cw-case-menu, .cw-line-menu');
+        if (menu?.querySelector('[aria-expanded="true"]') != null || origin.closest('[role="dialog"]') !== null) return;
+      }
       e.preventDefault();
       e.stopPropagation();
       dismiss();

@@ -1,5 +1,6 @@
 import { DEFAULT_DURATIONS } from '@chatwarden/core';
 import { DURATIONS } from '../decision.js';
+import type { ChoiceLimits } from '../decision.js';
 import type { SanctionKind } from '../types.js';
 import { lengthValue, nearestLength, resolveLength } from './length.js';
 import type { LengthMenu } from './LengthField.js';
@@ -18,9 +19,16 @@ export function lengthsOf(profile: { durations?: readonly number[]; customDurati
 /** What a form offers when it does not know the profile: the four lengths it always had, and no custom one. */
 export const LEGACY_LENGTHS: LengthPolicy = { durations: DURATIONS.flatMap((d) => (d.ms === null ? [] : [d.ms])), custom: false };
 
-/** The menu for one kind: permanent is left out of a ban for a role that may not give one. */
-export const menuOf = (lengths: LengthPolicy | undefined, kind: SanctionKind | '', canPermanent: boolean): LengthMenu => {
+/**
+ * The menu for one kind: permanent is left out of a ban for a role that may not give one. A scoped caller's `limits` also cut the lengths to those of at most their limit (the limit itself is the one
+ * length offered when the list has none that short), and leave out permanent and a custom length, which cannot be held to it.
+ */
+export const menuOf = (lengths: LengthPolicy | undefined, kind: SanctionKind | '', canPermanent: boolean, limits?: ChoiceLimits): LengthMenu => {
   const l = lengths ?? LEGACY_LENGTHS;
+  if (limits !== undefined) {
+    const within = l.durations.filter((ms) => ms <= limits.maxDurationMs);
+    return { durations: within.length === 0 ? [limits.maxDurationMs] : within, permanent: false, custom: false };
+  }
   return { durations: l.durations, permanent: kind !== 'ban' || canPermanent, custom: l.custom };
 };
 

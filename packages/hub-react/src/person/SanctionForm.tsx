@@ -4,7 +4,7 @@ import { actorName } from '../claims.js';
 import { useHub } from '../context.js';
 import { byId, rootOf } from '../dom.js';
 import { GAP_NOTE_MAX, REASON_MAX, hasLength } from '../decision.js';
-import { useFeatures } from '../features.js';
+import { useFeatures, useScopedLimits } from '../features.js';
 import { LazyPlayerPreview } from '../lazyParts.js';
 import { useHubAction, useHubData } from '../hooks.js';
 import { entityWord } from '../case/CaseContext.js';
@@ -53,7 +53,8 @@ export function SanctionForm({ person, name, mode, entities = [], onDone, onCanc
   // The lengths are the profile's. A form starts on 24 hours, which the profile may not list: it moves to a length that is.
   const lengths = useMemo(() => lengthsOf(policy.data?.profile), [policy.data]);
   const timedKind = !renaming && draft.kind !== '' && hasLength(draft.kind);
-  const menu = menuOf(lengths, draft.kind, canPermanent);
+  const limits = useScopedLimits();
+  const menu = menuOf(lengths, draft.kind, canPermanent, limits);
   const snapped = snapLength(draft.duration, menu);
   useEffect(() => {
     if (timedKind && snapped !== draft.duration) setDraft((d) => ({ ...d, duration: snapped }));
@@ -160,7 +161,7 @@ export function SanctionForm({ person, name, mode, entities = [], onDone, onCanc
                     }}
                   >
                     <option value="">{t('hub.decide.action.what.choose')}</option>
-                    {KINDS.map((k) => (
+                    {KINDS.filter((k) => limits === undefined || limits.kinds.includes(k)).map((k) => (
                       <option key={k} value={k}>
                         {kindLabel(t, k)}
                       </option>
@@ -221,7 +222,8 @@ export function SanctionForm({ person, name, mode, entities = [], onDone, onCanc
               />
             )}
           </Field>
-          {timedKind && (
+          {/* A scoped caller never places an IP sanction: it would land on people outside their scope (the server refuses it). */}
+          {timedKind && limits === undefined && (
             <div className="cw-field">
               <label className="cw-tick">
                 <input type="checkbox" checked={draft.includeIp} aria-describedby={id('ip-hint')} onChange={(e) => set({ includeIp: e.target.checked })} />

@@ -33,6 +33,12 @@ export const durationOf = (key: DurationKey): number | null => DURATIONS.find((d
 /** The kinds "Something else" offers, in the order shown. */
 export const CUSTOM_KINDS: readonly SanctionKind[] = ['chat', 'area', 'ban', 'warning', 'note'];
 
+/** What a scoped caller may apply (`Me.scopedLimits`): the kinds, and the longest length of a restriction or a ban (a permanent one never). */
+export interface ChoiceLimits {
+  kinds: readonly SanctionKind[];
+  maxDurationMs: number;
+}
+
 /** A kind has no length when it is only a record: a warning or a note. */
 export const hasLength = (kind: SanctionKind): boolean => kind !== 'warning' && kind !== 'note';
 
@@ -40,6 +46,15 @@ export const hasLength = (kind: SanctionKind): boolean => kind !== 'warning' && 
 export interface Choice {
   kind: SanctionKind;
   durationMs: number | null;
+}
+
+/**
+ * The choices a scoped caller's limits allow (the server refuses the rest with `invalid_sanction`): only the kinds listed and, for a kind with a length, a length of at most the limit (never a permanent one).
+ * No limits (a caller with no scope) changes nothing.
+ */
+export function limitChoices(choices: readonly Choice[], limits: ChoiceLimits | undefined): Choice[] {
+  if (limits === undefined) return [...choices];
+  return choices.filter((c) => limits.kinds.includes(c.kind) && (!hasLength(c.kind) || (c.durationMs !== null && c.durationMs <= limits.maxDurationMs)));
 }
 
 /** A stable text for a choice, used as the value of the "What happens" menu: `chat:86400000`, `ban:null`. */

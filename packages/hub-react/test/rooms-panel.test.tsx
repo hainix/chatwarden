@@ -33,7 +33,8 @@ describe('the list', () => {
   it('lists the rooms with a labelled radio group each, and shows no seat id, handle or key', async () => {
     const w = await lobby();
     await open(w);
-    expect(within(panel()).getAllByRole('group', { name: /^Mode for / }).map((g) => g.getAttribute('aria-label') ?? g.querySelector('legend')?.textContent)).toEqual(expect.arrayContaining([expect.anything()]));
+    // one labelled radio group per room, named for it (the names are what a screen reader announces: nothing of a seat or a player)
+    expect(within(panel()).getAllByRole('group', { name: /^Mode for / }).map((g) => g.getAttribute('aria-label') ?? g.querySelector('legend')?.textContent).sort()).toEqual(['Mode for lobby-1', 'Mode for lobby-2']);
     for (const id of ['lobby-1', 'lobby-2']) {
       expect(within(room(id)).getAllByRole('radio').map((r) => (r as HTMLInputElement).labels?.[0]?.textContent)).toEqual(['Normal', 'Locked', 'Emergency']);
       expect(radio(id, 'Normal')).toBeChecked();

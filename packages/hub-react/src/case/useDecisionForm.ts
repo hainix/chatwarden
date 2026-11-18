@@ -11,6 +11,7 @@ import {
   emptyForm,
   defaultLines,
   initialForm,
+  limitChoices,
   outcomeChoice,
   renameStartRule,
   presets,
@@ -21,6 +22,7 @@ import {
 } from '../decision.js';
 import type { Choice, DecisionForm, Draft, NotAdded, Problems, UiVerdict, ValidationContext } from '../decision.js';
 import type { ReportPerson } from '../excerpt.js';
+import { useScopedLimits } from '../features.js';
 import { useHubData } from '../hooks.js';
 import type { HubData } from '../hooks.js';
 import { outcomeLabel } from '../labels.js';
@@ -211,10 +213,12 @@ export function useDecisionForm({
   const setForm = useCallback((update: (f: DecisionForm) => DecisionForm): void => setFormState((f) => update(f ?? emptyForm())), []);
   const problems = formState === null ? NO_PROBLEMS : validate(formState, ctx);
 
+  const limits = useScopedLimits();
   const choices = useMemo(() => {
     const suggested = current === undefined ? null : outcomeChoice(current.outcome);
-    return presets(policy.data?.profile ?? {}, suggested === null ? [] : [suggested]);
-  }, [policy.data, current]);
+    // A scoped caller is offered only what their limits allow (the server refuses the rest).
+    return limitChoices(presets(policy.data?.profile ?? {}, suggested === null ? [] : [suggested]), limits);
+  }, [policy.data, current, limits]);
 
   const lengths = useMemo(() => lengthsOf(policy.data?.profile), [policy.data]);
 

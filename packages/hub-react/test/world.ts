@@ -28,6 +28,8 @@ export interface WorldOptions {
   actor?: string;
   /** Make the caller a scoped moderator (`Authz.scope`): they see only the reports of rooms tagged with one of these labels. */
   scope?: string[];
+  /** What a scoped moderator may apply (the kit's `scopedLimits`; default warning and chat, at most 7 days). */
+  scopedLimits?: Parameters<typeof adminRoutes>[1]['scopedLimits'];
   permissions?: Partial<Record<PermissionKey, Role>>;
   /** Mount the term routes (default true). */
   terms?: boolean;
@@ -138,6 +140,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
       return session.who;
     },
     ...(opts.permissions === undefined ? {} : { permissions: opts.permissions }),
+    ...(opts.scopedLimits === undefined ? {} : { scopedLimits: opts.scopedLimits }),
     ...(opts.terms === false ? {} : { terms: live }),
     ...(community === undefined ? {} : { community: community.admin }),
     ...(opts.recentLines === undefined ? {} : { recentLines: opts.recentLines }),

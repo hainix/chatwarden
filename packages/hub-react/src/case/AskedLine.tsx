@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { HubError } from '../client.js';
 import { actorName } from '../claims.js';
 import { useHub } from '../context.js';
@@ -60,6 +60,11 @@ export function AskForm({ to, label, done }: { to: 'senior' | 'owner'; label: st
   const queue = useOptionalQueue();
   const [note, setNote] = useState('');
   const tooLong = charsOf(note) > NOTE_MAX;
+  // The menu's item that opened this form is gone from the page: the focus goes to the note, not to the page.
+  const noteBox = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    noteBox.current?.focus();
+  }, []);
   const send = useHubAction(async (value: string): Promise<void> => {
     await client.escalate(reportId, { to, ...(value.trim() === '' ? {} : { note: value.trim() }) });
     detail.reload();
@@ -70,7 +75,7 @@ export function AskForm({ to, label, done }: { to: 'senior' | 'owner'; label: st
     <div className="cw-case-menu-form" role="group" aria-label={label}>
       <div className="cw-field">
         <label htmlFor={`ask-${to}`}>{t('hub.desk.ask.note')}</label>
-        <textarea id={`ask-${to}`} rows={3} value={note} {...(tooLong ? { 'aria-invalid': true as const } : {})} onChange={(e) => setNote(e.target.value)} />
+        <textarea id={`ask-${to}`} ref={noteBox} rows={3} value={note} {...(tooLong ? { 'aria-invalid': true as const } : {})} onChange={(e) => setNote(e.target.value)} />
         {tooLong && <p className="cw-field-error">{t('hub.desk.ask.error.long', { max: NOTE_MAX })}</p>}
       </div>
       <div className="cw-whattodo-actions">

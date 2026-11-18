@@ -472,6 +472,7 @@ export interface PersonHistory {
   signals?: SignalCountView[];
   reports: Array<{ id: string; createdAt: number; category: ReportCategory }>;
   sanctions: SanctionGroupView[];
+  /** How their own reports turned out. The kit leaves it out of a scoped caller's history (it spans every room); the Person page then draws no reporter panel. */
   asReporter: ReporterRecord;
   /** Their handle on the newest report filed against them, or null: the name to show for the person. */
   handle: string | null;

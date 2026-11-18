@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useHub } from '../context.js';
+import { useScopedLimits } from '../features.js';
 import { CUSTOM_KINDS, GAP_NOTE_MAX, LINES_MAX, choiceKey, hasLength, needsBanPermission, resolveDraft } from '../decision.js';
 import type { ActionProblems, Choice, Draft } from '../decision.js';
 import type { ExcerptLine, ReportPerson } from '../excerpt.js';
@@ -114,7 +115,8 @@ export function ActionCard(props: ActionProps) {
   const idOf = (field: string): string => `${base}-${draft.uid}-${field}`;
   const choice = resolveDraft(draft);
   // The length menu is the profile's. A draft starts on 24 hours, which the profile may not list: it moves to a length that is.
-  const menu = menuOf(lengths, draft.customKind, canPermanent);
+  const limits = useScopedLimits();
+  const menu = menuOf(lengths, draft.customKind, canPermanent, limits);
   const editsLength = draft.what === 'other' && hasLength(draft.customKind);
   const snapped = snapLength(draft.customDuration, menu);
   useEffect(() => {
@@ -162,7 +164,7 @@ export function ActionCard(props: ActionProps) {
             <Field id={idOf('kind')} label={t('hub.decide.action.kind')}>
               {(a) => (
                 <select {...a} value={draft.customKind} onChange={(e) => onChange({ customKind: e.target.value as Draft['customKind'] })}>
-                  {CUSTOM_KINDS.map((k) => (
+                  {CUSTOM_KINDS.filter((k) => limits === undefined || limits.kinds.includes(k)).map((k) => (
                     <option key={k} value={k}>
                       {kindLabel(t, k)}
                     </option>
