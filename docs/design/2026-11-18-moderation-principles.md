@@ -71,3 +71,50 @@ preset's five tiers. The moderator guide, the agent brief and the player code of
 
 ## 4. Left to the builder
 The hub layout of the editor, within the clean-core rule and the existing policy panel components. The exact preview text. Test names.
+
+## 5. Builder-check rulings (2026-11-18, the controller's calls)
+
+1. **The tier invariants stay.** Every tier covers at least one level. Each cover (banter, rude, hostile, severe, repeated,
+   after_warning) sits in exactly one tier, and all four conduct levels are covered. So there are 1 to 6 tiers. The editor shows each
+   tier's covers as checkboxes:
+   - "Add" splits covers off into a new tier.
+   - "Remove" moves its covers into the tier above it.
+   - Save is refused while the invariant fails, and the message says why.
+
+   The case view's "matching tier" lookup and the code-of-conduct derivation stay one tier per level, unchanged.
+2. **The AI prompt stays free of outcomes.** A tier line is `- <title> (covers: <levels>): <description> Examples: <examples>`, with no
+   outcome. The base instruction "never name a penalty" stands. The STABLE text changes, so `AI_PROMPT_VERSION` goes from 5 to 6, and
+   stored reads become stale and are re-read on demand, as at every earlier prompt change. The changelog says so. "Additive" means the
+   API; the prompt version is expected to move.
+3. **Layer shape.** `PolicyLayer.guidelines` accepts two shapes:
+   - the 0.2.1 positional `Array<{outcome}|null>`, which is still read so saved layers keep working;
+   - a new whole form, `{ tiers: GuidelineTier[] }`, which replaces the code profile's tiers.
+
+   The hub always saves the whole form. `teamNotes` is a new `POLICY_SECTIONS` entry, so audit, reset and changed-sections cover it.
+   Reset works per section: guidelines reset the tiers, teamNotes reset the notes.
+4. **Applying a recommendation** writes, in one versioned save:
+   - the preset's `guidelines` tiers;
+   - its `firstOffense`, `repeat` and `ladder`, so the principles and the enforcement match;
+   - its `aiContext`;
+   - the creator team note, for that choice only.
+
+   For this, `aiContext` becomes a layer-able section, edited in the hub behind the advanced door. `levels` stays in code, since it is
+   shared by all three presets, and so does `profanity`. The preview shows the tiers and a one-line summary of the ladder.
+5. **The setup flag** uses a new optional Store pair, `getSetupState(): { dismissedAt: number | null } | null` and
+   `saveSetupState(state)`. It exists in both stores: SQLite keeps it in kit_meta and the memory store in a field. The routes are
+   `GET /setup` (owner) and `POST /setup/dismiss` (owner). When a store lacks the pair, a dismissal lasts only for the session. Any saved
+   policy layer, for any section, hides the panel.
+6. **`chatwarden init`** gains `--game competitive|social|kids|creator`, which maps to a preset. `--profile` stays, and wins when both
+   are given. The interactive flow asks the game type first, and the JSON answers gain `game`. The creator choice writes its team note
+   into the generated profile overrides.
+7. **The injection screen on authored text.** It runs at save. A flagged tier field or note is a warning in the hub, never a refusal.
+   When the prompt is built:
+   - a flagged note is left out;
+   - a flagged tier keeps only its title and covers, so every level still has a line.
+
+   `PolicyState` gains `promptExcluded: { tiers: number[]; notes: number[] }` so the hub can show this. The cap is measured after the
+   `oneLine` reduction: each tier line is at most 400 characters, and the block is at most 4,000. Tiers always fit, because 6 lines at
+   400 is 2,400. Notes are dropped last first, and the hub says how many.
+8. **A note's rule link** must name an existing Community Rule, active or retired, at save. A note whose rule is later retired still
+   shows in the guide, but not on cases.
+9. **Moxgate is out of this plan.** Moving its wording and notes is a separate Moxgate change after 0.2.2 publishes.
