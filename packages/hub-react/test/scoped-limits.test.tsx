@@ -117,6 +117,7 @@ describe('the Sanction form of a scoped caller', () => {
   });
 });
 
+// Today a scoped caller cannot read the rules (policy.read is not scope-aware), so the decision bar offers no action row to them at all; these two keep it that way if that changes.
 describe('the decision bar of a scoped caller on a name report', () => {
   it('shows neither the row to ask for a new name nor the line that says renames are off (they cannot be asked for here)', async () => {
     const w = await appealsHub({ names: { renames: true }, role: 'senior', scope: [A] });
@@ -128,6 +129,17 @@ describe('the decision bar of a scoped caller on a name report', () => {
     await user.click(within(bar).getByRole('radio', { name: 'Fair' }));
     expect(within(bar).queryByRole('checkbox', { name: 'Ask for a new name' })).toBeNull();
     expect(bar.querySelector('.cw-rename-off')).toBeNull();
+  });
+
+  it('control: the same name report, unscoped, does show the row (so the test above is not looking at nothing)', async () => {
+    const w = await appealsHub({ names: { renames: true }, role: 'senior' });
+    const f = await w.fileRich({ target: 'Mallory', reason: 'name' });
+    const { user } = renderHub(w, { path: `/reports/${f.id}` });
+    await screen.findByRole('heading', { level: 2, name: /report against/ });
+    const bar = await screen.findByRole('region', { name: 'Decision' });
+    await within(bar).findByRole('radio', { name: 'Fair' });
+    await user.click(within(bar).getByRole('radio', { name: 'Fair' }));
+    expect(within(bar).getByRole('checkbox', { name: 'Ask for a new name' })).toBeInTheDocument();
   });
 
   it('GET /me told the hub so: features.renames is false and the limits are there', async () => {
