@@ -862,8 +862,8 @@ describe('the appeals and names docs (0.1.9)', () => {
     const catalog = read('packages/player-react/src/i18n.ts');
     const count = (prefix: string): number => [...catalog.matchAll(new RegExp(`^ {2}'${prefix.replaceAll('.', '\\.')}[a-zA-Z_.]*'`, 'gm'))].length;
     expect(count('player.appeal.')).toBe(18);
-    expect(count('player.name.')).toBe(2);
-    expect(doc).toContain('28 keys to `en`: 18 `player.appeal.*`, 2 `player.name.*`');
+    expect(count('player.name.')).toBe(3);
+    expect(doc).toContain('29 keys to `en`: 18 `player.appeal.*`, 3 `player.name.*`');
     // The notice words moved to core (`@chatwarden/core/notice-copy`); `en` spreads them.
     const words = read('packages/core/src/noticeCopy.ts');
     expect(catalog).toContain('...NOTICE_WORDS');

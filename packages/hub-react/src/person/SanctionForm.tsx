@@ -7,11 +7,12 @@ import { GAP_NOTE_MAX, REASON_MAX, hasLength } from '../decision.js';
 import { useFeatures } from '../features.js';
 import { LazyPlayerPreview } from '../lazyParts.js';
 import { useHubAction, useHubData } from '../hooks.js';
-import { choiceLabel, errorText, kindLabel } from '../labels.js';
+import { entityWord } from '../case/CaseContext.js';
+import { choiceLabel, displayName, errorText, kindLabel } from '../labels.js';
 import { LengthField } from '../policy/LengthField.js';
 import { lengthsOf, menuOf, snapLength } from '../policy/lengths.js';
 import { useToasts } from '../toasts.js';
-import type { PolicyDocs, SanctionKind } from '../types.js';
+import type { PersonHistory, PolicyDocs, SanctionKind } from '../types.js';
 import { ErrorBlock, Panel } from '../ui.js';
 import { renameOp, sanctionOp } from '../preview/ops.js';
 import { emptySanction, renameProblems, sanctionChoice, sanctionProblems, toRenameInput, toSanctionInput } from './sanctionDraft.js';
@@ -27,7 +28,7 @@ const KINDS: readonly SanctionKind[] = ['warning', 'chat', 'area', 'ban'];
  * "include their IP for 24 hours" for the timed kinds. Nothing is sent until the form passes the same checks a decision does; a
  * refusal from the server is shown with everything typed kept. A senior can take over another moderator's claim from here.
  */
-export function SanctionForm({ person, name, mode, onDone, onCancel }: { person: string; name: string; mode: SanctionMode; onDone: () => void; onCancel: () => void }) {
+export function SanctionForm({ person, name, mode, entities = [], onDone, onCancel }: { person: string; name: string; mode: SanctionMode; entities?: NonNullable<PersonHistory['entities']>; onDone: () => void; onCancel: () => void }) {
   const { t, locale, can, client, session } = useHub();
   const toasts = useToasts();
   const base = useId();
@@ -37,6 +38,9 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   // "Ask for a new name (no sanction)": the last choice of "What happens", only with renames on and sanctions.apply. It sends no sanction, so no length, no IP.
   const [renaming, setRenaming] = useState(false);
   const canRename = useFeatures().renames && mode === 'sanction';
+  // Which of the entities open reports name the rename is about: '' is the player's own name (the default), else an index into `entities`.
+  const [entityPick, setEntityPick] = useState('');
+  const entity = renaming && entityPick !== '' ? entities[Number(entityPick)] : undefined;
 
   // The rules are read when the form opens (once per session: `session.policy()` remembers them), never when the page opens.
   const wantsRules = can('policy.read');
@@ -72,7 +76,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   const sending = useRef(false);
   const apply = useHubAction(async (takeOver: boolean) => {
     if (renaming) {
-      await client.rename(person, toRenameInput(draft, takeOver ? { takeOver: true } : {}));
+      await client.rename(person, toRenameInput(draft, { ...(takeOver ? { takeOver: true } : {}), ...(entity === undefined ? {} : { entity }) }));
       return { renamed: true as const };
     }
     const input = toSanctionInput(person, draft, mode, takeOver ? { takeOver: true } : {});
@@ -227,6 +231,20 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
                 {t('hub.person.form.ip.hint')}
               </p>
             </div>
+          )}
+          {renaming && entities.length > 0 && (
+            <Field id={id('entity')} label={t('hub.person.form.rename.entity')}>
+              {(a) => (
+                <select {...a} value={entityPick} onChange={(e) => setEntityPick(e.target.value)}>
+                  <option value="">{t('hub.person.form.rename.entity.player')}</option>
+                  {entities.map((e, i) => (
+                    <option key={`${e.kind}:${e.ref}`} value={String(i)}>
+                      {entityWord(t, e.kind)} {displayName(t, { handle: e.label, flagged: e.labelFlagged })}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
           )}
           {renaming && <p className="cw-hint">{t('hub.person.form.rename.hint')}</p>}
           <LazyPlayerPreview op={previewOp} nameOf={() => name} extraEffects={previewIp} prompt={renaming ? 'chooseRule' : 'choose'} />

@@ -164,15 +164,16 @@ describe('the filter statements (migration 26) bind exactly as many values as th
     category: 'spam', reportedReason: 'spam', note: null, lineId: null, excerpt: [], people: [], status: 'open', origin: 'filter', originKey: 'link.unlisted',
   };
 
-  it('the report insert has one plain ? for each of its 22 columns and 22 values, the origin pair, then urgent, the evidence ref and the scope last (0, null and null when the report has none)', () => {
-    expect(placeholders(REPORT_INSERT_SQL)).toBe(22);
-    expect(reportInsertArgs(stored)).toHaveLength(22);
-    expect(reportInsertArgs(stored).slice(-5)).toEqual(['filter', 'link.unlisted', 0, null, null]);
-    expect(reportInsertArgs({ ...stored, urgent: true, evidenceRef: 'm_1', scope: 'creator:alice' }).slice(-3)).toEqual([1, 'm_1', 'creator:alice']);
+  it('the report insert has one plain ? for each of its 23 columns and 23 values, the origin pair, then urgent, the evidence ref, the scope and the entity last (0, null, null and null when the report has none)', () => {
+    expect(placeholders(REPORT_INSERT_SQL)).toBe(23);
+    expect(reportInsertArgs(stored)).toHaveLength(23);
+    expect(reportInsertArgs(stored).slice(-6)).toEqual(['filter', 'link.unlisted', 0, null, null, null]);
+    const entity = { kind: 'clan', ref: 'clan-1', label: 'Blue Wolves' };
+    expect(reportInsertArgs({ ...stored, urgent: true, evidenceRef: 'm_1', scope: 'creator:alice', entity }).slice(-4)).toEqual([1, 'm_1', 'creator:alice', JSON.stringify(entity)]);
     const plain = { ...stored } as Partial<StoredReport>;
     delete plain.origin;
     delete plain.originKey;
-    expect(reportInsertArgs(plain as StoredReport).slice(-5)).toEqual([null, null, 0, null, null]);
+    expect(reportInsertArgs(plain as StoredReport).slice(-6)).toEqual([null, null, 0, null, null, null]);
     expect(reportInsertArgs(plain as StoredReport)).toHaveLength(placeholders(REPORT_INSERT_SQL));
     expect(REPORT_INSERT_SQL).not.toMatch(/\?\d/);
   });
@@ -288,7 +289,7 @@ describe('the privacy statements bind exactly as many values as they have placeh
     HELD_NAMING_SQL: 4,
     REPORTS_ABOUT_IDS_SQL: 2,
     REPORTS_NAMING_SQL: 3,
-    REPORT_SCRUB_SQL: 7,
+    REPORT_SCRUB_SQL: 8,
     NOTICES_DELETE_SQL: 2,
     NOTICES_CLEAR_SQL: 2,
     MUTES_DELETE_SQL: 2,

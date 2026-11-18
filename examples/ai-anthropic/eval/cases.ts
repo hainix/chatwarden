@@ -84,6 +84,7 @@ export function caseToReport(c: EvalCase): ReportRecord {
     urgent: false,
     evidenceRef: null,
     scope: null,
+    entity: null,
     handoffAt: null,
     handoffBy: null,
     escalatedTo: null,

@@ -258,12 +258,14 @@ export interface RenameBody {
   reason: string;
   rule: number;
   takeOver: boolean;
+  /** The entity (a clan, guild, team) the rename is about, when it is not the player's own name. */
+  entity: { kind: string; ref: string } | null;
 }
 
 /**
  * The body of `POST /people/:ref/rename`: `{ reason, rule, takeOver? }`. `reason` is text that is not blank (the core keeps it to 500 characters); `rule`
  * is required (a rename always cites a rule) and a whole number from 1 (the core checks that it is an active rule; `'uncovered'` is not one); `takeOver` a
- * boolean. Anything else is 400.
+ * boolean; `entity` (optional, null is none) is exactly `{ kind, ref }` for a rename of a clan, guild or team (a label is never sent). Anything else is 400.
  */
 export function bodyRename(body: Record<string, unknown>): RenameBody {
   const reason = bodyText(body.reason);
@@ -271,7 +273,21 @@ export function bodyRename(body: Record<string, unknown>): RenameBody {
   const takeOver = bodyTakeOver(body);
   const rule = body.rule;
   if (typeof rule !== 'number' || !Number.isSafeInteger(rule) || rule < 1) throw new ValidationError();
-  return { reason, rule, takeOver };
+  return { reason, rule, takeOver, entity: bodyEntityRef(body.entity) };
+}
+
+const ENTITY_KIND = /^[a-z][a-z_]{0,23}$/;
+const ENTITY_REF = /^[A-Za-z0-9_:-]{1,64}$/;
+
+/** An entity a rename is about: exactly `{ kind, ref }` (the kit's grammar; a label is refused), or null for none. Anything else is 400. */
+function bodyEntityRef(value: unknown): { kind: string; ref: string } | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new ValidationError();
+  const keys = Object.keys(value);
+  const { kind, ref } = value as Record<string, unknown>;
+  if (keys.length !== 2 || !keys.includes('kind') || !keys.includes('ref')) throw new ValidationError();
+  if (typeof kind !== 'string' || !ENTITY_KIND.test(kind) || typeof ref !== 'string' || !ENTITY_REF.test(ref)) throw new ValidationError();
+  return { kind, ref };
 }
 
 /**

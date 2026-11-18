@@ -4,7 +4,7 @@ import { defineProfile, PRESETS, ProfileError, resolveProfile, validateProfile }
 
 // The `names` settings: in the profile (code), resolved with every field filled, refused with a path and never the value.
 
-const DEFAULTS = { profanity: false, keepBlocked: false, renames: false, maskInHub: true };
+const DEFAULTS = { profanity: false, keepBlocked: false, renames: false, maskInHub: true, reserved: [], reservedAllow: [], reservedRule: 2 };
 
 function failure(fn: () => unknown): ProfileError {
   try {
@@ -28,7 +28,7 @@ describe('names settings', () => {
     expect(resolveNames({ keepBlocked: true })).toEqual({ ...DEFAULTS, keepBlocked: true });
     expect(resolveNames({ renames: true })).toEqual({ ...DEFAULTS, renames: true });
     expect(resolveNames({ maskInHub: false })).toEqual({ ...DEFAULTS, maskInHub: false });
-    expect(resolveNames({ profanity: true, keepBlocked: true, renames: true, maskInHub: false })).toEqual({ profanity: true, keepBlocked: true, renames: true, maskInHub: false });
+    expect(resolveNames({ profanity: true, keepBlocked: true, renames: true, maskInHub: false })).toEqual({ ...DEFAULTS, profanity: true, keepBlocked: true, renames: true, maskInHub: false });
     expect(resolveNames({ maskInHub: undefined })).toEqual(DEFAULTS);
   });
 
@@ -70,7 +70,7 @@ describe('names in the profile', () => {
     expect(p.names).toEqual({ ...DEFAULTS, renames: true });
     expect(Object.isFrozen(p.names)).toBe(true);
     const coded = defineProfile({ ...PRESETS.standard, names: { profanity: true, maskInHub: false } });
-    expect(resolveProfile(coded, { names: { keepBlocked: true } }).names).toEqual({ profanity: true, keepBlocked: true, renames: false, maskInHub: false });
+    expect(resolveProfile(coded, { names: { keepBlocked: true } }).names).toEqual({ ...DEFAULTS, profanity: true, keepBlocked: true, renames: false, maskInHub: false });
   });
 
   it('a profile written without names resolves it to the defaults', () => {

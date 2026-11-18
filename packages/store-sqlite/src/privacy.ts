@@ -90,7 +90,7 @@ export const SANCTIONS_UNLINK_SQL = `UPDATE kit_sanctions SET report_id = NULL W
 export const APPEALS_UNLINK_SQL = `UPDATE kit_appeals SET report_id = NULL WHERE report_id IN ${IN_ARG}`;
 /** One report whose reporter and lines are rewritten. Binds: the reporter value, the reporter seat, the handle, the note flag, the excerpt, the people, the id. */
 export const REPORT_SCRUB_SQL = `UPDATE kit_reports SET reporter_subject = ?, reporter_seat = ?, reporter_handle = ?, note = CASE WHEN ? = 1 THEN NULL ELSE note END,
-  excerpt_json = ?, people_json = ? WHERE id = ?`;
+  entity_json = CASE WHEN ? = 1 THEN NULL ELSE entity_json END, excerpt_json = ?, people_json = ? WHERE id = ?`;
 
 /** Delete whole sanction groups (every row, address rows included). Binds: the groups. */
 export const SANCTIONS_DELETE_SQL = `DELETE FROM kit_sanctions WHERE group_id IN ${IN_ARG}`;
@@ -314,6 +314,7 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bu
       asReporter ? erasedReporter(id) : String(r.reporter_subject),
       asReporter ? '' : String(r.reporter_seat ?? ''),
       asReporter ? '' : String(r.reporter_handle ?? ''),
+      asReporter ? 1 : 0,
       asReporter ? 1 : 0,
       JSON.stringify(lines?.excerpt ?? parseJson<unknown[]>(r.excerpt_json, [])),
       JSON.stringify(lines?.people ?? people),

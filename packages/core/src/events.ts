@@ -89,10 +89,10 @@ export type KitEvent =
   | { type: 'appeal.decided'; appealId: string; at: number; target: StaffRef; outcome: AppealOutcome; rule: RuleRef | null }
   /**
    * A moderator required a rename. It names no name and no reason: the game learns who to rename through `cw.people.accountIds(target)`
-   * or a webhook that opted in to accounts.
+   * or a webhook that opted in to accounts. With `entity` the rename is of something the target owns (a clan, guild, team: `kind` and the game's opaque `ref`, never its label): the kit made no notice for it, and the game tells the owner in its own UI.
    * Carries subject ids: staff channels only, never send to a player. @experimental
    */
-  | { type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null }
+  | { type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null; entity?: { kind: string; ref: string } }
   /**
    * A report was held for legal reasons (`cw.legal.hold`): the game's own process takes it from here. It carries the report id, the time, the closed hold `code`
    * and the person the report is about (canonical at emit time), never text. The kit forwards it to no one; the game finds the player through

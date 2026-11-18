@@ -48,6 +48,7 @@ export function reportsContract(name: string, make: () => Store): void {
           urgent: false,
           evidenceRef: null,
           scope: null,
+          entity: null,
           handoffAt: null,
           handoffBy: null,
           escalatedTo: null,

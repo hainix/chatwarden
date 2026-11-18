@@ -708,6 +708,7 @@ export class MemoryStore implements Store {
       urgent: row.urgent === true,
       evidenceRef: row.evidenceRef ?? null,
       scope: row.scope ?? null,
+      entity: row.entity ?? null,
       handoffAt: null,
       handoffBy: null,
       escalatedTo: null,
@@ -1431,7 +1432,7 @@ export class MemoryStore implements Store {
       if (lines !== null || asReporter) readsGone.add(r.id);
       return {
         ...r,
-        ...(asReporter ? { reporterSubject: `erased:${r.id}`, reporterSeat: '', reporterHandle: '', note: null } : {}),
+        ...(asReporter ? { reporterSubject: `erased:${r.id}`, reporterSeat: '', reporterHandle: '', note: null, entity: null } : {}),
         ...(lines === null ? {} : { people: lines.people, excerpt: lines.excerpt }),
       };
     });

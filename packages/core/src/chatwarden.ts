@@ -54,7 +54,8 @@ import { checkContextBooks, checkScope, Contexts, effectiveOf } from './contexts
 import type { EffectiveContext } from './contexts.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
-import type { NameCheckResult } from './names.js';
+import { checkNameRules } from './names.js';
+import type { NameCheckResult, NameKind } from './names.js';
 import type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, AppealSummary, PlayerAppeal } from './appeals.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
@@ -792,12 +793,16 @@ export interface Chatwarden {
      * hit is `name_profane` (a matcher hit wins). `rule` is the Community Rule the slur filter cites (`autoRestrictRule`) for both. No
      * matcher, a matcher that fails (logged, class only) and a filter that fails (`chatwarden.names_filter_failed`) all let the name through.
      *
+     * A third reason, `name_reserved`, comes after those two: the name reads as one of `names.reserved` (a staff or system name, by skeleton and as a whole word: `Mod_Anna`, `M0derator`; not `xXmodXx`) and is not one of
+     * `names.reservedAllow`. It cites `names.reservedRule` (default Community Rule 2), not the slur rule, and is never kept as evidence. `opts.skipReserved: true` skips only that check, for the game's own staff signup. `opts.kind: 'entity'`
+     * is a name for a clan, guild, team, deck, pet or item: the same checks and the same answer (default `'player'`; any other value is a `TypeError`).
+     *
      * `opts.who` is the caller, as the doors take it. It is used ONLY to tie kept evidence to a person (found, never created); it never
      * changes the answer. A blocked name is kept (`kit_blocked_names`) only when `names.keepBlocked` is on: at most 5 an hour per person
      * (per `who`, or per name when there is none) and 200 an hour overall, in memory per process; past that the check still answers and
      * nothing more is stored. An allowed name is never stored, and a name is never logged.
      */
-    check(text: string, opts?: { who?: RawWho }): NameCheckResult;
+    check(text: string, opts?: { who?: RawWho; kind?: NameKind; skipReserved?: boolean }): NameCheckResult;
     /**
      * Would the matcher refuse this as a name? The evidence-free read for staff screens and routes (a list of handles): the matcher only,
      * no profanity pass, nothing stored whatever `names.keepBlocked` says, no person looked up. False for no matcher, for a non-string and
@@ -810,9 +815,12 @@ export interface Chatwarden {
      * false (or the store cannot release a rename); `invalid` for a reason that is not 1 to 500 characters or a rule that is missing or is not an
      * active integer rule; `not_found` for a person the kit does not hold; `pending` while a request is already waiting. `rule` is required (a rename always cites a
      * Community Rule; there is no default) and is shown to the player as a rule label. A store failure is logged (class only) and thrown.
+     *
+     * With `entity: { kind, ref }` the rename is of something the player owns (a clan, guild, team), not their own name: the kit has no screen for it, so it creates NO notice (`noticeId` is null) and sets no pending request
+     * (an entity rename may repeat); it emits `rename.required` with `entity: { kind, ref }` (never the label) and the game tells the owner in its own UI. The person is the owner. Otherwise as above.
      * @experimental
      */
-    requireRename(input: { subject: SubjectId; actor: string; reason: string; rule: number }): { ok: true; noticeId: string } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
+    requireRename(input: { subject: SubjectId; actor: string; reason: string; rule: number; entity?: { kind: string; ref: string } }): { ok: true; noticeId: string | null } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
     /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. @experimental */
     pendingRename(who: RawWho): boolean;
     /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. @experimental */
@@ -1249,6 +1257,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   };
   // The filters may cite only an active Community Rule (a code profile fails here, a layer when it is saved).
   checkFilterRules(baseProfile.filters, isActiveRule, 'profile.filters');
+  // The reserved-name rule likewise (a layer is checked when it is saved).
+  checkNameRules(baseProfile.names, isActiveRule, 'profile.names');
   // The staff workflow keeps a thread per report in the store: a code profile that asks for it over a store that cannot is refused here, plainly.
   if (baseProfile.desk.workflow && !hasWorkflowMethods(store)) {
     throw new Error('desk.workflow needs a store that keeps staff comments and escalation (insertComment, listComments, deleteComment, countComments, setEscalation, countOpenEscalated); this store lacks them');

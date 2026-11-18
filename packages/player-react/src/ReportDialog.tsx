@@ -73,6 +73,7 @@ const REFUSED_TEXT: Readonly<Record<ReportRefusal, PlayerText>> = {
   suspended: 'player.report.refused.suspended',
   reason_required: 'player.report.refused.reason_required',
   reason_unknown: 'player.report.refused.reason_unknown',
+  entity_invalid: 'player.report.refused.entity_invalid',
 };
 
 /** How much of the reported message is quoted on the screen. */

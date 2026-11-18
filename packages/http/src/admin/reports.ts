@@ -136,6 +136,20 @@ const claimView = (c: CaseClaim | undefined): ReportSummary['claim'] => (c === u
 const originOf = (r: Pick<StaffReport, 'origin' | 'originKey'>): { origin?: 'filter' | 'watch'; originKey?: string } =>
   r.origin === null || r.origin === undefined ? {} : { origin: r.origin, ...(r.originKey === null || r.originKey === undefined ? {} : { originKey: r.originKey }) };
 
+/** At most this many distinct entities are listed for a person. */
+const ENTITIES_MAX = 5;
+
+/** The distinct entities (by kind and ref) that these OPEN reports name, in the order met, at most {@link ENTITIES_MAX}: `{ kind, ref, label }` and `labelFlagged: true` when the label is flagged. */
+function openEntities(reports: ReadonlyArray<{ status: string; entity: { kind: string; ref: string; label: string } | null }>, flagged: (text: string) => boolean): Array<{ kind: string; ref: string; label: string; labelFlagged?: true }> {
+  const out: Array<{ kind: string; ref: string; label: string; labelFlagged?: true }> = [];
+  for (const r of reports) {
+    if (r.status !== 'open' || r.entity === null || out.length >= ENTITIES_MAX) continue;
+    if (out.some((e) => e.kind === r.entity?.kind && e.ref === r.entity?.ref)) continue;
+    out.push({ kind: r.entity.kind, ref: r.entity.ref, label: r.entity.label, ...(flagged(r.entity.label) ? { labelFlagged: true as const } : {}) });
+  }
+  return out;
+}
+
 /** Project a report to its queue summary. Lists each field by name, so a field added to the record never leaks in. */
 const summarize = (
   r: StaffReport,
@@ -374,7 +388,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (failed.length > 0) safeWarn(ctx.logger, 'chatwarden.http_notice_text_failed', { error: failed[0] instanceof Error ? failed[0].name : 'unknown', count: failed.length });
       // A player's report carries no `origin` keys (the body is as it was); a report nobody filed carries them, with `reporterPerson` null. The raw hand-off, escalation and evidence
       // columns are not the body's shape: `urgent` and `handoff: { at, by }` stand in for them (staff ids, never a player's).
-      const { origin: _origin, originKey: _originKey, handoffAt, handoffBy, escalatedTo, escalatedBy, escalatedAt, evidenceRef: _ref, scope: _scope, ...plain } = report;
+      const { origin: _origin, originKey: _originKey, handoffAt, handoffBy, escalatedTo, escalatedBy, escalatedAt, evidenceRef: _ref, scope: _scope, entity, ...plain } = report;
       void [_origin, _originKey, _ref, _scope];
       // With the workflow on: the staff thread and the second look asked of a senior or the owner. With it off the keys are not there at all.
       const workflow = cw.desk.workflowEnabled()
@@ -395,6 +409,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         ...(held === null ? {} : { hold: held }),
         ...(originLabelOf(report) === undefined ? {} : { originLabel: originLabelOf(report) }),
         reportedReasonLabel: labelOf(report),
+        // The clan, guild or team the report is about (a report about a player alone has no key at all); its label is a name, so it is masked like one.
+        ...(entity === null ? {} : { entity, ...flagKey(flagged, 'entityLabelFlagged', entity.label) }),
         ...flagKey(flagged, 'targetHandleFlagged', report.targetHandle),
         ...flagKey(flagged, 'reporterHandleFlagged', report.reporterHandle),
         excerpt,
@@ -581,6 +597,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // The name to show for the person: their handle on the newest report filed against them (null when none, or none recorded).
       const handle = filed.find((r) => r.targetHandle !== '')?.targetHandle ?? null;
       const sanctions = cw.sanctions.forPerson(ref);
+      // The clans, guilds or teams that open reports about the person name, each once (the rename form's choice). Present only when there is one; a label is a name, so it is marked when the matcher flags it.
+      const entities = openEntities(filed, handleFlags(cw));
       const asReporter = cw.reports.reporterRecord(ref);
       // The Person page record (`feeds.record`): the chosen kinds and window, counted by distinct source. Absent with the feed off.
       const signals = cw.profile.signals.feeds.record === undefined ? undefined : cw.signals.forRecord(ref);
@@ -606,6 +624,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
           ...(signals === undefined ? {} : { signals }),
           ...(showAppeals ? { appeals } : {}),
           ...(showRenames ? { renames } : {}),
+          ...(entities.length === 0 ? {} : { entities }),
           ...(mark.allowed ? {} : { automation: { code: mark.code, at: mark.at } }),
         },
       };

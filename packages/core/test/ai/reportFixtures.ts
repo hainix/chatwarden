@@ -78,6 +78,7 @@ export function mkReport(
     urgent: false,
     evidenceRef: null,
     scope: null,
+    entity: null,
     handoffAt: null,
     handoffBy: null,
     escalatedTo: null,

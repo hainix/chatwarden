@@ -145,10 +145,10 @@ describe('events', () => {
       outcome: AppealOutcome;
       rule: RuleRef | null;
     }>();
-    expectTypeOf<KitEventOf<'rename.required'>>().toEqualTypeOf<{ type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null }>();
+    expectTypeOf<KitEventOf<'rename.required'>>().toEqualTypeOf<{ type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null; entity?: { kind: string; ref: string } }>();
     // no field of any of them is free text of a player or a moderator
     type Keys = keyof KitEventOf<'appeal.created'> | keyof KitEventOf<'appeal.decided'> | keyof KitEventOf<'rename.required'>;
-    expectTypeOf<Extract<Keys, 'statement' | 'reason' | 'decisionReason' | 'handle' | 'name' | 'note' | 'accounts'>>().toEqualTypeOf<never>();
+    expectTypeOf<Extract<Keys, 'statement' | 'reason' | 'decisionReason' | 'handle' | 'name' | 'note' | 'accounts' | 'label'>>().toEqualTypeOf<never>();
     expectTypeOf<KitEventOf<'appeal.decided'>['outcome']>().toEqualTypeOf<'uphold' | 'reduce' | 'revoke'>();
     // and they are members of the union, so cw.on('*') hears them
     expectTypeOf<KitEvent['type']>().toExtend<string>();

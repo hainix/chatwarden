@@ -160,11 +160,13 @@ export function renameProblems(d: SanctionDraft): SanctionProblems {
   return out;
 }
 
-/** The body for `POST /people/:ref/rename`: the reason, the numbered rule and, when asked for, `takeOver`. Call it on a draft that has no problems. */
-export function toRenameInput(d: SanctionDraft, options: { takeOver?: boolean } = {}): { reason: string; rule: number; takeOver?: boolean } {
+/** The body for `POST /people/:ref/rename`: the reason, the numbered rule and, when asked for, `takeOver` and the entity to rename. Call it on a draft that has no problems. */
+export function toRenameInput(d: SanctionDraft, options: { takeOver?: boolean; entity?: { kind: string; ref: string } } = {}): { reason: string; rule: number; takeOver?: boolean; entity?: { kind: string; ref: string } } {
   return {
     reason: d.reason.trim(),
     rule: Number(d.rule),
     ...(options.takeOver === true ? { takeOver: true } : {}),
+    // Only the kind and the game's id: the label never leaves the page.
+    ...(options.entity === undefined ? {} : { entity: { kind: options.entity.kind, ref: options.entity.ref } }),
   };
 }

@@ -11,6 +11,7 @@ import type {
   Clock,
   Logger,
   ReportCategory,
+  ReportEntity,
   ReportExcerptLine,
   Store,
   StoredReport,
@@ -51,6 +52,8 @@ export type ReportRefusal =
   | 'reason_required'
   /** A reason that is not an enabled id in the profile's reporting reasons (in every flow). */
   | 'reason_unknown'
+  /** `entity` is not `{ kind, ref, label }` as described by {@link ReportInput.entity}. Checked right after the reason, before anything is spent or stored. */
+  | 'entity_invalid'
   | 'not_player'
   | 'self'
   | 'suspended'
@@ -111,6 +114,55 @@ export interface ReportInput {
    * still taken. The kit never fetches it; staff see it as `evidence` with a link built from `reporting.evidenceUrl`. It is in no event, queue summary, webhook or Discord post. @experimental
    */
   evidenceRef?: string | null;
+  /**
+   * The clan, guild, team, deck or other entity the report is about: `{ kind, ref, label }`, `kind` a word of the game's (`^[a-z][a-z_]{0,23}$`), `ref` its opaque id (1 to 64 of `A-Za-z0-9_:-`), `label` its name as players see it
+   * (1 to 64 characters, no control character; trimmed). The report is filed against the owner's seat (`targetSeat` or the line's author) as always, so the person is the case; the entity is stored with the report and shown as one extra
+   * row. Anything else (a missing key, an extra key, a bad value) is refused `entity_invalid` before the budget is touched. Omitted or null: none. No event, log line or webhook carries it.
+   */
+  entity?: ReportEntity | null;
+}
+
+/** The kinds, refs and labels `ReportInput.entity` may hold. */
+const ENTITY_KIND_RE = /^[a-z][a-z_]{0,23}$/;
+const ENTITY_REF_RE = /^[A-Za-z0-9_:-]{1,64}$/;
+// eslint-disable-next-line no-control-regex
+const ENTITY_LABEL_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+const ENTITY_LABEL_MAX = 64;
+
+/**
+ * A report's entity as the kit stores it (a new object, the label trimmed), `null` for none (`undefined` and `null`), or `'invalid'`. Exactly the own keys kind, ref and label; never echoes a value.
+ * @internal
+ */
+export function readEntity(raw: unknown): ReportEntity | null | 'invalid' {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return 'invalid';
+  const proto: unknown = Object.getPrototypeOf(raw);
+  if (proto !== Object.prototype && proto !== null) return 'invalid';
+  const keys = Object.keys(raw);
+  if (keys.length !== 3 || !['kind', 'ref', 'label'].every((k) => keys.includes(k))) return 'invalid';
+  const { kind, ref, label } = raw as Record<string, unknown>;
+  if (typeof kind !== 'string' || !ENTITY_KIND_RE.test(kind)) return 'invalid';
+  if (typeof ref !== 'string' || !ENTITY_REF_RE.test(ref)) return 'invalid';
+  if (typeof label !== 'string') return 'invalid';
+  const name = label.trim();
+  if (name === '' || name.length > ENTITY_LABEL_MAX || ENTITY_LABEL_CONTROL.test(name)) return 'invalid';
+  return { kind, ref, label: name };
+}
+
+/**
+ * The `{ kind, ref }` of an entity a rename is about (a label is never part of it), `null` for none, or `'invalid'`.
+ * @internal
+ */
+export function readEntityRef(raw: unknown): { kind: string; ref: string } | null | 'invalid' {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return 'invalid';
+  const proto: unknown = Object.getPrototypeOf(raw);
+  if (proto !== Object.prototype && proto !== null) return 'invalid';
+  const keys = Object.keys(raw);
+  if (keys.length !== 2 || !['kind', 'ref'].every((k) => keys.includes(k))) return 'invalid';
+  const { kind, ref } = raw as Record<string, unknown>;
+  if (typeof kind !== 'string' || !ENTITY_KIND_RE.test(kind) || typeof ref !== 'string' || !ENTITY_REF_RE.test(ref)) return 'invalid';
+  return { kind, ref };
 }
 
 export type ReportResult =
@@ -516,6 +568,9 @@ export class ReportService {
     const given = this.readReason(input);
     if (given === 'required') return refuse('reason_required');
     if (given === 'unknown') return refuse('reason_unknown');
+    // The entity is checked before anything is read, spent or stored: a malformed one is the game's bug, and the report is not taken.
+    const entity = readEntity(input.entity);
+    if (entity === 'invalid') return refuse('entity_invalid');
 
     let line = typeof input.lineId === 'string' ? this.buffer.get(roomId, input.lineId) : undefined;
     // A reporter cannot cite a line they never saw: one sent to a limited audience that left their seat out is
@@ -566,6 +621,7 @@ export class ReportService {
         urgent: (given.id !== null && findReason(this.reporting().reasons, given.id)?.urgent === true) || extras?.urgent === true,
         evidenceRef: this.cleanEvidenceRef(extras?.evidenceRef ?? input.evidenceRef),
         scope: scopeOfTags(tags),
+        entity,
       };
       const toStore = row;
       const written = this.store.transaction(() => this.store.insertReport(toStore));

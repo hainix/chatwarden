@@ -1,6 +1,7 @@
 import { isValidAuditActor, AUDIT_REASON_MAX } from './audit.js';
 import { sampleRecords, suggest } from './ladder.js';
 import { checkFilterRules } from './filters.js';
+import { checkNameRules } from './names.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
 import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
 import { playerReporting } from './reporting.js';
@@ -339,6 +340,7 @@ export class PolicyService {
       if (!this.workflowKept && effective.desk.workflow && !this.base.desk.workflow) return { ok: false, error: 'invalid', path: 'layer.desk.workflow' };
       // A filter may cite only an active Community Rule. Checked here, not when a stored layer is read: a rule switched off later fails the next save, never the chat path.
       checkFilterRules(effective.filters, this.isActiveRule, 'layer.filters');
+      checkNameRules(effective.names, this.isActiveRule, 'layer.names');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;
@@ -393,6 +395,7 @@ export class PolicyService {
       // As save: a window longer than the retention could never be met, so the candidate is refused here too, not only when it is saved.
       checkSignalFeeds(candidate.signals.feeds, candidate.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
       checkFilterRules(candidate.filters, this.isActiveRule, 'layer.filters');
+      checkNameRules(candidate.names, this.isActiveRule, 'layer.names');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;

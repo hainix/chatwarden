@@ -67,8 +67,9 @@ const known = (v: unknown): v is string => typeof v === 'string' && v !== '';
  * - `GET /code-of-conduct?format=html|markdown|text` (default markdown; anything else 400). The string body goes out
  *   with the `content-type` given here. HTML is a full document with a CSP of `default-src 'none'; style-src
  *   'unsafe-inline'`; every format has `x-content-type-options: nosniff`.
- * - `POST /names/check { name }` -> the core's answer (`{ ok: true }` or `{ ok: false, reason, rule }`, the reason `name_not_allowed` or, with
- *   `names.profanity` on, `name_profane`). `name` is a string of 1..64 characters. The caller is passed to the core so a blocked name can be
+ * - `POST /names/check { name, kind? }` -> the core's answer (`{ ok: true }` or `{ ok: false, reason, rule }`, the reason `name_not_allowed`, with
+ *   `names.profanity` on `name_profane`, and with `names.reserved` set `name_reserved`, citing `names.reservedRule`). `kind` is `'player'` (the default) or `'entity'` (a clan, guild, team,
+ *   deck, pet or item name: the same checks); any other value is 400 `invalid_request`. A player can never skip the reserved check: there is no such field. `name` is a string of 1..64 characters. The caller is passed to the core so a blocked name can be
  *   kept as evidence when the adopter opted in (`names.keepBlocked`); it never changes the answer. Limited per identity
  *   (default 20 a minute): 429 `rate_limited` with `retry-after` in seconds. The limiter holds a salted SHA-256 of the
  *   identity (account, else client key, else address; one shared bucket for nobody), never a raw value.
@@ -225,7 +226,9 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
       if (wait > 0) throw new HttpError('rate_limited', { 'retry-after': String(Math.ceil(wait / 1000)) });
       const name = bodyObject(req).name;
       if (typeof name !== 'string' || name.length < 1 || name.length > NAME_MAX) throw new ValidationError();
-      return personal(cw.names.check(name, { who }));
+      const kind = bodyObject(req).kind;
+      if (kind !== undefined && kind !== 'player' && kind !== 'entity') throw new ValidationError();
+      return personal(cw.names.check(name, { who, ...(kind === undefined ? {} : { kind }) }));
     }),
   };
 }

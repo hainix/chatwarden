@@ -148,9 +148,9 @@ const reason = (
 
 /**
  * The default reasons, deep-frozen: Chat (insults or harassment, hate, sexual content, threats, spam or ads, sharing personal
- * info, an inappropriate name, and a disabled "Someone may be in trouble"), Gameplay (cheating, throwing or griefing, leaving or AFK), then Something else. Each maps to the starter Community
+ * info, an inappropriate name, a disabled "Pretending to be staff or someone else" and a disabled "Someone may be in trouble"), Gameplay (cheating, throwing or griefing, leaving or AFK), then Something else. Each maps to the starter Community
  * Rules it usually means: harassment, threats and personal info to CR 2, a name to CR 7, hate to CR 1, sexual content to CR 3, spam to CR 4,
- * cheating to CR 5, griefing and AFK to CR 6. `other` and `welfare` map to none. `threat` is urgent; `welfare` is urgent, shows the owner's
+ * cheating to CR 5, griefing and AFK to CR 6; `impersonation` to CR 2, switched off until the owner turns it on (it appears in Settings > Reporting and in no player's report dialog until then). `other` and `welfare` map to none. `threat` is urgent; `welfare` is urgent, shows the owner's
  * resources and is switched off until the owner turns it on.
  */
 export const DEFAULT_REPORT_REASONS: readonly Readonly<ReportReason>[] = Object.freeze(
@@ -162,6 +162,7 @@ export const DEFAULT_REPORT_REASONS: readonly Readonly<ReportReason>[] = Object.
     reason('spam', 'Spam or ads', 'Repeated messages, flooding or advertising', 'Chat', [4]),
     reason('personal_info', 'Sharing personal info', "Posting someone's private details", 'Chat', [2]),
     reason('name', 'Inappropriate name', 'An offensive or inappropriate player name', 'Chat', [7]),
+    reason('impersonation', 'Pretending to be staff or someone else', 'A name or message that pretends to be a moderator, the game or another player', 'Chat', [2], false, { enabled: false }),
     reason('welfare', 'Someone may be in trouble', 'Someone who says they want to hurt themselves, or may be at risk', 'Chat', [], true, {
       urgent: true,
       showResources: true,

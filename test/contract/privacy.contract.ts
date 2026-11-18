@@ -161,8 +161,8 @@ export async function seedWorld(s: Store, o: WorldOptions = {}): Promise<void> {
       note: 'qq says pp was rude',
     }),
   );
-  s.insertReport(report('rFiled', 's_pp', 's_qq', { excerpt: [line(1, 0, WHO.handle, WHO.line2), line(2, 1, OTHER.handle, OTHER.line)], people: ['s_pp', 's_qq'] }));
-  s.insertReport(report('rThird', 's_qq', 's_xx', { excerpt: [line(1, 0, OTHER.handle, OTHER.line), line(2, 1, 'XXHandle', 'plain xx line'), line(3, 2, WHO.handle, WHO.line)], people: ['s_qq', 's_xx', 's_pp'] }));
+  s.insertReport(report('rFiled', 's_pp', 's_qq', { excerpt: [line(1, 0, WHO.handle, WHO.line2), line(2, 1, OTHER.handle, OTHER.line)], people: ['s_pp', 's_qq'], entity: { kind: 'clan', ref: 'clan-pp', label: 'ppclan label' } }));
+  s.insertReport(report('rThird', 's_qq', 's_xx', { excerpt: [line(1, 0, OTHER.handle, OTHER.line), line(2, 1, 'XXHandle', 'plain xx line'), line(3, 2, WHO.handle, WHO.line)], people: ['s_qq', 's_xx', 's_pp'], entity: { kind: 'guild', ref: 'guild-xx', label: 'xx guild label' } }));
   s.insertReport(
     report('rFilter', 'filter:rFilter', 's_pp', {
       reporterSeat: '',
@@ -549,6 +549,8 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
         expect(filed?.reporterSeat).toBe('');
         expect(filed?.reporterHandle).toBe('');
         expect(filed?.note).toBeNull();
+        // the clan or guild a report names goes with the reporter (a label is a name the game's UI may have taken from them); the report about another player's entity keeps its own
+        expect(filed?.entity).toBeNull();
         expect(filed?.targetSubject).toBe('s_qq');
         expect(filed?.people).toEqual(['s_qq']);
         expect(filed?.excerpt.map((l) => [l.p, l.raw])).toEqual([
@@ -565,6 +567,7 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
           [null, '[erased]'],
         ]);
         expect(third?.reporterSubject).toBe('s_qq');
+        expect(third?.entity).toEqual({ kind: 'guild', ref: 'guild-xx', label: 'xx guild label' });
         expect(s.loadReport('rAbout')).toBeNull();
         expect(s.loadReport('rFilter')).toBeNull();
         expect(s.findDecision('d-about')).toBeNull();

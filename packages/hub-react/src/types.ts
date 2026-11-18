@@ -250,6 +250,9 @@ export interface Claim {
  * @experimental
  */
 export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
+  // `entity` (the clan, guild or team the report is about: `kind` the game's word, `ref` its opaque id, `label` its name) is the kit's own field. The server sends it only for a report that names one, so it is
+  // absent, not null, for a report about a player alone and from an older server.  /** True when the server flags the entity's label (`names.maskInHub`): the hub hides it until shown. Absent otherwise. */
+  entityLabelFlagged?: boolean;
   /** The context the report's room had (its `context` tag, as written), or null; absent from an older server. The case chip shows its label. */
   context?: string | null;
   /** Who marked the case as passed to the game's safety team and when (the first mark only), or null. Staff ids, never a player's. @experimental */
@@ -489,6 +492,10 @@ export interface PersonHistory {
    * while the person is marked, and never says who set it. Absent from an older server. @experimental
    */
   automation?: { code: AutomationCode; at: number | null };
+  /**
+   * The entities (a clan, guild, team) that open reports about this person name, each once: the choice the rename form offers. Present only when there is one; a flagged label is marked. Staff only.
+   */
+  entities?: Array<{ kind: string; ref: string; label: string; labelFlagged?: boolean }>;
 }
 
 /**

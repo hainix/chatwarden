@@ -8,7 +8,7 @@ import {
   type TermRow,
 } from './matcher.js';
 import { collapseLikePreset, foldPhrase, foldTerm } from './normalise.js';
-import { matchName } from './names.js';
+import { matchName, matchReserved } from './names.js';
 import type { TermPack } from './termPack.js';
 import type { ExceptionRecord, TermRecord, TermStore } from './termStore.js';
 
@@ -129,7 +129,7 @@ const plainException = (r: ExceptionRecord): ExceptionRow => ({
 const isThenable = (v: unknown): boolean =>
   typeof v === 'object' && v !== null && typeof (v as { then?: unknown }).then === 'function';
 
-const NEVER: Matcher = { match: () => null, spans: () => [], matchName: () => null };
+const NEVER: Matcher = { match: () => null, spans: () => [], matchName: () => null, matchReserved };
 
 /** Terms and exceptions share a shape apart from the word column, so one set of edit internals serves both. */
 interface Kind {
@@ -218,6 +218,11 @@ export class LiveTerms implements Matcher {
   /** {@link match} for a name (a handle, a table or deck name): also reads the name split into words. */
   matchName(name: string): { termId: string } | null {
     return matchName(this.current, name);
+  }
+
+  /** Is this name one of the protected `entries` (reserved names)? Independent of the term list: see {@link matchReserved}. */
+  matchReserved(name: string, entries: readonly string[], allow: readonly string[]): boolean {
+    return matchReserved(name, entries, allow);
   }
 
   /** Every match as a range on the original text (end exclusive), for masking. Same rules as {@link match}. */

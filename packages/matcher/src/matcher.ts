@@ -6,7 +6,7 @@ import {
   stripInvisible,
   type Folded,
 } from './normalise.js';
-import { matchName } from './names.js';
+import { matchName, matchReserved } from './names.js';
 import { mergeSpans, stripWithMap, toOriginal, type Span } from './spans.js';
 import { compileWords, type EngineHit } from './vendored/wordEngine.js';
 
@@ -24,6 +24,8 @@ export interface Matcher {
   /** `match` for a NAME (a handle, a table or deck name): the name is also read split into words, so
    *  `Zorbak_99` is caught. See `matchName`. */
   matchName?(name: string): { termId: string } | null;
+  /** Is this name one of the protected `entries` (reserved names; `allow` lists names that pass)? Read as whole words by skeleton: see `matchReserved`. The same arrays are compiled once. */
+  matchReserved?(name: string, entries: readonly string[], allow: readonly string[]): boolean;
 }
 
 /** Thrown for a malformed active term or exception row; the message names the row id. */
@@ -132,7 +134,7 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
     phrases.push(normalisePhrase(row));
   }
 
-  if (terms.every((t) => !t.active)) return { match: () => null, spans: () => [], matchName: () => null };
+  if (terms.every((t) => !t.active)) return { match: () => null, spans: () => [], matchName: () => null, matchReserved };
 
   // The engine reads text the way obscenity's English preset does (see ./vendored/wordEngine.ts) and has no whitelist:
   // exceptions are applied by isExcepted (word-bounded), not by the engine.
@@ -176,6 +178,7 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
     matchName(name: string) {
       return matchName(built, name);
     },
+    matchReserved,
   };
   return built;
 }

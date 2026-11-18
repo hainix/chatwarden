@@ -35,18 +35,18 @@ describe('the name reason', () => {
     });
     expect(ids().indexOf('name')).toBe(6);
     expect(ids().indexOf('name')).toBe(ids().indexOf('personal_info') + 1);
-    expect(ids()[ids().indexOf('name') + 1]).toBe('welfare');
+    expect(ids()[ids().indexOf('name') + 1]).toBe('impersonation');
   });
 
-  it('the defaults are 12 (welfare, switched off, is the new one) and the list stays frozen', () => {
-    expect(DEFAULT_REPORT_REASONS).toHaveLength(12);
-    expect(ids()).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'welfare', 'cheating', 'griefing', 'afk', 'other']);
+  it('the defaults are 13 (impersonation and welfare, both switched off, are the newer ones) and the list stays frozen', () => {
+    expect(DEFAULT_REPORT_REASONS).toHaveLength(13);
+    expect(ids()).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'impersonation', 'welfare', 'cheating', 'griefing', 'afk', 'other']);
     expect(Object.isFrozen(DEFAULT_REPORT_REASONS)).toBe(true);
     const name = DEFAULT_REPORT_REASONS[6]!;
     expect(Object.isFrozen(name)).toBe(true);
     expect(Object.isFrozen(name.rules)).toBe(true);
     expect(() => (name.rules as number[]).push(1)).toThrow();
-    expect(defaultReporting().reasons).toHaveLength(12);
+    expect(defaultReporting().reasons).toHaveLength(13);
     expect(defaultReporting().reasons[6]!.rules).toEqual([7]);
   });
 
@@ -96,7 +96,7 @@ describe('the name reason', () => {
     expect(cw.policy.save({ reporting: { reasons: own } }, { version: 0, ...OWNER })).toMatchObject({ ok: true });
     expect(cw.profile.reporting.reasons.map((r) => r.id)).toEqual(['lag', 'other']);
     expect(cw.policy.reset('reporting')).toMatchObject({ ok: true, changed: ['reporting'] });
-    expect(cw.profile.reporting.reasons).toHaveLength(12);
+    expect(cw.profile.reporting.reasons).toHaveLength(13);
     expect(cw.profile.reporting.reasons.map((r) => r.id)).toContain('name');
   });
 

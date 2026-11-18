@@ -5,6 +5,7 @@ import { nameReasonText } from '../src/names.js';
 
 const NOT_ALLOWED = 'That name is not allowed. Choose another.';
 const PROFANE = 'That name is not allowed here. Choose another.';
+const RESERVED = 'That name is reserved. Choose another.';
 
 describe('nameReasonText', () => {
   const t = createT(en, 'en');
@@ -15,9 +16,18 @@ describe('nameReasonText', () => {
     expect(nameReasonText(t, 'name_not_allowed')).not.toBe(nameReasonText(t, 'name_profane'));
   });
 
+  it('name_reserved has words of its own: it says the name is reserved, and never which entry matched', () => {
+    expect(nameReasonText(t, 'name_reserved')).toBe(RESERVED);
+    expect(en['player.name.reserved']).toBe(RESERVED);
+    expect(nameReasonText(t, 'name_reserved')).not.toBe(NOT_ALLOWED);
+    expect(nameReasonText(t, 'name_reserved')).not.toBe(PROFANE);
+    expect(RESERVED).not.toMatch(/staff|admin|moderator/i);
+  });
+
   it('answers a sentence for every reason core names (control: the list is the type)', () => {
-    const all: NameReason[] = ['name_not_allowed', 'name_profane'];
-    for (const reason of all) expect(nameReasonText(t, reason)).toMatch(/^That name is not allowed/);
+    const all: NameReason[] = ['name_not_allowed', 'name_profane', 'name_reserved'];
+    for (const reason of all) expect(nameReasonText(t, reason)).toMatch(/^That name is (not allowed|reserved)/);
+    expect(new Set(all.map((r) => nameReasonText(t, r))).size).toBe(3);
   });
 
   it('a reason a newer server adds reads as the general one, never as a key or blank', () => {
@@ -41,6 +51,7 @@ describe('nameReasonText', () => {
     const bare = createT({}, 'fr');
     expect(nameReasonText(bare, 'name_not_allowed')).toBe(NOT_ALLOWED);
     expect(nameReasonText(bare, 'name_profane')).toBe(PROFANE);
+    expect(nameReasonText(bare, 'name_reserved')).toBe(RESERVED);
     // One key translated, the other missing: each falls back on its own.
     const half = createT({ 'player.name.profane': 'Nom interdit ici.' }, 'fr');
     expect(nameReasonText(half, 'name_profane')).toBe('Nom interdit ici.');

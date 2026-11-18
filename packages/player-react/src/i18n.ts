@@ -68,6 +68,7 @@ export const en = {
   // The words a sign-up screen shows beside a name field the check refused (`nameReasonText`).
   'player.name.not_allowed': 'That name is not allowed. Choose another.',
   'player.name.profane': 'That name is not allowed here. Choose another.',
+  'player.name.reserved': 'That name is reserved. Choose another.',
 
   'player.rules.title': 'Community rules',
   'player.rules.loading': 'Loading the rules',
@@ -154,6 +155,7 @@ export const en = {
   'player.report.refused.suspended': 'You cannot send reports from this account for now.',
   'player.report.refused.reason_required': 'This report needs a reason. Close this and report again to choose one.',
   'player.report.refused.reason_unknown': 'That reason is not available any more. Close this and report again.',
+  'player.report.refused.entity_invalid': 'This report is missing some details, so we could not take it.',
   'player.report.refused.unknown': 'We could not take that report.',
 } as const;
 

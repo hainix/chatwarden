@@ -83,6 +83,8 @@ export interface RichOptions extends FileOptions {
   note?: string;
   /** Tags on the room when the report is filed. */
   tags?: Record<string, string>;
+  /** The clan, guild or team the report is about. */
+  entity?: { kind: string; ref: string; label: string };
 }
 
 export async function hubWorld(opts: WorldOptions = {}) {
@@ -212,6 +214,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
       targetSeat: 'p2',
       ...(o.reason === undefined ? { category: o.category ?? 'harassment' } : { reason: o.reason }),
       ...(o.note === undefined ? {} : { note: o.note }),
+      ...(o.entity === undefined ? {} : { entity: o.entity }),
       ...(cite === null || cite < 0 ? {} : { lineId: lineIds[cite] as string }),
     });
     if (!res.ok) throw new Error(`report refused: ${res.refused}`);

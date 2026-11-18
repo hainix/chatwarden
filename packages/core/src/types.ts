@@ -778,7 +778,22 @@ export interface StoredReport {
    * it on every record.
    */
   scope?: string | null;
+  /**
+   * The clan, guild, team, deck or other entity this report is about, as the game described it at filing: `{ kind, ref, label }`. The report is still filed against the owner's seat; the entity is what the case shows as one
+   * extra row. Omitted or null reads as null. A store returns it on every record. The label may be a name a player chose: it goes with the report when the report is erased.
+   */
+  entity?: ReportEntity | null;
   status: 'open';
+}
+
+/**
+ * What a report says it is about when it is not a player alone: a clan, guild, team, deck, pet or item. `kind` is a word of the game's (`^[a-z][a-z_]{0,23}$`), `ref` the game's opaque id for the entity (1 to 64 of `A-Za-z0-9_:-`),
+ * `label` its name as the players see it (1 to 64 characters, no control character, trimmed).
+ */
+export interface ReportEntity {
+  kind: string;
+  ref: string;
+  label: string;
 }
 
 /** The origins a report can have besides a player. @experimental */
@@ -804,7 +819,7 @@ export interface FilterHitRow {
  * until then. `badFaith` marks a dismissal as the reporter's bad faith (it counts toward their suspension).
  * Private: moderator tools only.
  */
-export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason' | 'origin' | 'originKey' | 'urgent' | 'evidenceRef' | 'scope'> {
+export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason' | 'origin' | 'originKey' | 'urgent' | 'evidenceRef' | 'scope' | 'entity'> {
   /** Where the report came from: `'filter'`, `'watch'`, or null for a player's report. Every first-party store returns it. See {@link StoredReport.origin}. */
   origin: ReportOrigin | null;
   /** The counter key of an origin report; null otherwise. */
@@ -825,6 +840,8 @@ export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedRea
   evidenceRef: string | null;
   /** The staff scope the room carried when the report was filed (see {@link StoredReport.scope}), or null. Every store returns it. */
   scope: string | null;
+  /** The entity the report is about (see {@link StoredReport.entity}), or null. Every store returns it (a custom `Store` must). */
+  entity: ReportEntity | null;
   /** When a moderator marked the case as passed to the game's safety team, and who: the first mark only. Null until then. Staff ids, not players. @experimental */
   handoffAt: number | null;
   handoffBy: string | null;
@@ -2057,6 +2074,11 @@ export interface Matcher {
    * it `names.check` falls back to `match`.
    */
   matchName?(name: string): { termId: string } | null;
+  /**
+   * Is this NAME one of the protected `entries` (`names.reserved`)? Read as whole words by skeleton (look-alikes and leetspeak folded, a space, underscore, hump or digit run a word break); a name whose whole skeleton is
+   * one of `allow` is never a match. Optional: without it `names.reserved` does nothing and the kit says so once (`chatwarden.names_reserved_unsupported`). The kit hands over the same frozen arrays until the settings change.
+   */
+  matchReserved?(name: string, entries: readonly string[], allow: readonly string[]): boolean;
 }
 
 // ---------------------------------------------------------------------------

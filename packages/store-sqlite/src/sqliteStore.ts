@@ -50,6 +50,7 @@ import type {
   ReasonRow,
   ReportActivity,
   ReportCategory,
+  ReportEntity,
   ReportListQuery,
   ReportRecord,
   ReporterDecision,
@@ -163,15 +164,15 @@ function detailFromJson(json: unknown): { detail?: AuditDetail } {
  */
 export const REPORT_INSERT_SQL = `INSERT INTO kit_reports
    (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
-    target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status, origin, origin_key, urgent, evidence_ref, scope)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status, origin, origin_key, urgent, evidence_ref, scope, entity_json)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
  ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING
  ON CONFLICT (target_subject, room_id) WHERE origin = 'filter' AND status = 'open' DO NOTHING`;
 /** The values `REPORT_INSERT_SQL` binds, one for each `?`, in order. */
 export const reportInsertArgs = (r: StoredReport): Array<string | number | null> => [
   r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle, r.targetSubject, r.targetSeat, r.targetHandle,
   r.category, r.reportedReason ?? null, r.note, r.lineId, JSON.stringify(r.excerpt), JSON.stringify(r.people), r.status, r.origin ?? null, r.originKey ?? null,
-  r.urgent === true ? 1 : 0, r.evidenceRef ?? null, r.scope ?? null,
+  r.urgent === true ? 1 : 0, r.evidenceRef ?? null, r.scope ?? null, r.entity === undefined || r.entity === null ? null : JSON.stringify(r.entity),
 ];
 /** Set an open report's urgent flag when it differs. Binds: the new value, the id, the new value. */
 export const REPORT_URGENT_SET_SQL = "UPDATE kit_reports SET urgent = ? WHERE id = ? AND status = 'open' AND urgent <> ?";
@@ -230,6 +231,17 @@ export const IDENTIFIER_UPSERT_SQL = `INSERT INTO kit_subject_ids (subject_id, k
   ON CONFLICT (subject_id, kind, value) DO UPDATE SET last_seen = max(last_seen, excluded.last_seen)`;
 
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
+/** The entity of a report row: the stored `{ kind, ref, label }`, or null for none and for a damaged value (a read never fails on it). */
+function entityFromJson(raw: unknown): ReportEntity | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    const v = JSON.parse(raw) as Record<string, unknown> | null;
+    return v !== null && typeof v === 'object' && typeof v.kind === 'string' && typeof v.ref === 'string' && typeof v.label === 'string' ? { kind: v.kind, ref: v.ref, label: v.label } : null;
+  } catch {
+    return null;
+  }
+}
+
 function reportFromRow(r: Record<string, unknown>): ReportRecord {
   return {
     id: String(r.id),
@@ -250,6 +262,7 @@ function reportFromRow(r: Record<string, unknown>): ReportRecord {
     urgent: Number(r.urgent) === 1,
     evidenceRef: r.evidence_ref === null || r.evidence_ref === undefined ? null : String(r.evidence_ref),
     scope: r.scope === null || r.scope === undefined ? null : String(r.scope),
+    entity: entityFromJson(r.entity_json),
     handoffAt: r.handoff_at === null || r.handoff_at === undefined ? null : Number(r.handoff_at),
     handoffBy: r.handoff_by === null || r.handoff_by === undefined ? null : String(r.handoff_by),
     escalatedTo: r.escalated_to === 'senior' || r.escalated_to === 'owner' ? r.escalated_to : null,

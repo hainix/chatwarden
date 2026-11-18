@@ -123,8 +123,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     category: 'reports_filed',
     tables: ['kit_reports'],
     export: 'Reports the person filed: reason, note, time and room tags.',
-    eraseSafety: 'The person is removed from the report (who, seat, name and note); the report stays for the player it is about.',
-    eraseNone: 'The person is removed from the report; the report stays for the player it is about.',
+    eraseSafety: 'The person is removed from the report (who, seat, name, note and the clan, guild or team it names); the report stays for the player it is about.',
+    eraseNone: 'The person is removed from the report (who, seat, name, note and the clan, guild or team it names); the report stays for the player it is about.',
     retention: 'reportsMs',
     welfareClock: 'welfareReportsMs',
     jsonColumns: [],
@@ -256,6 +256,7 @@ export const NO_PERSON_TABLES: Readonly<Record<string, string>> = {
  */
 export const NO_PERSON_JSON_COLUMNS: Readonly<Record<string, string>> = {
   'kit_reports.tags_json': 'The room tags the game gave (mode, region): never a person.',
+  'kit_reports.entity_json': 'The clan, guild or team a report names (kind, the id the game gave it, label): no subject id. A label may be a name a player chose, so it is cleared when the reporter is erased and goes with the report when its target is.',
   'kit_audit.before_json': 'The earlier value of a changed setting: settings only.',
   'kit_audit.after_json': 'The new value of a changed setting: settings only.',
   'kit_audit.detail_json': 'The sections and the reason of a settings change: settings only, never a person.',

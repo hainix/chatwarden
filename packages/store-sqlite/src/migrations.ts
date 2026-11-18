@@ -863,6 +863,9 @@ ALTER TABLE kit_reports ADD COLUMN scope TEXT;
 CREATE INDEX kit_reports_by_scope ON kit_reports (scope, status, created_at);
 UPDATE kit_reports SET scope = json_extract(tags_json, '$.scope') WHERE json_extract(tags_json, '$.scope') IS NOT NULL;
 
+-- any-server-rooms-languages: kit_reports.entity_json. The clan, guild or team a report is about, as { kind, ref, label }; null for a report about a player alone. It goes with its report.
+ALTER TABLE kit_reports ADD COLUMN entity_json TEXT;
+
 -- any-server-rooms-languages: kit_mutes.block. A block is a mute that is also two-way and never expires; one row per pair, the latest action wins (a mute never downgrades a block).
 ALTER TABLE kit_mutes ADD COLUMN block INTEGER NOT NULL DEFAULT 0 CHECK (block IN (0, 1));
 

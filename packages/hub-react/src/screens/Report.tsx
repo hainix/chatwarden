@@ -8,7 +8,7 @@ import { SurgeLine } from '../case/SurgeLine.js';
 import { HiddenExcerpt } from '../case/HiddenExcerpt.js';
 import { CaseMenu } from '../case/CaseMenu.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
-import { ContextChip, useCase } from '../case/CaseContext.js';
+import { ContextChip, EntityRow, useCase } from '../case/CaseContext.js';
 import { DecisionBar } from '../case/DecisionBar.js';
 import { isWaiting } from '../decisions.js';
 import { RecordItem } from '../case/Record.js';
@@ -64,6 +64,7 @@ function Header({ detail }: { detail: ReportDetail }) {
         <Viewing />
         <CaseMenu />
       </div>
+      <EntityRow />
       <UrgentStrip />
       <AskedLine />
       <BreakNote />

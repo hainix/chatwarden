@@ -107,6 +107,7 @@ export function Person({ person }: { person: string }) {
             person={person}
             name={name}
             mode={form}
+            entities={data?.entities ?? []}
             onDone={() => {
               setForm(null);
               wrote();

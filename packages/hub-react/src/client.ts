@@ -298,7 +298,7 @@ export interface HubClient {
    * `POST /people/:ref/rename` (needs `sanctions.apply`, and `features.renames`): ask the player for a new name, with no sanction. The reason is checked
    * and kept by the audit trail only. Rejects with `pending_rename` (409) while one is waiting, `claimed` (409) like a sanction. @experimental
    */
-  rename(ref: string, input: { reason: string; rule: number; takeOver?: boolean }): Promise<{ ok: true }>;
+  rename(ref: string, input: { reason: string; rule: number; takeOver?: boolean; entity?: { kind: string; ref: string } }): Promise<{ ok: true }>;
   /**
    * `PUT /people/:id/automation` (needs `automation.write`, a senior's by default): mark a person "do not automate" with one of the closed reason codes, or clear the mark.
    * Rejects with 403 below the role, 400 for a code the server does not know, 404 for an unknown person or a store that cannot keep the mark. @experimental

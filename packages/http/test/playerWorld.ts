@@ -46,6 +46,8 @@ export interface PlayerWorldOptions {
   names?: Record<string, unknown>;
   routes?: Record<string, unknown>;
   wrap?: (cw: Chatwarden) => Chatwarden;
+  /** The kit's matcher (default: the one-term `blocker`). */
+  matcher?: Matcher;
 }
 
 export async function playerWorld(over: PlayerWorldOptions = {}) {
@@ -59,7 +61,7 @@ export async function playerWorld(over: PlayerWorldOptions = {}) {
     platform: { identify: (ctx: unknown) => ctx as RawWho },
     clock,
     logger,
-    matcher: blocker,
+    matcher: over.matcher ?? blocker,
     profanity: snerpFilter,
     retention: false,
     overrides: {

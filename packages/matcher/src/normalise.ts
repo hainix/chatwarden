@@ -1,4 +1,4 @@
-import { KEEP_TWO } from './vendored/wordEngine.js';
+import { KEEP_TWO, transformLikePreset } from './vendored/wordEngine.js';
 
 // Text normalisation for the matcher: everything that turns what a person typed, or what a moderator
 // entered, into the form the matcher compares. Pure functions, no state.
@@ -31,6 +31,14 @@ const BLANK_FILLERS = /[\u3164\uFFA0\u115F\u1160\u2800\u034F\uFE00-\uFE0F]/g;
  *  "z o r b a k") are NOT removed on purpose: that precision-first residual is a report away. */
 export function stripInvisible(text: string): string {
   return text.normalize('NFKD').replace(/[\p{M}\p{Cf}]/gu, '').replace(BLANK_FILLERS, '');
+}
+
+/**
+ * A text as a bare key: `stripInvisible` (marks and format characters off), then the engine's own reading (look-alike characters and leetspeak to letters, ASCII case folded, runs of one letter cut), then
+ * everything that is not `a-z` or `0-9` removed. `M0d_Anna`, `Mod_Anna`, `m.o.d anna` and `MODDD anna` have one skeleton. It is for comparing names (reserved names), never for chat: it throws away every word break.
+ */
+export function skeleton(text: string): string {
+  return transformLikePreset(stripInvisible(text)).text.replace(/[^a-z0-9]/g, '');
 }
 
 /** The text of a term as the matcher reads it before collapsing: accents stripped, trimmed, lowercase.

@@ -15,7 +15,7 @@ import type { NextReport, QueueGroup } from '../queue.js';
 import type { AiBus, AiCaseApi } from '../ai/api.js';
 import type { DecisionForm } from '../decision.js';
 import { LazyAiParts } from '../lazyParts.js';
-import { NameRevealContext } from '../names.js';
+import { NameRevealContext, NameToggle, NameValue } from '../names.js';
 import type { NameReveal } from '../names.js';
 import type { AiReadView, ContextRow, DecideInput, PersonHistory, ReportDetail } from '../types.js';
 import { QUICK_ACT_COOLDOWN_MS, hasAged, monotonicNow } from './actGuard.js';
@@ -98,6 +98,28 @@ export function ContextChip() {
     <span className="cw-tag cw-tag--idle cw-context" role="note" aria-label={t('hub.case.context', { label })}>
       {label}
     </span>
+  );
+}
+
+/** The word for an entity's kind: the hub's own for the kinds it knows (a clan, guild, team, deck, pet or item), "Entity" for any other word of the game's. */
+export function entityWord(t: ReturnType<typeof useHub>['t'], kind: string): string {
+  return t(['clan', 'guild', 'team', 'deck', 'pet', 'item'].includes(kind) ? (`hub.case.entity.${kind}` as 'hub.case.entity.clan') : 'hub.case.entity.unknown');
+}
+
+/**
+ * The entity row: "Clan: {label}", drawn only when the report names a clan, guild, team or other entity. The label is a name a player chose, so it is masked like one while the server flags it
+ * (the same hidden label and Show control as a flagged handle). Nothing for a report about a player alone.
+ */
+export function EntityRow() {
+  const { t } = useHub();
+  const { detail } = useCase();
+  const entity = detail.data?.report.entity;
+  if (entity === undefined || entity === null) return null;
+  const flagged = detail.data?.report.entityLabelFlagged === true;
+  return (
+    <p className="cw-entity">
+      <span className="cw-entity-kind">{entityWord(t, entity.kind)}</span> <NameValue text={entity.label} flagged={flagged} place="entity" /> <NameToggle flagged={flagged} place="entity" />
+    </p>
   );
 }
 

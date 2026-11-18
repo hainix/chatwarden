@@ -45,18 +45,18 @@ const r = (id: string, over: Partial<ReportReasonInput> = {}): ReportReasonInput
 const other = (): ReportReasonInput => r('other', { label: 'Something else' });
 
 describe('defaults', () => {
-  it('every preset resolves to one_tap, the twelve default reasons and the thank-you', () => {
+  it('every preset resolves to one_tap, the thirteen default reasons and the thank-you', () => {
     for (const name of ['relaxed', 'standard', 'strict'] as const) {
       const p = PRESETS[name];
       expect(p.reporting.flow).toBe('one_tap');
       expect(p.reporting.thanks).toBe("Thanks for the report. We'll look into it.");
       expect(p.reporting.reasons.map((x) => x.id)).toEqual([
-        'harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'welfare', 'cheating', 'griefing', 'afk', 'other',
+        'harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'impersonation', 'welfare', 'cheating', 'griefing', 'afk', 'other',
       ]);
     }
   });
 
-  it('the default reasons have the briefed labels, groups, rules and notes, and are all on but welfare', () => {
+  it('the default reasons have the briefed labels, groups, rules and notes, and are all on but impersonation and welfare', () => {
     const table = DEFAULT_REPORT_REASONS.map((x) => [x.id, x.label, x.group, x.rules, x.asksNote, x.enabled]);
     expect(table).toEqual([
       ['harassment', 'Insults or harassment', 'Chat', [2], false, true],
@@ -66,6 +66,7 @@ describe('defaults', () => {
       ['spam', 'Spam or ads', 'Chat', [4], false, true],
       ['personal_info', 'Sharing personal info', 'Chat', [2], false, true],
       ['name', 'Inappropriate name', 'Chat', [7], false, true],
+      ['impersonation', 'Pretending to be staff or someone else', 'Chat', [2], false, false],
       ['welfare', 'Someone may be in trouble', 'Chat', [], true, false],
       ['cheating', 'Cheating', 'Gameplay', [5], false, true],
       ['griefing', 'Throwing or griefing', 'Gameplay', [6], false, true],

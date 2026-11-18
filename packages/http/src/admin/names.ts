@@ -5,12 +5,14 @@ import type { AdminContext } from './context.js';
 import { bodyObject, bodyRename } from './validate.js';
 
 /**
- * `POST /people/:ref/rename { reason, rule, takeOver? }` (`sanctions.apply`): ask a player to choose a new name. It is not a sanction (no
+ * `POST /people/:ref/rename { reason, rule, takeOver?, entity? }` (`sanctions.apply`): ask a player to choose a new name. It is not a sanction (no
  * length, no appeal, nothing on "My record"): the player gets a notice that names no name, and the game hears `rename.required` and renames.
  * `reason` is private (1 to 500 characters, never echoed) and `rule` an active whole-number rule (required: a rename always cites one, there is no default). 200 `{ ok: true }`.
  * - 404 `not_found` while renames are off (`names.renames`), or when the store cannot release a rename (the same test `GET /me`'s
  *   `features.renames` applies, so a hub never offers a rename that always 404s), or for a person the kit does not hold. Checked before the body.
  * - 409 `pending_rename` while an earlier request is still waiting for the game to release the player.
+ * - `entity: { kind, ref }` (a clan, guild or team the player owns; never a label, else 400) makes it a rename of that: the kit makes no notice and sets no pending flag, so it never answers 409 and may repeat; the game hears
+ *   `rename.required` with the entity and tells the owner in its own UI. Audited the same.
  * - 400 for a reason that is missing, blank or over 500 characters, a rule that is missing or is not an active whole-number rule, or a malformed body.
  * - 409 `claimed` and `takeOver` work as for `POST /sanctions` (`gateCase`): another moderator's live claim on the person stops the request unless
  *   `takeOver: true` and the caller holds `claims.override`, which is audited as `case.takeover` first.
@@ -26,7 +28,7 @@ export function nameRoutes(ctx: AdminContext): RouteTable {
       const ref = c.params.ref as string;
       const ask = bodyRename(bodyObject(c.req));
       gateCase(ctx, c, ref, ask.takeOver);
-      const res = cw.names.requireRename({ subject: ref, actor: c.authz.actor, reason: ask.reason, rule: ask.rule });
+      const res = cw.names.requireRename({ subject: ref, actor: c.authz.actor, reason: ask.reason, rule: ask.rule, ...(ask.entity === null ? {} : { entity: ask.entity }) });
       if (!res.ok) {
         if (res.error === 'pending') throw new HttpError('pending_rename');
         if (res.error === 'invalid') throw new ValidationError();

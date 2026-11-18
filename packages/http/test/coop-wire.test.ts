@@ -38,6 +38,7 @@ function report(over: Partial<StaffReport> = {}): StaffReport {
     urgent: false,
     evidenceRef: null,
     scope: null,
+    entity: null,
     handoffAt: null,
     handoffBy: null,
     escalatedTo: null,

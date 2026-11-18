@@ -22,6 +22,7 @@ export type {
   AiActionState,
   ReportCategory,
   ReportExcerptLine,
+  ReportEntity,
   ReportListQuery,
   ReportRecord,
   SanctionKind,
@@ -452,8 +453,8 @@ export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_STATEME
 export type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';
 export { LINK_SYSTEMS } from './links.js';
 export type { LinkRow, LinkSystem } from './links.js';
-export { resolveNames } from './names.js';
-export type { NameCheckResult, NameReason, NameSettings, ResolvedNames } from './names.js';
+export { checkNameRules, DEFAULT_RESERVED_RULE, MAX_RESERVED_ENTRIES, NAME_ALLOW_MAX, NAME_ENTRY_MAX, NAME_ENTRY_MIN, resolveNames } from './names.js';
+export type { NameCheckResult, NameKind, NameReason, NameSettings, ResolvedNames } from './names.js';
 // Signals (@experimental): kinds a game declares, the guards, and the feeds that say where counts may be read.
 export {
   BUILTIN_SIGNAL_KINDS,
