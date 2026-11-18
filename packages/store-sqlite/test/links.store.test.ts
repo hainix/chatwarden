@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LinkRow } from '@chatwarden/core';
 import { MIGRATIONS, openStore } from '../src/index.js';
+import { insertOldSanction } from './oldRows.js';
 
 // Migration 23: `kit_links` and `kit_links_by_state` (K5 design 5.1), one additive table. Tested from a version-22 database with data.
 // The behaviour both stores share is in the shared contract suite (test/contract/links.contract.ts, run by contract.test.ts).
@@ -36,12 +37,11 @@ const link = (over: Partial<LinkRow> = {}): LinkRow => ({ system: 'coop-report',
 /** A database at version 22 with a sanction, an audit row and a notice's worth of neighbours in the older tables. */
 function openAt22(db: DatabaseSync) {
   const store = openStore({ db, migrations: UP_TO_22 });
-  store.insertSanctionGroup([
-    {
-      id: 'row1', groupId: 'g1', refCode: 'M-AAAAA', kind: 'chat', targetType: 'subject', value: 's_a', startsAt: NOW, endsAt: NOW + DAY,
-      reason: 'r', rule: '1', gapNote: null, gapStatus: null, roomId: null, actor: 'mod', source: 'moderator', automated: false, pending: false,
-    },
-  ]);
+  // The current insertSanctionGroup writes columns that later migrations add (term_id), so the v22 row goes in the way v22 wrote it.
+  insertOldSanction(db, {
+    id: 'row1', groupId: 'g1', refCode: 'M-AAAAA', kind: 'chat', targetType: 'subject', value: 's_a', startsAt: NOW, endsAt: NOW + DAY,
+    reason: 'r', rule: '1', gapNote: null, gapStatus: null, roomId: null, actor: 'mod', source: 'moderator', automated: false, pending: false,
+  });
   store.insertAudit({ id: 'a1', at: NOW, actor: 'mod', role: 'moderator', action: 'report.view', target: { type: 'report', ref: 'm1' } });
   return store;
 }

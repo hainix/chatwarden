@@ -82,6 +82,8 @@ describe('migration 6: kit_reports', () => {
       'scope',
       // Migration 26 (release 0.2.0, reserved names): the clan, guild or team the report is about.
       'entity_json',
+      // Migration 27 (release 0.2.1, appeals landing): the time the report's decision was overturned by a granted appeal.
+      'overturned_at',
     ]);
     const by = (n: string) => info.find((c) => c.name === n);
     expect(by('status')?.dflt_value).toBe("'open'");

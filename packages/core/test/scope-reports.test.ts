@@ -283,7 +283,12 @@ describe('the person record, scoped', () => {
     await w.cw.decide({ reportId: a.id, verdict: 'upheld', reason: 'r', actions: [warn(a.target)], actor: MOD });
     const h = w.cw.scopedHistory(a.target, [A]);
     expect(Object.keys(h).sort()).toEqual(['handle', 'history', 'reports', 'sanctions']);
-    expect(JSON.stringify(h)).not.toMatch(/account|signal|links|client|ip/i);
+    // Field names only: the values hold random ids (a report id can contain the letters "ip" by chance), which a whole-text match would trip on.
+    const keysOf = (value: unknown): string[] =>
+      Array.isArray(value) ? value.flatMap(keysOf) : value !== null && typeof value === 'object' ? Object.entries(value).flatMap(([k, v]) => [k, ...keysOf(v)]) : [];
+    const keys = keysOf(h);
+    expect(keys.length).toBeGreaterThan(10);
+    expect(keys.filter((k) => /account|signal|links?|client|address|^ip|Ip/.test(k))).toEqual([]);
   });
 
   it('sanctions.list with a scope pages only the sanctions of in-scope reports; forPerson takes it too', async () => {
