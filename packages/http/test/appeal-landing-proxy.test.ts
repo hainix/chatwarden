@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { appealLandingRoutes, createRouter, playerRoutes } from '@chatwarden/http';
-import { clientAddressOf } from '../src/clientAddress.js';
+import { clientAddressOf, isPrivateAddress } from '../src/clientAddress.js';
 import { errorOf, identifyFromHeaders } from './playerWorld.js';
 import { landingWorld } from './landingWorld.js';
 
@@ -36,6 +36,147 @@ describe('clientAddressOf', () => {
     expect(clientAddressOf(req(xff('not an address'), PROXY), 1)).toBeUndefined();
     expect(clientAddressOf(req(xff('203.0.113.7', ''), PROXY), 1)).toBeUndefined();
     expect(clientAddressOf(req({ 'x-forwarded-for': 'a'.repeat(500) }, PROXY), 1)).toBeUndefined();
+  });
+});
+
+describe('clientAddressOf: a long or padded X-Forwarded-For is read from the right, never given up on (R3 I1)', () => {
+  const req = (headers: Record<string, string>) => ({ method: 'GET', path: '/appeal', query: {}, headers, body: undefined, remoteAddress: PROXY });
+  const CLIENT = '203.0.113.7';
+
+  it('padding on the left cannot switch the address off: 50 forged entries, 2 000 characters, 100 empty entries, 16 000 characters', () => {
+    expect(clientAddressOf(req({ 'x-forwarded-for': '9.9.9.9, '.repeat(50) + CLIENT }), 1)).toBe(CLIENT);
+    expect(clientAddressOf(req({ 'x-forwarded-for': 'x'.repeat(2000) + ', ' + CLIENT }), 1)).toBe(CLIENT);
+    expect(clientAddressOf(req({ 'x-forwarded-for': ','.repeat(100) + CLIENT }), 1)).toBe(CLIENT);
+    expect(clientAddressOf(req({ 'x-forwarded-for': '9.9.9.9,'.repeat(2000) + CLIENT }), 1)).toBe(CLIENT);
+  });
+
+  it('the same with two proxies: the second from the right, behind a long padded left part', () => {
+    const pad = '9.9.9.9, '.repeat(80);
+    expect(clientAddressOf(req({ 'x-forwarded-for': pad + CLIENT + ', 10.0.0.9' }), 2)).toBe(CLIENT);
+    expect(clientAddressOf(req({ 'x-forwarded-for': pad + CLIENT + ', 10.0.0.9' }), 1)).toBe('10.0.0.9');
+  });
+
+  it('the right-most entries decide, not their count: fewer than N entries is still unknown, however long the header', () => {
+    expect(clientAddressOf(req({ 'x-forwarded-for': CLIENT }), 2)).toBeUndefined();
+    expect(clientAddressOf(req({ 'x-forwarded-for': 'a'.repeat(5000) }), 2)).toBeUndefined();
+    expect(clientAddressOf(req({ 'x-forwarded-for': 'a'.repeat(5000) }), 1)).toBeUndefined();
+    expect(clientAddressOf(req({ 'x-forwarded-for': ',' }), 2)).toBeUndefined();
+    expect(clientAddressOf(req({ 'x-forwarded-for': '' }), 1)).toBeUndefined();
+    expect(clientAddressOf(req({ 'x-forwarded-for': ', ' }), 1)).toBeUndefined();
+  });
+
+  it('an entry that is not an address stays unknown, padded or not', () => {
+    expect(clientAddressOf(req({ 'x-forwarded-for': '9.9.9.9, '.repeat(60) + 'a'.repeat(100) }), 1)).toBeUndefined();
+    expect(clientAddressOf(req({ 'x-forwarded-for': '9.9.9.9, '.repeat(60) + '<b>' }), 1)).toBeUndefined();
+  });
+
+  it('a long header is cheap: a 16 000 character header over a hop count of 10 answers at once', () => {
+    const header = '9.9.9.9,'.repeat(2000);
+    const started = Date.now();
+    for (let i = 0; i < 2000; i++) clientAddressOf(req({ 'x-forwarded-for': header }), 10);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+});
+
+describe('clientAddressOf: a port written into an entry is dropped (R3 minor 5)', () => {
+  const req = (value: string) => ({ method: 'GET', path: '/appeal', query: {}, headers: { 'x-forwarded-for': value }, body: undefined, remoteAddress: PROXY });
+
+  it('IPv4 with a port, and bracketed IPv6 with or without one, are the bare address', () => {
+    expect(clientAddressOf(req('203.0.113.7:51234'), 1)).toBe('203.0.113.7');
+    expect(clientAddressOf(req('6.6.6.6, 203.0.113.7:443'), 1)).toBe('203.0.113.7');
+    expect(clientAddressOf(req('203.0.113.7:1, 10.0.0.9:2'), 2)).toBe('203.0.113.7');
+    expect(clientAddressOf(req('[2001:db8::7]:443'), 1)).toBe('2001:db8::7');
+    expect(clientAddressOf(req('[2001:db8::7]'), 1)).toBe('2001:db8::7');
+    expect(clientAddressOf(req('  203.0.113.7:80  '), 1)).toBe('203.0.113.7');
+  });
+
+  it('a bare IPv6 address, an IPv4-mapped one and a plain IPv4 are unchanged', () => {
+    expect(clientAddressOf(req('2001:db8::7'), 1)).toBe('2001:db8::7');
+    expect(clientAddressOf(req('2001:db8:0:0:0:0:0:7'), 1)).toBe('2001:db8:0:0:0:0:0:7');
+    expect(clientAddressOf(req('::ffff:203.0.113.7'), 1)).toBe('::ffff:203.0.113.7');
+    expect(clientAddressOf(req('203.0.113.7'), 1)).toBe('203.0.113.7');
+  });
+
+  it('a malformed port or bracket is unknown, never a guess', () => {
+    for (const bad of ['203.0.113.7:', '203.0.113.7:abc', '203.0.113.7:123456', '203.0.113.7:80:90', '[2001:db8::7', '2001:db8::7]', '[2001:db8::7]:', '[2001:db8::7]:abc', '[203.0.113.7:80]', '[[2001:db8::7]]', '[]']) {
+      expect(clientAddressOf(req(bad), 1), bad).toBeUndefined();
+    }
+  });
+
+  it('two source ports of one client are one bucket', async () => {
+    const w = await landingWorld({ routeOptions: { trustProxy: 1 } });
+    for (let i = 0; i < 60; i++) await w.page(undefined, { remoteAddress: PROXY, headers: { 'x-forwarded-for': `203.0.113.1:${40000 + i}` } });
+    expect((await w.page(undefined, { remoteAddress: PROXY, headers: { 'x-forwarded-for': '203.0.113.1:50000' } })).status).toBe(429);
+    expect((await w.page(undefined, { remoteAddress: PROXY, headers: { 'x-forwarded-for': '[2001:db8::7]:1' } })).status).toBe(404);
+  });
+});
+
+describe('isPrivateAddress: loopback, private and link-local socket peers (R2 ruling)', () => {
+  it.each([
+    '127.0.0.1', '127.255.255.254', '::1', '0:0:0:0:0:0:0:1', '10.0.0.1', '10.255.255.255', '172.16.0.1', '172.31.255.255', '192.168.0.1', '192.168.255.255', '169.254.0.1', '169.254.169.254',
+    'fc00::1', 'fd12:3456:789a::1', 'fdff::1', 'fe80::1', 'febf::1', '::ffff:127.0.0.1', '::ffff:10.1.2.3', '::ffff:192.168.1.1', '::', '0.0.0.0', 'fe80::1%eth0',
+  ])('%s is local', (address) => expect(isPrivateAddress(address)).toBe(true));
+
+  it.each([
+    '198.51.100.7', '203.0.113.7', '8.8.8.8', '11.0.0.1', '9.255.255.255', '172.15.255.255', '172.32.0.1', '192.167.1.1', '192.169.0.1', '169.253.0.1', '126.255.255.255', '128.0.0.1',
+    '2001:db8::1', '2606:4700::1', 'fe00::1', 'fec0::1', 'fb00::1', '::ffff:198.51.100.7', '::ffff:172.32.0.1',
+  ])('%s is a public address', (address) => expect(isPrivateAddress(address)).toBe(false));
+
+  it('anything that is not an address is not local', () => {
+    for (const junk of ['', ' ', 'localhost', '10.0.0', '10.0.0.256', '1.2.3.4.5', 'garbage', '10.0.0.1, 6.6.6.6', 'fd', '127.0.0.1:80']) expect(isPrivateAddress(junk), junk).toBe(false);
+  });
+});
+
+describe('a loopback or private socket peer with no proxy setting: per-token limits only (R2 ruling)', () => {
+  const LOCAL = ['127.0.0.1', '::1', '10.4.5.6', '172.20.1.1', '192.168.1.20', '169.254.9.9', 'fd00::5', 'fe80::2', '::ffff:127.0.0.1'];
+
+  it.each(LOCAL)('%s: 100 reads and 30 junk writes with no token are never limited', async (peer) => {
+    const w = await landingWorld();
+    for (let i = 0; i < 100; i++) expect((await w.page(undefined, { remoteAddress: peer })).status, `read ${i}`).toBe(404);
+    for (let i = 0; i < 30; i++) expect((await w.postJson({ junk: 1 }, { remoteAddress: peer })).status, `write ${i}`).toBe(400);
+  });
+
+  it('the forwarding header is still not read: a forged entry does not make a private peer limited', async () => {
+    const w = await landingWorld();
+    for (let i = 0; i < 100; i++) expect((await w.page(undefined, { remoteAddress: PROXY, headers: xff('203.0.113.1') })).status).toBe(404);
+  });
+
+  it('the token limits still apply: 60 reads and 10 writes per token, other tokens untouched', async () => {
+    const w = await landingWorld();
+    const a = await w.sanctioned();
+    const b = await w.sanctioned();
+    for (let i = 0; i < 60; i++) expect((await w.page(a.token, { remoteAddress: '127.0.0.1' })).status).toBe(200);
+    expect((await w.page(a.token, { remoteAddress: '127.0.0.1' })).status).toBe(429);
+    expect((await w.page(b.token, { remoteAddress: '127.0.0.1' })).status).toBe(200);
+    for (let i = 0; i < 10; i++) expect((await w.postJson({ t: b.token, statement: '' }, { remoteAddress: '10.0.0.5' })).status).toBe(400);
+    expect((await w.postJson({ t: b.token, statement: '' }, { remoteAddress: '10.0.0.5' })).status).toBe(429);
+  });
+
+  it('one private peer is never one shared bucket for different people, however many forged tokens it sends', async () => {
+    const w = await landingWorld();
+    const s = await w.sanctioned();
+    for (let i = 0; i < 200; i++) expect((await w.page(`forged.${i}`, { remoteAddress: '127.0.0.1' })).status, `forged ${i}`).toBe(404);
+    expect((await w.page(s.token, { remoteAddress: '127.0.0.1' })).status).toBe(200);
+  });
+
+  it('it still warns once that every request shares one peer', async () => {
+    const w = await landingWorld();
+    for (let i = 0; i < 40; i++) await w.page(undefined, { remoteAddress: '127.0.0.1' });
+    expect(w.logged.filter(([event]) => event === SHARED)).toHaveLength(1);
+  });
+
+  it('a public peer is still limited by address (control)', async () => {
+    const w = await landingWorld();
+    for (let i = 0; i < 60; i++) await w.page(undefined, { remoteAddress: '198.51.100.9' });
+    expect((await w.page(undefined, { remoteAddress: '198.51.100.9' })).status).toBe(429);
+    for (let i = 0; i < 10; i++) await w.postJson({ junk: 1 }, { remoteAddress: '203.0.113.9' });
+    expect((await w.postJson({ junk: 1 }, { remoteAddress: '203.0.113.9' })).status).toBe(429);
+  });
+
+  it('with a trusted proxy a private CLIENT address in the header is limited as any other (the rule is about the socket peer only)', async () => {
+    const w = await landingWorld({ routeOptions: { trustProxy: 1 } });
+    for (let i = 0; i < 60; i++) await w.page(undefined, { remoteAddress: PROXY, headers: xff('192.168.1.50') });
+    expect((await w.page(undefined, { remoteAddress: PROXY, headers: xff('192.168.1.50') })).status).toBe(429);
   });
 });
 
@@ -92,10 +233,11 @@ describe('behind a trusted proxy', () => {
 });
 
 describe('with no proxy setting', () => {
-  it('the forwarding header is never read: one peer is one bucket whatever the header says', async () => {
+  it('the forwarding header is never read: one public peer is one bucket whatever the header says', async () => {
     const w = await landingWorld();
-    for (let i = 0; i < 60; i++) await w.page(undefined, { remoteAddress: PROXY, headers: xff(`203.0.113.${i}`) });
-    expect((await w.page(undefined, { remoteAddress: PROXY, headers: xff('203.0.113.250') })).status).toBe(429);
+    const peer = '198.51.100.60';
+    for (let i = 0; i < 60; i++) await w.page(undefined, { remoteAddress: peer, headers: xff(`203.0.113.${i}`) });
+    expect((await w.page(undefined, { remoteAddress: peer, headers: xff('203.0.113.250') })).status).toBe(429);
     // a different peer is its own bucket
     expect((await w.page(undefined, { remoteAddress: '198.51.100.1' })).status).toBe(404);
   });

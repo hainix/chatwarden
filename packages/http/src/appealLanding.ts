@@ -5,7 +5,7 @@ import { chooseLocale, noticeWordsFor } from '@chatwarden/core/notice-locales';
 import { APPEAL_PAGE_CSP, renderAppealPage } from './appealPage.js';
 import type { AppealPageError, AppealPageView } from './appealPage.js';
 import { BODY_MAX_BYTES, parseJson, utf8ByteLength } from './body.js';
-import { checkTrustProxy, clientAddressOf } from './clientAddress.js';
+import { checkTrustProxy, clientAddressOf, isPrivateAddress } from './clientAddress.js';
 import { HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
 import { checkLimit, Limiter } from './limiter.js';
 import type { NamesRateLimit } from './limiter.js';
@@ -117,11 +117,16 @@ export function appealLandingRoutes(cw: Chatwarden, options: AppealLandingOption
       safeWarn(logger, 'chatwarden.landing_shared_address', { requests: peers.requests });
     }
   };
-  /** The key a request is limited by as an address, or undefined when no real client address is known (then there is no address limit: never a shared bucket). */
+  /**
+   * The key a request is limited by as an address, or undefined when no real client address is known (then there is no address limit: never a shared bucket).
+   * With no proxy setting, a loopback or private socket peer is almost always your own proxy, so it is not a client address either (per-token limits only).
+   */
   const addressKey = (req: KitRequest): string | undefined => {
     watchPeer(req);
     const address = clientAddressOf(req, trustProxy);
-    return address === undefined ? undefined : keyOf('ip', address);
+    if (address === undefined) return undefined;
+    if ((trustProxy === undefined || trustProxy === 0) && isPrivateAddress(address)) return undefined;
+    return keyOf('ip', address);
   };
   /** 0 when allowed, else the wait: the address limit first (when an address is known), then the token limit (when the request names a well-formed token). */
   const limited = (byAddress: Limiter, byToken: Limiter, address: string | undefined, token: string | undefined): number => {

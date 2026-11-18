@@ -288,11 +288,14 @@ describe('CHATWARDEN_TRUST_PROXY', () => {
     expect((await get('203.0.113.2')).status).toBe(404);
   });
 
-  it('with 0 or unset, the header is ignored: the socket peer is one bucket', async () => {
+  it('with 0 or unset, the header is ignored and a loopback socket peer (a local test, or your own proxy) is not an address bucket: per-token limits only', async () => {
     for (const env of [{ CHATWARDEN_TRUST_PROXY: '0' }, {}]) {
       const s = await start({ CHATWARDEN_PUBLIC_URL: 'https://game.example', CHATWARDEN_PROFILE_FILE: appealsOn(), ...env });
-      for (let i = 0; i < 60; i++) await fetch(`${s.base}/appeal`, { headers: { 'x-forwarded-for': `203.0.113.${i}` } });
-      expect((await fetch(`${s.base}/appeal`, { headers: { 'x-forwarded-for': '203.0.113.200' } })).status).toBe(429);
+      // no token: nothing to limit by, so 100 reads are all answered (never one bucket for everyone behind the proxy)
+      for (let i = 0; i < 100; i++) expect((await fetch(`${s.base}/appeal`, { headers: { 'x-forwarded-for': `203.0.113.${i}` } })).status, `read ${i}`).toBe(404);
+      // a well-formed token is limited per token, whatever the header says
+      for (let i = 0; i < 60; i++) await fetch(`${s.base}/appeal?t=abc.def`, { headers: { 'x-forwarded-for': `203.0.113.${i}` } });
+      expect((await fetch(`${s.base}/appeal?t=abc.def`, { headers: { 'x-forwarded-for': '203.0.113.200' } })).status).toBe(429);
     }
   });
 });
