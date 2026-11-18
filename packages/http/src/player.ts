@@ -31,8 +31,14 @@ export interface PlayerOptions {
    * positive whole numbers (`RangeError`). Malformed requests count. It is not the weekly cap (`profile.appeals.perPlayerPerWeek`, the core's).
    */
   appealsRateLimit?: NamesRateLimit;
-  /** `GET /appeal` and `GET /appeal/case` (the appeal landing page) limit per address. Default 60 per hour. Both must be positive whole numbers (`RangeError`). */
+  /** `GET /appeal` and `GET /appeal/case` (the appeal landing page) limit per token, and per address when one is known. Default 60 per hour. Both must be positive whole numbers (`RangeError`). */
   landingReadRateLimit?: NamesRateLimit;
+  /**
+   * How many reverse proxies of your own are in front of this server (a whole number from 1 to 10; 0 or unset means none), for the appeal landing routes' address limits: the person's
+   * address is then the N-th entry from the right of `X-Forwarded-For`. Without it the address is the socket peer, which behind a proxy is the proxy (and the routes log
+   * `chatwarden.landing_shared_address` once). Set it only behind a proxy you run: a client can send any header to a server with nobody in front. See `AppealLandingOptions.trustProxy`.
+   */
+  trustProxy?: number;
   /** Where failures are logged (event and error class only). Defaults to `console.warn`. */
   logger?: Logger;
   /** Epoch-ms clock for the rate limit. Default `Date.now`. */
@@ -84,8 +90,8 @@ const known = (v: unknown): v is string => typeof v === 'string' && v !== '';
  *   counting malformed bodies too) or the weekly cap. Both appeal routes are 404 `not_found` while appeals are off, and every answer is `no-store`.
  * - The appeal landing routes (0.2.1), for a person who follows a signed link from a notice and is not signed in: `GET /appeal?t=` (the page, html), `GET /appeal/case?t=`
  *   (the same case as json), `POST /appeal/case` (json `{ t, statement }` or a urlencoded form) and `OPTIONS /appeal/case`. The signed link is the only credential: none of them
- *   calls `identify` or sets a cookie. See `appealLandingRoutes`. Their reads are limited per address (`landingReadRateLimit`, default 60 an hour) and their writes per address
- *   and per token (`appealsRateLimit`, default 10 an hour). Keep query strings out of access logs: the token is in the query.
+ *   calls `identify` or sets a cookie. See `appealLandingRoutes`. Their reads are limited per token (`landingReadRateLimit`, default 60 an hour) and their writes per token
+ *   (`appealsRateLimit`, default 10 an hour), and both also per address when a real client address is known (the socket peer, or with `trustProxy` the address your proxy reports). Keep query strings out of access logs: the token is in the query.
  * An unknown, IP-only or failed identity gets empty lists and 200.
  */
 export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable {
@@ -154,6 +160,7 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
       now,
       ...(options.appealsRateLimit === undefined ? {} : { appealsRateLimit: options.appealsRateLimit }),
       ...(options.landingReadRateLimit === undefined ? {} : { readRateLimit: options.landingReadRateLimit }),
+      ...(options.trustProxy === undefined ? {} : { trustProxy: options.trustProxy }),
     }),
     'GET /notices': route(async (req) => personal({ notices: cw.notices.pending(await identify(req)) })),
 

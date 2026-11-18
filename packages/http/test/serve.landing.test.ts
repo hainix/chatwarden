@@ -257,6 +257,46 @@ describe('a started service', () => {
   });
 });
 
+describe('CHATWARDEN_TRUST_PROXY', () => {
+  it('is read as given, an empty one is not set, and it has no flag', () => {
+    expect(resolveServeConfig(FLAGS, { CHATWARDEN_TRUST_PROXY: '1' })).toMatchObject({ trustProxy: '1' });
+    expect(Object.hasOwn(resolveServeConfig(FLAGS, { CHATWARDEN_TRUST_PROXY: '' }), 'trustProxy')).toBe(false);
+    expect(Object.hasOwn(resolveServeConfig(FLAGS, {}), 'trustProxy')).toBe(false);
+    expect(serveHelpText()).not.toContain('--trust-proxy');
+  });
+
+  it('--help lists it with what a number means', () => {
+    const line = serveHelpText().split('\n').find((l) => l.includes('CHATWARDEN_TRUST_PROXY'));
+    expect(line).toBeDefined();
+    expect(serveHelpText()).toMatch(/X-Forwarded-For/i);
+  });
+
+  it('refuses anything but a whole number from 0 to 10, in one sentence that names the variable and never repeats the value', async () => {
+    for (const value of ['-1', '11', '1.5', 'yes', 'true', '1,2', ' 1x', '99999', 'SEEDED-VALUE']) {
+      const message = await refusal({ ...BASE_ENV, CHATWARDEN_TRUST_PROXY: value });
+      expect(message, value).toMatch(/CHATWARDEN_TRUST_PROXY/);
+      expect(message).not.toContain('SEEDED-VALUE');
+      expect(message.includes('\n')).toBe(false);
+    }
+  });
+
+  it('with 1, the landing limits are per client behind a proxy: one forwarded client over the read limit, another still served', async () => {
+    const s = await start({ CHATWARDEN_PUBLIC_URL: 'https://game.example', CHATWARDEN_PROFILE_FILE: appealsOn(), CHATWARDEN_TRUST_PROXY: '1' });
+    const get = (client: string) => fetch(`${s.base}/appeal`, { headers: { 'x-forwarded-for': client } });
+    for (let i = 0; i < 60; i++) expect((await get('203.0.113.1')).status).toBe(404);
+    expect((await get('203.0.113.1')).status).toBe(429);
+    expect((await get('203.0.113.2')).status).toBe(404);
+  });
+
+  it('with 0 or unset, the header is ignored: the socket peer is one bucket', async () => {
+    for (const env of [{ CHATWARDEN_TRUST_PROXY: '0' }, {}]) {
+      const s = await start({ CHATWARDEN_PUBLIC_URL: 'https://game.example', CHATWARDEN_PROFILE_FILE: appealsOn(), ...env });
+      for (let i = 0; i < 60; i++) await fetch(`${s.base}/appeal`, { headers: { 'x-forwarded-for': `203.0.113.${i}` } });
+      expect((await fetch(`${s.base}/appeal`, { headers: { 'x-forwarded-for': '203.0.113.200' } })).status).toBe(429);
+    }
+  });
+});
+
 describe('the delivery webhook', () => {
   /** A local receiver that records what it is sent. */
   async function receiver(status = 200) {

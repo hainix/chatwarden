@@ -55,6 +55,8 @@ export interface ServeConfig {
   /** `CHATWARDEN_DELIVERY_URL` and `CHATWARDEN_DELIVERY_SECRET`: where a sanction notice and an appeal outcome are delivered, signed. Both or neither. */
   deliveryUrl?: string;
   deliverySecret?: string;
+  /** `CHATWARDEN_TRUST_PROXY`: how many reverse proxies of your own are in front of this process (0 to 10), for the appeal page's address limits. Unset means none. */
+  trustProxy?: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -126,48 +128,45 @@ export function resolveServeConfig(flags: ServeFlags, env: Env): ServeConfig {
     ...optional('landingOrigins', present(env.CHATWARDEN_LANDING_ORIGINS)),
     ...optional('deliveryUrl', present(env.CHATWARDEN_DELIVERY_URL)),
     ...optional('deliverySecret', present(env.CHATWARDEN_DELIVERY_SECRET)),
+    ...optional('trustProxy', present(env.CHATWARDEN_TRUST_PROXY)),
   };
 }
 
-const PUBLIC_URL_MAX = 1900;
-const LANDING_ORIGINS_MAX = 20;
+const PUBLIC_URL_MESSAGE = 'CHATWARDEN_PUBLIC_URL must be an http or https address of at most 1900 characters with no credentials, no query string and no fragment.';
+const LANDING_ORIGINS_MESSAGE = 'CHATWARDEN_LANDING_ORIGINS must be a comma separated list of at most 20 origins such as https://your-game.test (no path, no trailing slash).';
 
-/** The address of the appeal page from `CHATWARDEN_PUBLIC_URL`: an http(s) address with no credentials, query or fragment, at most 1900 characters; the page is that address (trailing slashes dropped) plus `/appeal`. */
+/**
+ * The address of the appeal page from `CHATWARDEN_PUBLIC_URL`: that address (trailing slashes dropped) plus `/appeal`. Whether it is a good address (http or https, no credentials, query
+ * or fragment) is the kit's own rule, applied by `checkLanding`. Only what the kit cannot see is checked here: that a host follows the scheme (a bare `https://` would otherwise become
+ * `https:/appeal`) and the length, which leaves room for the `/appeal` that is added.
+ */
 function landingUrlFrom(value: string): string {
-  const fail = (): never => {
-    throw new ServeError('CHATWARDEN_PUBLIC_URL must be an http or https address of at most 1900 characters with no credentials, no query string and no fragment.');
-  };
-  if (value.length > PUBLIC_URL_MAX || value.includes('?') || value.includes('#')) fail();
-  let url: URL | null = null;
-  try {
-    url = new URL(value);
-  } catch {
-    fail();
-  }
-  if (url === null || (url.protocol !== 'http:' && url.protocol !== 'https:') || url.username !== '' || url.password !== '' || url.hostname === '') fail();
+  if (value.length > 1900 || !/^https?:\/\/[^/?#]/i.test(value)) throw new ServeError(PUBLIC_URL_MESSAGE);
   return `${value.replace(/\/+$/, '')}/appeal`;
 }
 
-/** The origins from `CHATWARDEN_LANDING_ORIGINS`: a comma separated list of at most 20, each exactly an origin (`https://game.example`: no path, no trailing slash, no wildcard). Empty entries are skipped. */
+/** The origins from `CHATWARDEN_LANDING_ORIGINS`: a comma separated list, empty entries skipped. The kit checks each one (an origin and nothing more) and how many there are. */
 function landingOriginsFrom(value: string): string[] {
-  const fail = (): never => {
-    throw new ServeError('CHATWARDEN_LANDING_ORIGINS must be a comma separated list of at most 20 origins such as https://your-game.test (no path, no trailing slash).');
-  };
-  const items = value
+  return value
     .split(',')
     .map((v) => v.trim())
     .filter((v) => v !== '');
-  if (items.length > LANDING_ORIGINS_MAX) fail();
-  for (const item of items) {
-    let url: URL | null = null;
-    try {
-      url = new URL(item);
-    } catch {
-      fail();
-    }
-    if (url === null || (url.protocol !== 'http:' && url.protocol !== 'https:') || url.origin !== item) fail();
+}
+
+/** The two appeal-page settings, checked by the kit's own rule (`resolveLandingOptions`) so a change there is a change here: a refusal names the variable and never what it held. */
+function checkLanding(core: typeof import('@chatwarden/core'), landingUrl: string | undefined, landingOrigins: string[] | undefined): void {
+  try {
+    core.resolveLandingOptions({ ...(landingUrl === undefined ? {} : { landingUrl }), ...(landingOrigins === undefined ? {} : { landingOrigins }) });
+  } catch (err) {
+    const message = err instanceof RangeError ? err.message : '';
+    throw new ServeError(/appeals\.landingOrigins/.test(message) ? LANDING_ORIGINS_MESSAGE : PUBLIC_URL_MESSAGE);
   }
-  return items;
+}
+
+/** `CHATWARDEN_TRUST_PROXY`: a whole number from 0 (none) to 10. */
+function trustProxyFrom(value: string): number {
+  if (!/^[0-9]{1,2}$/.test(value) || Number(value) > 10) throw new ServeError('CHATWARDEN_TRUST_PROXY must be a whole number from 0 to 10: how many reverse proxies of your own sit in front of this process (0 or unset for none).');
+  return Number(value);
 }
 
 const MAKE_ONE = 'openssl rand -base64 32';
@@ -257,6 +256,8 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
   // 2b. the appeal page and the delivery webhook
   const landingUrl = config.publicUrl === undefined ? undefined : landingUrlFrom(config.publicUrl);
   const landingOrigins = config.landingOrigins === undefined ? undefined : landingOriginsFrom(config.landingOrigins);
+  checkLanding(core, landingUrl, landingOrigins);
+  const trustProxy = config.trustProxy === undefined ? undefined : trustProxyFrom(config.trustProxy);
   if ((config.deliveryUrl === undefined) !== (config.deliverySecret === undefined)) throw new ServeError('CHATWARDEN_DELIVERY_URL and CHATWARDEN_DELIVERY_SECRET must be set together.');
   let webhook: DeliveryWebhook | undefined;
   if (config.deliveryUrl !== undefined && config.deliverySecret !== undefined) {
@@ -332,7 +333,7 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
       {
         '/v1': serviceRoutes(cw, { keys, logger, warnings, processes: config.processes > 1 ? 'multiple' : 'single', capabilities: { sharedPacing: config.sharedPacing } }),
         '/admin': adminRoutes(cw, { authorize, terms: live, logger }),
-        '': { ...healthRoutes(cw, { logger }), ...appealLandingRoutes(cw, { logger }) },
+        '': { ...healthRoutes(cw, { logger }), ...appealLandingRoutes(cw, { logger, ...(trustProxy === undefined ? {} : { trustProxy }) }) },
       },
       { unmatched: 'pass', remoteAddress: peerAddress, logger },
     );

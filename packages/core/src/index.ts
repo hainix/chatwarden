@@ -250,6 +250,8 @@ export type {
   AuditTargetType,
   Role,
 } from './audit.js';
+export { resolveLandingOptions } from './appealLink.js';
+export type { LandingOptions } from './appealLink.js';
 export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
 export { CaseWorkflow } from './caseWorkflow.js';

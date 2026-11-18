@@ -331,7 +331,10 @@ describe('the read limit', () => {
     expect(html).toContain(T(en, 'player.appealPage.refused.busy'));
     expect(html).not.toContain('<form');
     expect(html).not.toContain(T(en, 'player.notice.title.chat'));
-    expect((await w.page(s.token, { remoteAddress: '198.51.100.2' })).status).toBe(200);
+    // another address is its own bucket (a read of another token, since the 61st read of this token is limited whoever sends it)
+    const other = await w.sanctioned(BOB);
+    expect((await w.page(other.token, { remoteAddress: '198.51.100.2' })).status).toBe(200);
+    expect((await w.page(s.token, { remoteAddress: '198.51.100.2' })).status).toBe(429);
     w.advance(w.HOUR);
     expect((await w.page(s.token, { remoteAddress: '198.51.100.1' })).status).toBe(200);
   });
@@ -348,7 +351,7 @@ describe('the read limit', () => {
     expect(Number(over.headers?.['retry-after'])).toBeGreaterThanOrEqual(1);
   });
 
-  it('with no remote address the reads share one bucket, and an own read limit is taken from the options', async () => {
+  it('with no remote address the reads of one token share its bucket (never a global one), and an own read limit is taken from the options', async () => {
     const w = await landingWorld({ routeOptions: { landingReadRateLimit: { max: 2, windowMs: 60_000 } } });
     const s = await w.sanctioned();
     expect((await w.page(s.token)).status).toBe(200);

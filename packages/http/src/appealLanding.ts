@@ -5,6 +5,7 @@ import { chooseLocale, noticeWordsFor } from '@chatwarden/core/notice-locales';
 import { APPEAL_PAGE_CSP, renderAppealPage } from './appealPage.js';
 import type { AppealPageError, AppealPageView } from './appealPage.js';
 import { BODY_MAX_BYTES, parseJson, utf8ByteLength } from './body.js';
+import { checkTrustProxy, clientAddressOf } from './clientAddress.js';
 import { HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
 import { checkLimit, Limiter } from './limiter.js';
 import type { NamesRateLimit } from './limiter.js';
@@ -17,15 +18,23 @@ export interface AppealLandingOptions {
   logger?: Logger;
   /** Epoch-ms clock for the limits and for the times on the page. Default `Date.now`. */
   now?: () => number;
-  /** `GET /appeal` and `GET /appeal/case` limit per address. Default 60 an hour. Both must be positive whole numbers (`RangeError`). */
+  /** `GET /appeal` and `GET /appeal/case` limit per token, and per address when one is known. Default 60 an hour. Both must be positive whole numbers (`RangeError`). */
   readRateLimit?: NamesRateLimit;
-  /** `POST /appeal/case` limit per address AND per token. Default 10 an hour. Both must be positive whole numbers (`RangeError`). */
+  /** `POST /appeal/case` limit per token, and per address when one is known. Default 10 an hour. Both must be positive whole numbers (`RangeError`). */
   appealsRateLimit?: NamesRateLimit;
+  /**
+   * How many reverse proxies of your own are in front of this server (a whole number from 1 to 10; 0 or unset means none). With it set, the address a request is
+   * limited as is the N-th entry from the right of `X-Forwarded-For` (the entries to its left are the client's own claim and are never read). Without it the address is
+   * the socket peer, and behind a proxy that is the proxy: every person would share one limit, and the first 20 requests from one peer in an hour log
+   * `chatwarden.landing_shared_address` once. Set it only when a proxy you run really sets the header: a client can send any header to a server nobody sits in front of.
+   * Whatever the setting, the limits are always per token, and a request with no known address is not limited by address at all (never by one shared bucket).
+   */
+  trustProxy?: number;
 }
 
-/** Reads (the page and its json) per address per hour. */
+/** Reads (the page and its json) per token per hour, and per address per hour when one is known. */
 export const APPEAL_LANDING_READ_LIMIT: NamesRateLimit = { max: 60, windowMs: 3_600_000 };
-/** Writes (the form and its json) per address per hour, and per token per hour. */
+/** Writes (the form and its json) per token per hour, and per address per hour when one is known. */
 export const APPEAL_LANDING_WRITE_LIMIT: NamesRateLimit = { max: 10, windowMs: 3_600_000 };
 
 /** What a token may look like before the route looks at it at all: the base64url payload, a dot and the signature (and nothing a page could be tricked by). */
@@ -35,6 +44,9 @@ const ERROR_CODES: ReadonlySet<string> = new Set<AppealPageError>(['invalid', 'a
 const SECONDS_RE = /^[0-9]{1,7}$/;
 const ACCEPT_MAX_CHARS = 512;
 const ACCEPT_MAX_TAGS = 10;
+/** One peer for this many requests in a window, and no proxy setting: it is probably a proxy, and the limits are then shared by everyone behind it. */
+const SHARED_PEER_REQUESTS = 20;
+const SHARED_PEER_WINDOW_MS = 3_600_000;
 const TAG_MAX_CHARS = 35;
 
 /** On every answer of both routes: nothing is stored, nothing is leaked in a referrer, nothing is indexed. */
@@ -78,14 +90,46 @@ function acceptedTags(header: unknown): string[] {
 export function appealLandingRoutes(cw: Chatwarden, options: AppealLandingOptions = {}): RouteTable {
   const { logger } = options;
   const now = options.now ?? Date.now;
-  const readLimiter = new Limiter(checkLimit(options.readRateLimit, APPEAL_LANDING_READ_LIMIT, 'appealLandingRoutes: readRateLimit'));
+  const readLimit = checkLimit(options.readRateLimit, APPEAL_LANDING_READ_LIMIT, 'appealLandingRoutes: readRateLimit');
   const writeLimit = checkLimit(options.appealsRateLimit, APPEAL_LANDING_WRITE_LIMIT, 'appealLandingRoutes: appealsRateLimit');
+  const trustProxy = checkTrustProxy(options.trustProxy, 'appealLandingRoutes: trustProxy');
+  const readByAddress = new Limiter(readLimit);
+  const readByToken = new Limiter(readLimit);
   const writeByAddress = new Limiter(writeLimit);
   const writeByToken = new Limiter(writeLimit);
   // Per-instance, in memory only: the keys cannot be recomputed or compared across restarts or processes, and hold no address or token.
   const salt = randomBytes(32);
   const keyOf = (kind: 'ip' | 'tok', value: string): string => createHash('sha256').update(salt).update(`${kind}\0${value}`).digest('hex');
-  const addressKey = (req: KitRequest): string => keyOf('ip', req.remoteAddress ?? 'unknown');
+
+  // The socket peers of the current window: how many requests, and whether more than one peer was seen. Only keys, never an address.
+  const peers = { start: 0, requests: 0, first: '', several: false, warned: false };
+  const watchPeer = (req: KitRequest): void => {
+    if (trustProxy !== undefined && trustProxy > 0) return;
+    if (typeof req.remoteAddress !== 'string' || req.remoteAddress === '' || peers.warned) return;
+    const at = now();
+    if (peers.requests === 0 || at - peers.start >= SHARED_PEER_WINDOW_MS) Object.assign(peers, { start: at, requests: 0, first: '', several: false });
+    const key = keyOf('ip', req.remoteAddress);
+    if (peers.requests === 0) peers.first = key;
+    else if (key !== peers.first) peers.several = true;
+    peers.requests++;
+    if (!peers.several && peers.requests >= SHARED_PEER_REQUESTS) {
+      peers.warned = true;
+      safeWarn(logger, 'chatwarden.landing_shared_address', { requests: peers.requests });
+    }
+  };
+  /** The key a request is limited by as an address, or undefined when no real client address is known (then there is no address limit: never a shared bucket). */
+  const addressKey = (req: KitRequest): string | undefined => {
+    watchPeer(req);
+    const address = clientAddressOf(req, trustProxy);
+    return address === undefined ? undefined : keyOf('ip', address);
+  };
+  /** 0 when allowed, else the wait: the address limit first (when an address is known), then the token limit (when the request names a well-formed token). */
+  const limited = (byAddress: Limiter, byToken: Limiter, address: string | undefined, token: string | undefined): number => {
+    const at = now();
+    const addressWait = address === undefined ? 0 : byAddress.hit(address, at);
+    if (addressWait > 0) return addressWait;
+    return token === undefined ? 0 : byToken.hit(keyOf('tok', token), at);
+  };
 
   const tokenOf = (raw: unknown): string | undefined => (typeof raw === 'string' && TOKEN_RE.test(raw) ? raw : undefined);
   const header = (req: KitRequest, name: string): string | undefined => {
@@ -176,11 +220,11 @@ export function appealLandingRoutes(cw: Chatwarden, options: AppealLandingOption
     'GET /appeal': landing((req) => {
       // Off reads as no route at all: nothing is counted and nothing else is looked at.
       if (!cw.appeals.enabled()) throw new NotFoundError();
-      const wait = readLimiter.hit(addressKey(req), now());
+      const token = tokenOf(req.query.t);
+      const wait = limited(readByAddress, readByToken, addressKey(req), token);
       if (wait > 0) return busyPage(req, wait);
       const s = speak(req.query.lang, req);
       const invalid = (): KitResponse => htmlPage(404, { state: 'invalid', locale: s.locale, words: s.words, contact: s.contact });
-      const token = tokenOf(req.query.t);
       if (token === undefined) return invalid();
       try {
         const res = cw.appeals.caseByLink(token);
@@ -205,9 +249,9 @@ export function appealLandingRoutes(cw: Chatwarden, options: AppealLandingOption
 
     'GET /appeal/case': withCors((req) => {
       if (!cw.appeals.enabled()) throw new NotFoundError();
-      const wait = readLimiter.hit(addressKey(req), now());
-      if (wait > 0) throw new HttpError('rate_limited', { 'retry-after': seconds(wait) });
       const token = tokenOf(req.query.t);
+      const wait = limited(readByAddress, readByToken, addressKey(req), token);
+      if (wait > 0) throw new HttpError('rate_limited', { 'retry-after': seconds(wait) });
       if (token === undefined) throw new NotFoundError();
       let res: ReturnType<Chatwarden['appeals']['caseByLink']>;
       try {
@@ -223,8 +267,8 @@ export function appealLandingRoutes(cw: Chatwarden, options: AppealLandingOption
     'POST /appeal/case': withCors((req) => {
       if (!cw.appeals.enabled()) throw new NotFoundError();
       const mode = mediaType(req);
-      // Counted before anything is read or checked, so a flood of forged or malformed requests is limited too.
-      const addressWait = writeByAddress.hit(addressKey(req), now());
+      // Counted before anything is read or checked, so a flood of forged or malformed requests is limited too (by address when one is known, and by token once the token is read).
+      const addressWait = limited(writeByAddress, writeByToken, addressKey(req), undefined);
       if (addressWait > 0) {
         if (mode !== 'form') throw new HttpError('rate_limited', { 'retry-after': seconds(addressWait) });
         return location(tokenOf(formFields(req).get('t')), speak(formFields(req).get('lang'), req).locale, 'busy');
@@ -237,7 +281,7 @@ export function appealLandingRoutes(cw: Chatwarden, options: AppealLandingOption
         if (mode === 'form') return location(undefined, locale);
         throw new NotFoundError();
       }
-      const tokenWait = writeByToken.hit(keyOf('tok', token), now());
+      const tokenWait = limited(writeByAddress, writeByToken, undefined, token);
       if (tokenWait > 0) {
         if (mode === 'form') return location(token, locale, 'busy');
         throw new HttpError('rate_limited', { 'retry-after': seconds(tokenWait) });
