@@ -33,8 +33,8 @@ function bodyApply(body: Record<string, unknown>): { game: GameKind; version: nu
  *   Changes no policy, so it writes no audit row.
  * - `POST /setup/apply { game, version, reason? }` (exactly these keys, else 400 `invalid_request`; `game` one of the four, `version` a whole number from 0, `reason` text,
  *   default `Applied the recommended principles for <game> games`): save the recommendation for that kind of game as one layer, keeping every other section. It
- *   answers as `PUT /policy/profile` does (200 `{ ok, changed, effective, base, layer, version, canSave, limits, promptExcluded }`, where `changed` names only the sections that
- *   differ from the profile in code; 409 `conflict` for a stale `version`; 501 `not_supported`; 400 `invalid_profile` with a `path`) and audits `policy.update` with the
+ *   answers as `PUT /policy/profile` does (200 `{ ok, changed, effective, base, layer, version, canSave, limits, promptExcluded }`, where `changed` names the sections whose stored value
+ *   differs from the previous layer; 409 `conflict` for a stale `version`; 501 `not_supported`; 400 `invalid_profile` with a `path`) and audits `policy.update` with the
  *   sections changed and the reason, best-effort.
  */
 export function setupRoutes(ctx: AdminContext): RouteTable {
