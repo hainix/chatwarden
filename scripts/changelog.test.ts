@@ -490,3 +490,73 @@ describe('the 0.1.13 notes (the AI gate dashboard and the do-not-automate mark),
     expect(readdirSync(join(root, '.changeset')).sort()).toEqual(['config.json']);
   });
 });
+
+describe('the 0.2.0 notes (the release with breaking changes), in all ten CHANGELOGs', () => {
+  const section0200 = (dir: string): string => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    const at = text.indexOf('## 0.2.0');
+    const end = text.indexOf('\n## 0.1.14', at);
+    return text.slice(at, end < 0 ? undefined : end);
+  };
+  const breaking = (dir: string): string => {
+    const s = section0200(dir);
+    const at = s.indexOf('**Breaking changes for adopters**');
+    return s.slice(at, s.indexOf('**What is new**', at));
+  };
+  const features = (dir: string): string => {
+    const s = section0200(dir);
+    return s.slice(s.indexOf('**What is new**'));
+  };
+
+  it.each(dirs)('%s: has a 0.2.0 section above 0.1.14, as a minor change', (dir) => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    expect(text.indexOf('## 0.2.0'), dir).toBeGreaterThan(-1);
+    expect(text.indexOf('## 0.2.0'), dir).toBeLessThan(text.indexOf('## 0.1.14'));
+    expect(section0200(dir), dir).toMatch(/### Minor Changes/);
+  });
+
+  it('all ten carry exactly the same text', () => {
+    const first = section0200(dirs[0] as string);
+    expect(first.length).toBeGreaterThan(3000);
+    for (const dir of dirs) expect(section0200(dir), dir).toBe(first);
+  });
+
+  it.each(dirs)('%s: has a "Breaking changes for adopters" section that lists what an adopter must change', (dir) => {
+    const s = breaking(dir);
+    expect(s.length, dir).toBeGreaterThan(1500);
+    for (const needle of [
+      '`finishErasure(id, at)`', '`ErasureCounts`', '`closure`', '`SubjectExport`', '`holds`', '{ sweepStrays }', '`ReportRecord.scope` is required', '`PurgeResult`', '`pace`',
+      'optional methods', '`paceLoad`', '`setReportUrgent`', '`insightRows`', '`matchReserved(name, entries, allow)`', '`Session.safety()` and `Session.rules`', '`HubClient`', '`rules`', '`reportBundle`',
+      '`PolicyDocs.notices` is required', '`PlayerReporting`', '`thanks`', '`showResources`', '`resources`', 'Chat wire version 2', '`phrases`', '`GET /me` always carries `features`',
+      '`^0.2.0`', 'Secure by default', 'CHATWARDEN_INSECURE_STAFF_COOKIE=1', 'migration 26 is one-way', 'Back up the database file', '`evidenceRef` is public on `ReportInput`',
+    ]) expect(s.toLowerCase(), needle).toContain(needle.toLowerCase());
+  });
+
+  it('every Store method the notes name is really on the Store interface, required or optional as claimed', () => {
+    const { required, optional } = storeMethods();
+    const s = breaking('core');
+    const required0200 = [...(/Store` gains required methods: ([^.]*)\./.exec(s)?.[1] ?? '').matchAll(/`([a-zA-Z]+)(?:\([^`]*\))?`/g)].map((m) => m[1] as string);
+    const optional0200 = [...(/New optional methods: ([^.]*)\./.exec(s)?.[1] ?? '').matchAll(/`([a-zA-Z]+)`/g)].map((m) => m[1] as string);
+    expect(required0200.length).toBeGreaterThanOrEqual(15);
+    expect(optional0200.length).toBeGreaterThanOrEqual(15);
+    for (const name of required0200) expect(required, name).toContain(name);
+    for (const name of optional0200) expect(optional, name).toContain(name);
+  });
+
+  it.each(dirs)('%s: lists the features, and says the Spanish and Portuguese words are machine drafts', (dir) => {
+    const s = features(dir).toLowerCase();
+    for (const needle of ['urgent desk', 'welfare', 'second look', 'insights', 'rooms', 'contexts', 'staff scope', 'blocks', 'phrase-only', 'names', 'service mode', 'shared pacing', 'spanish and portuguese', 'machine drafts']) {
+      expect(s, needle).toContain(needle);
+    }
+  });
+
+  it('says what is still experimental and does not use an em dash or a real term', () => {
+    const s = section0200('core');
+    expect(s).toMatch(/except the Coop, EOS and Discord bot integrations/);
+    expect(s).not.toContain('\u2014');
+  });
+
+  it('no consumed changeset is left behind but the config', () => {
+    expect(readdirSync(join(root, '.changeset')).sort()).toEqual(['config.json']);
+  });
+});

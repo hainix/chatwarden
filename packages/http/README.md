@@ -686,7 +686,7 @@ io.on('connection', (socket) => {
 - **Needs a newer core.** The broadcaster re-reads a player's restriction with `cw.chat.restrictedBySubject`, which is new in core 0.1.6
   (`cw.chat.restrictedBySubject` is new with the chat box; `createRoomBroadcaster` throws a `TypeError` with a core that lacks it). Since 0.1.7 the queue and the case page also call `cw.ai`
   (the AI's brief and read), which core 0.1.6 does not have, and since 0.1.8 they also call `cw.signals` (`boosted`, `forRecord`) and read `limits` from `cw.policy.get()`, which core 0.1.7 does not have. Since 0.1.9 the routes also call `cw.appeals`, `cw.names.flagged`, `cw.names.requireRename`, `cw.names.renamesEnabled`, `cw.names.renamesOf`, `cw.blocked.names`, `cw.people.accountIds` and the three new event types, which core 0.1.8 does not have. Install `@chatwarden/http` and `@chatwarden/core` from the same release. The package's
-  peer range on core is `^0.1.9`.
+  peer range on core is `^0.2.0`, and so is every other `@chatwarden/*` peer of this package, the four optional ones (`@chatwarden/store-sqlite`, `@chatwarden/matcher`, `@chatwarden/profanity`, `@chatwarden/hub-element`) included. A consumer without an optional peer can still import every entry point that does not need it: `chatwarden serve` loads them with `import()` when it needs them.
 - **Names:** `createRoomBroadcaster`, `chatRoutes`, `encodeFrame`, `HEARTBEAT`, `CHAT_WIRE_VERSION`,
   `refusalOf`, `ROOM_BROADCASTER_DEFAULTS`, and the types `ChatMember`, `ChatSession`, `ChatSink`, `ChatStream`, `RoomBroadcaster`,
   `RoomBroadcasterOptions`, `ChatRoutesOptions`, `ChatFrame`, `WireLine`, `WireRestriction`, `WireMuted`, `WireRefusal`, `SendResult`,

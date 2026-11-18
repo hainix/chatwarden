@@ -16,7 +16,7 @@ Status: pre-release, as-is, no support promise.
 npm install @chatwarden/discord @chatwarden/core
 ```
 
-Node 22.13 or newer. No other dependencies; it uses the global `fetch`. The peer range on `@chatwarden/core` is `^0.1.9`: the feed listens for the two appeal events, which core 0.1.8 does not have.
+Node 22.13 or newer. No other dependencies; it uses the global `fetch`. The peer range on `@chatwarden/core` is `^0.2.0`, like every `@chatwarden/*` peer in 0.2.0: the feed listens for the appeal events and posts the urgent and digest posts, which an older core does not have.
 
 ## Set up
 

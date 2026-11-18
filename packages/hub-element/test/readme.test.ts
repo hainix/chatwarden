@@ -40,14 +40,14 @@ describe('the quick start', () => {
   it('comes first, and is the script tag from the npm CDN plus the element, and nothing more', () => {
     expect(readme.indexOf('\n## ')).toBe(readme.indexOf('\n## Quick start\n'));
     expect(html.trim().split('\n')).toEqual([
-      '<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.1/dist/hub-element.js"></script>',
+      '<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.2/dist/hub-element.js"></script>',
       '<chatwarden-hub base-url="/admin"></chatwarden-hub>',
     ]);
   });
 
   it('the CDN version is a range the published package satisfies, and the file it names is the one the package ships', () => {
     const manifest = JSON.parse(readFileSync(join(root, 'packages', 'hub-element', 'package.json'), 'utf8')) as { version: string; files: string[] };
-    expect(manifest.version.startsWith('0.1.')).toBe(true);
+    expect(manifest.version.startsWith('0.2.')).toBe(true);
     expect(manifest.files).toContain('dist/hub-element.js');
     expect(VERSION).toBe(manifest.version);
   });
@@ -186,9 +186,12 @@ describe('the README is plain', () => {
 
   it('names the installed size honestly: the number in the Size section is within the budget in the size test', () => {
     const size = section('Size');
-    expect(size.replace(/\s+/g, ' ')).toMatch(/about 677 KB minified, about 184 KB gzipped \(gzip -9\) and about 155 KB with brotli/);
+    expect(size.replace(/\s+/g, ' ')).toMatch(/about 1,447 KB minified, about 377 KB gzipped \(gzip -9\) and about 299 KB with brotli/);
     expect(size).toMatch(/THIRD_PARTY_NOTICES\.txt/);
-    expect(size).toMatch(/under 200 KB gzipped/);
+    expect(size).toMatch(/under 400 KB gzipped/);
+    // why it is this big now: every lazy chunk and both catalogues are inlined, and a page that wants one language uses the module with its own bundler
+    expect(size.replace(/\s+/g, ' ')).toMatch(/Spanish and Portuguese/);
+    expect(size.replace(/\s+/g, ' ')).toMatch(/hub-react/);
   });
 });
 

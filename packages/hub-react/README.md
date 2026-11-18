@@ -24,7 +24,7 @@ npm install @chatwarden/http express @types/express
 `@chatwarden/hub-react/headless`; see "Four ways to adopt"). The hub uses only APIs that exist in
 18.3 (`useSyncExternalStore`, `useId`). The unit and interaction tests run on React 19; the consumer smoke test installs React 18.3, type-checks against
 `@types/react` 18 and renders the hub and the headless entry on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` and
-`@chatwarden/http` are peers too (`^0.1.9` for both: the hub reads the appeal and name fields, routes and `MeFeatures`): the hub imports types from both, and these values from core (constants and defaults, so the hub
+`@chatwarden/http` are peers too (`^0.2.0` for both, like every `@chatwarden/*` peer in 0.2.0: the hub reads the appeal and name fields, the desk, privacy and room routes and `MeFeatures`): the hub imports types from both, and these values from core (constants and defaults, so the hub
 and the kit cannot drift apart): `LADDER_TABLE`, `DEFAULT_DURATIONS`, `DEFAULT_AREA_RULES`, `DEFAULT_SEVERE_RULES`, `AUDIT_ACTIONS`,
 `MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES`, `REPORTER_RANK_LAPSE_MS`, `isDefaultNoActionReason`, `BUILTIN_SIGNAL_KINDS`, `PACE_SUGGESTIONS` (the signal kinds the kit records itself, and the slow mode values the Advanced screen suggests), `APPEAL_STATEMENT_MAX` (the fixed limit on an appeal statement, which the Appeals panel states) `DEFAULT_SAFETY_GUIDANCE` (the guidance an urgent case's "What to do" panel shows when the owner wrote none), `SAFETY_GUIDANCE_MAX`, `SAFETY_CONTACT_MAX`, `SAFETY_LABEL_MAX`, `SAFETY_DETAIL_MAX`, `SAFETY_URL_MAX` and `SAFETY_RESOURCES_MAX` (the limits the Safety panel checks before it sends) `FILTER_LIMITS`, `FILTER_RULE_DEFAULTS`, `FILTER_SUGGESTIONS`, `PERSONAL_KINDS`, `RATIO_DEFAULTS`, `checkFilters`, `resolveFilters` and `ProfileError` (the chat filters' own limits, defaults, suggestions and check, so the Chat filters panel refuses what the server refuses, in the same words of the same field), and `assertWithinCeilings` (the one check the AI's pre-fill is held to, from the kit itself). Its own type declarations name
 both packages. Node 22.13 or newer
@@ -332,7 +332,7 @@ No React build, no framework: `@chatwarden/hub-element` is the same hub as `<cha
 It is the way for a plain HTML page, Vue, Svelte or a server-rendered admin page, and it reads the page's cookies like `<Hub>` does.
 
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.1/dist/hub-element.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.2/dist/hub-element.js"></script>
 <chatwarden-hub base-url="/admin"></chatwarden-hub>
 ```
 

@@ -364,8 +364,17 @@ describe('RELEASING.md', () => {
     for (const api of ['cw.policy', 'ResolvedProfile', 'reportedReason', 'addDetail', 'releaseWhenDone', 'detailUntil']) expect(note.slice(0, 1600), api).toContain(api);
     expect(note).toContain('scripts/manifests.test.ts');
   });
-  it('tells the releaser to cut a patch while the peer ranges are ^0.1.x', () => {
-    expect(flat(doc)).toMatch(/release a patch: a minor version \(0\.2\.0\) falls outside every `\^0\.1\.x` peer range/);
+  it('tells the releaser that every peer range is ^0.2.0, that the next 0.x minor falls outside them, and to set the ranges by hand before npm run version', () => {
+    const text = flat(doc);
+    expect(text).toMatch(/Every `@chatwarden\/\*` peer range is `\^0\.2\.0` since 0\.2\.0/);
+    expect(text).toMatch(/The next 0\.x minor \(0\.3\.0\) falls outside every `\^0\.2\.x` peer range/);
+    expect(text).toMatch(/set every peer range to `\^0\.3\.0` by hand first/);
+    expect(text).toMatch(/For a 0\.x minor, set every range to the new minor before `npm run version`/);
+  });
+  it('says http does not dev-depend on hub-element and that an optional peer is never imported statically', () => {
+    const text = flat(doc);
+    expect(text).toContain('`http` does not dev-depend on `hub-element`');
+    expect(text).toContain('scripts/http-optional-peers.test.ts');
   });
   it('documents the provenance input of the workflow', () => {
     expect(flat(doc)).toMatch(/provenance=false/);
@@ -770,7 +779,7 @@ describe('the appeals and names docs (0.1.9)', () => {
     for (const needle of [
       '| `GET /appeals?status&cursor&limit` |', '| `GET /appeals/:id` |', '| `POST /appeals/:id/decide` |', '| `POST /people/:ref/rename` |', '| `GET /appeals` |', '| `POST /appeals { noticeId, statement }` |',
       '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (new in 0.1.9) is `{ appeals, renames, keepBlocked, rooms, workflow, insights }`', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
-      '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.1.9`',
+      '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.2.0`',
       '`name_profane`', 'Also `POST /people/:ref/rename`.',
     ]) {
       expect(httpDoc, needle).toContain(needle);
@@ -784,7 +793,7 @@ describe('the appeals and names docs (0.1.9)', () => {
 
   it('player-react: the appeals section says what the prop does, the new words to translate (counted from the catalog), and the older version', () => {
     const doc = flat(section(playerDoc, 'Install') + playerDoc.slice(playerDoc.indexOf('### Appeals'), playerDoc.indexOf('### Transports')));
-    for (const needle of ['`appeals`', '`AppealDialog`', '`appealUrl` is not used then', 'older than 0.1.9', '`nameReasonText(t, reason)`', '`@chatwarden/core` is a peer too (`^0.1.9`)', '`AppealRefusal`, `PlayerAppeal` and `NameReason`']) {
+    for (const needle of ['`appeals`', '`AppealDialog`', '`appealUrl` is not used then', 'older than 0.1.9', '`nameReasonText(t, reason)`', '`@chatwarden/core` is a peer too (`^0.2.0`)', '`AppealRefusal`, `PlayerAppeal` and `NameReason`']) {
       expect(doc, needle).toContain(needle);
     }
     const catalog = read('packages/player-react/src/i18n.ts');
@@ -812,14 +821,14 @@ describe('the appeals and names docs (0.1.9)', () => {
     const mounted = ['LazyPaceSettings', 'LazySignalSettings', 'LazyAppealSettings', 'LazyNameSettings'].map((n) => advanced.indexOf(`<${n} `));
     expect([...mounted].sort((a, b) => a - b)).toEqual(mounted);
     const doc = flat(hubDoc);
-    for (const needle of ['a custom length is never offered', 'shows on the Person page in Simple too', '`^0.1.9` for both', 'Translators: words new in 0.1.9', '`displayName(t, { handle, flagged, revealed })`']) {
+    for (const needle of ['a custom length is never offered', 'shows on the Person page in Simple too', '`^0.2.0` for both', 'Translators: words new in 0.1.9', '`displayName(t, { handle, flagged, revealed })`']) {
       expect(doc, needle).toContain(needle);
     }
   });
 
   it('discord: the two appeal posts, what they never carry, severeOnly and the peer floor', () => {
     const doc = flat(readme('discord'));
-    for (const needle of ['Appeal filed against a 24-hour chat restriction, Rule 2.', 'Appeal decided: lighter.', 'never carries the statement', '`rename.required`', 'only appeals under a severe rule post', '`^0.1.9`', 'no appeal statement']) {
+    for (const needle of ['Appeal filed against a 24-hour chat restriction, Rule 2.', 'Appeal decided: lighter.', 'never carries the statement', '`rename.required`', 'only appeals under a severe rule post', '`^0.2.0`', 'no appeal statement']) {
       expect(doc, needle).toContain(needle);
     }
   });
@@ -1365,6 +1374,73 @@ describe('the rooms sections (0.2.0)', () => {
     has(matcher, ['### Reserved names', '`skeleton(text)`', '`matchReserved(name, entries, allow)`']);
     expect(matcher).toMatch(/whole words/i);
     expect(matcher).toMatch(/never the chat/i);
+  });
+
+  it('the core README says how many words NOTICE_WORDS holds, and the number is the real one (39: 36 notice words and the three restricted-chat words)', async () => {
+    const { NOTICE_WORDS } = await import('@chatwarden/core/notice-copy');
+    const count = Object.keys(NOTICE_WORDS).length;
+    expect(count).toBe(39);
+    expect(flat(readme('core'))).toContain(`\`NOTICE_WORDS\` (${count} keys: 36 notice words and the three restricted-chat words)`);
+  });
+
+  it('the READMEs say the Spanish and Portuguese catalogues are machine drafts that a person has not read', () => {
+    for (const dir of ['player-react', 'hub-react', 'hub-element']) {
+      const text = flat(readme(dir));
+      expect(text, dir).toMatch(/Spanish and Portuguese are machine-drafted/);
+      expect(text, dir).toMatch(/not been reviewed by a person/);
+      expect(text, dir).toMatch(/who speaks the language/);
+    }
+  });
+
+  // Migration 26 is shared by every theme of 0.2.0, so its README list is judged against the SQL itself: every table and every column the migration adds is named in the
+  // store-sqlite README's Migration 26 section, and the core README, which also describes the migration, does not name a table the SQL does not create.
+  describe('migration 26 in the READMEs, against the migration itself', () => {
+    const migrations = read('packages', 'store-sqlite', 'src', 'migrations.ts');
+    const at = migrations.indexOf('version: 26,');
+    const sql = migrations.slice(at, migrations.indexOf('`,', migrations.indexOf('sql: `', at)));
+    const tables = [...sql.matchAll(/CREATE TABLE (kit_[a-z_]+)/g)].map((m) => m[1] as string);
+    const columns = [...sql.matchAll(/ALTER TABLE (kit_[a-z_]+) ADD COLUMN ([a-z_]+)/g)].map((m) => `${m[1]}.${m[2]}`);
+    const sqliteDoc = read('packages', 'store-sqlite', 'README.md').replace(/\r\n/g, '\n');
+    const start = sqliteDoc.indexOf('### Migration 26');
+    const section26 = flat(start === -1 ? '' : sqliteDoc.slice(start, sqliteDoc.indexOf('\n#', start + 5) === -1 ? undefined : sqliteDoc.indexOf('\n#', start + 5)));
+    const core = flat(readme('core'));
+
+    it('control: the scan finds the tables and columns of the migration', () => {
+      expect(tables).toEqual(expect.arrayContaining(['kit_filter_hits', 'kit_legal_holds', 'kit_erasures', 'kit_report_comments', 'kit_chat_days', 'kit_pace']));
+      expect(columns).toEqual(expect.arrayContaining(['kit_reports.origin', 'kit_reports.urgent', 'kit_reports.scope', 'kit_terms.match_mode', 'kit_mutes.block']));
+    });
+
+    it('store-sqlite has a "Migration 26" section that says it is one-way and to back up first', () => {
+      expect(start).toBeGreaterThan(-1);
+      expect(section26).toMatch(/one-way/);
+      expect(section26).toMatch(/back up/i);
+    });
+
+    it.each(tables)('the store-sqlite section names the table %s', (table) => {
+      expect(section26).toContain(`\`${table}\``);
+    });
+
+    it.each(columns)('the store-sqlite section names the column %s', (column) => {
+      expect(section26).toContain(`\`${column}\``);
+    });
+
+    it('the section names every index the migration creates', () => {
+      for (const index of new Set([...sql.matchAll(/CREATE (?:UNIQUE )?INDEX (kit_[a-z_]+)/g)].map((m) => m[1] as string))) expect(section26, index).toContain(`\`${index}\``);
+    });
+
+    it('the section names the erasure epoch row, and the core README points at it and names no table or index the migrations do not create', () => {
+      expect(section26).toContain('erasure_epoch');
+      expect(core).toMatch(/migration 26/i);
+      for (const name of new Set([...core.matchAll(/`(kit_[a-z_]+)`/g)].map((m) => m[1] as string))) {
+        const known = new RegExp(`CREATE (?:UNIQUE )?(?:TABLE|INDEX)(?: IF NOT EXISTS)? ${name}\\b`).test(migrations);
+        expect(known, `${name} is a table or index the migrations create`).toBe(true);
+      }
+    });
+
+    it('the core README lists the same new tables as the migration for migration 26 (filters, holds, erasures, comments, chat days, pace)', () => {
+      const line = core.slice(core.search(/SQLite migration 26/i));
+      for (const table of ['kit_filter_hits', 'kit_legal_holds', 'kit_erasures', 'kit_report_comments', 'kit_chat_days', 'kit_pace']) expect(line.slice(0, 1800), table).toContain(`\`${table}\``);
+    });
   });
 
   it('the readme checks pass for the changed packages: store-sqlite names the rooms and languages columns of migration 26', () => {

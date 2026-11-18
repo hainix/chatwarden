@@ -295,7 +295,7 @@ describe('OpenSource', () => {
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Free and open source');
     const text = container.textContent ?? '';
     expect(text).toContain('Apache-2.0, with no paid tier and nothing hosted.');
-    expect(text).toContain('Chatwarden is pre-release (version 0.1): ready to try, with no support promise yet.');
+    expect(text).toContain('Chatwarden is pre-release (version 0.2): ready to try, with no support promise yet.');
     expect(text).toContain('Published to npm with provenance.');
     expect(text).not.toMatch(/no strings|forever|0\.1\.0|0\.1\.x/i);
   });

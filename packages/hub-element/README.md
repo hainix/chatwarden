@@ -12,7 +12,7 @@ On your server you already mount the kit's staff routes at `/admin` (see `@chatw
 add the script and the element:
 
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.1/dist/hub-element.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.2/dist/hub-element.js"></script>
 <chatwarden-hub base-url="/admin"></chatwarden-hub>
 ```
 
@@ -215,8 +215,8 @@ import (its entry is listed under `sideEffects`, so a bare `import '@chatwarden/
 
 ## Size
 
-`dist/hub-element.js` is about 677 KB minified, about 184 KB gzipped (gzip -9) and about 155 KB with brotli, with React, react-dom, the whole hub and
-its stylesheet in it. A test holds it under 200 KB gzipped. The scripts keep the licence banners of that third-party code, and
+`dist/hub-element.js` is about 1,447 KB minified, about 377 KB gzipped (gzip -9) and about 299 KB with brotli, with React, react-dom, the whole hub and
+its stylesheet in it. A test holds it under 400 KB gzipped. It is bigger than in 0.1.x because the script inlines every lazy chunk of the hub: the Spanish and Portuguese catalogues (about 2,260 words each, and the player words), the urgent desk, the rooms, the privacy parts, the filters and the community list all count in full, whichever language a page uses. A page that wants one language and a smaller script uses the module with its own bundler, where each catalogue is a lazy chunk. The scripts keep the licence banners of that third-party code, and
 `dist/THIRD_PARTY_NOTICES.txt` lists each bundled package with its licence text; the build generates it from what it bundled. The cost is the price of needing nothing else on the page; a team that already ships React
 pays far less with `@chatwarden/hub-react`.
 

@@ -191,7 +191,7 @@ describe('llms.txt', () => {
   });
   it('has the proposal’s summary: what it is, that it moderates an existing chat, and what it is not', () => {
     expect(txt()).toContain(
-      "> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one case per player by default). It moderates the chat you already have, and has an optional moderated chat box for a game with none. TypeScript for Node 22.13 or newer. Pre-release (0.1.x), Apache-2.0, provided as-is. Not a child-safety tool.",
+      "> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one case per player by default). It moderates the chat you already have, and has an optional moderated chat box for a game with none. TypeScript for Node 22.13 or newer. Pre-release (0.2.x), Apache-2.0, provided as-is. Not a child-safety tool.",
     );
     expect(txt()).toContain('one case per player by default');
     expect(txt()).not.toMatch(/Simple mode of one card per case|one card per report|one tap|fair ladder|dodge simple filters|\brefuses?\b/i);
@@ -211,7 +211,8 @@ describe('llms.txt', () => {
     }
     expect(section).toContain('Express, Fastify, Next.js');
     expect(section).toContain('never overwrites');
-    expect(section).toContain('experimental until 0.2');
+    expect(section).not.toContain('experimental until 0.2');
+    expect(section).toContain('`chatwarden serve`');
     expect(txt()).not.toMatch(/minutes|in about 15/i);
   });
   it('links every recipe in docs/recipes (and each link resolves to a real file)', () => {
@@ -223,14 +224,24 @@ describe('llms.txt', () => {
       expect(existsSync(join(repo, 'docs', 'recipes', f)), f).toBe(true);
     }
   });
-  it('says only what the READMEs say about what shipped since 0.1.5: experimental names, opt-in, and an AI that never acts on its own', () => {
+  it('says only what the READMEs say about what shipped since 0.1.5: what is still experimental, opt-in, and an AI that never acts on its own', () => {
     const t = txt();
     expect(t).toMatch(/AI/);
     expect(t).toMatch(/never acts on its own yet/);
     expect(t).toMatch(/shadow mode/i);
-    expect(t).toContain('experimental until 0.2');
+    expect(t).not.toContain('experimental until 0.2');
+    expect(t).toMatch(/Discord bot, Coop and EOS integrations are experimental/);
     expect(t).not.toMatch(/accura|guarantee|automatic(ally)? (ban|sanction)|replaces? (your )?moderators/i);
     expect(t.toLowerCase()).not.toContain('moxgate');
+  });
+  it('names the 0.2.0 features and their entry points', () => {
+    const t = txt();
+    for (const needle of [
+      'urgent', 'welfare', 'second look', 'Insights', 'rooms under attack', 'chat filters', 'privacy requests', 'legal hold', 'contexts', 'staff scope', 'blocks', 'phrase-only',
+      'reserved names', 'without spaces', '`@chatwarden/http/service`', '`chatwarden serve`', 'shared pacing', 'Spanish and Portuguese', 'machine drafts',
+      '`@chatwarden/player-react/locales/es`', '`@chatwarden/hub-react/locales/es`', '`@chatwarden/core/notice-copy`',
+    ]) expect(t.toLowerCase(), needle).toContain(needle.toLowerCase());
+    expect(t).not.toMatch(/service API for a game server in another language is planned/);
   });
   it('is honest: pre-release, and no promises the site would not make', () => {
     expect(txt()).toMatch(/pre-release/i);

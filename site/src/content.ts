@@ -292,7 +292,7 @@ export const ModeratorPage = () => <Hub client={client} />;`,
           lang: 'text',
           file: 'moderator.html',
           copyLabel: 'Copy the one-script-tag hub',
-          code: `<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.1/dist/hub-element.js"></script>
+          code: `<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.2/dist/hub-element.js"></script>
 <chatwarden-hub base-url="/admin"></chatwarden-hub>`,
         },
       ],
@@ -310,7 +310,7 @@ export const PLAYER_STEP = {
 
 export const OPEN_SOURCE = {
   title: 'Free and open source',
-  body: 'Apache-2.0, with no paid tier and nothing hosted. It runs on your server and keeps its data in your database file. Chatwarden is pre-release (version 0.1): ready to try, with no support promise yet. Issues and pull requests are welcome.',
+  body: 'Apache-2.0, with no paid tier and nothing hosted. It runs on your server and keeps its data in your database file. Chatwarden is pre-release (version 0.2): ready to try, with no support promise yet. Issues and pull requests are welcome.',
   small: 'Published to npm with provenance.',
 } as const;
 

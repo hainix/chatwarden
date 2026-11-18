@@ -102,7 +102,7 @@ describe('the steps, panels and questions', () => {
     expect(FAQ.find((f) => f.id === 'cost')?.a).toBe("Nothing. It's open source under Apache-2.0, with no paid tier.");
     expect(JSON.stringify([FAQ, OPEN_SOURCE])).not.toMatch(/forever|no strings/i);
     expect(OPEN_SOURCE.body).toBe(
-      'Apache-2.0, with no paid tier and nothing hosted. It runs on your server and keeps its data in your database file. Chatwarden is pre-release (version 0.1): ready to try, with no support promise yet. Issues and pull requests are welcome.',
+      'Apache-2.0, with no paid tier and nothing hosted. It runs on your server and keeps its data in your database file. Chatwarden is pre-release (version 0.2): ready to try, with no support promise yet. Issues and pull requests are welcome.',
     );
   });
   it('the FAQ is the nine questions developers ask, in order', () => {

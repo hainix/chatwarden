@@ -608,8 +608,8 @@ cw.names.renamed(who);
 
 The text a player reads in a notice lives in one small module, so the game's notice card and a hub's preview of it cannot word a notice differently.
 Import it from the subpath (`import { noticeView, NOTICE_WORDS } from '@chatwarden/core/notice-copy'`); it is plain code with no Node module and no React,
-and a bundler that reads `sideEffects: false` takes only this file. It exports `NOTICE_WORDS` (the English words, keyed as `@chatwarden/player-react` keys
-them: `player.notice.title.warning`, `player.notice.gotIt`, `player.restricted.moderator.until`, and the rest) with `englishWords()` (a copy to spread under your
+and a bundler that reads `sideEffects: false` takes only this file. It exports `NOTICE_WORDS` (39 keys: 36 notice words and the three restricted-chat words), the English words, keyed as `@chatwarden/player-react` keys
+them: `player.notice.title.warning`, `player.notice.gotIt`, `player.restricted.moderator.until`, and the rest, with `englishWords()` (a copy to spread under your
 own translation) and the types `NoticeWordKey` and `NoticeWords`; `titleKey`, `bodyKey`, `isSanction` and `WARNING_DAYS` (90); `dayText`, `untilText` and `timeLeft`;
 `noticeView(notice, { words, locale, timeZone?, now, record? })`, which returns a `NoticeView` (`kind`, `title`, `body`, `facts`, `refHint`, `linesLabel`, `lines`,
 `mustAcknowledge`, `todo`, `button`, `sanction`) as plain text, with the time passed in; `communityRuleLabel(ref, title?)`, the one place "Community Rule 2: Title"
@@ -739,7 +739,7 @@ skipped by every purge. Several processes on one database: an erase moves an epo
 **Upgrading:** `Store` gains required methods (`exportSubjects`, `eraseSubjects`, `insertErasure`, `loadPendingErasures`, `finishErasure`, `erasureEpoch`, `purgeStrayRows`, `placeHold`, `releaseHold`,
 `loadHold`, `listHolds`, `heldSet`, `sanctionGroupsOfReport`) and `AuditListQuery` gains `targets`; a custom store implements them, and `saveIdentifier` for a subject that does not exist must write nothing and
 not throw. `AUDIT_ACTIONS` gains `privacy.find`, `privacy.export`, `privacy.erase`, `legal.hold`, `legal.release` and `legal.bundle`; `KIT_EVENT_TYPES` gains `report.escalated`; `PurgeResult` gains
-`erasuresFinished` and `strayRows`. SQLite migration 26 (shared by the whole release) adds `kit_legal_holds`, `kit_erasures`, the erasure epoch and four lookup indexes, and is one-way.
+`erasuresFinished` and `strayRows`. SQLite migration 26 (shared by the whole release, one-way: back up first; the full list is in the `@chatwarden/store-sqlite` README) adds the tables `kit_filter_hits`, `kit_legal_holds`, `kit_erasures`, `kit_report_comments`, `kit_chat_days` and `kit_pace`, the columns for filter origin, urgent, hand-off, escalation, evidence, scope, entity, blocks and match modes, the erasure epoch and the lookup indexes.
 
 **New in 0.2.0:** `cw.privacy`, `cw.legal`, `PrivacyService`, `PrivacyStatement`, `PrivacyRefusal`, `PRIVACY_CATEGORIES`, `PRIVACY_REGISTRY`, `NO_PERSON_TABLES`, `NO_PERSON_JSON_COLUMNS`, `PrivacyCategory`, `PrivacyRule`, `PrivacyClock`, `PrivacyExport`,
 `SubjectExport`, `EraseMode`, `ErasePlan`, `ErasePreview`, `ErasureCounts`, `ErasureReceipt`, `ErasureRemoved`, `ErasureRow`, `PRIVACY_DISCLAIMER`, `ERASED_LINE`, `EXPORT_SECTION_MAX`, `erasedReporter`, `isNonPersonReporter`,

@@ -126,6 +126,17 @@ How it behaves:
 - **Encryption at rest is yours.** SQLite does not encrypt the file. Put it on an encrypted disk if the hashes and the moderators'
   excerpts need that.
 
+### Migration 26 (0.2.0, one-way)
+
+Migration 26 is the one migration of the whole 0.2.0 release: every theme's block is in it, and nothing adds a 27. It only adds (no table is rebuilt, no row is rewritten except the scope backfill below), and it runs in one transaction with the version bump, so a failure leaves version 25. **It is one-way: a 0.1.14 or older build refuses a database at version 26, so back up the database file before you upgrade.**
+
+- **Chat filters.** `kit_reports.origin` (`filter` for a report a chat filter filed, null for a player's) and `kit_reports.origin_key` (the counter key that made it, never text), with `kit_reports_open_filter` (one open filter report per person and room) and `kit_reports_by_origin` (the daily cap). `kit_filter_hits` is one row per UTC day, counter key and applied action: counts only, no person, room or text.
+- **Legal hold.** `kit_legal_holds` is one row per held report (a code from the closed list, who and when, and the release), with `kit_legal_holds_open` for the purges and the erase.
+- **Privacy requests.** `kit_erasures` is one receipt row per erase (counts as JSON, no subject, no text), with `kit_erasures_pending` for the finish pass; the `erasure_epoch` row of `kit_meta` is a counter every erase moves, so another process learns that a person it holds in memory is gone. Four lookup indexes keep an erase from scanning by person: `kit_mutes_by_target`, `kit_blocked_names_by_subject`, `kit_signals_by_source` and `kit_sanctions_by_report`.
+- **Urgent lane and desk.** `kit_reports.urgent` (a snapshot taken at filing, 0 on every earlier row) with `kit_reports_urgent_open`, `kit_reports.handoff_at` and `kit_reports.handoff_by`, `kit_reports.escalated_to`, `kit_reports.escalated_by` and `kit_reports.escalated_at`, and `kit_reports.evidence_ref` (the game's opaque id). `kit_report_comments` is the staff thread of a report, at most 50 a report, deleted with it, with `kit_report_comments_by_report`. `kit_chat_days` is one row per UTC day with two counts (lines delivered and refused), written only when `desk.insights` is on. `kit_reports_by_reporter_outcome_reason` is the reporter-accuracy index with the reason added.
+- **Rooms, names and languages.** `kit_reports.scope` with `kit_reports_by_scope` (filled in for the reports already stored), `kit_reports.entity_json`, `kit_mutes.block` and `kit_terms.match_mode`, described in the bullet above.
+- **Shared pacing.** `kit_pace` is one row per room and person with the pacer's times and short fingerprints of the last lines (never text), swept after an hour (`kit_pace_by_touched`) and erased with the person.
+
 ## Links
 
 - [Chatwarden on GitHub](https://github.com/hainix/chatwarden) and the [root README](https://github.com/hainix/chatwarden#readme)
