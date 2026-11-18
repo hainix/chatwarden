@@ -58,6 +58,8 @@ import { NameService } from './nameService.js';
 import { checkNameRules } from './names.js';
 import type { NameCheckResult, NameKind } from './names.js';
 import { resolveLandingOptions } from './appealLink.js';
+import { checkDeliveryOptions, DeliveryService } from './delivery.js';
+import type { NoticeDeliveryOptions } from './delivery.js';
 import type { AppealCaseResult, AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, AppealSummary, PlayerAppeal } from './appeals.js';
 import { isSanction } from './noticeCopy.js';
 import { createInertSignals } from './signalInert.js';
@@ -207,6 +209,14 @@ export interface ChatwardenOptions {
    * `RangeError` naming the option and never echoing it.
    */
   appeals?: { landingUrl?: string; landingOrigins?: readonly string[] };
+  /**
+   * Tell the game what a person was told (0.2.1), so it can send it by email or any other channel: `deliver(d)` is called after the commit, fenced and never awaited, once per notice, when a sanction
+   * is given (a moderator's decision, the automatic restriction) and when an appeal is decided, and only when an account id is known (`d.to.accountId`, never an address hash); otherwise
+   * `chatwarden.delivery_skipped_no_account` is counted (logged at most once a minute with a count). A throw or a rejection is logged by class (`chatwarden.delivery_failed`) and never fails
+   * the sanction. `d.noticeId` is the stable key for dedupe and retry; the kit has no email address and sends nothing itself. `localeOf({ accountId })` picks the language (`es-MX`; nothing is
+   * English). Code only: a function is not settings. A `deliver` or `localeOf` that is not a function is a `TypeError` at creation.
+   */
+  notices?: NoticeDeliveryOptions;
   /** Defaults to the system clock. */
   clock?: Clock;
   /** The kill switch, read per call. Drives both sanction enforcement and report intake. Defaults to always on. */
@@ -1240,6 +1250,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (opts.sharedPacing !== undefined && typeof opts.sharedPacing !== 'boolean') throw new TypeError('createChatwarden: sharedPacing must be true or false');
   if (opts.sharedPacing === true) assertPaceStore(store);
   const landing = resolveLandingOptions(opts.appeals);
+  const deliveryOptions = checkDeliveryOptions(opts.notices);
   // The phrase books: the grammar and sizes first, then every context's `chat.phrases` must name one. Each phrase is also run through the matcher and every profanity filter in force, once those exist (further down).
   const phraseBooks = checkPhraseBooks(opts.phrases);
   checkContextBooks(baseProfile.contexts, phraseBooks);
@@ -1373,6 +1384,22 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     notify: typeof platformNotify === 'function' ? (who, event) => platformNotify.call(platform, who, event) : undefined,
   });
 
+  // The delivery hook (only when the game gave one). The link and the game's own words are read late: the appeal service and the profile in force come later.
+  const delivery: DeliveryService | undefined =
+    deliveryOptions === undefined
+      ? undefined
+      : new DeliveryService({
+          store,
+          subjects,
+          notices,
+          rules,
+          clock,
+          logger,
+          options: deliveryOptions,
+          link: (noticeId) => appealService.link(noticeId),
+          words: () => policy.profileNow().appeals.words,
+        });
+
   /** The signal service, set once `personOf` exists (the chat path above it only calls it later, never during creation). */
   const signalRef: { service?: SignalRuntime } = {};
 
@@ -1476,6 +1503,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     logger,
     notices,
+    delivery,
     autoRestrictRule,
     limits: { maxLength: limits.chatMaxLength, rate: limits.chatRate },
     filters: {
@@ -1596,6 +1624,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     index: sanctions,
     logger,
     reporterFeedback: limits.reporterFeedback,
+    delivery,
     aiOutcome: (args) => aiRef.service?.outcomeOf(args) ?? null,
   });
 
@@ -1876,7 +1905,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         });
   aiRef.service = aiService;
   const ai: AiFacade = aiService ?? createInertAi();
-  const appealService = new AppealService({
+  const appealService: AppealService = new AppealService({
     store,
     subjects,
     notices,
@@ -1898,6 +1927,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     secret: opts.secret,
     landingUrl: landing.landingUrl,
     landingOrigins: landing.landingOrigins,
+    delivery,
   });
 
   // Names. The profanity filter for a name is the kit's own when the profile has one; otherwise (a profile that allows swearing in chat) it is

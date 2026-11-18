@@ -335,6 +335,7 @@ export type {
   PlayerNotice,
   SanctionNoticeInput,
 } from './notices.js';
+export type { NoticeDelivery, NoticeDeliveryOptions } from './delivery.js';
 export { KIT_EVENT_TYPES } from './events.js';
 export type { InsightsDigest, KitEvent, KitEventOf, KitListener, StaffRef, Subscribe } from './events.js';
 export { createChatwarden } from './chatwarden.js';

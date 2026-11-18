@@ -152,6 +152,8 @@ export interface DecisionServiceDeps {
   reporterFeedback?: boolean;
   /** AI casebook: the outcome row for a decision made with an AI echo. Fenced; null records nothing. */
   aiOutcome?: AiOutcomeHook;
+  /** Told, after the commit and fenced, of each sanction notice a fresh decision made (the delivery hook). A replay and a decision that did not commit tell it nothing. Never throws. */
+  delivery?: { sanctionNoticed(noticeId: string): void };
 }
 
 /**
@@ -392,6 +394,7 @@ export class DecisionService {
   private readonly logger: Logger | undefined;
   private readonly reporterFeedback: boolean;
   private readonly aiOutcome: AiOutcomeHook | undefined;
+  private readonly delivery: DecisionServiceDeps['delivery'];
 
   constructor(deps: DecisionServiceDeps) {
     this.store = deps.store;
@@ -403,6 +406,7 @@ export class DecisionService {
     this.logger = deps.logger;
     this.reporterFeedback = deps.reporterFeedback ?? true;
     this.aiOutcome = deps.aiOutcome;
+    this.delivery = deps.delivery;
   }
 
   /**
@@ -597,6 +601,15 @@ export class DecisionService {
         this.notices.announce(subject);
       } catch (err) {
         this.warn('decide.announce_failed', { error: errName(err) });
+      }
+    }
+    // One delivery per group that made a notice (a decision for two people tells each of them once). A note made none; the reporter's thank-you is not in `groups`.
+    for (const g of done.groups) {
+      if (g.noticeId === null) continue;
+      try {
+        this.delivery?.sanctionNoticed(g.noticeId);
+      } catch (err) {
+        this.warn('decide.delivery_failed', { error: errName(err) });
       }
     }
     return {

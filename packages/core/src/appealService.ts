@@ -44,6 +44,7 @@ import { APPEALS_START_TOKEN, MAX_SANCTION_DURATION_MS, writeSanction } from './
 import type { SanctionIndex } from './sanctions.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
 import type { SubjectIndex } from './subjects.js';
+import type { DeliveryService } from './delivery.js';
 import type { AppealRow, Clock, Logger, Matcher, NoticeRow, RawWho, SanctionRow, Store, SubjectId } from './types.js';
 
 // The appeals service: filing (the player side) here; deciding and the staff reads are added to the same class. It holds no state of its own:
@@ -112,6 +113,8 @@ export interface AppealServiceDeps {
   landingUrl: string | null;
   /** The origins the appeal page may be read from by a script (`ChatwardenOptions.appeals.landingOrigins`). Frozen. */
   landingOrigins: readonly string[];
+  /** Told, after the commit and fenced, that an appeal was decided (the delivery hook). A moot close and a refused decision tell it nothing. */
+  delivery?: Pick<DeliveryService, 'appealDecided'> | undefined;
 }
 
 /** A decision step that must roll the transaction back and answer something other than success. */
@@ -497,6 +500,8 @@ export class AppealService {
     let written: ReturnType<typeof writeSanction> | null = null;
     // What the overturn record said, for the announcements after the commit (null: none was recorded).
     let overturn: { termId: string | null; filterKey: string | null } | null = null;
+    // The id of the outcome message the decision wrote, for the delivery after the commit.
+    let outcomeNoticeId: string | null = null;
     try {
       store.transaction(() => {
         if (d.outcome !== 'uphold') {
@@ -533,7 +538,7 @@ export class AppealService {
             { notify: false },
           );
         }
-        notices.createMessage(person, OUTCOME_NOTICE[d.outcome], { rule: ruleRefOf(appeal.rule), refCode: group.refCode, notify: false });
+        outcomeNoticeId = notices.createMessage(person, OUTCOME_NOTICE[d.outcome], { rule: ruleRefOf(appeal.rule), refCode: group.refCode, notify: false });
         const moved = store.decideAppeal?.(appeal.id, {
           status: OUTCOME_STATUS[d.outcome],
           at: now,
@@ -593,6 +598,25 @@ export class AppealService {
       );
     }
     fenced(() => this.d.emit({ type: 'appeal.decided', appealId: appeal.id, at: now, target: person, outcome: d.outcome, rule: ruleRefOf(appeal.rule), reason: d.reasonCode }));
+    // Tell the game, once: the outcome message (never the replacement's own notice, which was made without a push).
+    const outcomeId = outcomeNoticeId as string | null;
+    if (outcomeId !== null) {
+      fenced(() => {
+        const original = { kind: group.kind, until: group.kind === 'warning' ? null : group.endsAt };
+        const replacement = made === null || plan === null ? null : { kind: plan.kind, until: plan.kind === 'warning' ? null : made.endsAt };
+        const sanction = replacement === null ? { ...original, rule: ruleRefOf(group.rule), source: group.source, automated: group.automated } : { ...replacement, rule: ruleRefOf(group.rule), source: 'moderator' as const, automated: false };
+        this.d.delivery?.appealDecided({
+          noticeId: outcomeId,
+          originalNoticeId: appeal.noticeId,
+          person,
+          status: OUTCOME_STATUS[d.outcome],
+          reason: d.reasonCode,
+          sanction,
+          standing: d.outcome === 'revoke' ? null : (replacement ?? original),
+          refCode: group.refCode,
+        });
+      });
+    }
     return { ok: true, status: OUTCOME_STATUS[d.outcome], ...(made === null ? {} : { replacementGroupId: made.groupId }) };
   }
 

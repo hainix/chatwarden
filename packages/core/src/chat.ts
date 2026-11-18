@@ -172,6 +172,8 @@ export interface ChatServiceDeps {
    * changes the verdict.
    */
   notices?: NoticeService;
+  /** Told, after the notice of an automatic restriction was committed and announced, so the game can deliver it (the delivery hook). Never throws. */
+  delivery?: { sanctionNoticed(noticeId: string): void };
   /**
    * The Community Rule the automatic filter cites: on a `blocked` refusal, on the automatic timeout it earns (the
    * stored sanction, the in-memory fallback and the player's notice). Default 1. The caller checks it is an active
@@ -322,6 +324,7 @@ export class ChatService {
   private readonly onAutoRestricted: ChatServiceDeps['onAutoRestricted'];
   private readonly logger: Logger | undefined;
   private readonly notices: NoticeService | undefined;
+  private readonly delivery: ChatServiceDeps['delivery'];
   private readonly autoRestrictRule: number;
   private readonly maxLength: number;
   private readonly rate: SlidingWindow;
@@ -382,6 +385,7 @@ export class ChatService {
     this.filterWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.pacer = deps.pace === undefined ? undefined : (deps.pace.pacer ?? createPacer({ clock: deps.clock, settings: deps.pace.settings, ...(deps.pace.floorMax === undefined ? {} : { floorMax: deps.pace.floorMax }) }));
     this.notices = deps.notices;
+    this.delivery = deps.delivery;
     this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
     this.maxLength = deps.limits?.maxLength ?? MAX_LEN;
     this.rate = slidingWindow({
@@ -1076,11 +1080,13 @@ export class ChatService {
         audience: line.audience,
         p: 0,
       };
-      notices.createForSanction(
+      const id = notices.createForSanction(
         { groupId: found.groupId, refCode: found.refCode, kind: 'chat', until: found.until, rule: this.autoRestrictRule, subject },
         [excerpt],
         { notify: true },
       );
+      // The notice is committed and announced: tell the game (fenced; the restriction and its notice stand whatever the hook does).
+      this.delivery?.sanctionNoticed(id);
     } catch (err) {
       this.warn('chat.notice_failed', { error: errName(err) });
     }
