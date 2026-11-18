@@ -87,6 +87,27 @@ describe('the cause of an appeal', () => {
     expect(causeOf(k, id)).toEqual({ source: 'term', termId: 'syn:quissel', strikes: 3 });
   });
 
+  it.each([['an empty string', ''], ['a non-string', 7 as unknown as string], ['null', null as unknown as string]])(
+    'a custom matcher that gives %s as the term id still gets its automatic restriction, with no term stored',
+    async (_name, termId) => {
+      const odd: Matcher = { match: (t) => (t.toLowerCase().includes('glarn') ? { termId } : null) };
+      const k = await kit({ matcher: odd });
+      const t = k.table({ target: 'key-odd' });
+      for (const word of ['glarn', 'glarn two', 'glarn three']) k.cw.chat.accept(t.room, 'p2', word);
+      const rows = k.store.rawSanctions().filter((r) => r.source === 'auto_filter' && r.targetType === 'subject');
+      expect(rows).toHaveLength(1);
+      expect(k.store.loadSanctionSubjectRow(rows[0]!.groupId)?.termId).toBeNull();
+    },
+  );
+
+  it('a normal term id is still stored on the restriction (control)', async () => {
+    const k = await kit();
+    const t = k.table({ target: 'key-ctl' });
+    for (const word of ['zorbak', 'vlemmo', 'quissel']) k.cw.chat.accept(t.room, 'p2', word);
+    const rows = k.store.rawSanctions().filter((r) => r.source === 'auto_filter' && r.targetType === 'subject');
+    expect(k.store.loadSanctionSubjectRow(rows[0]!.groupId)?.termId).toBe('syn:quissel');
+  });
+
   it('a row written before 0.2.1 (no term id) gives termId: null', async () => {
     const k = await kit();
     const id = direct(k, 'old-auto', { source: 'auto_filter', automated: true, actor: 'auto' });

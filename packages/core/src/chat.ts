@@ -1007,8 +1007,9 @@ export class ChatService {
             source: 'auto_filter',
             automated: true,
             rule: this.autoRestrictRule,
-            // The term of the strike that tipped it (the one just recorded), kept on the subject row for the appeal that may overturn it. The kit's own key.
-            termId,
+            // The term of the strike that tipped it (the one just recorded), kept on the subject row for the appeal that may overturn it. The kit's own key. A custom matcher's
+            // empty (or non-string) term id is not a term: it is left off, so a bad value there can never stop the restriction.
+            ...(typeof termId === 'string' && termId !== '' ? { termId } : {}),
             startsAtToken: APPEALS_START_TOKEN,
           },
           now,
