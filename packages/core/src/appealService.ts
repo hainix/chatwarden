@@ -154,6 +154,22 @@ function checkDecision(input: AppealDecision): CheckedDecision | typeof INVALID_
   if (!isValidAuditActor(actor)) return null;
   const why = typeof reason === 'string' ? reason.trim() : '';
   if (why === '' || why.length > 500) return null;
+  // The outcome-specific shape first: a stray or malformed `to` is `invalid` whatever the reason code says.
+  let checkedTo: CheckedDecision['to'] = null;
+  if (outcome !== 'reduce') {
+    if (to !== undefined) return null;
+  } else {
+    if (typeof to !== 'object' || to === null) return null;
+    const { kind, durationMs } = to as Record<string, unknown>;
+    if (typeof kind !== 'string' || !(SANCTION_KIND_ORDER as readonly string[]).includes(kind)) return null;
+    if (kind === 'warning') {
+      if (durationMs !== null) return null;
+    } else if (durationMs !== null && (typeof durationMs !== 'number' || !Number.isSafeInteger(durationMs) || durationMs <= 0 || durationMs > MAX_SANCTION_DURATION_MS)) {
+      return null;
+    }
+    checkedTo = { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs: durationMs as number | null };
+  }
+  // The reason code last (read once): an absent key or `undefined` is the default; anything else must be a code this outcome offers.
   let code: AppealReasonCode;
   const given: unknown = (input as unknown as Record<string, unknown>).reasonCode;
   if (given === undefined) {
@@ -164,16 +180,7 @@ function checkDecision(input: AppealDecision): CheckedDecision | typeof INVALID_
     if (!(APPEAL_REASONS[outcome as AppealOutcome] as readonly string[]).includes(given)) return INVALID_REASON;
     code = given as AppealReasonCode;
   }
-  if (outcome !== 'reduce') return to === undefined ? { appealId, outcome: outcome as AppealOutcome, actor, reason: why, reasonCode: code, to: null } : null;
-  if (typeof to !== 'object' || to === null) return null;
-  const { kind, durationMs } = to as Record<string, unknown>;
-  if (typeof kind !== 'string' || !(SANCTION_KIND_ORDER as readonly string[]).includes(kind)) return null;
-  if (kind === 'warning') {
-    if (durationMs !== null) return null;
-  } else if (durationMs !== null && (typeof durationMs !== 'number' || !Number.isSafeInteger(durationMs) || durationMs <= 0 || durationMs > MAX_SANCTION_DURATION_MS)) {
-    return null;
-  }
-  return { appealId, outcome: 'reduce', actor, reason: why, reasonCode: code, to: { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs: durationMs as number | null } };
+  return { appealId, outcome: outcome as AppealOutcome, actor, reason: why, reasonCode: code, to: checkedTo };
 }
 
 /** The stored reason code of a decided appeal when it is one the kit knows (a moot appeal, an older row and anything else read null). */
@@ -320,8 +327,13 @@ export class AppealService {
     return row.groupId !== null && (row.kind === 'warning' || row.kind === 'chat' || row.kind === 'area' || row.kind === 'ban');
   }
 
-  /** The appeal filed for the notice's sanction, found among the person's newest appeals; null when there is none. */
+  /**
+   * The appeal filed for the notice's sanction (a moot one too), or null when there is none: one lookup by the sanction's group, so it never depends on how many appeals the person has.
+   * A store without `loadAppealByGroup` (a custom one written for 0.2.0) is read the old way, among the person's newest appeals, which can miss an older one and never sees a moot one.
+   */
   private appealOf(row: NoticeRow): AppealRow | null {
+    const direct = this.d.store.loadAppealByGroup;
+    if (typeof direct === 'function') return direct.call(this.d.store, row.groupId as string);
     const aliases = this.d.subjects.aliasesOf(this.d.subjects.canonical(row.subject));
     return (this.d.store.listAppealsBy?.(aliases, MINE_MAX) ?? []).find((r) => r.groupId === row.groupId) ?? null;
   }
@@ -400,15 +412,20 @@ export class AppealService {
       const { row, live, appeal } = link;
       const view = this.d.notices.viewOf(row);
       const group = this.d.store.loadSanctionSubjectRow?.(row.groupId) ?? null;
-      const standing = (kind: 'warning' | 'chat' | 'area' | 'ban', until: number | null) => ({ kind, until: kind === 'warning' ? null : until });
+      // The sanction as it stands now: its kind and end, and whether it is in force, over, or lifted (a revoked group, whoever revoked it).
+      const now = this.d.clock.now();
+      const standing = (kind: 'warning' | 'chat' | 'area' | 'ban', until: number | null, revoked: boolean): NonNullable<AppealCase['standing']> => {
+        const end = kind === 'warning' ? null : until;
+        return { kind, until: end, state: revoked ? 'lifted' : end !== null && end <= now ? 'ended' : 'active' };
+      };
       let stands: AppealCase['standing'] = null;
-      if (appeal !== null && appeal.status === 'upheld') {
-        // The original, while it still stands (a moderator may have revoked it since).
-        stands = group !== null && group.revokedAt === undefined ? standing(row.kind, row.until) : null;
+      if (appeal !== null && (appeal.status === 'upheld' || appeal.status === 'revoked')) {
+        // The original: still in force (upheld), lifted by the decision (revoked), or lifted by a moderator after an upheld one.
+        stands = group === null ? null : standing(row.kind, row.until, appeal.status === 'revoked' || group.revokedAt !== undefined);
       } else if (appeal !== null && appeal.status === 'reduced' && appeal.replacementGroupId !== null) {
         const replacement = this.d.store.loadSanctionSubjectRow?.(appeal.replacementGroupId) ?? null;
         const kind = replacement?.kind;
-        stands = replacement !== null && replacement.revokedAt === undefined && (kind === 'warning' || kind === 'chat' || kind === 'area' || kind === 'ban') ? standing(kind, replacement.endsAt) : null;
+        stands = replacement !== null && (kind === 'warning' || kind === 'chat' || kind === 'area' || kind === 'ban') ? standing(kind, replacement.endsAt, replacement.revokedAt !== undefined) : null;
       }
       const settings = this.d.settings();
       return {

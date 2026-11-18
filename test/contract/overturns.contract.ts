@@ -141,6 +141,50 @@ export function overturnsContract(name: string, make: () => Store): void {
         expect(s.loadStrikes(0).map((r) => r.id)).toEqual(['below', 'other', 'above']);
       });
 
+      it('a report read never carries overturnedAt, before or after the overturn (the store keeps it for the reporter counts only)', () => {
+        const s = store();
+        decided(s, 'r1');
+        expect(s.loadReport('r1')).not.toHaveProperty('overturnedAt');
+        expect(s.recordOverturn(input({ reportId: 'r1', strikes: null }))).toBe(true);
+        expect(s.loadReport('r1')).not.toHaveProperty('overturnedAt');
+        expect(s.listReports({ limit: 10 }).every((r) => !('overturnedAt' in r))).toBe(true);
+        expect(outcome(s)).toMatchObject({ overturned: 1 });
+      });
+
+      it('reporterTally: an overturned report is counted as overturned, not as actioned; the split still adds up and the others are untouched', () => {
+        const s = store();
+        decided(s, 'r1', 'actioned');
+        decided(s, 'r2', 'actioned');
+        decided(s, 'r3', 'dismissed');
+        s.insertReport(report('r4'));
+        expect(s.reporterTally(['s_rep'])).toEqual({ open: 1, actioned: 2, dismissed: 1, badFaith: 0 });
+        expect(s.recordOverturn(input({ groupId: 'g1', reportId: 'r1', strikes: null }))).toBe(true);
+        expect(s.reporterTally(['s_rep'])).toEqual({ open: 1, actioned: 1, dismissed: 1, badFaith: 0, overturned: 1 });
+        expect(s.recordOverturn(input({ groupId: 'g2', reportId: 'r2', strikes: null }))).toBe(true);
+        expect(s.reporterTally(['s_rep'])).toEqual({ open: 1, actioned: 0, dismissed: 1, badFaith: 0, overturned: 2 });
+        // another reporter is untouched (control)
+        expect(s.reporterTally(['s_other'])).toEqual({ open: 0, actioned: 0, dismissed: 0, badFaith: 0 });
+      });
+
+      it('reporterTally: a second group naming an already-overturned report does not count it twice; sums over aliases', () => {
+        const s = store();
+        decided(s, 'r1', 'actioned');
+        decided(s, 'r2', 'actioned', { reporterSubject: 's_rep2' });
+        s.recordOverturn(input({ groupId: 'g1', reportId: 'r1', strikes: null }));
+        s.recordOverturn(input({ groupId: 'g2', at: NOW + 2 * DAY, reportId: 'r1', strikes: null }));
+        s.recordOverturn(input({ groupId: 'g3', reportId: 'r2', strikes: null }));
+        expect(s.reporterTally(['s_rep', 's_rep2'])).toEqual({ open: 0, actioned: 0, dismissed: 0, badFaith: 0, overturned: 2 });
+      });
+
+      it('reporterTally and reporterOutcomes agree on the overturned count', () => {
+        const s = store();
+        decided(s, 'r1');
+        decided(s, 'r2');
+        s.recordOverturn(input({ reportId: 'r2', strikes: null }));
+        expect(s.reporterTally(['s_rep']).overturned).toBe(outcome(s)?.overturned);
+        expect(s.reporterTally(['s_rep']).actioned).toBe(outcome(s)?.actioned);
+      });
+
       it('strikes: null marks no strike; reportId: null marks no report', () => {
         const s = store();
         s.insertStrike(strike('k1', NOW - 10));

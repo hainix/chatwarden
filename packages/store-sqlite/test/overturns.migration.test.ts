@@ -118,6 +118,19 @@ describe('migration 27 (release 0.2.1), block 1: overturn storage', () => {
     expect(ddl(db, 'kit_reports_by_reporter_outcome_overturned')).toMatch(/\(reporter_subject, created_at, status, bad_faith, reported_reason, overturned_at\)/);
   });
 
+  it('the migration 19 reporter index stays: the open-reports-by-reporter read names it (INDEXED BY), so dropping it would break that read (m7 check)', () => {
+    const db = memDb();
+    const store = openStore({ db });
+    expect(names(db, 'index')).toContain('kit_reports_by_reporter_outcome');
+    store.insertReport({
+      id: 'r1', createdAt: NOW, roomId: 'R', tags: {}, reporterSubject: 's_rep', reporterSeat: 'p1', reporterHandle: 'Rep', targetSubject: 's_t', targetSeat: 'p2', targetHandle: 'T',
+      category: 'spam', note: null, lineId: null, excerpt: [], people: [], status: 'open',
+    } as StoredReport);
+    expect(store.listOpenReportsByReporter?.(['s_rep'], 10).map((r) => r.id)).toEqual(['r1']);
+    // and the source keeps saying so, so a later change to either side shows in review
+    expect(String(MIGRATIONS.find((m) => m.version === 27)?.sql ?? '')).not.toMatch(/DROP INDEX kit_reports_by_reporter_outcome(?!_)/);
+  });
+
   it('the strike flag refuses a value other than 0 or 1', () => {
     const db = memDb();
     openStore({ db });

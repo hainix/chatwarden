@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { OverturnInput, SanctionRow, StoredReport } from '@chatwarden/core';
 import { openStore } from '../src/index.js';
+import { latestAutoChatStartSql, OVERTURN_FILTER_COUNTS_SQL, OVERTURN_TERM_COUNTS_SQL } from '../src/sqliteStore.js';
 import { seedWorld } from '../../../test/contract/privacy.contract.js';
 
 // What only the SQLite store can show about the overturn methods: the raw rows, the query plans, the chunked list and the erase's unlink of report ids.
@@ -113,22 +114,25 @@ describe('recordOverturn on SQLite', () => {
 });
 
 describe('the reads on SQLite', () => {
-  it('latestAutoChatStart is answered through the target index: no scan of kit_sanctions', () => {
+  it('latestAutoChatStart is answered through the target index by the planner itself: no index hint, no scan of kit_sanctions', () => {
     const { db, store } = open();
     for (let i = 0; i < 50; i++) store.insertSanctionGroup([sanction(`g${i}`, `M-${String(i).padStart(5, '0')}`, { value: `s_${i}`, startsAt: NOW + i })]);
-    const seen: string[] = [];
-    const real = db.prepare.bind(db);
-    db.prepare = ((text: string) => {
-      seen.push(text);
-      return real(text);
-    }) as typeof db.prepare;
-    expect(store.latestAutoChatStart?.(['s_3', 's_7'])).toBe(NOW + 7);
-    db.prepare = real as typeof db.prepare;
-    const sql = seen.find((t) => t.includes('MAX(starts_at)'));
-    expect(sql).toBeDefined();
-    const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all('s_3', 's_7').map((r) => String(r.detail)).join(' | ');
+    // The exported builder is what the store prepares: the plan is read from it, not from a copy.
+    const text = latestAutoChatStartSql(2);
+    expect(text).not.toMatch(/INDEXED\s+BY/i);
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${text}`).all('s_3', 's_7').map((r) => String(r.detail)).join(' | ');
     expect(plan).toMatch(/USING (COVERING )?INDEX kit_sanctions_by_target/);
     expect(plan).not.toMatch(/SCAN kit_sanctions/);
+    expect(plan).not.toMatch(/kit_sanctions_by_start/);
+    expect(store.latestAutoChatStart?.(['s_3', 's_7'])).toBe(NOW + 7);
+  });
+
+  it('latestAutoChatStart does not hard-fail when the target index is gone (a later migration or a host dropped it): it answers, only slower', () => {
+    const { db, store } = open();
+    store.insertSanctionGroup([sanction('g1', 'M-AAAAA', { value: 's_x', startsAt: NOW + 5 })]);
+    db.exec('DROP INDEX kit_sanctions_by_target');
+    expect(store.latestAutoChatStart?.(['s_x'])).toBe(NOW + 5);
+    expect(store.latestAutoChatStart?.(['nobody'])).toBeNull();
   });
 
   it('loadStrikes with the flag still reads through the time index and needs no sort', () => {
@@ -148,15 +152,11 @@ describe('the reads on SQLite', () => {
     expect(plan).not.toMatch(/TEMP B-TREE/);
   });
 
-  it('the term and filter counts are answered through their partial indexes', () => {
+  it('the term and filter counts are answered through their partial indexes (the exported statements)', () => {
     const { db } = open();
-    for (const [col, index] of [['term_id', 'kit_overturns_by_term'], ['filter_key', 'kit_overturns_by_filter']] as const) {
-      const plan = db
-        .prepare(`EXPLAIN QUERY PLAN SELECT ${col}, COUNT(*) AS n, MAX(at) AS last_at FROM kit_overturns WHERE ${col} IS NOT NULL AND at >= ? GROUP BY ${col} ORDER BY ${col}`)
-        .all(0)
-        .map((r) => String(r.detail))
-        .join(' | ');
-      expect(plan, col).toContain(index);
+    for (const [sql, index] of [[OVERTURN_TERM_COUNTS_SQL, 'kit_overturns_by_term'], [OVERTURN_FILTER_COUNTS_SQL, 'kit_overturns_by_filter']] as const) {
+      const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(0).map((r) => String(r.detail)).join(' | ');
+      expect(plan, sql).toContain(index);
     }
   });
 });

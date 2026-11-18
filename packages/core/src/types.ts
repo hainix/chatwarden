@@ -246,9 +246,15 @@ export interface SanctionListQuery {
 /** What {@link Store.reporterTally} counts over the reports a person filed. `badFaith` is the number marked bad faith. */
 export interface ReporterTally {
   open: number;
+  /** Reports actioned and still standing. One whose sanction was later overturned on appeal is counted in `overturned` instead (0.2.1). */
   actioned: number;
   dismissed: number;
   badFaith: number;
+  /**
+   * Actioned reports whose sanction was overturned on appeal (see {@link Store.recordOverturn}). Optional, and left off by the kit's own stores while it is none, so a 0.2.0 store and a
+   * 0.2.0 reading of this shape are unchanged; read an absent value as 0.
+   */
+  overturned?: number;
 }
 
 /**
@@ -821,11 +827,6 @@ export interface StoredReport {
    * extra row. Omitted or null reads as null. A store returns it on every record. The label may be a name a player chose: it goes with the report when the report is erased.
    */
   entity?: ReportEntity | null;
-  /**
-   * Epoch ms an appeal against the sanction this report's decision made was granted (see {@link Store.recordOverturn}), or null/omitted when none was. Written by
-   * `recordOverturn` only, never by a caller. The memory store keeps it on the record; the SQLite store keeps the column and reads it only inside `reporterOutcomes`.
-   */
-  overturnedAt?: number | null;
   status: 'open';
 }
 
@@ -1741,6 +1742,12 @@ export interface Store {
   listAppeals?(q: { status?: 'open' | 'decided' | 'all'; limit: number; after?: { createdAt: number; id: string } }): AppealRow[];
 
   /**
+   * OPTIONAL (0.2.1). The appeal filed for one sanction group, whatever its status (a `moot` one too), or null. One lookup by the unique group, so it never depends on how many appeals the
+   * person has (`listAppealsBy` stops at a limit and leaves moot ones out). Returns a copy. Without it the signed appeal link reads the person's newest appeals instead.
+   */
+  loadAppealByGroup?(groupId: string): AppealRow | null;
+
+  /**
    * OPTIONAL. How many appeals these subjects (a person's canonical id and its aliases) filed at or after `since`, whatever their status
    * (a moot or decided one still counts against the weekly cap), and the oldest `createdAt` among them. None: `{ count: 0, oldestAt: null }`.
    */
@@ -1822,7 +1829,7 @@ export interface Store {
    * OPTIONAL. Record that the sanction group `o.groupId` was overturned on appeal (revoked or reduced), in ONE transaction: write the overturn row (one per
    * group), mark every row of the group overturned (`overturnedAt` on `loadSanctionSubjectRow`; `loadAutoChatStarts` and `latestAutoChatStart` leave it out),
    * and, when `o.strikes` is set, mark the strikes of `o.aliases` with `at` in that window (inclusive) so `loadStrikes` leaves them out, and, when `o.reportId` is
-   * set, mark that report overturned (`reporterOutcomes` counts it in `overturned`, not `actioned`). Returns false, changing nothing else, when the group already
+   * set, mark that report overturned (`reporterOutcomes` and `reporterTally` count it in `overturned`, not `actioned`; no read of the report itself returns the mark). Returns false, changing nothing else, when the group already
    * has an overturn row. A group or report that is not there is not an error. Moves the change token.
    */
   recordOverturn?(o: OverturnInput): boolean;

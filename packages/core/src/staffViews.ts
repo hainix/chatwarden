@@ -290,14 +290,18 @@ export function sanctionByRef(store: Store, subjects: SubjectIndex, code: string
  * hint, so this is a signal for moderators and nothing more: it is never used to refuse a report.
  */
 export interface ReporterRecord {
+  /** Every report they filed, overturned ones included. */
   reports: number;
   open: number;
+  /** Reports actioned and still standing: one whose sanction was overturned on appeal is `overturned` instead, as in `accuracy` (0.2.1). */
   actioned: number;
   dismissed: number;
   badFaith: number;
   suspendedUntil: number | null;
   reasonMatched: number;
   reasonDecided: number;
+  /** How many of their actioned reports had the sanction overturned on appeal (all time). Left off while none, so the shape of 0.2.0 holds; read an absent value as 0. */
+  overturned?: number;
   /**
    * How their reports filed in the last 30 days turned out (see {@link ReporterAccuracy}): a ranking hint and a line on the case.
    * Null when the store cannot tell (it has no `reporterOutcomes`); otherwise always set, with `falseRate` null below the minimum
@@ -334,7 +338,7 @@ export function reporterRecord(
     if (subjects.canonical(m.reporter) === root) marks.push(m.actionedAt);
   }
   return {
-    reports: tally.open + tally.actioned + tally.dismissed,
+    reports: tally.open + tally.actioned + tally.dismissed + (tally.overturned ?? 0),
     open: tally.open,
     actioned: tally.actioned,
     dismissed: tally.dismissed,
@@ -342,6 +346,7 @@ export function reporterRecord(
     suspendedUntil: reporterSuspendedUntil(marks, limits),
     reasonMatched,
     reasonDecided,
+    ...(tally.overturned !== undefined && tally.overturned > 0 ? { overturned: tally.overturned } : {}),
     accuracy:
       store.reporterOutcomes === undefined
         ? null

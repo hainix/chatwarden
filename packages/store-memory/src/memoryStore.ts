@@ -105,6 +105,11 @@ export class MemoryStore implements Store {
   protected strikes: StrikeRow[] = [];
   /** The strike rows `recordOverturn` set aside (their restriction was overturned on appeal): `loadStrikes` leaves them out, the other reads show them. Keyed by the stored row. */
   protected overturnedStrikes = new WeakSet<StrikeRow>();
+  /**
+   * When an appeal overturned the decision a report led to, by report id: read only by `reporterOutcomes` and `reporterTally` (SQLite keeps the same fact in a column no report read returns, so a
+   * report read carries no overturn time in either store). An id of a deleted report stays here, inert: nothing reads a report that is not stored.
+   */
+  protected overturnedReports = new Map<string, number>();
   /** Reports in insertion order; `insertReport` enforces UNIQUE (reporter, target, room). */
   protected reports: StoredReportRow[] = [];
   /** The chat-filter hit counters by (day, key, action). */
@@ -833,7 +838,9 @@ export class MemoryStore implements Store {
     const wanted = new Set(reporters);
     for (const r of this.reports) {
       if (r.origin !== null || !wanted.has(r.reporterSubject)) continue;
-      tally[r.status] += 1;
+      // An actioned report whose sanction was overturned on appeal is not counted as actioned: it has its own count, left off while it is none (the 0.2.0 shape).
+      if (r.status === 'actioned' && this.overturnedReports.has(r.id)) tally.overturned = (tally.overturned ?? 0) + 1;
+      else tally[r.status] += 1;
       if (r.badFaith) tally.badFaith += 1;
     }
     return tally;
@@ -849,7 +856,7 @@ export class MemoryStore implements Store {
       const row = by.get(r.reporterSubject) ?? { reporter: r.reporterSubject, actioned: 0, noAction: 0, badFaith: 0, overturned: 0 };
       // An actioned report whose sanction was overturned on appeal is neither upheld nor dismissed: it has its own count.
       if (r.status === 'actioned') {
-        if (r.overturnedAt === undefined || r.overturnedAt === null) row.actioned += 1;
+        if (!this.overturnedReports.has(r.id)) row.actioned += 1;
         else row.overturned = (row.overturned ?? 0) + 1;
       }
       else if (r.badFaith) row.badFaith += 1;

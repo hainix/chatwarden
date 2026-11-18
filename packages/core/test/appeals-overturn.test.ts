@@ -162,6 +162,21 @@ describe('a decision made from a report', () => {
     expect(overturned(k)).toEqual([{ type: 'sanction.overturned', groupId: s.groupId, at: NOW, source: 'moderator' }]);
   });
 
+  it('the lifetime reporter record agrees with the accuracy: an overturned report is not "actioned" but counted as overturned, and the total still counts it', async () => {
+    const k = await kit();
+    const keep = await k.sanction({ key: 'key-keep' });
+    const gone = await k.sanction({ key: 'key-gone' });
+    const reporterOf = (id: string) => k.store.loadReport(id)?.reporterSubject as string;
+    const reporter = reporterOf(gone.reportId);
+    expect(reporterOf(keep.reportId)).toBe(reporter); // the world files every report from one reporter
+    expect(k.cw.reports.reporterRecord(reporter)).toMatchObject({ reports: 2, actioned: 2 });
+    expect(k.cw.reports.reporterRecord(reporter)).not.toHaveProperty('overturned');
+    expect(await decide(k, fileAppeal(k, gone), 'revoke')).toMatchObject({ ok: true });
+    const record = k.cw.reports.reporterRecord(reporter);
+    expect(record).toMatchObject({ reports: 2, open: 0, actioned: 1, dismissed: 0, overturned: 1 });
+    expect(record.accuracy).toMatchObject({ overturned: record.overturned, decided: record.actioned });
+  });
+
   it('a sanction from a filter report records filterKey = the report\'s originKey, and no term', async () => {
     const k = await appealsKit({ overrides: { filters: { links: { action: 'flag' } } } as never }, { perPlayerPerWeek: 20 });
     const ROOM = 'RFILTER';

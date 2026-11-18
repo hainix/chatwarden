@@ -10,6 +10,7 @@ export type MemoryAppealMethods = Required<
     Store,
     | 'insertAppeal'
     | 'loadAppeal'
+    | 'loadAppealByGroup'
     | 'listAppeals'
     | 'countAppealsBy'
     | 'countOpenAppeals'
@@ -87,6 +88,13 @@ class MemoryAppeals extends MemoryStore {
 
   loadAppeal(id: string): AppealRow | null {
     const row = this.appealState().rows.get(id);
+    return row === undefined ? null : structuredClone(row);
+  }
+
+  loadAppealByGroup(groupId: string): AppealRow | null {
+    const s = this.appealState();
+    const id = s.byGroup.get(groupId);
+    const row = id === undefined ? undefined : s.rows.get(id);
     return row === undefined ? null : structuredClone(row);
   }
 
@@ -262,16 +270,13 @@ class MemoryAppeals extends MemoryStore {
         });
       }
     }
-    if (o.reportId !== null) {
-      const report = this.reports.find((r) => r.id === o.reportId);
-      if (report !== undefined && (report.overturnedAt === undefined || report.overturnedAt === null)) {
-        const prev = report.overturnedAt;
-        report.overturnedAt = o.at;
-        this.undoWith(() => {
-          if (prev === undefined) delete report.overturnedAt;
-          else report.overturnedAt = prev;
-        });
-      }
+    if (o.reportId !== null && !this.overturnedReports.has(o.reportId) && this.reports.some((r) => r.id === o.reportId)) {
+      // The first overturn of a report keeps its time; nothing on the report record itself changes (a report read carries no overturn time, as on SQLite).
+      const id = o.reportId;
+      this.overturnedReports.set(id, o.at);
+      this.undoWith(() => {
+        this.overturnedReports.delete(id);
+      });
     }
     this.bump();
     return true;

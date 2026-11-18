@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import {
   AI_ACTED_COUNT_SQL,
+  APPEAL_BY_GROUP_SQL,
   AI_ACTION_COUNTS_SQL,
   AI_ACTION_DUE_SQL,
   AI_ACTION_INSERT_SQL,
@@ -293,6 +294,7 @@ describe('the desk statements (migration 26, the urgent-lane block) bind exactly
 describe('the overturn statements (migration 27) bind exactly as many values as they have placeholders', () => {
   it('each fixed statement has the number of plain ? placeholders its method binds', () => {
     const counts: Array<[string, string, number]> = [
+      ['APPEAL_BY_GROUP_SQL', APPEAL_BY_GROUP_SQL, 1],
       ['OVERTURN_INSERT_SQL', OVERTURN_INSERT_SQL, 7],
       ['OVERTURN_SANCTION_SQL', OVERTURN_SANCTION_SQL, 2],
       ['OVERTURN_REPORT_SQL', OVERTURN_REPORT_SQL, 2],
@@ -347,7 +349,8 @@ describe('the overturn statements (migration 27) bind exactly as many values as 
     store.overturnedTermCounts?.(0);
     store.overturnedFilterCounts?.(0);
     store.purgeOverturns?.(100);
-    for (const sql of [OVERTURN_INSERT_SQL, OVERTURN_SANCTION_SQL, OVERTURN_REPORT_SQL, OVERTURN_TERM_COUNTS_SQL, OVERTURN_FILTER_COUNTS_SQL, OVERTURN_PURGE_SQL, overturnStrikesSql(3), latestAutoChatStartSql(2)]) {
+    expect(store.loadAppealByGroup?.('g1')).toBeNull();
+    for (const sql of [APPEAL_BY_GROUP_SQL, OVERTURN_INSERT_SQL, OVERTURN_SANCTION_SQL, OVERTURN_REPORT_SQL, OVERTURN_TERM_COUNTS_SQL, OVERTURN_FILTER_COUNTS_SQL, OVERTURN_PURGE_SQL, overturnStrikesSql(3), latestAutoChatStartSql(2)]) {
       expect(known.has(sql), sql.slice(0, 60)).toBe(true);
     }
   });

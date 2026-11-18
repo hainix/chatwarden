@@ -269,7 +269,7 @@ describe('caseByLink after an appeal', () => {
     const c = (k.cw.appeals.caseByLink(token) as { ok: true; case: AppealCase }).case;
     expect(c.canAppeal).toBe(false);
     expect(c.appeal).toEqual({ status: 'upheld', createdAt: NOW, decidedAt: NOW + HOUR, reason: 'rule_applies' });
-    expect(c.standing).toEqual({ kind: 'chat', until: NOW + 6 * HOUR });
+    expect(c.standing).toEqual({ kind: 'chat', until: NOW + 6 * HOUR, state: 'active' });
   });
 
   it('after reduce: the standing is the replacement kind and end, and the link (its notice now withdrawn) still resolves, read-only', async () => {
@@ -283,7 +283,7 @@ describe('caseByLink after an appeal', () => {
       const c = (k.cw.appeals.caseByLink(token) as { ok: true; case: AppealCase }).case;
       expect(c.canAppeal).toBe(false);
       expect(c.appeal).toMatchObject({ status: 'reduced', reason: 'lighter_fits' });
-      expect(c.standing).toEqual({ kind: 'chat', until: NOW + 2 * HOUR });
+      expect(c.standing).toEqual({ kind: 'chat', until: NOW + 2 * HOUR, state: 'active' });
       // the notice shown is the original one, as it was given
       expect(c.notice).toMatchObject({ kind: 'ban', until: null, refCode: s.refCode });
     }
@@ -294,7 +294,7 @@ describe('caseByLink after an appeal', () => {
     const s = await filed(k, { kind: 'chat', durationMs: 6 * HOUR });
     await k.cw.appeals.decide(decision(s.appealId, { outcome: 'reduce', reasonCode: 'first_offence', to: { kind: 'warning', durationMs: null } }));
     const c = (k.cw.appeals.caseByLink(tokenOf(k.cw.appeals.link(s.noticeId))) as { ok: true; case: AppealCase }).case;
-    expect(c.standing).toEqual({ kind: 'warning', until: null });
+    expect(c.standing).toEqual({ kind: 'warning', until: null, state: 'active' });
   });
 
   it('after reduce with the replacement rows gone (retention): the standing is null and the case still answers', async () => {
@@ -310,7 +310,7 @@ describe('caseByLink after an appeal', () => {
     expect(c.appeal).toMatchObject({ status: 'reduced' });
   });
 
-  it('after revoke: the standing is null, the link still resolves, and the reason is the stored code', async () => {
+  it('after revoke: the standing is the original, lifted; the link still resolves, and the reason is the stored code', async () => {
     const k = await kit();
     const s = await filed(k, { kind: 'chat', durationMs: 6 * HOUR });
     const before = tokenOf(k.cw.appeals.link(s.noticeId));
@@ -318,7 +318,8 @@ describe('caseByLink after an appeal', () => {
     for (const token of [before, tokenOf(k.cw.appeals.link(s.noticeId))]) {
       const c = (k.cw.appeals.caseByLink(token) as { ok: true; case: AppealCase }).case;
       expect(c.canAppeal).toBe(false);
-      expect(c.standing).toBeNull();
+      // The group exists (revoked by the decision), so the standing says what it was and that it is lifted: never null.
+      expect(c.standing).toEqual({ kind: 'chat', until: NOW + 6 * HOUR, state: 'lifted' });
       expect(c.appeal).toMatchObject({ status: 'revoked', reason: 'mistake' });
     }
   });
@@ -345,6 +346,144 @@ describe('caseByLink after an appeal', () => {
       const c = (k.cw.appeals.caseByLink(tokenOf(k.cw.appeals.link(s.noticeId))) as { ok: true; case: AppealCase }).case;
       expect(c.appeal).toMatchObject({ status: 'upheld', reason: null });
     }
+  });
+});
+
+describe('the standing is the sanction as it stands now, in every decided case', () => {
+  const caseOf = (k: AppealsKit, token: string) => (k.cw.appeals.caseByLink(token) as { ok: true; case: AppealCase }).case;
+
+  it('upheld, then a moderator revokes the original later: standing is the original, lifted (it was null)', async () => {
+    const k = await kit();
+    const s = await filed(k, { kind: 'ban', durationMs: null });
+    const token = tokenOf(k.cw.appeals.link(s.noticeId));
+    await k.cw.appeals.decide(decision(s.appealId, { outcome: 'uphold', reasonCode: 'rule_applies' }));
+    expect(caseOf(k, token).standing).toEqual({ kind: 'ban', until: null, state: 'active' });
+    await k.cw.sanctions.revoke(s.groupId, 'mod_cy', 'lifted later');
+    const c = caseOf(k, token);
+    expect(c.standing).toEqual({ kind: 'ban', until: null, state: 'lifted' });
+    expect(c.appeal).toMatchObject({ status: 'upheld' });
+    expect(c.canAppeal).toBe(false);
+  });
+
+  it('upheld, then its end passes: standing is the original, ended', async () => {
+    const k = await kit({ linkTtlMs: 365 * DAY });
+    const s = await filed(k, { kind: 'chat', durationMs: 6 * HOUR });
+    const token = tokenOf(k.cw.appeals.link(s.noticeId));
+    await k.cw.appeals.decide(decision(s.appealId, { outcome: 'uphold', reasonCode: 'rule_applies' }));
+    k.clock.t = NOW + 7 * HOUR;
+    expect(caseOf(k, token).standing).toEqual({ kind: 'chat', until: NOW + 6 * HOUR, state: 'ended' });
+    // the boundary: a millisecond before the end it is active, at the end instant it has ended
+    k.clock.t = NOW + 6 * HOUR - 1;
+    expect(caseOf(k, token).standing).toMatchObject({ state: 'active' });
+    k.clock.t = NOW + 6 * HOUR;
+    expect(caseOf(k, token).standing).toMatchObject({ state: 'ended' });
+  });
+
+  it('reduced, then the replacement runs out: its kind and end with state ended', async () => {
+    const k = await kit({ linkTtlMs: 365 * DAY });
+    const s = await filed(k, { kind: 'ban', durationMs: null });
+    const token = tokenOf(k.cw.appeals.link(s.noticeId));
+    await k.cw.appeals.decide(decision(s.appealId, { outcome: 'reduce', reasonCode: 'lighter_fits', to: { kind: 'chat', durationMs: 2 * HOUR } }));
+    expect(caseOf(k, token).standing).toEqual({ kind: 'chat', until: NOW + 2 * HOUR, state: 'active' });
+    k.clock.t = NOW + 3 * HOUR;
+    expect(caseOf(k, token).standing).toEqual({ kind: 'chat', until: NOW + 2 * HOUR, state: 'ended' });
+  });
+
+  it('reduced, then a moderator revokes the replacement: its kind and end with state lifted (it was null)', async () => {
+    const k = await kit();
+    const s = await filed(k, { kind: 'ban', durationMs: null });
+    const token = tokenOf(k.cw.appeals.link(s.noticeId));
+    const res = await k.cw.appeals.decide(decision(s.appealId, { outcome: 'reduce', reasonCode: 'lighter_fits', to: { kind: 'chat', durationMs: 2 * HOUR } }));
+    await k.cw.sanctions.revoke((res as { replacementGroupId: string }).replacementGroupId, 'mod_cy', 'lifted later');
+    expect(caseOf(k, token).standing).toEqual({ kind: 'chat', until: NOW + 2 * HOUR, state: 'lifted' });
+  });
+
+  it('reduced to a warning stays active however long ago (a warning has no end)', async () => {
+    const k = await kit({ linkTtlMs: 365 * DAY });
+    const s = await filed(k, { kind: 'chat', durationMs: 6 * HOUR });
+    const token = tokenOf(k.cw.appeals.link(s.noticeId));
+    await k.cw.appeals.decide(decision(s.appealId, { outcome: 'reduce', reasonCode: 'first_offence', to: { kind: 'warning', durationMs: null } }));
+    k.clock.t = NOW + 10 * DAY;
+    expect(caseOf(k, token).standing).toEqual({ kind: 'warning', until: null, state: 'active' });
+  });
+
+  it('no decision yet (none, or still open): standing is null; the group row gone: null (control)', async () => {
+    const k = await kit();
+    const a = await k.sanction({ key: 'k-none' });
+    expect(caseOf(k, tokenOf(k.cw.appeals.link(a.noticeId))).standing).toBeNull();
+    const b = await filed(k, { key: 'k-open' });
+    expect(caseOf(k, tokenOf(k.cw.appeals.link(b.noticeId))).standing).toBeNull();
+    const c = await filed(k, { key: 'k-gone' });
+    await k.cw.appeals.decide(decision(c.appealId, { outcome: 'uphold', reasonCode: 'rule_applies' }));
+    const token = tokenOf(k.cw.appeals.link(c.noticeId));
+    const real = k.store.loadSanctionSubjectRow.bind(k.store);
+    k.store.loadSanctionSubjectRow = (id: string) => (id === c.groupId ? null : real(id));
+    expect(caseOf(k, token).standing).toBeNull();
+  });
+});
+
+describe('the appeal of a notice is found directly, not among the newest 50 of the person', () => {
+  /** An old appeal filed through the real path, then 55 newer ones of the same person written straight into the store. */
+  async function crowded() {
+    const k = await kit({}, {});
+    const s = await filed(k, { key: 'k-crowd', kind: 'chat', durationMs: 6 * HOUR });
+    const subject = k.store.loadAppeal(s.appealId)!.subject;
+    for (let i = 0; i < 55; i++) {
+      k.store.insertAppeal({
+        id: `bulk-${i}`, subject, groupId: `bulk-g-${i}`, noticeId: `bulk-n-${i}`, reportId: null, rule: '2', kind: 'chat', statement: 'x',
+        status: 'open', createdAt: NOW + 1000 + i, decidedAt: null, decidedBy: null, decisionReason: null, replacementGroupId: null,
+      });
+    }
+    return { k, s, subject };
+  }
+
+  it('canAppeal is false and the open appeal shows, although 55 newer appeals of the person exist', async () => {
+    const { k, s, subject } = await crowded();
+    expect(k.store.listAppealsBy([subject], 50).some((r) => r.id === s.appealId)).toBe(false); // the premise
+    const c = (k.cw.appeals.caseByLink(tokenOf(k.cw.appeals.link(s.noticeId))) as { ok: true; case: AppealCase }).case;
+    expect(c.canAppeal).toBe(false);
+    expect(c.appeal).toMatchObject({ status: 'open' });
+  });
+
+  it('a decided old appeal keeps its read-only view and its standing', async () => {
+    const { k, s } = await crowded();
+    const token = tokenOf(k.cw.appeals.link(s.noticeId));
+    await k.cw.appeals.decide(decision(s.appealId, { outcome: 'uphold', reasonCode: 'rule_applies' }));
+    const c = (k.cw.appeals.caseByLink(token) as { ok: true; case: AppealCase }).case;
+    expect(c.appeal).toMatchObject({ status: 'upheld', reason: 'rule_applies' });
+    expect(c.standing).toEqual({ kind: 'chat', until: NOW + 6 * HOUR, state: 'active' });
+  });
+
+  it('the link of a revoked old appeal still resolves (decided view) after the notice was withdrawn', async () => {
+    const { k, s } = await crowded();
+    const token = tokenOf(k.cw.appeals.link(s.noticeId));
+    await k.cw.appeals.decide(decision(s.appealId, { outcome: 'revoke', reasonCode: 'mistake' }));
+    expect(k.cw.appeals.caseByLink(token)).toMatchObject({ ok: true });
+    expect(k.cw.appeals.link(s.noticeId)).not.toBeNull();
+  });
+
+  it('filing by the link of the crowded notice answers already_appealed, as the case said', async () => {
+    const { k, s } = await crowded();
+    const token = tokenOf(k.cw.appeals.link(s.noticeId));
+    expect(k.cw.appeals.fileByLink(token, { statement: 'again' })).toEqual({ ok: false, refused: 'already_appealed' });
+  });
+
+  it('a moot appeal of a live notice is not a link: the moot row is seen through the direct lookup', async () => {
+    const k = await kit();
+    const s = await filed(k, { key: 'k-moot', kind: 'ban', durationMs: null });
+    const token = tokenOf(k.cw.appeals.link(s.noticeId));
+    k.store.closeAppealsForGroup(s.groupId, 'x', NOW); // moot, while the notice itself is untouched and live
+    expect(k.store.loadAppeal(s.appealId)?.status).toBe('moot');
+    expect(k.cw.appeals.caseByLink(token)).toEqual(INVALID);
+    expect(k.cw.appeals.link(s.noticeId)).toBeNull();
+  });
+
+  it('a store without loadAppealByGroup is read the old way (the newest appeals of the person) and still answers', async () => {
+    const k = await kit();
+    const s = await filed(k, { key: 'k-old' });
+    (k.store as unknown as { loadAppealByGroup?: unknown }).loadAppealByGroup = undefined;
+    const c = (k.cw.appeals.caseByLink(tokenOf(k.cw.appeals.link(s.noticeId))) as { ok: true; case: AppealCase }).case;
+    expect(c).toMatchObject({ canAppeal: false, appeal: { status: 'open' } });
   });
 });
 

@@ -364,8 +364,12 @@ export interface AppealCase {
   canAppeal: boolean;
   /** The appeal filed for this sanction, if any. `reason` is the fixed reason code of a decision (null while open, and for a decision that kept none). */
   appeal: { status: 'open' | 'upheld' | 'reduced' | 'revoked'; createdAt: number; decidedAt: number | null; reason: AppealReasonCode | null } | null;
-  /** The sanction as it stands after the appeal: the original (upheld), the replacement (reduced), or null (open, revoked). */
-  standing: { kind: 'warning' | 'chat' | 'area' | 'ban'; until: number | null } | null;
+  /**
+   * The sanction as it stands NOW after a decided appeal: the original (upheld, or revoked), or the replacement (reduced), with its `state`: `active` (in force), `ended` (its end
+   * has passed) or `lifted` (revoked, by the decision itself or by a moderator since). Null while no decision exists (none, or open), and when the row it would describe is gone.
+   * It is never null for a decided appeal whose sanction row exists: a lifted or ended sanction says so instead of reading as nothing.
+   */
+  standing: { kind: 'warning' | 'chat' | 'area' | 'ban'; until: number | null; state: 'active' | 'ended' | 'lifted' } | null;
   /** When the link stops working (epoch ms). */
   expiresAt: number;
   /** Whether the person is also told of the outcome by email (the setting; the game sends it). */

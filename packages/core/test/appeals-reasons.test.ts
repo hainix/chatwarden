@@ -155,6 +155,31 @@ describe('the order of the checks', () => {
     expect(await k.cw.appeals.decide(decision(s.appealId, 'uphold', { actor: 'x y', reasonCode: 'mistake' }))).toEqual({ ok: false, error: 'invalid' });
   });
 
+  it('a malformed or stray `to` is invalid whatever the code says: the outcome shape comes before the reason code', async () => {
+    const k = await appealsKit();
+    const s = await filed(k);
+    const bad = 'mistake'; // not offered for reduce, uphold or (as a code) a malformed decision
+    expect(await k.cw.appeals.decide(decision(s.appealId, 'reduce', { to: { kind: 'nope', durationMs: 1 }, reasonCode: bad }))).toEqual({ ok: false, error: 'invalid' });
+    expect(await k.cw.appeals.decide(decision(s.appealId, 'reduce', { to: { kind: 'warning', durationMs: 5 }, reasonCode: bad }))).toEqual({ ok: false, error: 'invalid' });
+    expect(await k.cw.appeals.decide(decision(s.appealId, 'reduce', { to: null, reasonCode: bad }))).toEqual({ ok: false, error: 'invalid' });
+    expect(await k.cw.appeals.decide(decision(s.appealId, 'uphold', { to: TO, reasonCode: bad }))).toEqual({ ok: false, error: 'invalid' });
+    expect(await k.cw.appeals.decide(decision(s.appealId, 'revoke', { to: TO, reasonCode: 'rule_applies' }))).toEqual({ ok: false, error: 'invalid' });
+    // controls: the same decisions with a good shape and the bad code are invalid_reason; with the good code they are decided
+    expect(await k.cw.appeals.decide(decision(s.appealId, 'reduce', { reasonCode: bad }))).toEqual({ ok: false, error: 'invalid_reason' });
+    expect(await k.cw.appeals.decide(decision(s.appealId, 'uphold', { reasonCode: bad }))).toEqual({ ok: false, error: 'invalid_reason' });
+    expect((await k.cw.appeals.decide(decision(s.appealId, 'reduce', { reasonCode: 'lighter_fits' }))).ok).toBe(true);
+  });
+
+  it('a hostile reasonCode getter is read once, and only after the whole shape passed', async () => {
+    const k = await appealsKit();
+    const s = await filed(k);
+    let reads = 0;
+    const d = decision(s.appealId, 'reduce', { to: { kind: 'bogus', durationMs: 1 } });
+    Object.defineProperty(d, 'reasonCode', { get: () => (reads++, 'lighter_fits'), enumerable: true });
+    expect(await k.cw.appeals.decide(d)).toEqual({ ok: false, error: 'invalid' });
+    expect(reads).toBe(0);
+  });
+
   it('a bad code on an already-decided appeal is invalid_reason, not already_decided', async () => {
     const k = await appealsKit();
     const s = await filed(k);

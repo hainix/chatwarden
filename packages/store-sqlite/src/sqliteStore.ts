@@ -251,11 +251,12 @@ export const OVERTURN_PURGE_SQL = 'DELETE FROM kit_overturns WHERE at < ?';
 export const overturnStrikesSql = (n: number): string =>
   `UPDATE kit_strikes SET overturned = 1 WHERE subject_id IN (${Array.from({ length: n }, () => '?').join(', ')}) AND at >= ? AND at <= ?`;
 /**
- * The latest start of an automatic chat sanction not overturned, over `n` subject ids. Binds: the ids. Left to itself SQLite answers MAX(starts_at) by walking
- * kit_sanctions_by_start across every subject row; the person's own rows are few, so it is told to seek them through the target index.
+ * The latest start of an automatic chat sanction not overturned, over `n` subject ids. Binds: the ids. A bare `MAX(starts_at)` makes SQLite walk kit_sanctions_by_start
+ * across every subject row; `starts_at + 0` (the idiom EXPORT_SANCTIONS_SQL uses for the same reason) takes that index out of play, so the planner seeks the person's own
+ * rows through kit_sanctions_by_target. No index is named: a dropped or renamed index costs speed, never the answer.
  */
 export const latestAutoChatStartSql = (n: number): string =>
-  `SELECT MAX(starts_at) AS latest FROM kit_sanctions INDEXED BY kit_sanctions_by_target
+  `SELECT MAX(starts_at + 0) AS latest FROM kit_sanctions
    WHERE kind = 'chat' AND source = 'auto_filter' AND target_type = 'subject' AND overturned_at IS NULL
      AND target_value IN (${Array.from({ length: n }, () => '?').join(', ')})`;
 
@@ -369,6 +370,9 @@ function toNoticeRow(r: Record<string, unknown>): NoticeRow {
 
 const APPEAL_COLUMNS =
   'id, subject_id, group_id, notice_id, report_id, rule, kind, statement, status, created_at, decided_at, decided_by, decision_reason, replacement_group_id, reason_code';
+
+/** The appeal of one sanction group, whatever its status (moot too). Served by the unique index kit_appeals_by_group. Binds: the group. */
+export const APPEAL_BY_GROUP_SQL = `SELECT ${APPEAL_COLUMNS} FROM kit_appeals WHERE group_id = ?`;
 
 function toAppealRow(r: Record<string, unknown>): AppealRow {
   return {
@@ -1749,6 +1753,11 @@ export class SqliteStore implements Store, TermStore {
     return r === undefined ? null : toAppealRow(r);
   }
 
+  loadAppealByGroup(groupId: string): AppealRow | null {
+    const r = this.transaction(() => this.db.prepare(APPEAL_BY_GROUP_SQL).get(groupId));
+    return r === undefined ? null : toAppealRow(r);
+  }
+
   listAppeals(q: { status?: 'open' | 'decided' | 'all'; limit: number; after?: { createdAt: number; id: string } }): AppealRow[] {
     const n = Math.floor(q.limit);
     const limit = Number.isFinite(n) ? Math.min(200, Math.max(1, n)) : 1;
@@ -2592,11 +2601,13 @@ export class SqliteStore implements Store, TermStore {
     const people = reporters.filter(isPersonReporter);
     if (people.length === 0) return tally;
     const marks = people.map(() => '?').join(', ');
-    const sql = `SELECT status, bad_faith, COUNT(*) AS n FROM kit_reports WHERE reporter_subject IN (${marks}) GROUP BY status, bad_faith`;
+    const sql = `SELECT status, bad_faith, overturned_at IS NOT NULL AS ov, COUNT(*) AS n FROM kit_reports WHERE reporter_subject IN (${marks}) GROUP BY status, bad_faith, ov`;
     for (const r of this.transaction(() => this.db.prepare(sql).all(...people))) {
       const n = Number(r.n);
       const status = String(r.status);
-      if (status === 'open' || status === 'actioned' || status === 'dismissed') tally[status] += n;
+      // An actioned report whose sanction was overturned on appeal is counted as overturned, not actioned (the key is left off while there is none: the 0.2.0 shape).
+      if (status === 'actioned' && Number(r.ov) === 1) tally.overturned = (tally.overturned ?? 0) + n;
+      else if (status === 'open' || status === 'actioned' || status === 'dismissed') tally[status] += n;
       if (Number(r.bad_faith) === 1) tally.badFaith += n;
     }
     return tally;

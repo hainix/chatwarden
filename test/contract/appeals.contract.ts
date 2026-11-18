@@ -285,6 +285,51 @@ export function appealsContract(name: string, make: () => Store): void {
       });
     });
 
+    // OPTIONAL beyond the rest (0.2.1): a store without it is read the old way (the newest few appeals of the person), so it skips.
+    const byGroup = make().loadAppealByGroup === undefined ? describe.skip : describe;
+    byGroup('loadAppealByGroup', () => {
+      const withGroup = (): Required<Pick<Store, 'loadAppealByGroup'>> & Appeals & Store => {
+        const s = store();
+        if (typeof s.loadAppealByGroup !== 'function') throw new Error('this store has no loadAppealByGroup');
+        return s as Required<Pick<Store, 'loadAppealByGroup'>> & Appeals & Store;
+      };
+
+      it('finds the appeal of a group whatever its status (open, decided and moot), and null for a group with none or an unknown one', () => {
+        const s = withGroup();
+        const open = appeal({ groupId: 'g-open' });
+        const decided = appeal({ groupId: 'g-decided' });
+        const moot = appeal({ groupId: 'g-moot' });
+        for (const r of [open, decided, moot]) s.insertAppeal(r);
+        s.decideAppeal(decided.id, decide({ status: 'revoked' }));
+        s.closeAppealsForGroup('g-moot', 'x', NOW);
+        expect(s.loadAppealByGroup('g-open')).toEqual(open);
+        expect(s.loadAppealByGroup('g-decided')).toMatchObject({ id: decided.id, status: 'revoked' });
+        expect(s.loadAppealByGroup('g-moot')).toMatchObject({ id: moot.id, status: 'moot' });
+        expect(s.loadAppealByGroup('g-none')).toBeNull();
+        expect(s.loadAppealByGroup('')).toBeNull();
+      });
+
+      it('is not limited by how many appeals the person has, answers exactly the group asked for, and returns a copy', () => {
+        const s = withGroup();
+        const first = appeal({ subject: 's_many', groupId: 'g-first', createdAt: NOW });
+        s.insertAppeal(first);
+        for (let i = 0; i < 60; i++) s.insertAppeal(appeal({ subject: 's_many', groupId: `g-more-${i}`, createdAt: NOW + 1000 + i }));
+        expect(s.listAppealsBy(['s_many'], 50).some((r) => r.id === first.id)).toBe(false);
+        const got = s.loadAppealByGroup('g-first');
+        expect(got?.id).toBe(first.id);
+        (got as AppealRow).statement = 'changed';
+        expect(s.loadAppealByGroup('g-first')?.statement).toBe(first.statement);
+        expect(s.loadAppealByGroup('g-more-59')?.groupId).toBe('g-more-59');
+      });
+
+      it('agrees with loadAppeal on the same row', () => {
+        const s = withGroup();
+        const row = appeal({ groupId: 'g-same' });
+        s.insertAppeal(row);
+        expect(s.loadAppealByGroup('g-same')).toEqual(s.loadAppeal(row.id));
+      });
+    });
+
     describe('countAppealsBy and countOpenAppeals', () => {
       it('countAppealsBy counts across a person\'s aliases in the window and returns the oldest time', () => {
         const s = store();

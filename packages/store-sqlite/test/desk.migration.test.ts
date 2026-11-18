@@ -98,13 +98,23 @@ describe('migration 26, the desk block, from a version-25 database', () => {
     expect(names(db, 'index')).toContain('kit_reports_by_reporter_outcome_overturned');
     expect(names(db, 'index')).not.toContain('kit_reports_by_reporter_outcome_reason');
     expect(String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_reports_by_reporter_outcome_overturned'").get()?.sql)).toMatch(/\(reporter_subject, created_at, status, bad_faith, reported_reason, overturned_at\)/);
+    // The plan of the statement the store really prepares for the read, not a copy of it.
+    const seen: string[] = [];
+    const real = db.prepare.bind(db);
+    db.prepare = ((text: string) => {
+      seen.push(text);
+      return real(text);
+    }) as typeof db.prepare;
+    expect(store.reporterOutcomes?.(['s_a'], 0)).toEqual([]);
+    db.prepare = real as typeof db.prepare;
+    const sql = seen.find((t) => t.includes('FROM kit_reports') && t.includes('GROUP BY reporter_subject'));
+    expect(sql).toBeDefined();
     const plan = db
-      .prepare("EXPLAIN QUERY PLAN SELECT reporter_subject, SUM(status = 'actioned' AND overturned_at IS NULL), SUM(status = 'actioned' AND overturned_at IS NOT NULL) FROM kit_reports WHERE reporter_subject IN (?) AND created_at >= ? AND status != 'open' AND (reported_reason IS NULL OR reported_reason <> 'welfare') GROUP BY reporter_subject")
+      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
       .all('s_a', 0)
       .map((r) => String(r.detail))
       .join(' | ');
-    expect(plan).toMatch(/COVERING INDEX kit_reports_by_reporter_outcome_overturned/);
-    expect(store.reporterOutcomes?.(['s_a'], 0)).toEqual([]);
+    expect(plan).toMatch(/COVERING INDEX kit_reports_by_reporter_outcome_overturned \(/);
   });
 
   it('the comment table has the spec columns, the (report_id, at, id) index and a kind CHECK that refuses an unknown kind', () => {

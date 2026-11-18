@@ -907,7 +907,8 @@ CREATE INDEX kit_pace_by_who ON kit_pace (who);
     //   second overturn is refused): the time, the person, where the sanction came from, the term, the filter key and the report, for counts by term and by filter and for the person's
     //   export; it holds no text. Its indexes serve the counts by term and by filter (partial: a row with none is not indexed), the export and the erase (by person), and the
     //   retention delete (by time). `kit_reports_by_reporter_outcome_overturned` replaces `kit_reports_by_reporter_outcome_reason` with `overturned_at` added, so the reporter read is
-    //   still answered from one covering index.
+    //   still answered from one covering index. The migration 19 index `kit_reports_by_reporter_outcome` STAYS: it is now a left prefix of the new one, but the open-reports-by-reporter
+    //   read names it (`INDEXED BY`), so dropping it would break that read (a test pins both).
     // Block 2 (appeals landing, fixed reasons): `kit_appeals.reason_code`, the fixed reason a decision gave (a code from a closed list of seven, kept in core: no CHECK here, so a later
     //   code needs no migration). NULL on every existing appeal and on one decided without a code; the free-text `decision_reason` is untouched and stays private.
     version: 27,
