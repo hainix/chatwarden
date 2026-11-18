@@ -47,6 +47,9 @@ export const enChat = {
   // A room's mode (a lock or an emergency) and a new account's pause. The status line above the input and the refusal of a line say the same words.
   'player.chat.locked': 'Chat is locked until {time}.',
   'player.chat.lockedNoEnd': 'Chat is locked right now.',
+  // The same lock, for a viewer who can still post (staff): the lock is for the players, so the line must not sit above an input that works.
+  'player.chat.lockedForPlayers': 'Chat is locked for players until {time}.',
+  'player.chat.lockedForPlayersNoEnd': 'Chat is locked for players right now.',
   'player.chat.modeEmergency': 'Slow mode is on.',
   'player.chat.readOnlyNew': 'New accounts can only read right now.',
   'player.chat.probation': 'New accounts chat a little slower. You can send another message in {left}.',

@@ -95,7 +95,9 @@ describe('a locked room', () => {
     await make();
     w.real.rooms.setMode(ROOM, 'locked', { forMs: 30 * MIN });
     const { transport } = await join('modmo', { who: veteran('modmo'), member: { staff: true } });
-    expect(screen.getByText(/Chat is locked until/)).toBeInTheDocument();
+    // Not "Chat is locked until ...": that would sit above an input that works. It says whom the lock is for.
+    expect(screen.getByText(`Chat is locked for players until ${clockText(w.clock.t + 30 * MIN)}.`)).toBeInTheDocument();
+    expect(screen.queryByText(/^Chat is locked until/)).toBeNull();
     expect(input()).not.toHaveAttribute('aria-disabled', 'true');
     expect(input()).not.toHaveAttribute('readonly');
     fireEvent.change(input(), { target: { value: 'a staff line' } });
@@ -104,6 +106,34 @@ describe('a locked room', () => {
     });
     await waitFor(() => expect(transport.sent).toEqual(['a staff line']));
     expect(within(screen.getByRole('log', { name: 'Chat' })).getByText('a staff line')).toBeInTheDocument();
+  });
+
+  it('a staff viewer in a lock is told it is for players, and a player in the same room still reads the plain line (control)', async () => {
+    await make();
+    w.real.rooms.setMode(ROOM, 'locked', { forMs: 30 * MIN });
+    const mod = await join('modmo', { who: veteran('modmo'), member: { staff: true } });
+    expect(screen.queryByText(/Chat is locked until/)).toBeNull();
+    expect(screen.getByText(/Chat is locked for players/)).toBeInTheDocument();
+    mod.unmount();
+    await join('snerp', { who: veteran('snerp') });
+    expect(screen.getByText(/^Chat is locked until/)).toBeInTheDocument();
+    expect(screen.queryByText(/locked for players/)).toBeNull();
+  });
+
+  it('a staff viewer is not told the room is locked "for players" once it is back to normal, and an emergency line is the same for staff', async () => {
+    await make();
+    w.real.rooms.setMode(ROOM, 'emergency', { forMs: 30 * MIN });
+    await join('modmo', { who: veteran('modmo'), member: { staff: true } });
+    expect(screen.getByText('Slow mode is on.')).toBeInTheDocument();
+    expect(screen.queryByText(/locked/)).toBeNull();
+    await act(async () => {
+      w.real.rooms.setMode(ROOM, 'locked', { forMs: 30 * MIN });
+    });
+    await waitFor(() => expect(screen.getByText(/Chat is locked for players/)).toBeInTheDocument());
+    await act(async () => {
+      w.real.rooms.setMode(ROOM, 'normal');
+    });
+    await waitFor(() => expect(screen.queryByText(/locked/)).toBeNull());
   });
 
   it('the history is still shown in a locked room', async () => {

@@ -299,11 +299,13 @@ export function ChatBox(props: ChatBoxProps) {
   // The room's mode now: one that has run out by the server's clock is normal even if the frame that says so is still on its way.
   const mode = state.mode.kind !== 'normal' && state.mode.until !== null && serverNow >= state.mode.until ? ({ kind: 'normal', until: null } as const) : state.mode;
   const readOnlyByMode = mode.kind === 'normal' ? null : state.readOnly;
+  // A viewer who can still post in a lock (staff: the server sends no `readOnly` for them) is told the lock is for players, not "Chat is locked" above an input that works.
+  const canPostInLock = state.readOnly === null;
   const modeText =
     mode.kind === 'locked'
       ? mode.until === null
-        ? t('player.chat.lockedNoEnd')
-        : t('player.chat.locked', { time: clockText(mode.until, ui.locale, ui.timeZone) })
+        ? t(canPostInLock ? 'player.chat.lockedForPlayersNoEnd' : 'player.chat.lockedNoEnd')
+        : t(canPostInLock ? 'player.chat.lockedForPlayers' : 'player.chat.locked', { time: clockText(mode.until, ui.locale, ui.timeZone) })
       : mode.kind === 'emergency'
         ? [t('player.chat.modeEmergency'), ...(readOnlyByMode === 'new_account' ? [t('player.chat.readOnlyNew')] : [])].join(' ')
         : '';
