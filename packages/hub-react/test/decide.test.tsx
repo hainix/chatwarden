@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { renderHub } from './render.js';
 import { DAY, hubWorld } from './world.js';
 import type { HubWorld, RichLine } from './world.js';
+import { ANNOUNCE_MS } from '../src/preview/usePreview.js';
 import type { TransportRequest } from '../src/transport.js';
 
 // The decision panel against the real routes: what it offers, what it refuses before sending, what it sends, and what it does
@@ -1235,5 +1236,70 @@ describe('DecisionPanel: keyboard', () => {
     await user.click(verdict('Bad faith'));
     await user.type(within(panel()).getByRole('textbox', { name: 'Evidence for bad faith' }), 'e{Enter}');
     expect(decides(w)).toHaveLength(0);
+  });
+});
+
+describe('DecisionPanel: a late preview announcement never replaces the decided one', () => {
+  // The preview announces a change after it has been still for ANNOUNCE_MS, and its form stays mounted (hidden) once the decision is sent: a change made just before Decide
+  // used to land its sentence in the live region after "Decided. The report is closed." (seen in CI as a flaky failure of the sending test).
+  const lateMs = ANNOUNCE_MS + 400;
+  const wait = (ms: number): Promise<void> => act(async () => void (await new Promise((resolve) => setTimeout(resolve, ms))));
+
+  it('a preview change made just before Decide announces after the decision is closed: the decided text stays', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich({ lines: TALK });
+    const { user } = await ready(w, f.id);
+    await user.click(verdict('Fair'));
+    const group = await addAction(user, 1, { what: 'Warning', rule: ruleText(w, 2) });
+    await reason(user);
+    // The last change to the plan, a moment before Decide: its preview sentence is still waiting out its 600 ms.
+    await pick(user, within(group).getByLabelText('What happens'), /^Note/);
+    await decide(user);
+    await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
+    await wait(lateMs);
+    expect(live()).toHaveTextContent('Decided. The report is closed.');
+    expect(live()).not.toHaveTextContent('Preview updated');
+  });
+
+  it('a preview change that comes due while the decision is held (before it is sent) is not announced, and the decided text follows', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich({ lines: TALK });
+    const { user } = await ready(w, f.id);
+    await user.click(verdict('Fair'));
+    const group = await addAction(user, 1, { what: 'Warning', rule: ruleText(w, 2) });
+    await reason(user);
+    await pick(user, within(group).getByLabelText('What happens'), /^Note/);
+    await user.click(decideButton());
+    await within(panel()).findByText('Decision queued.', { selector: 'strong' });
+    const heldText = live().textContent;
+    await wait(lateMs);
+    // Whatever the live region said when the decision was queued is what it still says: the preview's sentence for the change made just before Decide is dropped.
+    expect(live().textContent).toBe(heldText);
+    await sendNow();
+    await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
+    await wait(lateMs);
+    expect(live()).toHaveTextContent('Decided. The report is closed.');
+  });
+
+  it('control: a preview change before any decision is still announced', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich({ lines: TALK });
+    const { user } = await ready(w, f.id);
+    await user.click(verdict('Fair'));
+    await addAction(user, 1, { what: 'Warning', rule: ruleText(w, 2) });
+    await waitFor(() => expect(live()).toHaveTextContent(/Preview updated: they see /), { timeout: lateMs + 2000 });
+  });
+
+  it('control: after the decision fails, preview changes are announced again', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich({ lines: TALK });
+    const { user } = await ready(w, f.id);
+    await user.click(verdict('Fair'));
+    const group = await addAction(user, 1, { what: 'Warning', rule: ruleText(w, 2) });
+    await reason(user);
+    await user.click(decideButton());
+    await user.click(within(panel()).getByRole('button', { name: 'Undo' }));
+    await pick(user, within(group).getByLabelText('What happens'), /^Note/);
+    await waitFor(() => expect(live()).toHaveTextContent(/Preview updated: they see /), { timeout: lateMs + 2000 });
   });
 });

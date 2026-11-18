@@ -12,7 +12,7 @@ const body = source.slice(source.indexOf('export function openStore'));
 describe('openStore: the busy timeout comes before the first statement that takes a lock', () => {
   it('sets busy_timeout before journal_mode', () => {
     const timeout = body.indexOf('PRAGMA busy_timeout = ');
-    const journal = body.indexOf('PRAGMA journal_mode = WAL');
+    const journal = body.indexOf('enableWal(db)');
     expect(timeout).toBeGreaterThan(-1);
     expect(journal).toBeGreaterThan(-1);
     expect(timeout).toBeLessThan(journal);

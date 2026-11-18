@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { actorName } from '../claims.js';
 import { useCaseActions } from '../cases.js';
@@ -98,6 +98,14 @@ export function DecisionBar() {
 
   const status = entry?.state.status;
   const waiting = isWaiting(entry);
+  // Once the decision is held, being sent or done, the live region belongs to the decision's own sentences: the preview's form stays mounted (hidden) and its debounced
+  // "Preview updated" would otherwise land after "Decided. The report is closed." A ref, so a sentence that fires between a click and the next render is judged too.
+  const decided = waiting || status === 'done';
+  const decidedRef = useRef(decided);
+  decidedRef.current = decided;
+  const announcePreview = useCallback((text: string): void => {
+    if (!decidedRef.current) draft.announce(text);
+  }, [draft.announce]);
   // Decided (waiting or sent): the case is off the screen and this is all that is left of it.
   const open = report?.status === 'open';
   const canDecide = can('reports.decide');
@@ -170,6 +178,7 @@ export function DecisionBar() {
     // What the AI's read was, if one was shown, and whether this is its suggestion as it stood (the server checks it against the decision).
     const ai = c.echo(undefined, form);
     const input = toInput(form);
+    decidedRef.current = true;
     decisions.submit({ reportId: report.id, person: report.targetPerson, name: nameOfTarget, input: ai === undefined ? input : { ...input, ai }, snapshot: form });
     // On to the same person's next report, or the next case: one rule, in `continueFrom`.
     if (andNext) void actions.continueFrom({ reportId: report.id, person: report.targetPerson });
@@ -561,7 +570,7 @@ export function DecisionBar() {
                 </div>
               )}
 
-              <LazyPlayerPreview op={previewOp} nameOf={parts.nameOf} reporter={parts.reporter} announce={draft.announce} />
+              <LazyPlayerPreview op={previewOp} nameOf={parts.nameOf} reporter={parts.reporter} announce={announcePreview} />
 
               <div className="cw-submit">
                 <button id={submitId} type="button" className="cw-btn cw-btn--primary" aria-disabled={readOnly || !c.cooled} {...(!readOnly && !c.cooled ? { 'data-cooling': 'true' } : {})} {...(shortcuts ? { 'aria-keyshortcuts': 'Control+Enter Meta+Enter' } : {})} onClick={(e) => decide(true, e)}>
