@@ -1,4 +1,6 @@
 import type { PlayerReporting, ReportFlow } from '@chatwarden/core';
+import { en } from './i18n.js';
+import type { PlayerT, PlayerText } from './i18n.js';
 import { isSafeHref } from './safeHref.js';
 
 const FLOWS: readonly ReportFlow[] = ['one_tap', 'reason_first', 'reason_required'];
@@ -88,4 +90,16 @@ export function groupReasons(reasons: readonly ReasonItem[]): ReasonGroup[] {
     else groups.push({ name: '', items: [other] });
   }
   return groups;
+}
+
+/**
+ * The words to show for a text the server sent that has an English default in the catalogue (a default report reason's label or hint, the
+ * thank-you). While the server's text still equals that English default the owner has not changed it, so the catalogue's words are used (the
+ * language the page is in); a text the owner edited is the game's own and is shown as sent, and so is one the catalogue has no key for.
+ */
+export function defaultText(t: PlayerT, key: string, sent: string): string {
+  const english = (en as Record<string, string>)[key];
+  if (english === undefined || sent.trim() !== english) return sent;
+  const own = t(key as PlayerText);
+  return own === key ? sent : own;
 }

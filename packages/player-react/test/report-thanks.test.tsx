@@ -57,7 +57,7 @@ describe('the thank-you', () => {
 
   it('with no thanks anywhere the catalog\'s own words show', async () => {
     const d = await sendWith(null, { reporting: { ...REPORTING, thanks: '' } as PlayerReporting });
-    expect(within(d).getByText(/We got your report/)).toBeInTheDocument();
+    expect(within(d).getByText(/We.ll look into it/)).toBeInTheDocument();
   });
 
   it('a reason\'s thanks is plain text: markup in it is shown as text, never rendered', async () => {

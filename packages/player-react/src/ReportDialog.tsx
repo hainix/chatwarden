@@ -5,7 +5,7 @@ import { NOTE_MAX } from './constants.js';
 import { PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
 import type { PlayerText } from './i18n.js';
-import { groupReasons, isResourceHref, readReporting } from './reporting.js';
+import { defaultText, groupReasons, isResourceHref, readReporting } from './reporting.js';
 import { errorText, Portal, Root, useUi } from './ui.js';
 import type { DialogHostProps, PlayerUiProps } from './ui.js';
 
@@ -127,7 +127,13 @@ export function ReportDialog(props: ReportDialogProps) {
   const [sentReason, setSentReason] = useState<string | null>(null);
 
   // No `reporting` (or something that is not the payload): no reasons to offer, as when `GET /rules` cannot be loaded.
-  const read = readReporting(props.reporting) ?? { flow: 'one_tap' as const, reasons: [], thanks: '', resources: [] };
+  const sent = readReporting(props.reporting) ?? { flow: 'one_tap' as const, reasons: [], thanks: '', resources: [] };
+  // A default reason's label and hint, and the default thank-you, are shown in the catalogue's words while the server's text is still the English default.
+  const read = {
+    ...sent,
+    reasons: sent.reasons.map((r) => ({ ...r, label: defaultText(t, `player.report.reason.${r.id}.label`, r.label), hint: defaultText(t, `player.report.reason.${r.id}.hint`, r.hint) })),
+    thanks: sent.thanks.trim() === '' ? '' : defaultText(t, 'player.report.thanks', sent.thanks),
+  };
   const thanks = read.thanks.trim();
   const hasReasons = read.reasons.length > 0;
   // A flow that asks for a reason has nothing to ask with when the list is empty.

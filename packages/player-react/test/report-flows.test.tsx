@@ -534,7 +534,7 @@ describe('with no reporting payload the dialog is one tap with the default words
     const s = await setup();
     const { user } = renderUi(<ReportDialog {...await s.dialog(none)} />);
     await user.click(btn('Report'));
-    expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
+    expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it. You can send 9 more reports today.");
     expect(s.submit).toHaveBeenCalledTimes(1);
     expect(s.submit.mock.calls[0]?.[0]).toEqual({});
     expect(Object.keys(s.submit.mock.calls[0]?.[0] ?? {})).not.toContain('category');
@@ -615,7 +615,7 @@ describe('a payload the dialog cannot trust', () => {
     const s = await setup();
     const { user } = renderUi(<ReportDialog {...await s.dialog(bad({ flow: 'one_tap', thanks: '   ', reasons: [] }))} />);
     await user.click(btn('Report'));
-    expect(await findStatus()).toHaveTextContent('Thanks. We got your report.');
+    expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it.");
   });
 
   it('a staff field in the payload (rule numbers, enabled) is never shown', async () => {

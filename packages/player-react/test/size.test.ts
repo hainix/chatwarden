@@ -28,10 +28,15 @@ async function bundle() {
     minify: true,
     jsx: 'automatic',
     external: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/*', '@chatwarden/*'],
+    // Split, as an adopter's bundler splits at a dynamic import(): the Spanish and Portuguese catalogues are chunks loaded on demand (loadPlayerT), not part of the entry.
+    splitting: true,
+    outdir: fileURLToPath(new URL('../.size-out', import.meta.url)),
+    entryNames: 'entry',
+    chunkNames: 'chunk-[name]-[hash]',
     metafile: true,
     logLevel: 'silent',
   });
-  const out = result.outputFiles[0];
+  const out = result.outputFiles.find((o) => o.path.endsWith('entry.js'));
   if (out === undefined) throw new Error('esbuild produced no output');
   return { text: out.text, bytes: out.contents.byteLength, gzip: gzipSync(out.contents, { level: 9 }).byteLength, inputs: Object.keys(result.metafile.inputs) };
 }

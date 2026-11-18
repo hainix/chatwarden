@@ -37,12 +37,26 @@
       "types": "./dist/src/chat/index.d.ts",
       "default": "./dist/src/chat/index.js"
     },
-    "./chat.css": "./src/chat.css"
+    "./chat.css": "./src/chat.css",
+    "./locales/es": {
+      "types": "./dist/src/locales/es.d.ts",
+      "default": "./dist/src/locales/es.js"
+    },
+    "./locales/pt": {
+      "types": "./dist/src/locales/pt.d.ts",
+      "default": "./dist/src/locales/pt.js"
+    }
   },
   "typesVersions": {
     "*": {
       "chat": [
         "dist/src/chat/index.d.ts"
+      ],
+      "locales/es": [
+        "dist/src/locales/es.d.ts"
+      ],
+      "locales/pt": [
+        "dist/src/locales/pt.d.ts"
       ]
     }
   },

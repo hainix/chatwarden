@@ -131,7 +131,7 @@ describe('a report that is taken', () => {
     const { user } = renderUi(<ReportDialog {...props(realSubmit(w), { targetName: 'Bob' })} />);
     await pick(user, 'Harassment');
     await send(user);
-    expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
+    expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it. You can send 9 more reports today.");
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Report' })).toBeNull();
@@ -154,7 +154,7 @@ describe('a report that is taken', () => {
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve({ ok: true, reportId: 'r' } as unknown as ReportResult))} />);
     await pick(user, 'Spam');
     await send(user);
-    expect(await findStatus()).toHaveTextContent(/^Thanks\. We got your report\.$/);
+    expect(await findStatus()).toHaveTextContent(/^Thanks for the report. We'll look into it.$/);
   });
 
   it('moves focus to the heading once the form is gone, and Close calls onClose', async () => {
@@ -295,7 +295,7 @@ describe('when sending fails', () => {
     expect(screen.getByRole('button', { name: 'Report' })).not.toHaveAttribute('aria-busy');
     fail = false;
     await send(user);
-    expect(await findStatus()).toHaveTextContent('Thanks.');
+    expect(await findStatus()).toHaveTextContent('Thanks for the report.');
     expect(onSubmit).toHaveBeenCalledTimes(2);
     expect(onSubmit.mock.calls[1]?.[0]).toEqual({ reason: 'hate', note: 'what they said' });
   });

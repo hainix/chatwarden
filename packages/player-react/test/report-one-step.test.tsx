@@ -121,7 +121,7 @@ describe('one click reports', () => {
   it('without a thank-you from the studio it uses the dialog\'s own words', async () => {
     const { user } = renderUi(<ReportDialog {...props(sender(), { reporting: { ...STUDIO, thanks: '' } })} />);
     await user.click(reportButton());
-    expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
+    expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it. You can send 9 more reports today.");
   });
 });
 
