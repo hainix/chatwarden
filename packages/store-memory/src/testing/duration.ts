@@ -2,7 +2,6 @@
 
 /**
  * A number of milliseconds, or a string: `'250ms'`, `'5s'`, `'30m'`, `'2h'` or `'7d'` (a decimal is allowed: `'1.5s'`). Anything else is a `RangeError`.
- * @experimental
  */
 export type Duration = number | `${number}${'ms' | 's' | 'm' | 'h' | 'd'}`;
 
@@ -13,7 +12,6 @@ const MESSAGE = 'A duration is a number of milliseconds or a string such as 250m
 /**
  * The milliseconds in a {@link Duration}, as a whole number (a fraction of a millisecond rounds). Throws a `RangeError` for a value that is not one:
  * negative, not finite, too large to count exactly, or a string that is not a number and a unit. The message is fixed text: it never echoes the value.
- * @experimental
  */
 export function durationMs(d: Duration): number {
   let ms: number;

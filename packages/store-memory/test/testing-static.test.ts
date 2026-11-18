@@ -56,11 +56,12 @@ describe('the testing entry', () => {
     for (const file of files) expect(text(file).includes('\r'), file).toBe(false);
   });
 
-  it('the public names are marked @experimental', () => {
+  it('the public names carry no @experimental tag (0.2.0 settled them)', () => {
     const index = text(join(testingDir, 'index.ts'));
     for (const name of ['durationMs', 'createFakeClock', 'wordMatcher', 'wordFilter', 'createTestKit', 'expectOutcomes', 'checkLines', 'ScriptMismatch']) {
       const all = files.map(text).join('\n');
-      expect(all, name).toMatch(new RegExp(`@experimental[\\s\\S]{0,400}(?:function|class)\\s+${name}\\b`));
+      expect(all, name).toMatch(new RegExp(`(?:function|class)\\s+${name}\\b`));
+      expect(all, name).not.toContain('@experimental');
     }
     expect(index).toContain('export');
   });

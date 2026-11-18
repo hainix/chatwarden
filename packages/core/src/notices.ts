@@ -26,7 +26,6 @@ const SANCTION_NOTICE_KINDS: readonly NoticeKind[] = ['warning', 'chat', 'area',
  * The four notices that are messages, not sanctions: a rename is required, an appeal was upheld, reduced or revoked. They have no
  * group, no end and no excerpt, show in `pending` and `announce` and never on "My record", and never need an acknowledgement. Made by
  * {@link NoticeService.createMessage}. A seen one is purged like a seen report outcome; an unseen one is kept until seen or withdrawn.
- * @experimental
  */
 export const MESSAGE_NOTICE_KINDS = ['rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'] as const;
 export type MessageNoticeKind = (typeof MESSAGE_NOTICE_KINDS)[number];
@@ -284,7 +283,6 @@ export class NoticeService {
    * Returns the notice id. It carries the kind, an optional rule and reference code and the time, and nothing else: no excerpt, no name,
    * no reason. It has no sanction group, so `withdrawGroup` never touches it. Throws for any other kind, a malformed rule or code, or a
    * bad subject (nothing is written). Pass `{ notify: false }` inside a larger transaction, then call {@link announce} after the commit.
-   * @experimental
    */
   createMessage(subject: SubjectId, kind: MessageNoticeKind, opts: MessageNoticeOptions = {}): string {
     if (!isMessageKind(kind)) throw new Error('createMessage: invalid kind');

@@ -48,7 +48,6 @@ const MESSAGES: Readonly<Record<CorpusErrorCode, string>> = {
 /**
  * What the corpus code throws. The message is fixed by `code`; the `stage` says where. It carries no cause, no URL, no path, no
  * key and no content.
- * @experimental
  */
 export class CorpusError extends Error {
   readonly code: CorpusErrorCode;

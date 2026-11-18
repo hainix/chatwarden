@@ -93,11 +93,11 @@ export function authorize(req${t(ctx, ': KitRequest')})${t(ctx, ': Authz | null'
   return sameText(cookieValue(req.headers.cookie, STAFF_COOKIE), cookieFor(token)) ? staff() : null;
 }
 
-/** For the sign-in form: the Set-Cookie value when the token is right, otherwise null. HttpOnly and SameSite=Strict; Secure in production. */
+/** For the sign-in form: the Set-Cookie value when the token is right, otherwise null. HttpOnly, SameSite=Strict and Secure; set CHATWARDEN_INSECURE_STAFF_COOKIE=1 to drop Secure for local plain-http development only. */
 export function signIn(given${t(ctx, ': unknown')})${t(ctx, ': string | null')} {
   const token = staffToken();
   if (token === undefined || !sameText(given, token)) return null;
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  const secure = process.env.CHATWARDEN_INSECURE_STAFF_COOKIE === '1' ? '' : '; Secure'; // Chrome and Firefox accept Secure on http://127.0.0.1 too
   return STAFF_COOKIE + '=' + cookieFor(token) + '; HttpOnly; SameSite=Strict; Path=' + BASE + secure;
 }
 

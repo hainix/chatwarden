@@ -6,7 +6,6 @@ import { ProfileError } from './profileError.js';
 
 /**
  * What an emergency adds to a room's pace. Every field optional on input.
- * @experimental
  */
 export interface EmergencySettings {
   /** The least time between one player's lines while the room is in emergency, ms, 1 000 to 600 000. Default 30 000. */
@@ -17,7 +16,6 @@ export interface EmergencySettings {
 
 /**
  * Probation: new accounts chat slower. Every field optional on input.
- * @experimental
  */
 export interface ProbationSettings {
   /** Default false. */
@@ -28,16 +26,15 @@ export interface ProbationSettings {
   slowModeMs?: number;
 }
 
-/** The modes of a room: ordinary, locked (read-only except staff) and emergency (slower, new accounts read-only). Every non-normal mode expires. @experimental */
+/** The modes of a room: ordinary, locked (read-only except staff) and emergency (slower, new accounts read-only). Every non-normal mode expires. */
 export const ROOM_MODES = ['normal', 'locked', 'emergency'] as const;
 export type RoomMode = (typeof ROOM_MODES)[number];
 
-/** What an account whose age is unknown is treated as by probation and emergency. @experimental */
+/** What an account whose age is unknown is treated as by probation and emergency. */
 export type UnknownAge = 'allow' | 'treat_as_new';
 
 /**
  * How rooms behave under attack. Every field optional.
- * @experimental
  */
 export interface RoomsSettings {
   /** How long a lock or emergency lasts when the caller names no length, ms, 60 000 to 86 400 000. Default 1 800 000 (30 minutes). */
@@ -50,7 +47,6 @@ export interface RoomsSettings {
 
 /**
  * What the kit reads: every field filled in.
- * @experimental
  */
 export interface ResolvedRooms {
   defaultModeMs: number;
@@ -66,7 +62,6 @@ const PROBATION_KEYS = ['enabled', 'ageDays', 'slowModeMs'] as const;
 /**
  * Validate and fill. Throws ProfileError naming the field (`rooms.emergency.slowModeMs`), never echoing the value. `path` names the
  * settings in the error (default `rooms`). The result is a new object that shares nothing with the input; each value is read once.
- * @experimental
  */
 export function resolveRooms(input: RoomsSettings | undefined, path = 'rooms'): ResolvedRooms {
   const out: ResolvedRooms = {

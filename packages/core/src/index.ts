@@ -264,7 +264,7 @@ export type { ClearEscalationResult, CommentRemoveResult, CommentResult, Escalat
 export type { CaseMarkResult } from './caseWorkflow.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
-// Desk, safety and room settings (@experimental): the three profile sections of the urgent-lane and rooms release, all defaulted.
+// Desk, safety and room settings: the three profile sections of the urgent-lane and rooms release, all defaulted.
 export { resolveDesk } from './desk.js';
 export type { DeskSettings, ResolvedDesk, SurgeSettings } from './desk.js';
 export {
@@ -411,10 +411,10 @@ export {
   resolveProfile,
   validateProfile,
 } from './profile.js';
-// Pace settings (@experimental): slow mode, burst limit and repeat refusal, all off until set.
+// Pace settings: slow mode, burst limit and repeat refusal, all off until set.
 export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
 export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
-// Chat filter settings (@experimental): links, personal info, phrases and caps or repeats, each with an action and a Community Rule, all off until set.
+// Chat filter settings: links, personal info, phrases and caps or repeats, each with an action and a Community Rule, all off until set.
 export {
   checkFilterRules,
   checkFilters,
@@ -449,14 +449,14 @@ export type {
 export type { FilterCheckResult, FilterCheckRule, FilterHit, FilterHitKind, FilterRefusal, FilterTestResult, FilterVerdict } from './filters/engine.js';
 export type { FilterKeyCounts, FilterStats } from './filters/counters.js';
 export type { FilterSpan } from './filters/fold.js';
-// Appeals and names settings (@experimental): off until set (names masking in the hub is the one default-on setting).
+// Appeals and names settings: off until set (names masking in the hub is the one default-on setting).
 export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_STATEMENT_MAX, APPEAL_STATS_MIN_SANCTIONS, normalizeStatement, resolveAppeals, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
 export type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';
 export { LINK_SYSTEMS } from './links.js';
 export type { LinkRow, LinkSystem } from './links.js';
 export { checkNameRules, DEFAULT_RESERVED_RULE, MAX_RESERVED_ENTRIES, NAME_ALLOW_MAX, NAME_ENTRY_MAX, NAME_ENTRY_MIN, resolveNames } from './names.js';
 export type { NameCheckResult, NameKind, NameReason, NameSettings, ResolvedNames } from './names.js';
-// Signals (@experimental): kinds a game declares, the guards, and the feeds that say where counts may be read.
+// Signals: kinds a game declares, the guards, and the feeds that say where counts may be read.
 export {
   BUILTIN_SIGNAL_KINDS,
   checkSignalFeeds,
@@ -518,7 +518,7 @@ export type {
   RulesFlavour,
 } from './profile.js';
 
-// AI levels 1 and 2: the provider-free contract (@experimental). Kept apart from the rest so a bundler can drop it.
+// AI levels 1 and 2: the provider-free contract. Kept apart from the rest so a bundler can drop it.
 export { AI_CONFIRM_PROMPT_VERSION, AI_PROMPT_VERSION, AIError } from './ai/types.js';
 export { confirmAgrees } from './ai/confirm.js';
 export { AI_ACT_MAX_AGE_MS, capsOk, dueAt, isHeldBack, preFilter } from './ai/actPlan.js';

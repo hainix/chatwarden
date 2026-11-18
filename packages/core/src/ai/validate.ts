@@ -19,7 +19,6 @@ export interface AIValidationContext {
 
 /**
  * The result of {@link validateAIOutput}. `code` on an `ok` result says the read was softened (today only `no_own_line`).
- * @experimental
  */
 export type AIValidation =
   | { ok: true; read: AIRead; code?: 'no_own_line' }
@@ -123,7 +122,6 @@ function checkSummary(v: unknown): string | { summary: string } {
  * Validate a model's parsed JSON against the answer shape and against what was sent. Never throws and never echoes the text it
  * rejects: a failure is a fixed `code`. A recommendation to uphold or note whose cited lines include none by the reported person
  * is softened to `unclear` (`code: 'no_own_line'`, still `ok`). `bad_faith` is not a valid verdict.
- * @experimental
  */
 export function validateAIOutput(raw: unknown, ctx: AIValidationContext): AIValidation {
   if (!isPlainObject(raw)) return fail('not_object');

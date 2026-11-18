@@ -6,7 +6,6 @@ import { bool, given, plain, wholeIn } from './settingsCheck.js';
 /**
  * What a report surge is: `reports` reports against one person inside `windowMinutes`, from accounts younger than `newAccountDays`.
  * Every field optional on input.
- * @experimental
  */
 export interface SurgeSettings {
   /** Name a surge on a case. Default false. */
@@ -21,7 +20,6 @@ export interface SurgeSettings {
 
 /**
  * How the moderators' desk behaves. Every field optional.
- * @experimental
  */
 export interface DeskSettings {
   /** Staff comments and "ask for a look": off, the routes answer 404 and the hub shows nothing of them. Default false. */
@@ -34,7 +32,6 @@ export interface DeskSettings {
 
 /**
  * What the kit reads: every field filled in.
- * @experimental
  */
 export interface ResolvedDesk {
   workflow: boolean;
@@ -48,7 +45,6 @@ const SURGE_KEYS = ['enabled', 'reports', 'windowMinutes', 'newAccountDays'] as 
 /**
  * Validate and fill. Throws ProfileError naming the field (`desk.surge.reports`), never echoing the value. `path` names the settings in
  * the error (default `desk`). The result is a new object that shares nothing with the input; each value is read from `input` once.
- * @experimental
  */
 export function resolveDesk(input: DeskSettings | undefined, path = 'desk'): ResolvedDesk {
   const out: ResolvedDesk = { workflow: false, insights: false, surge: { enabled: false, reports: 5, windowMinutes: 10, newAccountDays: 2 } };

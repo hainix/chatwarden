@@ -302,7 +302,6 @@ export interface ReporterRecord {
    * How their reports filed in the last 30 days turned out (see {@link ReporterAccuracy}): a ranking hint and a line on the case.
    * Null when the store cannot tell (it has no `reporterOutcomes`); otherwise always set, with `falseRate` null below the minimum
    * sample. Staff only: never send to a player.
-   * @experimental
    */
   accuracy?: ReporterAccuracy | null;
 }

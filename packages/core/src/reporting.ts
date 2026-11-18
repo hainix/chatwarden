@@ -63,11 +63,11 @@ export interface ReportReasonInput {
   asksNote?: boolean;
   /** Offered to players. A switched-off reason stays valid for reports already filed. */
   enabled?: boolean;
-  /** Reports filed under this reason are urgent: a snapshot taken when the report is filed. Default false (`threat` and `welfare` are urgent in the defaults). @experimental */
+  /** Reports filed under this reason are urgent: a snapshot taken when the report is filed. Default false (`threat` and `welfare` are urgent in the defaults). */
   urgent?: boolean;
-  /** What the reporter is told after sending a report under this reason (at most 300 characters). `null` or absent: `reporting.thanks`. @experimental */
+  /** What the reporter is told after sending a report under this reason (at most 300 characters). `null` or absent: `reporting.thanks`. */
   thanks?: string | null;
-  /** Show `safety.resources` to the reporter after the thank-you for this reason. Default false (`welfare` shows them in the defaults). @experimental */
+  /** Show `safety.resources` to the reporter after the thank-you for this reason. Default false (`welfare` shows them in the defaults). */
   showResources?: boolean;
 }
 
@@ -80,11 +80,11 @@ export interface ReportReason {
   rules: number[];
   asksNote: boolean;
   enabled: boolean;
-  /** Reports filed under this reason are urgent. @experimental */
+  /** Reports filed under this reason are urgent. */
   urgent: boolean;
-  /** The reporter's own thank-you for this reason, or `null` for the global one. @experimental */
+  /** The reporter's own thank-you for this reason, or `null` for the global one. */
   thanks: string | null;
-  /** Show the owner's resource list after the thank-you. @experimental */
+  /** Show the owner's resource list after the thank-you. */
   showResources: boolean;
 }
 
@@ -98,7 +98,7 @@ export interface ReportingSettings {
   thanks?: string;
   /**
    * A link template for the case's evidence link: `https://`, exactly one `{ref}` placeholder (never in the host), at most 300
-   * characters, no credentials. `null` or absent: no link. @experimental
+   * characters, no credentials. `null` or absent: no link.
    */
   evidenceUrl?: string | null;
 }
@@ -108,7 +108,7 @@ export interface ResolvedReporting {
   flow: ReportFlow;
   reasons: ReportReason[];
   thanks: string;
-  /** The evidence link template, or `null`. @experimental */
+  /** The evidence link template, or `null`. */
   evidenceUrl: string | null;
 }
 
@@ -121,7 +121,6 @@ export interface PlayerReporting {
   flow: ReportFlow;
   reasons: Array<{ id: string; label: string; hint: string; group: string; asksNote: boolean; thanks: string | null; showResources: boolean }>;
   thanks: string;
-  /** @experimental */
   resources: SafetyResource[];
 }
 
@@ -312,7 +311,7 @@ export function resolveReporting(settings: ReportingSettings | undefined): Resol
 /**
  * The link to the evidence behind a report: the owner's `reporting.evidenceUrl` template with `{ref}` replaced by `encodeURIComponent(ref)`, or `null` with no template. The template is
  * checked again here (an `https` URL with a host, no credentials and exactly one `{ref}`, never in the host): one that is not, say a layer edited to `http` after it was saved, gives `null`.
- * Pure; the kit fetches nothing. @experimental
+ * Pure; the kit fetches nothing.
  */
 export function evidenceLink(settings: { evidenceUrl?: string | null }, ref: string): string | null {
   const template = settings.evidenceUrl;

@@ -23,7 +23,6 @@ import type { BlockedDays, BlockedLine, Claim, Me, PermissionKey, PersonHistory,
 
 /**
  * One read: the answer for the current key, the last failure, whether it is loading, and how to ask again.
- * @experimental
  */
 export interface HubRead<T> {
   /** False when the role does not hold the permission the read needs: then nothing is asked of the server. */
@@ -37,7 +36,6 @@ export interface HubRead<T> {
 
 /**
  * Who is signed in.
- * @experimental
  */
 export interface UseMe {
   me: Me;
@@ -53,7 +51,6 @@ export interface UseMe {
  * const { me, can } = useMe();
  * return can('audit.read') ? <AuditLog /> : <p>Hello {me.actor}</p>;
  * ```
- * @experimental
  */
 export function useMe(): UseMe {
   useHubController();
@@ -63,7 +60,6 @@ export function useMe(): UseMe {
 
 /**
  * The open cases, kept fresh.
- * @experimental
  */
 export interface UseCases {
   /** False when the role cannot read reports: the list is then empty and nothing is asked of the server. */
@@ -99,7 +95,6 @@ export interface UseCases {
  * // A name the server flags (`handleFlagged`) is hidden until a moderator shows it: draw it hidden, as the hub does (see `displayName`).
  * return <ul>{cases.map((c) => <li key={c.person}>{c.handleFlagged ? 'A hidden name' : c.handle} ({c.open})</li>)}</ul>;
  * ```
- * @experimental
  */
 export function useCases(): UseCases {
   const controller = useHubController();
@@ -129,7 +124,6 @@ export function useCases(): UseCases {
 
 /**
  * See the README.
- * @experimental
  */
 export interface UseCaseOptions {
   /** Claim the case while it is shown, and renew the claim (every 60 seconds) and the "viewing" hint (every 20) while the tab is visible. Default `true`. */
@@ -138,7 +132,6 @@ export interface UseCaseOptions {
 
 /**
  * One case: the read of the report, who holds it, and what is going on with its decision.
- * @experimental
  */
 export interface UseCase {
   /** `idle` for no case (`null`), `loading`, `ready`, or `error` (a 404 for a report that is not there is an error, not a throw). */
@@ -164,7 +157,6 @@ export interface UseCase {
  * const { report, holder } = useCase(reportId);
  * return holder.kind === 'other' ? <p>{holder.by} is on it</p> : <p>{report?.category}</p>;
  * ```
- * @experimental
  */
 export function useCase(reportId: string | null, options: UseCaseOptions = {}): UseCase {
   const controller = useHubController();
@@ -195,7 +187,6 @@ export function useCase(reportId: string | null, options: UseCaseOptions = {}): 
 
 /**
  * What `useDecide` hands back.
- * @experimental
  */
 export interface UseDecide {
   /**
@@ -224,7 +215,6 @@ export interface UseDecide {
  * const { decide, undo } = useDecide();
  * const outcome = await decide({ reportId, person, input: { verdict: 'no_action', reason: 'Banter.', actions: [] } });
  * ```
- * @experimental
  */
 export function useDecide(): UseDecide {
   const controller: HubController = useHubController();
@@ -244,7 +234,6 @@ export function useDecide(): UseDecide {
 
 /**
  * Who holds a person's case, and what you can do about it.
- * @experimental
  */
 export interface UseClaim {
   holder: Holder;
@@ -264,7 +253,6 @@ export interface UseClaim {
  * const { holder, claim } = useClaim(person);
  * return holder.kind === 'none' ? <button onClick={claim}>Take it</button> : null;
  * ```
- * @experimental
  */
 export function useClaim(person: string): UseClaim {
   const controller = useHubController();
@@ -288,7 +276,6 @@ export function useClaim(person: string): UseClaim {
  * const { data } = useTerms();
  * return <p>{data?.terms.length ?? 0} terms</p>;
  * ```
- * @experimental
  */
 export function useTerms(): HubRead<TermsList> {
   const { client, can } = useHub();
@@ -305,7 +292,6 @@ export function useTerms(): HubRead<TermsList> {
  * const { data } = useBlocked({ days: 1 });
  * return <p>{data?.items.length ?? 0} lines today</p>;
  * ```
- * @experimental
  */
 export function useBlocked(options: { days?: BlockedDays } = {}): HubRead<{ items: BlockedLine[] }> {
   const { client, can } = useHub();
@@ -323,7 +309,6 @@ export function useBlocked(options: { days?: BlockedDays } = {}): HubRead<{ item
  * const { data } = usePerson(ref);
  * return <p>{data?.sanctions.length ?? 0} sanctions</p>;
  * ```
- * @experimental
  */
 export function usePerson(ref: string | null): HubRead<PersonHistory> {
   const { client, can } = useHub();

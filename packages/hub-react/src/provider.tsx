@@ -31,7 +31,6 @@ import type { Me, PermissionKey } from './types.js';
 
 /**
  * What a provider takes besides where its controller comes from.
- * @experimental
  */
 export interface HubProviderOptions {
   /** `simple` or `detailed`: what a `CaseList` row shows. Left out, each moderator's last choice is kept in their browser, and a browser that cannot keep it gets `simple`. */
@@ -57,7 +56,6 @@ export interface HubProviderOptions {
 
 /**
  * Where the provider's controller comes from: exactly one of a client (the provider makes and owns the controller) or a controller (yours).
- * @experimental
  */
 export type HubControllerSource =
   | {
@@ -79,7 +77,6 @@ export type HubControllerSource =
 
 /**
  * The props of `HubProvider`: a `client` or a `controller` (never both), and the options.
- * @experimental
  */
 export type HubProviderProps = HubProviderOptions & HubControllerSource & { children?: ReactNode };
 
@@ -308,7 +305,6 @@ setRankLoader(ensureAi);
  *   <CaseList onOpenCase={(person, reportId) => router.push(`/cases/${reportId}`)} />
  * </HubProvider>
  * ```
- * @experimental
  */
 export function HubProvider(props: HubProviderProps) {
   const { client, controller, children, ...options } = props;
@@ -322,7 +318,6 @@ export function HubProvider(props: HubProviderProps) {
 /**
  * The hub's controller, for the part of your page that wants the headless API (`decide`, `open`, the stores) next to the pieces.
  * Throws outside a `<HubProvider>` or `<Hub>`.
- * @experimental
  */
 export function useHubController(): HubController {
   const controller = useOptionalController();

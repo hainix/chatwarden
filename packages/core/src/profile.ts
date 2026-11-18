@@ -175,7 +175,6 @@ export interface ModerationProfile extends ModerationProfileBase {
   /**
    * How a room paces a player's lines: a least gap between them (`slowModeMs`), a burst limit (`burst`) and no repeats
    * (`duplicateWindowMs`). Every setting is off until set, so a profile without `pace` changes nothing. See {@link PaceSettings}.
-   * @experimental
    */
   pace?: PaceSettings;
   /**
@@ -183,43 +182,36 @@ export interface ModerationProfile extends ModerationProfileBase {
    * only; `feeds` says where counts may be read (the Person page record, the ladder suggestion, the AI read's context, the queue
    * boost) and is editable in the hub. Nothing is unset-only: a profile without `signals` declares no kinds and has no feeds. A signal
    * never acts. See {@link SignalSettings}.
-   * @experimental
    */
   signals?: SignalSettings;
   /**
    * Appeals: whether players may appeal a sanction from its notice, how many a week, and whether the moderator who made the original
    * decision may decide its appeal. Off until set, so a profile without `appeals` changes nothing. See {@link AppealSettings}.
-   * @experimental
    */
   appeals?: AppealSettings;
   /**
    * Names: a profanity pass on the name check, kept evidence of blocked names, required renames, and masking a flagged name in the
    * hub (on by default; it changes only what the hub shows). See {@link NameSettings}.
-   * @experimental
    */
   names?: NameSettings;
   /**
    * Chat filters: links, personal info, phrases and caps or repeats, each with an action and the Community Rule it cites. Every block is
    * off until set, so a profile without `filters` changes nothing. See {@link FilterSettings}.
-   * @experimental
    */
   filters?: FilterSettings;
   /**
    * The moderators' desk: staff comments and "ask for a look" (`workflow`), the Insights page (`insights`) and the report surge. All
    * off until set. See {@link DeskSettings}.
-   * @experimental
    */
   desk?: DeskSettings;
   /**
    * Safety: the guidance and the contact line a moderator reads on an urgent case, and the resources a reporter is shown. The kit
    * routes and surfaces; it never diagnoses or contacts anyone. See {@link SafetySettings}.
-   * @experimental
    */
   safety?: SafetySettings;
   /**
    * Rooms under attack: how long a lock or an emergency lasts, what emergency adds, probation for new accounts and unknown ages. See
    * {@link RoomsSettings}.
-   * @experimental
    */
   rooms?: RoomsSettings;
   /**
@@ -233,7 +225,6 @@ export interface ModerationProfile extends ModerationProfileBase {
 /**
  * The AI levels and the casebook switch, as the profile holds them. The level in force is also bounded by the adapter and the
  * maximum level given in code, and is 0 when no adapter is configured.
- * @experimental
  */
 export interface AISettings {
   /** 0 off, 1 read, 2 recommend. Levels 3 and 4 are not set here: the owner takes them through the acting switch (`cw.ai.acting`), apart from the settings. */
@@ -248,7 +239,6 @@ export interface AISettings {
   /**
    * Rule numbers the AI may never act on (level 3), a restrict-only list: it can only take cells away from `aiAutoAct`, never add one. Whole numbers from 1, each once, at most
    * 100. Absent (the default) excludes none. Owner-editable in the hub like the rest of this section.
-   * @experimental
    */
   actExcludeRules?: number[];
 }
@@ -277,21 +267,21 @@ export interface ResolvedProfile extends ModerationProfileBase {
   reporting: ResolvedReporting;
   /** The AI settings in force, every field filled in. */
   ai: AISettings;
-  /** The pace settings in force, every field filled in (`null` is off). @experimental */
+  /** The pace settings in force, every field filled in (`null` is off). */
   pace: ResolvedPace;
-  /** The signal settings in force: the declared kinds merged over the built-ins, the guards filled in, the feeds as given. @experimental */
+  /** The signal settings in force: the declared kinds merged over the built-ins, the guards filled in, the feeds as given. */
   signals: ResolvedSignals;
-  /** The appeal settings in force, every field filled in. @experimental */
+  /** The appeal settings in force, every field filled in. */
   appeals: ResolvedAppeals;
-  /** The name settings in force, every field filled in. @experimental */
+  /** The name settings in force, every field filled in. */
   names: ResolvedNames;
-  /** The filter settings in force, every field filled in (`null` is off). @experimental */
+  /** The filter settings in force, every field filled in (`null` is off). */
   filters: ResolvedFilters;
-  /** The desk settings in force, every field filled in. @experimental */
+  /** The desk settings in force, every field filled in. */
   desk: ResolvedDesk;
-  /** The safety settings in force: the guidance (the default when unset), the contact line and the resources. @experimental */
+  /** The safety settings in force: the guidance (the default when unset), the contact line and the resources. */
   safety: ResolvedSafety;
-  /** The room settings in force, every field filled in. @experimental */
+  /** The room settings in force, every field filled in. */
   rooms: ResolvedRooms;
   /** The declared contexts, validated, with the labels filled in (`{}` when none). Code only: a stored layer never changes it. */
   contexts: ResolvedContexts;
@@ -1149,28 +1139,28 @@ export interface PolicyLayer {
   ai?: Partial<AISettings>;
   /**
    * The pace settings: each field is optional and merges onto the profile's (a field left out inherits, `null` turns it off, a value sets
-   * it); `burst` replaces whole. @experimental
+   * it); `burst` replaces whole.
    */
   pace?: PaceSettings;
   /**
    * The signal feeds: only `feeds` may be edited (the kinds and the guards are declared in code). The layer's `feeds` REPLACE the
-   * profile's wholesale, like every other section: a feed left out is off. A feed names declared kinds only. @experimental
+   * profile's wholesale, like every other section: a feed left out is off. A feed names declared kinds only.
    */
   signals?: { feeds?: SignalFeeds };
-  /** The appeal settings: `enabled`, `perPlayerPerWeek` (1 to 20) and `allowSelfReview`. Each is optional and merges onto the profile's. @experimental */
+  /** The appeal settings: `enabled`, `perPlayerPerWeek` (1 to 20) and `allowSelfReview`. Each is optional and merges onto the profile's. */
   appeals?: AppealSettings;
-  /** The name settings: `profanity`, `keepBlocked`, `renames` and `maskInHub`. Each is optional and merges onto the profile's. @experimental */
+  /** The name settings: `profanity`, `keepBlocked`, `renames` and `maskInHub`. Each is optional and merges onto the profile's. */
   names?: NameSettings;
   /**
    * The chat filters: each block (`links`, `personalInfo`, `ratio`) is replaced whole when given, `null` turns it off, `phrases` and
-   * `ignore` replace whole, and a field left out inherits the profile's. @experimental
+   * `ignore` replace whole, and a field left out inherits the profile's.
    */
   filters?: FilterSettings;
-  /** The desk settings: `workflow`, `insights` and the `surge` window. Each is optional and merges onto the profile's. @experimental */
+  /** The desk settings: `workflow`, `insights` and the `surge` window. Each is optional and merges onto the profile's. */
   desk?: DeskSettings;
-  /** The safety settings: `guidance`, `contact` and `resources` (a list replaces the whole list). Each is optional and merges onto the profile's. @experimental */
+  /** The safety settings: `guidance`, `contact` and `resources` (a list replaces the whole list). Each is optional and merges onto the profile's. */
   safety?: SafetySettings;
-  /** The room settings: `defaultModeMs`, `emergency`, `probation` and `unknownAge`. Each is optional and merges onto the profile's. @experimental */
+  /** The room settings: `defaultModeMs`, `emergency`, `probation` and `unknownAge`. Each is optional and merges onto the profile's. */
   rooms?: RoomsSettings;
 }
 

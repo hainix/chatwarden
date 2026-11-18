@@ -20,18 +20,14 @@ import type { Toasts } from './toasts.js';
 
 /**
  * The open queue is read 200 reports a page, up to 5 pages: 1,000 reports. Past that the numbers say they are partial.
- * @experimental
  */
 export const QUEUE_PAGE = 200;
-/** @experimental */
 export const QUEUE_MAX_PAGES = 5;
 
-/** @experimental */
 export type Connection = 'live' | 'lost' | 'offline' | 'signedOut';
 
 /**
  * What the queue knows, as a snapshot.
- * @experimental
  */
 export interface LiveQueueState {
   /** `loading` until the first answer; `error` when there has never been one; `ready` after, even while a refresh fails. */
@@ -77,14 +73,12 @@ const REFRESH_MIN_MS = 1_000;
 
 /**
  * One hold on a live queue (see `acquire`).
- * @experimental
  */
 export interface QueueHold {
   release: () => void;
   ready: Promise<void>;
 }
 
-/** @experimental */
 export interface LiveQueueStore extends Store<LiveQueueState> {
   /** True while it is polling (after `start`, until `stop` or `dispose`). A part that starts the queue for itself can ask first, and stop only what it started. */
   readonly running: boolean;
@@ -109,7 +103,7 @@ export interface LiveQueueStore extends Store<LiveQueueState> {
   /** Ask now, instead of waiting for the next poll (the banner's "Try now"). */
   retryNow: () => void;
   /**
-   * @experimental Poll the change token now, as a normal poll would (and read the queue when it moved). Only reads: it sends nothing that writes.
+   * Poll the change token now, as a normal poll would (and read the queue when it moved). Only reads: it sends nothing that writes.
    * Does nothing while the queue is not running (before `start`), after `dispose`, while the browser is offline, or once the session has
    * ended. At most one read a second: a call made while a read is on its way is ignored, and one made within a second of the last
    * refresh is held and sent once, when the second is up (calls in between add nothing). Do not call it in a loop: it is for "something
@@ -135,7 +129,6 @@ export interface LiveQueueStore extends Store<LiveQueueState> {
   endTake: (cooldownMs: number) => void;
 }
 
-/** @experimental */
 export interface LiveQueueOptions {
   client: HubClient;
   /** The hub's clock. */
@@ -152,14 +145,12 @@ const NO_FILTER: QueueFilter = { claim: 'all', category: 'all' };
 
 /**
  * The rows that pass the filters and whose decision is not on its way. Pure: the clock comes in.
- * @experimental
  */
 export function visibleRows(rows: readonly ShownRow[], filter: QueueFilter, pending: ReadonlySet<string>, actor: string, now: number): ShownRow[] {
   const keepPersons = new Set(filterGroups(rows.map((r) => r.group), filter, actor, now).map((g) => g.person));
   return rows.filter((r) => keepPersons.has(r.group.person) && !pending.has(r.group.person));
 }
 
-/** @experimental */
 export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   const { client, now, timers, page, toasts, words } = options;
   const initial: LiveQueueState = {

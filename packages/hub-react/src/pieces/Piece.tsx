@@ -12,7 +12,6 @@ import type { PermissionKey } from '../types.js';
 
 /**
  * Where a piece sends the moderator. Each is optional: a piece that is not told where a thing opens shows it as plain text, and never moves the page.
- * @experimental
  */
 export interface PieceLinks {
   /** A case was chosen: the reported person's ref, and the id of their newest open report. */
@@ -25,7 +24,6 @@ export interface PieceLinks {
 
 /**
  * What a piece takes besides the callbacks.
- * @experimental
  */
 export interface PieceProps {
   /** Extra class names for the piece's root element. */

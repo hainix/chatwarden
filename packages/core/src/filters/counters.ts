@@ -107,7 +107,6 @@ export interface FilterKeyCounts {
 
 /**
  * What `cw.filters.stats` returns: per key, the counts by applied action over the last `days` UTC days (today included).
- * @experimental
  */
 export interface FilterStats {
   days: number;

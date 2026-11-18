@@ -62,7 +62,7 @@ describe('the grammar', () => {
 
   it('a label with a direction control or a zero-width character is refused: it could reorder or hide what a moderator reads (review m8)', async () => {
     const k = await kit();
-    const bad = [0x061c, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2060, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff, 0x00ad].map((cp) => String.fromCodePoint(cp));
+    const bad = [0x061c, 0x200b, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2060, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff, 0x00ad].map((cp) => String.fromCodePoint(cp));
     for (const ch of bad) {
       for (const label of [`Blue${ch}Wolves`, `${ch}Blue Wolves`, `Blue Wolves${ch}`]) {
         const t = k.table();
@@ -73,6 +73,50 @@ describe('the grammar', () => {
     for (const ok of ['Blue\u2010Wolves', 'Blue\u00a0Wolves', 'Wolves \u2192 Bears', '\u{1F43A} Wolves', '\u0627\u0644\u0630\u0626\u0627\u0628', '\u05d6\u05d0\u05d1\u05d9\u05dd']) {
       const t = k.table();
       expect((await k.submit(t.room, { entity: { ...ENTITY, label: ok } })).ok, ok).toBe(true);
+    }
+  });
+
+  it('ZWNJ and ZWJ are allowed between two letters (Persian and Indic labels), nowhere else (review m8 refinement)', async () => {
+    const k = await kit();
+    const ZWNJ = String.fromCodePoint(0x200c);
+    const ZWJ = String.fromCodePoint(0x200d);
+    const ZWSP = String.fromCodePoint(0x200b);
+    const RLO = String.fromCodePoint(0x202e);
+    const LRM = String.fromCodePoint(0x200e);
+    const L = (cps: number[]): string => String.fromCodePoint(...cps);
+    // Persian: mi + ZWNJ + khwaham; Sinhala and Devanagari ligatures use ZWJ after a virama (a mark that belongs to the letter before it)
+    const good = [
+      L([0x645, 0x6cc, 0x200c, 0x62e, 0x648, 0x627, 0x647, 0x645]),
+      L([0x915, 0x94d, 0x200d, 0x937]),
+      L([0xdc1, 0xdca, 0x200d, 0xdbb, 0xdd3]),
+      `Blue${ZWNJ}Wolves`,
+      `Blue${ZWJ}Wolves`,
+      `Blue${ZWNJ}Wolves${ZWJ}Bears`,
+    ];
+    for (const label of good) {
+      const t = k.table();
+      expect((await k.submit(t.room, { entity: { ...ENTITY, label } })).ok, JSON.stringify(label)).toBe(true);
+    }
+    const bad = [
+      `${ZWNJ}Wolves`,
+      `Wolves${ZWNJ}`,
+      `${ZWJ}Wolves`,
+      `Wolves${ZWJ}`,
+      `Blue ${ZWNJ}Wolves`,
+      `Blue${ZWNJ} Wolves`,
+      `Blue${ZWJ} Wolves`,
+      `Blue 1${ZWNJ}2 Wolves`,
+      `Blue${ZWNJ}${ZWNJ}Wolves`,
+      `Blue${ZWNJ}${ZWJ}Wolves`,
+      `Blue-${ZWJ}Wolves`,
+      L([0x1f43a, 0x200d, 0x1f43a]),
+      `Blue${ZWNJ}${ZWSP}Wolves`,
+      `Blue${ZWNJ}${RLO}Wolves`,
+      `Blue${LRM}W${ZWNJ}olves`,
+    ];
+    for (const label of bad) {
+      const t = k.table();
+      expect(await k.submit(t.room, { entity: { ...ENTITY, label } }), JSON.stringify(label)).toEqual({ ok: false, refused: 'entity_invalid' });
     }
   });
 

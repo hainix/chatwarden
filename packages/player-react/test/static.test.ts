@@ -23,8 +23,8 @@ function walk(dir: string): string[] {
 }
 const files = walk(src);
 const code = files.filter((f) => /\.tsx?$/.test(f));
-// The catalog itself and its comments name keys on purpose.
-const appCode = code.filter((f) => !f.endsWith('i18n.ts') && !f.endsWith('words.ts'));
+// The catalog itself and its comments name keys on purpose, and so do the translations (src/locales: every key of the catalog, in another language).
+const appCode = code.filter((f) => !f.endsWith('i18n.ts') && !f.endsWith('words.ts') && !f.replaceAll(String.fromCharCode(92), '/').includes('/locales/'));
 const read = (f: string): string => readFileSync(f, 'utf8');
 const rel = (f: string): string => f.slice(pkg.length).replaceAll('\\', '/');
 /** The public name of a private default: `--cwd-bg` is what `--cw-bg` falls back to. */
@@ -604,6 +604,8 @@ describe('the public exports of the main entry are locked', () => {
         'timeLeft',
         'untilText',
         'nameReasonText',
+        'loadPlayerT',
+        'matchLocale',
       ].sort(),
     );
     expect(index).toMatch(/export const VERSION = /);
@@ -617,12 +619,12 @@ describe('the public exports of the main entry are locked', () => {
     }
   });
 
-  it('the new exports are marked @experimental where they are written, and the internals stay out', () => {
+  it('the appeal exports carry no @experimental tag any more, and the internals stay out of the index', () => {
     for (const [file, name] of [['AppealDialog.tsx', 'AppealDialog'], ['names.ts', 'nameReasonText'], ['client.ts', 'FileAppealOutcome']] as const) {
       const source = read(join(src, file));
       const at = source.indexOf(`export function ${name}`) >= 0 ? source.indexOf(`export function ${name}`) : source.indexOf(`export type ${name}`);
       expect(at, name).toBeGreaterThan(0);
-      expect(source.slice(Math.max(0, at - 1200), at), name).toMatch(/@experimental/);
+      expect(source.slice(Math.max(0, at - 1200), at), name).not.toMatch(/@experimental/);
     }
     for (const internal of ['AppealBody', 'AppealSlot', 'useAppeals', 'leaveAppeal', 'dateText', 'APPEAL_MAX']) expect(index, internal).not.toContain(internal);
   });

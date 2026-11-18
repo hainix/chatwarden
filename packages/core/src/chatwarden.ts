@@ -193,7 +193,7 @@ export interface ChatwardenOptions {
    * Keep the pacer's state (slow mode, the burst limit and repeat refusal) in the store instead of the process, so several processes on one store judge one player's lines together.
    * A deployment property, not a moderation setting: it is not in the profile or the hub. The store must have `paceLoad`, `paceUpdate`, `paceDropRoom` and `paceSweep` (the memory and SQLite
    * stores do); `createChatwarden` throws a plain message naming the missing one otherwise. Costs one indexed read per line in a room where a check is on and one write per accepted line; a
-   * room with every check off touches the store not at all. `cw.rooms.setPace` overrides stay per process. Default false: the in-memory pacer, exactly as before. @experimental
+   * room with every check off touches the store not at all. `cw.rooms.setPace` overrides stay per process. Default false: the in-memory pacer, exactly as before.
    */
   sharedPacing?: boolean;
   /** Defaults to the system clock. */
@@ -273,7 +273,6 @@ export interface ChatwardenOptions {
    * (`profile.ai.level`, default 0) held to at most `maxLevel`. Needs a store with the AI methods (SQLite has them; the
    * in-memory store has them through `withMemoryAi`). A store without them leaves the AI inert and logs `chatwarden.ai_store_unsupported`
    * once at creation, as with any optional Store method; a bad option still throws. The adapter runs on the server only; see `ModerationAI`.
-   * @experimental
    */
   ai?: AiOptions;
   /**
@@ -281,7 +280,6 @@ export interface ChatwardenOptions {
    * holds the one hook the profile cannot. Signals need a store with the three signal methods (SQLite has them; the in-memory store has them
    * through `withMemorySignals`): declaring kinds or feeds over a store without them is refused at creation, and the kit loads its signal
    * service only for a store that has them.
-   * @experimental
    */
   signals?: {
     /**
@@ -296,14 +294,12 @@ export interface ChatwardenOptions {
    * The secret that signs an evidence bundle (`cw.legal.bundle`): at least 32 characters, the same rule as a webhook secret. It is read from here and nowhere else and
    * is never logged, never put in a body or an error. Without one a bundle is produced unsigned (its `hmacSha256` is null and the hub says "not signed"); the
    * SHA-256 still shows the file was not edited. A shorter secret throws at creation, naming `bundleSecret` and never its value.
-   * @experimental
    */
   bundleSecret?: string;
 }
 
 /**
  * How a person is linked (`cw.people.links`): counts only, never an id, a key, a hash or an address.
- * @experimental
  */
 export interface PersonLinks {
   /** Account ids the kit holds for the person, across their merged subjects. */
@@ -342,46 +338,45 @@ export interface Chatwarden {
      * override whole; it is not merged into it. The object is read once, so changing it afterwards changes nothing. Throws `ProfileError` for an invalid
      * value (a setup mistake, not a hot-path call), and changes nothing when it does. In memory, this process only: `rooms.close(roomId)`
      * drops it, and a game that runs several processes calls it in each process that serves the room. The override sits on top of the
-     * stored layer, which sits on top of the profile in code. @experimental
+     * stored layer, which sits on top of the profile in code.
      */
     setPace(roomId: string, pace: PaceSettings | null): void;
     /**
      * The pace in force for the room: the profile's (code, then the stored layer) with the room's override applied; while the room is in emergency its slow mode is the stricter of its own and
-     * `rooms.emergency.slowModeMs`. Every field filled, `null` is off. @experimental
+     * `rooms.emergency.slowModeMs`. Every field filled, `null` is off.
      */
     pace(roomId: string): ResolvedPace;
     /**
      * Put the room in a mode: `normal` (clears at once), `locked` (only staff may chat: `chat.accept(..., { staff: true })` or `ChatMember.staff`) or `emergency` (slow mode, and accounts younger
      * than `rooms.emergency.newAccountDays` read-only). Every mode but normal ends by itself after `opts.forMs` (60 000 to 86 400 000, whole ms) or `rooms.defaultModeMs`; there is no "until I
      * turn it off". A second call replaces the first whole and restarts the clock. Raises `room.mode`. A mode is never a sanction. In memory, this process only, like the pace: a game that runs
-     * several processes calls it in each; `rooms.close` clears it. `RangeError` for an unknown mode or a bad length, `TypeError` for a bad room id; either changes nothing. @experimental
+     * several processes calls it in each; `rooms.close` clears it. `RangeError` for an unknown mode or a bad length, `TypeError` for a bad room id; either changes nothing.
      */
     setMode(roomId: string, mode: RoomMode, opts?: { forMs?: number }): RoomModeState;
-    /** The room's mode now, with the expiry applied (a mode that ran out is noticed here, announced once as `room.mode` with `expired`). A copy. @experimental */
+    /** The room's mode now, with the expiry applied (a mode that ran out is noticed here, announced once as `room.mode` with `expired`). A copy. */
     mode(roomId: string): RoomModeState;
-    /** The rooms this process knows (seated players, or a mode set), up to 500, the most seated first: tags, seats held, mode and end. No seat id, no handle. @experimental */
+    /** The rooms this process knows (seated players, or a mode set), up to 500, the most seated first: tags, seats held, mode and end. No seat id, no handle. */
     list(): Array<{ roomId: string; tags: Record<string, string>; seated: number; mode: RoomMode; until: number | null }>;
     /**
      * Whether a seat may chat in the room right now: `'ok'`, `'locked'` or `'new_account'` (an emergency and a young account). The same decision as `accept` for the seat; `opts.staff`
-     * (the game's word, as for `accept`) is always `'ok'`. A pure read, for the chat box's hello. @experimental
+     * (the game's word, as for `accept`) is always `'ok'`. A pure read, for the chat box's hello.
      */
     postingState(roomId: string, seatId: string, opts?: { staff?: boolean }): 'ok' | 'locked' | 'new_account';
     /**
      * Take a delivered line back for everyone, keeping it as evidence: its text stays in the evidence buffer and in any report filed from now on (flagged `retracted`), a report already filed is
      * not rewritten, and a report on the line is still valid. `opts.allFromAuthor` also takes back every delivered line still in the buffer by the same person (the spam-wave case). It works only
      * while the line is in the evidence buffer (15 minutes, 100 lines a room), else `not_found` (also for a line already taken back, a blocked line and any bad argument). Raises `line.retracted`
-     * (the room, the line ids and a time: no text, no seat). Not a sanction: no notice, no strike, nothing said to the author. @experimental
+     * (the room, the line ids and a time: no text, no seat). Not a sanction: no notice, no strike, nothing said to the author.
      */
     retract(roomId: string, lineId: string, opts?: { allFromAuthor?: boolean }): { ok: true; lineIds: string[] } | { ok: false; refused: 'not_found' };
     /**
      * The lines the room's evidence buffer holds now, as id, send time and whether each was taken back: for staff to see which lines of a report can still be removed. No text, no seat, no handle.
-     * A pure read; empty for an unknown room. @experimental
+     * A pure read; empty for an unknown room.
      */
     lineStates(roomId: string): Array<{ lineId: string; ts: number; retracted: boolean }>;
   };
   /**
    * The chat filters (`profile.filters`): what they did, and a way to try them before they act. All off until an owner turns a block on.
-   * @experimental
    */
   filters: {
     /**
@@ -417,7 +412,7 @@ export interface Chatwarden {
     visibleTo(roomId: string, viewerSeat: string, senderSeat: string): boolean;
     /**
      * The seats of the room that must NOT be shown a line `senderSeat` sent (they muted or blocked its sender, or the sender blocked them): the other seats `visibleTo` is false for, sorted. It costs the people who
-     * muted or blocked the sender, not the seats in the room, so a line in a room of thousands is cheap. [] for an unknown room, an empty seat or a guest. This process's seats only, like `visibleTo`. Seat ids only. @experimental
+     * muted or blocked the sender, not the seats in the room, so a line in a room of thousands is cheap. [] for an unknown room, an empty seat or a guest. This process's seats only, like `visibleTo`. Seat ids only.
      */
     hiddenFor(roomId: string, senderSeat: string): string[];
     /**
@@ -448,7 +443,6 @@ export interface Chatwarden {
      * rules (a merge is followed, a failure reads as not restricted and is logged once a minute), the same shape; `opts` as in
      * `restricted`. A value that is not a subject id, or a subject nobody holds, reads `{ restricted: false, until: null, kind: null }`.
      * A subject id is an identifier: pass it from server code, never from what a client sent, and never send it to a player.
-     * @experimental
      */
     restrictedBySubject(subject: SubjectId, opts?: { roomId?: string | null; seatId?: string | null }): RestrictedAnswer;
   };
@@ -513,7 +507,6 @@ export interface Chatwarden {
      * `flag`; it is public for a game that runs its own rules. Never rejects: `filed`, `open_exists` (one is already open for this person and room),
      * `capped` (`flagCapPerDay` filter reports filed today across the instance), `no_subject` (a guest), or `off`. See {@link SystemReportInput}.
      * A report it files is announced like any other (`report.created` with `origin`, `onReport`). Staff views show its reporter as null.
-     * @experimental
      */
     fileSystem(input: SystemReportInput): Promise<SystemReportResult>;
     /**
@@ -552,7 +545,6 @@ export interface Chatwarden {
      * report in the window is absent; a store without `reporterOutcomes` gives an empty map. `falseRate` is null below
      * `REPORTER_ACCURACY_MIN_DECIDED` decided reports. A ranking hint and a line on the case: it never refuses a report and never
      * counts toward a suspension. Staff only: never send to a player.
-     * @experimental
      */
     reporterAccuracy(people: readonly SubjectId[]): Map<SubjectId, ReporterAccuracy>;
     /**
@@ -565,7 +557,6 @@ export interface Chatwarden {
      * a bad `actor` is a `RangeError`; a STORE failure rejects, the reports closed before it stay closed, and running it again
      * finishes the rest. Writes no audit row: the staff layer records the sweep. Carries subject ids: staff channels only, never send
      * to a player.
-     * @experimental
      */
     dismissMany(input: DismissManyInput): Promise<DismissManyResult>;
   };
@@ -582,7 +573,6 @@ export interface Chatwarden {
      * The blocked NAMES kept as evidence (`names.keepBlocked`) over the last `days` days (1, 7 or 30, else `RangeError`), newest first, at most
      * 200: `{ id, at, person, name, termId, reason }`, the person a staff ref or null. Empty when none was kept, or the store keeps none. A name
      * is a player's text and `person` a subject id: staff channels only, never send either to a player.
-     * @experimental
      */
     names(q: { days: BlockedDays }): BlockedNameItem[];
   };
@@ -637,37 +627,33 @@ export interface Chatwarden {
      * first but a case is claimed only when it is overdue (its oldest open report has waited 24 hours) or boosted (the person meets the
      * feed's threshold); the first such case wins. If the queue, or the first 200 people, hold neither, the oldest free case is claimed as
      * usual, so nothing is ever left out. A boosted case is never ranked down. A non-boolean value is a `RangeError`.
-     * @experimental (the `rankDownHabitual` and `signalBoost` filters)
+     * (the `rankDownHabitual` and `signalBoost` filters)
      */
     next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean; scope?: readonly string[] }): NextCase | null;
     /**
      * Mark an open report urgent or not urgent (any moderator, both directions; the staff layer audits it). `ok: true` also for a repeat; `closed` for a decided report, `not_found` for
      * an unknown id. Urgent is a stored snapshot (a reason's flag sets it at filing, see `reporting.reasons[].urgent`); this is the one other way it changes. Moves the change token,
      * announces nothing, touches no claim and nothing about a person. `RangeError` for a malformed actor or a non-boolean flag; `TypeError` for a store without the urgent lane.
-     * @experimental
      */
     setUrgent(reportId: string, actor: string, on: boolean): CaseMarkResult;
     /**
      * Mark that `actor` passed the case to the game's safety team: who and when, once (the first call wins; a repeat answers `ok: true` and changes nothing). Allowed on an urgent or an
      * ordinary open report. Emits `report.handoff` (the report id and the time only) after the write commits, fenced. It contacts no one and writes nothing to the person.
-     * @experimental
      */
     handoff(reportId: string, actor: string): CaseMarkResult;
     /**
      * Ask a senior or the owner for a second look at an open report (`desk.workflow` on; `off` otherwise). A moderator or a senior may ask a senior or the owner; an owner no one
      * (`not_allowed`). Sets the report's escalation, adds an `ask` or `escalate` entry (with the optional note) to its staff thread and emits `case.escalated` after the commit. It never
      * touches the claim, never blocks a decision, never reorders the queue; deciding the report clears it. `RangeError` for a malformed actor or role.
-     * @experimental
      */
     escalate(reportId: string, actor: string, role: Role, input: { to: 'senior' | 'owner'; note?: string }): EscalateResult;
     /**
      * End a second look ("Looked at"): the asker, or anyone at or above the role asked. A report with none answers ok and changes nothing.
-     * @experimental
      */
     clearEscalation(reportId: string, actor: string, role: Role): ClearEscalationResult;
-    /** How many open reports are asked of each role (zeros with the workflow off). @experimental */
+    /** How many open reports are asked of each role (zeros with the workflow off). */
     askedCount(): { senior: number; owner: number };
-    /** How many open reports are urgent (0 for a store without the urgent lane); with `scope`, only those filed in a room of one of these staff scopes. @experimental */
+    /** How many open reports are urgent (0 for a store without the urgent lane); with `scope`, only those filed in a room of one of these staff scopes. */
     urgentCount(scope?: readonly string[]): number;
     /**
      * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
@@ -688,7 +674,6 @@ export interface Chatwarden {
   /**
    * The staff thread on a report (`desk.workflow` on; `off` and an empty list otherwise): comments of 1 to 500 characters, at most 50 entries a report, deleted with the report, never
    * claim-gated, never in an event, a webhook, a post, an audit row, a notice, an AI input or a log. `RangeError` for a malformed actor or role. Staff only.
-   * @experimental
    */
   comments: {
     /** Add a comment (cleaned like an appeal statement: control, bidi and zero-width characters removed; counted in code points). A decided report still takes one. */
@@ -699,7 +684,7 @@ export interface Chatwarden {
     remove(reportId: string, commentId: string, actor: string, role: Role): CommentRemoveResult;
   };
   /**
-   * The desk's own switches. @experimental
+   * The desk's own switches.
    */
   desk: {
     /** Whether `desk.workflow` is on in the profile in force (and the store can keep the thread). */
@@ -707,7 +692,7 @@ export interface Chatwarden {
   };
   /**
    * Insights (`desk.insights`, off by default): how the team is doing, from rows the kit already holds plus a daily line counter. Counts and times only: never a person, a handle, text or
-   * a staff member, and no per-person number. @experimental
+   * a staff member, and no per-person number.
    */
   insights: {
     /** `desk.insights` is on in the profile in force and the store can read the rows. */
@@ -781,7 +766,6 @@ export interface Chatwarden {
      * or one with an ambiguous letter (never throws for a string; a non-string is a `TypeError`). Revoked and ended groups are found: the
      * code never changes. Built from the group's subject row only (never an IP row). Synchronous. Carries staff-only text (reason, actor):
      * never send to a player. A store without `sanctionGroupByRef` is read through its newest 1 000 groups.
-     * @experimental
      */
     byRef(refCode: string): PersonSanctionView | null;
   };
@@ -833,26 +817,23 @@ export interface Chatwarden {
      *
      * With `entity: { kind, ref }` the rename is of something the player owns (a clan, guild, team), not their own name: the kit has no screen for it, so it creates NO notice (`noticeId` is null) and sets no pending request
      * (an entity rename may repeat); it emits `rename.required` with `entity: { kind, ref }` (never the label) and the game tells the owner in its own UI. The person is the owner. Otherwise as above.
-     * @experimental
      */
     requireRename(input: { subject: SubjectId; actor: string; reason: string; rule: number; entity?: { kind: string; ref: string } }): { ok: true; noticeId: string | null } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
-    /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. @experimental */
+    /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. */
     pendingRename(who: RawWho): boolean;
-    /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. @experimental */
+    /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. */
     renamed(who: RawWho): boolean;
     /**
      * Whether `requireRename` can work right now: `names.renames` is on AND the store can release a rename (the test `requireRename` applies
      * first). A live read. For a staff screen, so it never offers a rename that always answers `off`.
-     * @experimental
      */
     renamesEnabled(): boolean;
-    /** A person's rename requests, newest first, at most 20: `{ at, pending }` each. No reason, actor, rule or name. Staff only: never send to a player. @experimental */
+    /** A person's rename requests, newest first, at most 20: `{ at, pending }` each. No reason, actor, rule or name. Staff only: never send to a player. */
     renamesOf(subject: SubjectId): Array<{ at: number; pending: boolean }>;
   };
   /**
    * "This kit id is that outside id": a small table the Coop and EOS adapters keep their links in (a report sent to Coop, a sanction pushed
    * to EOS, an EOS report already filed, a polling cursor). Rows are ids and one short state word, never text. Purged with `retention.reportsMs`.
-   * @experimental
    */
   links: {
     /** True when the store implements the link methods. An adapter that needs links throws `RangeError` at construction when false. */
@@ -871,14 +852,12 @@ export interface Chatwarden {
    * The AI read and recommend service. Always present: without an `ai` option (or at level 0) it answers as if there were no AI. A
    * read is made after the report is stored and never delays the player's ack; a failing, slow or refusing provider changes nothing
    * for players or moderators. Staff only: a read describes chat lines.
-   * @experimental
    */
   ai: AiFacade;
   /**
    * Signals: what the game records about a player (muted by others, kicked, left mid-game), counted by distinct source. A signal never
    * acts: it is read only where a profile rule says so (the Person page record, the ladder suggestion, the AI read, the queue order).
    * Staff-side data: never send any of this to a player.
-   * @experimental
    */
   signals: {
     /**
@@ -967,14 +946,12 @@ export interface Chatwarden {
      * Staff side: the text a player is shown for one report excerpt line, the same text a sanction notice stores for it. A delivered line is its
      * delivered form; a blocked line (or one with no delivered form) has only its matched terms starred, or is all stars when the matcher cannot
      * say where they are. Never the raw text of a blocked line. Throws for a line with no raw text. Never send a raw line to a player.
-     * @experimental
      */
     lineText(line: ReportExcerptLine): string;
   };
   /**
    * Appeals (0.1.9, `profile.appeals`, off until turned on). The player side takes the same `RawWho` as `notices` and FINDS the person
    * (never creates one); every answer is a reason or a rule number, never an identifier, a staff ref or a reason a moderator gave.
-   * @experimental
    */
   appeals: {
     /** Whether appeals are on right now: the profile in force says so (a live read) and the store can keep them. */
@@ -1016,7 +993,6 @@ export interface Chatwarden {
      * One person's appeals (across their merged subjects) as summaries, newest first, at most 50; a moot appeal is left out. For the person's
      * page. Still listed after appeals are switched off (what was filed stays visible until retention removes it); empty for a store that cannot keep
      * appeals or a person the kit does not hold. Carries a staff ref and never the statement: staff channels only.
-     * @experimental
      */
     forPerson(subject: SubjectId): AppealSummary[];
   };
@@ -1077,7 +1053,7 @@ export interface Chatwarden {
     list(q: AuditQuery): AuditPage;
     /**
      * The audit ref of a room, for the `room.mode` and `room.retract` rows: the room id itself when it fits the ref alphabet (1 to 64 of `A-Z a-z 0-9 _ . : -`), else `h-` and 16 hex characters of a keyed
-     * hash (the kit's own secret, so the same id gives the same ref across restarts and the id never reaches the trail). @experimental
+     * hash (the kit's own secret, so the same id gives the same ref across restarts and the id never reaches the trail).
      */
     roomRef(roomId: string): string;
   };
@@ -1109,19 +1085,17 @@ export interface Chatwarden {
      * The account ids the kit holds for this person across their merged aliases, sorted: exactly the strings the game passed as
      * `RawWho.accountId` (no client key, no IP, no hash). A guest has none; so does an unknown id. For the game to find the player to rename
      * after `rename.required`. Server side only: never send to a player.
-     * @experimental
      */
     accountIds(subject: SubjectId): string[];
     /**
      * The "do not automate" mark (AI levels 3 and 4, design 6.4): a senior marks a person so the AI never acts on them. Staff only (`automation.write` in
      * the HTTP layer). Reads and drafts are still produced for a marked person. Follows a merge. A store without the methods answers `unsupported`.
-     * @experimental
      */
     automation: AutomationFacade;
     /**
      * How a person is linked, as counts only: `accounts` (account ids the kit holds for them) and `devices` (client keys), `merged` (other subjects folded into them), and `inForceOnLinked`, how many
      * bans, area bans and chat restrictions in force were placed on a merged subject rather than on the person's own. Never an id, a key, a hash or an address; the IP rows are not read; a guest and an
-     * unknown subject read zeros. A hint (a shared device can link two different people), not proof. A pure read. Staff only: it says who is linked to a person. @experimental
+     * unknown subject read zeros. A hint (a shared device can link two different people), not proof. A pure read. Staff only: it says who is linked to a person.
      */
     links(subject: SubjectId): PersonLinks;
   };
@@ -1130,14 +1104,12 @@ export interface Chatwarden {
    * that keeps a ban in force until retention removes it, a dry run). The adopter verifies the requester first; the kit never does, never tells the player and never
    * judges a request. Owner-only in the HTTP layer and on no player route. Erase leaves the staff audit trail (its person refs read the receipt id) and any report held
    * for legal reasons.
-   * @experimental
    */
   privacy: PrivacyService;
   /**
    * Legal hold (0.2.0): hold a report so no retention purge and no erase reaches it or what hangs on it, release it, and produce its signed evidence bundle. A senior
    * holds and the owner releases and downloads in the HTTP layer; `hold` emits `report.escalated` (ids and a code, never text). The kit judges nothing and forwards
    * nothing: it keeps what it held.
-   * @experimental
    */
   legal: LegalService;
   /**

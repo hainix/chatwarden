@@ -18,7 +18,6 @@ const EPS = 1e-12;
 
 /**
  * The numbers a gate may be moved by, in code (design 5.4). Every one is held inside {@link AI_GATE_BANDS}; the hub cannot move any.
- * @experimental
  */
 export interface AiGateConfig {
   /** The window every count is over, in days. */
@@ -51,7 +50,6 @@ export interface AiGateConfig {
 
 /**
  * The defaults of design 5.2. Frozen.
- * @experimental
  */
 export const AI_GATE_DEFAULTS: Readonly<AiGateConfig> = Object.freeze({
   windowDays: 90,
@@ -70,7 +68,6 @@ export const AI_GATE_DEFAULTS: Readonly<AiGateConfig> = Object.freeze({
 /**
  * The inclusive band each number may be moved inside (design 5.4). Frozen. The ceilings of acting (24 hours, the kinds, the evidence rule, "do not
  * automate", "never a ban", "only people review") are not here: they have no band and are constants checked elsewhere.
- * @experimental
  */
 export const AI_GATE_BANDS: Readonly<Record<keyof AiGateConfig, Readonly<{ min: number; max: number }>>> = Object.freeze({
   windowDays: Object.freeze({ min: 30, max: 365 }),
@@ -92,7 +89,6 @@ const WHOLE: ReadonlySet<keyof AiGateConfig> = new Set(['windowDays', 'volume', 
  * Check a partial config against the bands and fill it from the defaults. Throws a plain `RangeError` naming the field (never the value) for an
  * unknown field, a value that is not a finite number, a fraction in a whole-number field, or a number outside its band. Reads own properties only;
  * an `undefined` field is the default. The result is frozen and shares nothing with the input.
- * @experimental
  */
 export function checkGateConfig(partial?: Partial<AiGateConfig>): AiGateConfig {
   const out: AiGateConfig = { ...AI_GATE_DEFAULTS };
@@ -127,7 +123,6 @@ function wilson(k: number, n: number, z: number): [number, number] {
 /**
  * The lower bound of the Wilson score interval for `successes` of `n` (z defaults to 1.96, 95%). `n` 0 gives 0. Throws a `RangeError` for a count that
  * is not a whole number from 0 to `n`.
- * @experimental
  */
 export function wilsonLower(successes: number, n: number, z: number = Z95): number {
   checkCounts(successes, n);
@@ -137,7 +132,6 @@ export function wilsonLower(successes: number, n: number, z: number = Z95): numb
 
 /**
  * The upper bound of the Wilson score interval for `events` of `n` (z defaults to 1.96). `n` 0 gives 1. Throws like {@link wilsonLower}.
- * @experimental
  */
 export function wilsonUpper(events: number, n: number, z: number = Z95): number {
   checkCounts(events, n);
@@ -148,7 +142,6 @@ export function wilsonUpper(events: number, n: number, z: number = Z95): number 
 /**
  * The instance-wide limits of design ruling 10, as the read-only dashboard shows them (the acting release enforces them and gives them bands): at most
  * 10 AI actions an hour and 50 a UTC day, and acting pauses while the oldest unreviewed action is older than 72 hours or more than 25 are unreviewed.
- * @experimental
  */
 export const AI_ACT_CAP_DEFAULTS: Readonly<{ perHour: number; perDay: number; reviewWithinMs: number; reviewDebtMax: number }> = Object.freeze({
   perHour: 10,
@@ -159,7 +152,6 @@ export const AI_ACT_CAP_DEFAULTS: Readonly<{ perHour: number; perDay: number; re
 
 /**
  * What the store aggregates for one cell and window (design 5.1). Every number is a count of decided reports; there is no identifier in it.
- * @experimental
  */
 export interface AiCellCounts {
   qualifying: number;
@@ -175,7 +167,6 @@ export interface AiCellCounts {
 
 /**
  * What `cw.appeals.stats` and the AI-act revoke time give (design 5.2 G6 and G7). Revokes only; reduces are carried apart and never count.
- * @experimental
  */
 export interface AiAppealFacts {
   /** False when in-kit appeals are absent or disabled: both appeals checks then fail (`no_appeals`). */
@@ -187,13 +178,12 @@ export interface AiAppealFacts {
   actRevokeAt: number | null;
 }
 
-/** The names of the eight checks, in the order they are evaluated and shown. @experimental */
+/** The names of the eight checks, in the order they are evaluated and shown. */
 export type AiGateName = 'volume' | 'breadth' | 'agreement' | 'override' | 'recency' | 'appeals_rule' | 'appeals_acts' | 'keep';
 
 /**
  * One check of a cell. `need` is a fixed code (`'min:100'`, `'lower>=0.90'`), built from the configured number only, never free text.
  * `value` is what was measured, or null when it does not exist (no recent decisions, no rate yet, the keep gate not applying).
- * @experimental
  */
 export interface AiGateCheck {
   name: AiGateName;
@@ -205,7 +195,6 @@ export interface AiGateCheck {
 /**
  * What {@link evaluateCell} knows about a cell: every check, whether the cell is open, and the cooling latch. It does not know the cell's rule and
  * level (they are not an input); the service names them in {@link AiCellGate}.
- * @experimental
  */
 export interface AiCellVerdict {
   /** Every check, in the order of {@link AiGateName}. Never short-circuits, so the dashboard shows all of them. */
@@ -217,7 +206,7 @@ export interface AiCellVerdict {
   coolingCode: 'not_a_violation' | 'appeal_revoked' | null;
 }
 
-/** A cell (a rule number and a conduct level) with its verdict. @experimental */
+/** A cell (a rule number and a conduct level) with its verdict. */
 export interface AiCellGate extends AiCellVerdict {
   rule: number;
   level: 'hostile' | 'severe';
@@ -237,7 +226,6 @@ const two = (v: number): string => {
 /**
  * Evaluate one cell against every gate at `now`. Pure: the same input gives the same output, nothing is mutated, and it never throws (a malformed
  * count, such as more clean agrees than qualifying decisions, is clamped and can only make the cell harder to open, never easier).
- * @experimental
  */
 export function evaluateCell(counts: AiCellCounts, appeals: AiAppealFacts, cfg: AiGateConfig, now: number): AiCellVerdict {
   const n = count(counts.qualifying);
@@ -323,6 +311,5 @@ export function evaluateCell(counts: AiCellCounts, appeals: AiAppealFacts, cfg: 
 
 /**
  * The recent window of G5, in days: the `recent` counts the store aggregates are over exactly this many.
- * @experimental
  */
 export const AI_RECENT_DAYS = RECENT_DAYS;

@@ -92,7 +92,6 @@ function appealOf(raw: unknown): PlayerAppeal | null {
 /**
  * What filing an appeal came to: the appeal, or the refusal the route gave (`statement_invalid` 400, `not_found` 404, `already_appealed` 409,
  * `rate` 429 with `retryAfter` in whole seconds when the server said). Any other failure rejects with a `PlayerError`.
- * @experimental
  */
 export type FileAppealOutcome = { ok: true; appeal: PlayerAppeal } | { ok: false; refused: AppealRefusal; retryAfter?: number };
 
@@ -131,13 +130,11 @@ export interface PlayerClient {
   rules(): Promise<PlayerRules>;
   /**
    * `GET /appeals`: the player's own appeals, with only the fields the kit documents. Rejects with a 404 `PlayerError` while appeals are off.
-   * @experimental
    */
   appeals(): Promise<PlayerAppeal[]>;
   /**
    * `POST /appeals`: appeal the sanction a notice told the player about. `statement` is sent as typed (the server cleans it and counts it
    * in characters against 1000). A refusal is a value; a failure to get an answer rejects.
-   * @experimental
    */
   fileAppeal(noticeId: string, statement: string): Promise<FileAppealOutcome>;
 }

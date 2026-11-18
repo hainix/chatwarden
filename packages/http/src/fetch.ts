@@ -12,11 +12,9 @@ import type { KitRequest, KitResponse, KitStream } from './types.js';
 /**
  * Route tables by the path they live under: `{ '/admin': adminTable, '/api': playerTable, '': healthTable }`. A key is `''` or starts with `/`,
  * has no trailing `/`, and each of its parts is letters, digits and `_ . ~ -`.
- * @experimental
  */
 export type Mounts = Record<string, RouteTable>;
 
-/** @experimental */
 export interface FetchOptions {
   /** Where the mounts are rooted in the URL, such as `/chatwarden`. Default `''`. A request outside it is not this adapter's (see `unmatched`). Same rule as a mount key. */
   prefix?: string;
@@ -33,7 +31,7 @@ export interface FetchOptions {
   logger?: Logger;
 }
 
-/** What `toFetch` returns: hand it a `Request`, get the kit's `Response`. @experimental */
+/** What `toFetch` returns: hand it a `Request`, get the kit's `Response`. */
 export type FetchHandler = (request: Request) => Promise<Response>;
 
 /** The largest `maxBody` accepted: the body is held in memory and decoded to one string. */
@@ -259,7 +257,6 @@ function streamResponse(request: Request, kit: KitResponse, stream: KitStream, h
  *   HEAD on a GET route has the GET status and headers and no body. A KitResponse with `stream` is a streaming Response (see `streamResponse`).
  *
  * Mount keys, the prefix and `maxBody` are checked when this is called: a bad one is a `RangeError` that does not repeat the value.
- * @experimental
  */
 export function toFetch(mounts: Mounts, options: FetchOptions & { unmatched: 'pass' }): (request: Request) => Promise<Response | null>;
 export function toFetch(mounts: Mounts, options?: FetchOptions): FetchHandler;

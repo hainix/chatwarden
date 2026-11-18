@@ -7,7 +7,6 @@ import type { PieceLinks, PieceProps } from './Piece.js';
 
 /**
  * The props of `CaseWorkbench`.
- * @experimental
  */
 export interface CaseWorkbenchProps extends PieceProps, PieceLinks {
   /** The report to show: the person's case is its newest open report. */
@@ -41,7 +40,6 @@ function Body({ reportId }: { reportId: string }) {
  * ```tsx
  * <CaseWorkbench reportId={id} onOpenPerson={(person) => navigate(`/people/${person}`)} />
  * ```
- * @experimental
  */
 export function CaseWorkbench({ reportId, className, onOpenCase, onOpenPerson, onOpenReport }: CaseWorkbenchProps) {
   const runtime = useRuntime();

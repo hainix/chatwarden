@@ -62,14 +62,14 @@ export interface StaffReport extends ReportRecord {
   ownLineIds: Record<SubjectId, string[]>;
   /**
    * Set by `cw.reports.get` only (never by the queue listing): the game's evidence pointer as `{ ref, url }` (`url` is the owner's `reporting.evidenceUrl` with the ref filled in, or `null` with no
-   * usable template) or `null` for a report with no ref. @experimental
+   * usable template) or `null` for a report with no ref.
    */
   evidence?: ReportEvidence | null;
-  /** Set by `cw.reports.get` only, and only with `desk.surge` on and the person over its threshold: a hint, never a reason to set a report aside. @experimental */
+  /** Set by `cw.reports.get` only, and only with `desk.surge` on and the person over its threshold: a hint, never a reason to set a report aside. */
   surge?: ReportSurge;
 }
 
-/** The evidence pointer of a case: the game's opaque ref and the staff link built from `reporting.evidenceUrl`, when there is one. @experimental */
+/** The evidence pointer of a case: the game's opaque ref and the staff link built from `reporting.evidenceUrl`, when there is one. */
 export interface ReportEvidence {
   ref: string;
   url: string | null;
@@ -97,7 +97,7 @@ export interface ReportQuery {
   reason?: string | null;
   /**
    * Only urgent reports (`true`): the urgent queue, found at any age. It means open reports, so it does not combine with another `status` or with `person` (`ReportQueryError`).
-   * `false` or absent: every report. @experimental
+   * `false` or absent: every report.
    */
   urgent?: boolean;
   /**

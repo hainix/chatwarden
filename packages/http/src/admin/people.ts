@@ -4,11 +4,11 @@ import type { AdminContext } from './context.js';
 import { bodyAutomation, bodyObject } from './validate.js';
 
 /**
- * `GET /people/:ref/links` (`history.read`, a moderator's by default, `@experimental`): how a person is linked, as counts only: `{ accounts, devices, merged, inForceOnLinked: { ban, area, chat } }` (account ids and client keys
+ * `GET /people/:ref/links` (`history.read`, a moderator's by default): how a person is linked, as counts only: `{ accounts, devices, merged, inForceOnLinked: { ban, area, chat } }` (account ids and client keys
  * the kit holds for them, other subjects merged into them, and the bans, area bans and chat restrictions in force that were placed on a merged subject rather than on their own). Never an id, a key, a hash or an address, and the
  * address rows are not read. A hint (a shared device can link two different people), not proof. 404 `not_found` for a ref the kit holds nothing for. Audits `history.view` on the person, `required`. `no-store`.
  *
- * `PUT /people/:id/automation { allowed, code? }` (`automation.write`, a senior's by default, `@experimental`): mark a person "do not automate", or clear the mark.
+ * `PUT /people/:id/automation { allowed, code? }` (`automation.write`, a senior's by default): mark a person "do not automate", or clear the mark.
  * `allowed: false` needs one of the closed reason codes (`vulnerable`, `under_review`, `staff`, `sensitive_case`, `other`), `allowed: true` takes none; there is no
  * free text. 200 `{ ok: true }`.
  * - 400 `invalid_request` for a body that is not that shape, 400 `forbidden_key` for any other key (an actor, a note). The actor is the authenticated caller, never the body.

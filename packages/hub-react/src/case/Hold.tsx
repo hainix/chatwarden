@@ -16,7 +16,7 @@ import { Notice, Time } from '../ui.js';
 /** The reasons, in the order the kit lists them. */
 const CODES: readonly HoldCodeView[] = ['law_enforcement_request', 'legal_proceeding', 'platform_request', 'safety_review', 'other'];
 
-/** What the part is given. @experimental */
+/** What the part is given. */
 export interface CaseHoldProps {
   reportId: string;
   /** The hold the server sent with the report, or null. */

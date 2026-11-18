@@ -12,7 +12,7 @@ export { sha256Hex } from './sha256.js';
 // manifest's hash before any of them is parsed, unknown keys and unknown entries are refusals, and every refusal is a CorpusError
 // with a fixed message. A message never carries a term, a phrase, a line or an id from the archive.
 
-/** A term row of `terms.json`. @experimental */
+/** A term row of `terms.json`. */
 export interface TermRow6 {
   id: string;
   term: string;
@@ -31,7 +31,7 @@ export interface TermRow6 {
   negative: string[];
 }
 
-/** A row of `exceptions.json`. @experimental */
+/** A row of `exceptions.json`. */
 export interface ExceptionRow6 {
   id: string;
   phrase: string;
@@ -39,7 +39,7 @@ export interface ExceptionRow6 {
   status: TermRow6['status'];
 }
 
-/** `negative.<lang>.json`: known-innocent lines and known losses for one language. @experimental */
+/** `negative.<lang>.json`: known-innocent lines and known losses for one language. */
 export interface NegativeFile {
   schema: 'chatwarden-corpus-negative/1';
   language: string;
@@ -47,7 +47,7 @@ export interface NegativeFile {
   knownLosses: string[];
 }
 
-/** The manifest of a terms release (6.5). `builtAt` is epoch ms. @experimental */
+/** The manifest of a terms release (6.5). `builtAt` is epoch ms. */
 export interface ReleaseManifest {
   schema: 'chatwarden-corpus-manifest/1';
   kind: 'terms';
@@ -66,7 +66,7 @@ export interface ReleaseManifest {
   gate: { matcher: string; positiveLines: number; negativeLines: number; crossLanguageLines: number; passed: true };
 }
 
-/** A parsed terms release. `positive` is the pack-wide `positive.json` (empty when the release has none). @experimental */
+/** A parsed terms release. `positive` is the pack-wide `positive.json` (empty when the release has none). */
 export interface TermsRelease {
   manifest: ReleaseManifest;
   version: string;
@@ -367,7 +367,6 @@ export function entriesOf(files: unknown): Map<string, Uint8Array> {
  * `unpack`) for the manifest, the hashes, the kind, the gate and what the index said it should be, `bad_pack` (stage `validate`) for
  * a row, a line or a file that does not meet the format. `expected` is what the index entry says: the manifest's `version` must equal
  * it and its `sequence` must not be above it. Every file is hashed before any is parsed.
- * @experimental
  */
 export function parseTermsRelease(files: ReadonlyMap<string, Uint8Array>, expected?: { version?: string; sequence?: number }): TermsRelease {
   try {

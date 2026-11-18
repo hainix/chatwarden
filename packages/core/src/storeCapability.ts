@@ -20,7 +20,6 @@ export function hasUrgentMethods(store: Store): boolean {
 /**
  * Thrown when a call needs an optional store method the store does not have (today: `cases.setUrgent` and `cases.handoff` over a store without the urgent lane). The message names the call
  * and the missing methods; `missing` lists them. It is an `Error`, not a `TypeError`: the HTTP layer answers it 501 `not_supported`, and a log line shows the class `StoreCapabilityError`.
- * @experimental
  */
 export class StoreCapabilityError extends Error {
   readonly missing: readonly string[];

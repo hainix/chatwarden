@@ -11,7 +11,7 @@ export const SURGE_MAX_REPORTERS = 100;
 
 /**
  * A surge on a case: how many reports reached the person inside `windowMinutes`, from how many distinct players, and how many of those players' accounts are younger than `newAccountDays`
- * (`null` when the game wired no account-age hook). Counts only. @experimental
+ * (`null` when the game wired no account-age hook). Counts only.
  */
 export interface ReportSurge {
   reports: number;
@@ -35,7 +35,6 @@ export interface SurgeDeps {
 /**
  * The surge on a person, or `null` when `desk.surge` is off or fewer than `reports` reports (any status, a chat filter's flag excluded: nobody filed it) were filed against them within the
  * last `windowMinutes` (a report exactly that old still counts). Reads at most {@link SURGE_MAX_REPORTS} reports and {@link SURGE_MAX_REPORTERS} reporters; a merged alias counts as one person.
- * @experimental
  */
 export function surgeOf(person: SubjectId, now: number, settings: ResolvedDesk['surge'], deps: SurgeDeps): ReportSurge | null {
   if (!settings.enabled) return null;

@@ -84,7 +84,6 @@ const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
  * Reads a player-typed reference code: trims, ignores case, accepts a bare five characters as `M-` plus them. Returns the canonical
  * `M-XXXXX`, or null for anything else (a wrong length, an ambiguous character I, L, O, 0 or 1, another prefix). A non-string is a
  * `TypeError`. Pure.
- * @experimental
  */
 export function normalizeRefCode(text: string): string | null {
   if (typeof text !== 'string') throw new TypeError('a reference code is a string');

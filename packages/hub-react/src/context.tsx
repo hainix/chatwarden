@@ -28,7 +28,6 @@ export interface HubContextValue {
    * Set only for a piece placed in the adopter's own page (see `HubProvider`): whether the piece was told where this route goes.
    * A link to a route it cannot go to is plain text, and one it can go to is a button that calls the adopter's callback; neither
    * is an address. Left out in the hub, where every link is an `<a href>` to a route of its own.
-   * @experimental
    */
   canGo?: (route: Route) => boolean;
 }

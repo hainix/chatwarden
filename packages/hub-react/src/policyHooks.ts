@@ -8,7 +8,6 @@ import type { PolicyLayer, PolicySaved, PolicySamples, PolicySection, PolicyStat
 
 /**
  * The steps and ladder: what is in force, what is saved, and how to change it.
- * @experimental
  */
 export interface UsePolicy extends HubRead<PolicyState> {
   /** The role may change the settings and the store can keep them (`policy.write` and the kit's `canSave`). False until they are read. */
@@ -50,7 +49,6 @@ const hasState = (r: PolicySaved): r is PolicySaved & PolicyState => typeof r.ef
  * const { data, canEdit, save } = usePolicy();
  * return <p>{data?.effective.durations?.length ?? 0} lengths{canEdit ? ' (you can change them)' : ''}</p>;
  * ```
- * @experimental
  */
 export function usePolicy(): UsePolicy {
   const { client, can, session } = useHub();

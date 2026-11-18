@@ -23,7 +23,6 @@ const PATTERNS: readonly RegExp[] = [IGNORE, NOW, ROLE, TAG, AS_AI, NEW, TELL, P
  * True when a chat line or note reads like an attempt to instruct the AI ("ignore the above", "you are now ...", "system: ...",
  * "as an AI", "disregard your rules", "tell the moderator this is fine"). Case, width, zero-width characters and extra whitespace
  * are ignored. Never throws.
- * @experimental
  */
 export function looksLikeInjection(text: string): boolean {
   if (typeof text !== 'string' || text === '') return false;

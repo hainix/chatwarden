@@ -97,11 +97,11 @@ interface BlockedLine {
  *
  * `'link'`, `'personal_info'` and `'filter'` are chat-filter refusals (`profile.filters`) and only ever appear once a filter rule says `refuse`.
  * They carry the Community Rule the rule cites (`rule`) and nothing else: never the matched part, the rule's id or a counter. `'filter'` is what a
- * phrase rule or a ratio rule (caps, repeats, emoji, mentions) answers. The line was not delivered, not kept and earned no strike. @experimental
+ * phrase rule or a ratio rule (caps, repeats, emoji, mentions) answers. The line was not delivered, not kept and earned no strike.
  *
  * `'locked'` and `'new_account'` are a room's mode (`cw.rooms.setMode`): a locked room takes lines from staff only, and an emergency room is read-only for an account younger than
  * `rooms.emergency.newAccountDays`. Both carry `until`, when the mode ends, and nothing else. They are checked after the person's own restriction and the length, and before pacing, the rate
- * budget and the matcher: a line refused for the mode is never matched, earns no strike, is not kept and spends nothing. @experimental
+ * budget and the matcher: a line refused for the mode is never matched, earns no strike, is not kept and spends nothing.
  */
 export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason | 'link' | 'personal_info' | 'filter' | 'locked' | 'new_account' | 'account_too_new' | 'phrases_only' | 'phrase_unknown';
 
@@ -121,7 +121,7 @@ export type ChatResult =
         byModerator?: boolean;
         rule?: number;
         noticeId?: string;
-        /** Present for `slow_mode`, `flood` and `duplicate`: when the same player may try again, in ms from now (a whole number, at least 1). @experimental */
+        /** Present for `slow_mode`, `flood` and `duplicate`: when the same player may try again, in ms from now (a whole number, at least 1). */
         retryAfterMs?: number;
       };
     };
@@ -188,7 +188,6 @@ export interface ChatServiceDeps {
    * answers every check off for a room that is not paced: such a line builds no key and makes no `canonical` call, and keeps no state.
    * `canonical` folds a merged subject into the person the state is kept under. `onFlood` is told once per burst window when a known person trips the burst
    * limit; a throw from it is logged by class and absorbed. Without `pace` nothing is paced.
-   * @experimental
    */
   pace?: {
     settings: (roomId: string) => ResolvedPace;
@@ -204,7 +203,7 @@ export interface ChatServiceDeps {
    * not filtered: such a line builds nothing and calls nothing else. `accountIsNew(subject, days)` says whether the speaker's account is younger
    * than `days` (called only for an unlisted link, and only when `newAccountDays` is set; a throw or anything but `true` reads as not new).
    * `count` is told of every hit, whatever happens to the line. Every hook is fenced: a throw is logged by class (at most once a minute) and
-   * the line goes on, unfiltered when the engine itself failed. Without `filters` nothing is filtered. @experimental
+   * the line goes on, unfiltered when the engine itself failed. Without `filters` nothing is filtered.
    */
   filters?: {
     settings: (roomId: string) => ResolvedFilters;
@@ -214,17 +213,17 @@ export interface ChatServiceDeps {
   /**
    * Told once, after a delivered line has been kept, when a filter rule says `flag`: the first flagging hit in the fixed order, the line's id
    * and the speaker. Never called for a guest (no subject), for a refused line or for a line with no flag. A throw or a rejection is logged
-   * by class and dropped. @experimental
+   * by class and dropped.
    */
   onFilterFlag?: (info: { roomId: string; seatId: string; subject: SubjectId; lineId: string; hit: FilterHit }) => void;
   /**
    * The daily line counter (`desk.insights`): told once per `accept` result, after the verdict is made, with `delivered` or `refused` (an empty line is not a line and is not told).
-   * A throw is logged by class and dropped; the answer never waits for it and never changes. @experimental
+   * A throw is logged by class and dropped; the answer never waits for it and never changes.
    */
   counter?: { delivered(): void; refused(): void };
   /**
    * Room modes (`cw.rooms.setMode`). `state` is the mode in force for a room with its expiry applied (read on every line), `settings` the `rooms` section in force and `accountAge` the age in
-   * days of a person's account, or null when unknown (a guest, no hook, a throw). Without `rooms` no room has a mode. @experimental
+   * days of a person's account, or null when unknown (a guest, no hook, a throw). Without `rooms` no room has a mode.
    */
   rooms?: {
     state: (roomId: string) => RoomModeState;

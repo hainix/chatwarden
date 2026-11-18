@@ -12,7 +12,7 @@ function queryDays(raw: string | undefined): 7 | 30 | 90 {
 }
 
 /**
- * The Insights route (0.2.0, `@experimental`), behind `desk.insights`: with it off the route answers 404 like any route that is not there.
+ * The Insights route (0.2.0), behind `desk.insights`: with it off the route answers 404 like any route that is not there.
  *
  * - `GET /insights?days=7|30|90` (`insights.read`, a moderator's by default; 30 days by default, any other value 400 `invalid_query`): how the team is doing over the window, from rows the
  *   kit already holds plus the daily line counter: `{ days, from, to, reports: { filed, decided, open }, decision: { decided, medianMs, p90Ms }, urgent: { filed, decided, medianMs }, wait: {

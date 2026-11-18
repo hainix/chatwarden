@@ -171,18 +171,30 @@ describe('authorize (staff)', () => {
     expect(cookieOf(three.auth.signIn(`${TOKEN}-2`))).not.toBe(cookieOf(setCookie));
   });
 
-  it('the sign-in cookie is HttpOnly, SameSite=Strict, scoped to the base path, and Secure only in production', () => {
-    const dev = withToken().auth.signIn(TOKEN) as string;
-    expect(dev).toContain('HttpOnly');
-    expect(dev).toContain('SameSite=Strict');
-    expect(dev).toContain('Path=/chatwarden');
-    expect(dev).not.toContain('Secure');
-    const prod = withToken({}, { NODE_ENV: 'production' }).auth.signIn(TOKEN) as string;
-    expect(prod).toContain('Secure');
-    expect(prod).toContain('HttpOnly');
+  it('the sign-in cookie is HttpOnly, SameSite=Strict, scoped to the base path, and Secure by default, in development and in production alike', () => {
+    for (const env of [{}, { NODE_ENV: 'development' }, { NODE_ENV: 'production' }, { NODE_ENV: 'test' }]) {
+      const cookie = withToken({}, env).auth.signIn(TOKEN) as string;
+      expect(cookie, JSON.stringify(env)).toContain('HttpOnly');
+      expect(cookie).toContain('SameSite=Strict');
+      expect(cookie).toContain('Path=/chatwarden');
+      expect(cookie, JSON.stringify(env)).toMatch(/; Secure$/);
+    }
     const custom = withToken({ base: '/tarvo' }).auth.signIn(TOKEN) as string;
     expect(custom).toContain('Path=/tarvo');
     expect(custom).not.toContain('Path=/chatwarden');
+    expect(custom).toContain('Secure');
+  });
+
+  it('CHATWARDEN_INSECURE_STAFF_COOKIE=1 drops Secure (plain-http development only); any other value keeps it, as chatwarden serve does', () => {
+    const off = withToken({}, { CHATWARDEN_INSECURE_STAFF_COOKIE: '1' }).auth.signIn(TOKEN) as string;
+    expect(off).not.toContain('Secure');
+    expect(off).toContain('HttpOnly');
+    expect(off).toContain('SameSite=Strict');
+    // the opt-out is explicit: production with it set still drops Secure, because the owner asked
+    expect(withToken({}, { NODE_ENV: 'production', CHATWARDEN_INSECURE_STAFF_COOKIE: '1' }).auth.signIn(TOKEN) as string).not.toContain('Secure');
+    for (const value of ['0', '', 'true', 'yes', '2', ' 1']) {
+      expect(withToken({}, { CHATWARDEN_INSECURE_STAFF_COOKIE: value }).auth.signIn(TOKEN) as string, JSON.stringify(value)).toContain('Secure');
+    }
   });
 
   it('signIn refuses a wrong token, a missing one and a non-string', () => {

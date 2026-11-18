@@ -315,9 +315,9 @@ describe('the manifest', () => {
     expect(existsSync(join(src, 'chat.css'))).toBe(true);
   });
 
-  it('the chat entry exports ChatBox, sseTransport and the experimental pure parts, and not the main entry\'s own names twice', () => {
+  it('the chat entry exports ChatBox, sseTransport and the pure parts, and not the main entry\'s own names twice', () => {
     const entry = read(join(chatDir, 'index.ts'));
     for (const name of ['ChatBox', 'sseTransport', 'chatReducer', 'readFrame', 'enChat']) expect(entry, name).toContain(name);
-    expect(entry).toMatch(/@experimental/);
+    expect(entry).not.toMatch(/@experimental/);
   });
 });

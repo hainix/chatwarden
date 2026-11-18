@@ -5,7 +5,6 @@
 /**
  * A case accepts a quick key or a quick-action click only this long after it appeared. The second tap of a double tap, meant for the
  * case just closed, then cannot act on the next one, and a case that rendered under the finger is not acted on unread.
- * @experimental
  */
 export const QUICK_ACT_COOLDOWN_MS = 300;
 

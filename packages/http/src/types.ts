@@ -31,7 +31,6 @@ export interface KitRequest {
 
 /**
  * A response that stays open: the adapter sends the status and headers, then calls `start` once. Server-Sent Events use it.
- * @experimental
  */
 export interface KitStream {
   /**
@@ -67,7 +66,6 @@ export interface KitResponse {
   body: unknown;
   /**
    * When present, `body` is ignored and the response stays open until `start`'s sink ends it or the client leaves.
-   * @experimental
    */
   stream?: KitStream;
 }

@@ -113,7 +113,6 @@ const isRule = (r: unknown): r is RuleRef => r === 'uncovered' || (typeof r === 
  * The end of the sanction an appeal's reduction writes: the original's start plus the chosen length, never later than the original's end. A
  * permanent choice (`durationMs: null`) keeps the original end; a permanent original takes the chosen length. `null` is no end. The one function
  * the appeals service and the plan share.
- * @experimental
  */
 export function appealReplacementEnd(original: { startsAt: number; endsAt: number | null }, to: { durationMs: number | null }): number | null {
   if (to.durationMs === null) return original.endsAt;
@@ -265,7 +264,6 @@ function appeal(op: Extract<NoticeOp, { op: 'appeal' }>, c: Context): NoticePlan
  * - `revoke`: no notice; the effects say what lifts.
  * - `appeal`: the outcome notice; a reduction first writes the replacement sanction's notice (ending at `appealReplacementEnd`).
  * - `dismiss`: nothing is sent.
- * @experimental
  */
 export function planNotices(op: NoticeOp, ctx: PlanContext): NoticePlan {
   try {

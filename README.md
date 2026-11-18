@@ -29,21 +29,21 @@ yourself and your project gets exactly one copy of it. `store-sqlite` and `profa
 
 | I want to | Install |
 | --- | --- |
-| Set it up fast: write the wiring for my server (Express, Fastify, Next.js, anything on Web `Request`) | `npm install @chatwarden/http @chatwarden/core`, then `npx chatwarden init`. With nothing installed yet: `npx -p @chatwarden/http chatwarden init` (the command and its result are experimental until 0.2) |
+| Set it up fast: write the wiring for my server (Express, Fastify, Next.js, anything on Web `Request`) | `npm install @chatwarden/http @chatwarden/core`, then `npx chatwarden init`. With nothing installed yet: `npx -p @chatwarden/http chatwarden init` |
 | Moderate chat: the engine, a store and a slur matcher | `npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher` |
 | Give moderators and players HTTP routes (Express) | add `npm install @chatwarden/http express @types/express` |
 | Mask or refuse ordinary swearing | add `npm install @chatwarden/profanity` |
 | Post the review queue into a Discord forum | add `npm install @chatwarden/discord` |
-| Answer `/chatwarden lookup` and let moderators act on a report from Discord, with a confirm step (experimental until 0.2) | add `@chatwarden/discord` and `@chatwarden/http`, then `discordBot` from `@chatwarden/http/discord` (setup in the [`@chatwarden/http` README](packages/http#discord-bot)) |
-| Review in Coop, the open-source review tool: each report becomes a Coop job and a reviewer's decision comes back through a signed callback (experimental until 0.2) | add `@chatwarden/http`, then `coop` from `@chatwarden/http/coop` (setup in the [`@chatwarden/http` README](packages/http#coop)); it needs a store with `cw.links` |
-| Mirror kit sanctions to Epic Online Services and file EOS player reports as kit reports (experimental until 0.2) | add `@chatwarden/http`, then `eos` from `@chatwarden/http/eos` (setup in the [`@chatwarden/http` README](packages/http#epic-online-services)); it needs a store with `cw.links` |
+| Answer `/chatwarden lookup` and let moderators act on a report from Discord, with a confirm step (experimental: not yet run against a live Discord server) | add `@chatwarden/discord` and `@chatwarden/http`, then `discordBot` from `@chatwarden/http/discord` (setup in the [`@chatwarden/http` README](packages/http#discord-bot)) |
+| Review in Coop, the open-source review tool: each report becomes a Coop job and a reviewer's decision comes back through a signed callback (experimental: not yet run against a live Coop) | add `@chatwarden/http`, then `coop` from `@chatwarden/http/coop` (setup in the [`@chatwarden/http` README](packages/http#coop)); it needs a store with `cw.links` |
+| Mirror kit sanctions to Epic Online Services and file EOS player reports as kit reports (experimental: not yet run against live EOS) | add `@chatwarden/http`, then `eos` from `@chatwarden/http/eos` (setup in the [`@chatwarden/http` README](packages/http#epic-online-services)); it needs a store with `cw.links` |
 | Give moderators a web UI over the staff routes | add `npm install @chatwarden/hub-react react react-dom` (it also needs `@chatwarden/http` as a peer) |
 | Put the moderator hub on any page with one script tag (no React or build step) | add `npm install @chatwarden/hub-element` to self-host the script, or load it from a CDN; it has no required peer |
-| Add chat to a game that has none: a moderated chat box with report and mute | `npm install @chatwarden/http @chatwarden/player-react express react react-dom` and `@chatwarden/core`: `createRoomBroadcaster` and `chatRoutes` on the server, `<ChatBox>` from `@chatwarden/player-react/chat` in the page (the chat names are experimental until 0.2) |
+| Add chat to a game that has none: a moderated chat box with report and mute | `npm install @chatwarden/http @chatwarden/player-react express react react-dom` and `@chatwarden/core`: `createRoomBroadcaster` and `chatRoutes` on the server, `<ChatBox>` from `@chatwarden/player-react/chat` in the page |
 | Show players their notices, record and the rules, and let them report | add `npm install @chatwarden/player-react react react-dom` (it needs `@chatwarden/core` as a peer, for types) |
 | Run tests or a demo with no database (everything is lost on restart) | swap `@chatwarden/store-sqlite` for `npm install @chatwarden/store-memory` |
 | Try it with invented test words, no real term list | nothing extra: `@chatwarden/matcher/fixtures` is part of `@chatwarden/matcher` |
-| Use the shared community term list (signed, kept on disk, server only; the package ships no terms and nothing is on until you turn it on) | nothing extra: import `startCorpus` from `@chatwarden/matcher/corpus/node` (the names are experimental until 0.2), and pass the loader to `adminRoutes` as `community` for the hub's Community list. See the [matcher README](packages/matcher#the-community-term-corpus) |
+| Use the shared community term list (signed, kept on disk, server only; the package ships no terms and nothing is on until you turn it on) | nothing extra: import `startCorpus` from `@chatwarden/matcher/corpus/node`, and pass the loader to `adminRoutes` as `community` for the hub's Community list. See the [matcher README](packages/matcher#the-community-term-corpus) |
 
 Express 5 ships no types, so `@types/express` goes with `express` in a TypeScript project (a plain JavaScript project can skip it).
 
@@ -83,7 +83,7 @@ discordFeed(cw, { webhookUrl: process.env.DISCORD_WEBHOOK_URL!, hubLink: (kind, 
 - A runnable example with a chat server and a browser page that uses the chat box: [`examples/tiny-chat`](examples/tiny-chat).
 
 ## Add chat to a game that has none
-The room broadcaster behind four routes, and the box in the page (all the chat names are experimental until 0.2):
+The room broadcaster behind four routes, and the box in the page:
 
 ```ts
 import express from 'express';
@@ -103,7 +103,7 @@ The page renders `<ChatBox transport={sseTransport({ baseUrl: '/chat' })} room="
 
 ## Test your policy
 
-Write your moderation rules as a table, and run it in your own tests. `@chatwarden/store-memory/testing` is a fake clock, a scripted chat and plain assertions. It needs no test runner and no database, and its names are `@experimental` until 0.2. The words below are invented.
+Write your moderation rules as a table, and run it in your own tests. `@chatwarden/store-memory/testing` is a fake clock, a scripted chat and plain assertions. It needs no test runner and no database. The words below are invented.
 
 ```ts
 import { createTestKit, expectOutcomes } from '@chatwarden/store-memory/testing';

@@ -3,7 +3,7 @@
 > Not legal advice, not a compliance claim. This page describes what Chatwarden stores and what its privacy and legal-hold tools do. It does not say whether a request is valid, whether
 > a retention period is right, or whether any law is met. You decide those things; the kit gives you the mechanism.
 
-Everything here is `@experimental` in 0.2.0. The tools are `cw.privacy` and `cw.legal` in `@chatwarden/core`, the owner's staff routes in `@chatwarden/http`, and "Data requests", "Privacy
+The tools are `cw.privacy` and `cw.legal` in `@chatwarden/core`, the owner's staff routes in `@chatwarden/http`, and "Data requests", "Privacy
 requests" and "Legal hold" in the hub. None of it is on a player route: a player cannot export or erase anything, and the kit never contacts the person who asked.
 
 ## Who checks who is asking

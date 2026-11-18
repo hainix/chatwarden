@@ -5,7 +5,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * See the README.
- * @experimental
  */
 export interface CaseListProps extends PieceProps {
   /** The case that is open in your page (a report id): its row is marked, and never disappears under the moderator while it is open. */
@@ -31,7 +30,6 @@ function Body({ selected, onOpenCase }: Pick<CaseListProps, 'selected' | 'onOpen
  *   <CaseList selected={openReportId} onOpenCase={(person, reportId) => navigate(`/cases/${reportId}`)} />
  * </HubProvider>
  * ```
- * @experimental
  */
 export function CaseList({ className, selected, onOpenCase }: CaseListProps) {
   return (

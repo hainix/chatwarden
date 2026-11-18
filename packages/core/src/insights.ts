@@ -5,15 +5,15 @@ import type { ChatDayRow, InsightRow } from './types.js';
 // `countSanctionsByRule`). Counts and times only: the rows carry no person, handle, text or staff member, and nothing here adds one. The page shows the median and the longest
 // wait together on purpose, and never a per-person number.
 
-/** A figure of the decision time needs at least this many decided reports in the window; below it the median and the 90th percentile are `null`. @experimental */
+/** A figure of the decision time needs at least this many decided reports in the window; below it the median and the 90th percentile are `null`. */
 export const INSIGHTS_MIN_DECIDED = 5;
-/** The urgent median needs at least this many decided urgent reports. @experimental */
+/** The urgent median needs at least this many decided urgent reports. */
 export const INSIGHTS_MIN_URGENT = 3;
-/** The most report rows one read takes. A window that hits it is `partial`. @experimental */
+/** The most report rows one read takes. A window that hits it is `partial`. */
 export const INSIGHTS_ROW_CAP = 20_000;
-/** How far back one read takes report rows, whatever the window: an open report older than this is not in the rows (the read says so with `partial`). @experimental */
+/** How far back one read takes report rows, whatever the window: an open report older than this is not in the rows (the read says so with `partial`). */
 export const INSIGHTS_READ_DAYS = 90;
-/** The windows a read may ask for, in days. @experimental */
+/** The windows a read may ask for, in days. */
 export const INSIGHTS_DAYS = [7, 30, 90] as const;
 
 export type InsightsDays = (typeof INSIGHTS_DAYS)[number];
@@ -29,7 +29,6 @@ const DAY_MS = 24 * HOUR_MS;
  * lines, `null` when no line was delivered or counting began inside the window. `partial` is true when the read hit its row cap inside the window, or when an open report is older than the
  * rows it took (older than {@link INSIGHTS_READ_DAYS}, or cut by the cap): the longest wait is still exact, but the open count and the bands leave that report out. `byRule` is `null` when the
  * store cannot count sanctions by rule (the page says "not available", not "none").
- * @experimental
  */
 export interface InsightsResult {
   days: InsightsDays;
@@ -46,7 +45,7 @@ export interface InsightsResult {
   partial: boolean;
 }
 
-/** How many open reports have waited under 1 hour, 1 to 4 hours, 4 hours to a day, a day to 3 days, and 3 days or more (an exact edge belongs to the older band). @experimental */
+/** How many open reports have waited under 1 hour, 1 to 4 hours, 4 hours to a day, a day to 3 days, and 3 days or more (an exact edge belongs to the older band). */
 export interface InsightsBacklog {
   under1h: number;
   under4h: number;
@@ -99,7 +98,6 @@ function ruleSlot(rule: string | null): number | 'uncovered' {
  * wait), `counts` the daily line counts of the window, `sanctionsByRule` the sanctions written in it, `now` the clock and `days` the window (7, 30 or 90). `labelOf` gives a reason id its
  * label (an unknown id is its own label). `sanctionsByRule` is `null` for a store that cannot count them. `extra.oldestOpenAt` is when the oldest open report in the whole store was filed (`null`
  * when none is open, left out when the caller does not know): an open report older than the rows handed in makes the result `partial` and sets the longest wait. Nothing in the result names a person, a handle, text or a staff member: the function copies only what it counts. `RangeError` for any other `days`.
- * @experimental
  */
 export function computeInsights(
   rows: readonly InsightRow[],

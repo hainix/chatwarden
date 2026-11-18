@@ -54,7 +54,7 @@ export interface ReportDialogProps extends PlayerUiProps, DialogHostProps {
   /** The message being reported. Shown as quoted text (cut if very long) so the player sees what they are reporting. */
   line?: string;
   /**
-   * @experimental Your own controls, placed inside the form under the reason and the note and above Report and Cancel (for example
+   * Your own controls, placed inside the form under the reason and the note and above Report and Cancel (for example
    * an "Also mute this player" checkbox and a line about false reports). You own their state; the dialog only places them, adds no
    * styling beyond the spacing, and keeps their focusable controls in its Tab order (reason, note, yours, Report, Cancel) and its
    * focus trap. They are not shown once the report is sent. They sit inside the dialog's form, so give your buttons `type="button"`:

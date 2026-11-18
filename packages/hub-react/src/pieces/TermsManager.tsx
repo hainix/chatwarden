@@ -4,7 +4,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * The props of `TermsManager`: a class name.
- * @experimental
  */
 export type TermsManagerProps = PieceProps;
 
@@ -16,7 +15,6 @@ export type TermsManagerProps = PieceProps;
  * ```tsx
  * <TermsManager />
  * ```
- * @experimental
  */
 export function TermsManager({ className }: TermsManagerProps) {
   return (

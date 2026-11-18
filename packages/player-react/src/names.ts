@@ -13,7 +13,6 @@ const NAME_TEXT: Readonly<Record<NameReason, PlayerText>> = {
  * not allowed. Choose another." for `name_not_allowed`, "That name is not allowed here. Choose another." for `name_profane`. A reason a newer
  * kit adds reads as the general one. `name_reserved` (a name the game protects, such as a staff name) has words of its own and never says which entry matched. A key your catalog lacks falls back to the English words, never to the key. It never says which
  * word matched: the check does not tell it.
- * @experimental
  */
 export function nameReasonText(t: PlayerT, reason: NameReason): string {
   const key = typeof reason === 'string' && Object.hasOwn(NAME_TEXT, reason) ? NAME_TEXT[reason] : NAME_TEXT.name_not_allowed;

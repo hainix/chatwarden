@@ -31,7 +31,6 @@ export interface EvidenceLine {
   audience: string[] | null;
   /**
    * A moderator took the line back for everyone (`cw.rooms.retract`). It stays here as evidence with its text; a report filed from now on carries the flag on its excerpt line. Absent until then.
-   * @experimental
    */
   retracted?: true;
 }

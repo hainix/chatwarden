@@ -3,13 +3,13 @@ import { ProfileError } from './profileError.js';
 // The name settings: a second check (profanity), optional kept evidence, a way to require a rename, and whether the hub masks a name
 // the matcher flags. Pure data and validation. Off until set, except `maskInHub`, which is on: it changes only what the hub shows.
 
-/** Why a name was refused. `name_profane` needs `names.profanity`; `name_reserved` needs `names.reserved` and is the third reason, after the other two. @experimental */
+/** Why a name was refused. `name_profane` needs `names.profanity`; `name_reserved` needs `names.reserved` and is the third reason, after the other two. */
 export type NameReason = 'name_not_allowed' | 'name_profane' | 'name_reserved';
 
 /** What a name is for: a `player` (a handle) or an `entity` (a clan, guild, team, deck, pet or item the player names). The checks are the same; the kind is the caller's word. */
 export type NameKind = 'player' | 'entity';
 
-/** The answer of `cw.names.check`: allowed, or a reason id and the Community Rule it cites; never the text. @experimental */
+/** The answer of `cw.names.check`: allowed, or a reason id and the Community Rule it cites; never the text. */
 export type NameCheckResult = { ok: true } | { ok: false; reason: NameReason; rule: number };
 
 const FLAGS = ['profanity', 'keepBlocked', 'renames', 'maskInHub'] as const;
@@ -30,7 +30,6 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
 /**
  * How names are checked and shown. Every field is optional.
- * @experimental
  */
 export interface NameSettings {
   /** Also refuse a name the profanity filter flags. Default false (a swear word is not a slur; this is for a family game). */
@@ -54,7 +53,6 @@ export interface NameSettings {
 
 /**
  * What the kit reads: every field filled in.
- * @experimental
  */
 export interface ResolvedNames {
   profanity: boolean;
@@ -77,7 +75,6 @@ function isPlain(v: unknown): v is Record<string, unknown> {
 /**
  * Validate and fill. Throws ProfileError naming the field (`names.keepBlocked`), never echoing the value. `path` names the settings in
  * the error (default `names`). The result is a new object that shares nothing with the input; each value is read from `input` once.
- * @experimental
  */
 export function resolveNames(input: NameSettings | undefined, path = 'names'): ResolvedNames {
   const out: ResolvedNames = { profanity: false, keepBlocked: false, renames: false, maskInHub: true, reserved: Object.freeze([]), reservedAllow: Object.freeze([]), reservedRule: DEFAULT_RESERVED_RULE };

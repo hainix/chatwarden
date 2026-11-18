@@ -19,7 +19,7 @@ function bodyEscalate(body: Record<string, unknown>): { to: 'senior' | 'owner'; 
 }
 
 /**
- * The staff workflow routes (0.2.0, `@experimental`): a comment thread on a report, a second look and escalation. All of them are behind `desk.workflow`: with it off every one is 404 and
+ * The staff workflow routes (0.2.0): a comment thread on a report, a second look and escalation. All of them are behind `desk.workflow`: with it off every one is 404 and
  * `GET /reports/:id` carries no `comments` or `escalation` key, `GET /changes` no `asked`. Comments and escalation are never claim-gated. Every body is `no-store`; the text of a comment or a
  * note is in the report body's thread and nowhere else (never an audit row, an event or a log).
  *

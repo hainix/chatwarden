@@ -661,7 +661,6 @@ function ruleOrder(a: string | null, b: string | null): number {
  * Give a {@link MemoryStore} the optional AI methods (`reserveAiRead`, `loadAiOutcome`, `aiStats`, ...), so `createChatwarden({ ai })` can use
  * it. Returns the same store. `createMemoryStore()` does not carry them, so an app that never turns the AI on does not bundle them. A method the
  * store already has (a subclass's override) is left as it is, and calling this twice changes nothing.
- * @experimental
  */
 export function withMemoryAi<S extends MemoryStore>(store: S): S & MemoryAiMethods {
   const target = store as unknown as Record<string, unknown>;

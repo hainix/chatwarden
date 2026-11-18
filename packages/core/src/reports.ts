@@ -111,12 +111,12 @@ export interface ReportInput {
   /**
    * The game's own id for the evidence behind this report (a match, a replay): an opaque string of 1 to 128 of `A-Z a-z 0-9 _ : -` (no dot, no slash), given by the game's SERVER and never
    * read from a player's request (the chat route takes it from `ChatMember.evidenceRef`, set in the `join` hook). An invalid value is dropped and logged by class, and the report is
-   * still taken. The kit never fetches it; staff see it as `evidence` with a link built from `reporting.evidenceUrl`. It is in no event, queue summary, webhook or Discord post. @experimental
+   * still taken. The kit never fetches it; staff see it as `evidence` with a link built from `reporting.evidenceUrl`. It is in no event, queue summary, webhook or Discord post.
    */
   evidenceRef?: string | null;
   /**
    * The clan, guild, team, deck or other entity the report is about: `{ kind, ref, label }`, `kind` a word of the game's (`^[a-z][a-z_]{0,23}$`), `ref` its opaque id (1 to 64 of `A-Za-z0-9_:-`), `label` its name as players see it
-   * (1 to 64 characters, no control, direction or zero-width character; trimmed). The report is filed against the owner's seat (`targetSeat` or the line's author) as always, so the person is the case; the entity is stored with the report and shown as one extra
+   * (1 to 64 characters, no control, direction or zero-width character, except a ZWNJ or ZWJ between two letters; trimmed). The report is filed against the owner's seat (`targetSeat` or the line's author) as always, so the person is the case; the entity is stored with the report and shown as one extra
    * row. Anything else (a missing key, an extra key, a bad value) is refused `entity_invalid` before the budget is touched. Omitted or null: none. No event, log line or webhook carries it.
    */
   entity?: ReportEntity | null;
@@ -128,7 +128,10 @@ const ENTITY_REF_RE = /^[A-Za-z0-9_:-]{1,64}$/;
 // eslint-disable-next-line no-control-regex
 const ENTITY_LABEL_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 // Direction controls and zero-width or soft-hyphen characters: they reorder or hide what a moderator reads in the case row (as `phrases` refuses them), so a label holding one anywhere is refused, edges included.
-const ENTITY_LABEL_INVISIBLE = /[\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
+const ENTITY_LABEL_INVISIBLE = /[\u00ad\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
+// The two joiners are the exception, only between letters: Persian writes a ZWNJ between two letters, and Indic scripts put a ZWJ after a virama (a mark that belongs to the letter before it). A joiner at an edge, beside a space, a digit or another joiner is refused.
+const ENTITY_LABEL_JOINER = /[\u200c\u200d]/;
+const ENTITY_LABEL_JOINER_BETWEEN_LETTERS = /(?<=[\p{L}\p{M}])[\u200c\u200d](?=\p{L})/gu;
 const ENTITY_LABEL_MAX = 64;
 
 /**
@@ -147,7 +150,7 @@ export function readEntity(raw: unknown): ReportEntity | null | 'invalid' {
   if (typeof ref !== 'string' || !ENTITY_REF_RE.test(ref)) return 'invalid';
   if (typeof label !== 'string') return 'invalid';
   const name = label.trim();
-  if (name === '' || name.length > ENTITY_LABEL_MAX || ENTITY_LABEL_CONTROL.test(name) || ENTITY_LABEL_INVISIBLE.test(label)) return 'invalid';
+  if (name === '' || name.length > ENTITY_LABEL_MAX || ENTITY_LABEL_CONTROL.test(name) || ENTITY_LABEL_INVISIBLE.test(label) || ENTITY_LABEL_JOINER.test(label.replace(ENTITY_LABEL_JOINER_BETWEEN_LETTERS, ''))) return 'invalid';
   return { kind, ref, label: name };
 }
 
@@ -189,7 +192,7 @@ export interface ReportCounts {
 /**
  * What a chat filter's `flag` files: a report nobody wrote. `originKey` is the counter key that made it (`[a-z0-9_.:-]{1,48}`, never text from a
  * line); `target` is the speaker's canonical subject (a guest has none and cannot be reported); `reportedReason` is `spam` for a link, phrase or
- * ratio hit and `personal_info` for a personal-info hit. @experimental
+ * ratio hit and `personal_info` for a personal-info hit.
  */
 export interface SystemReportInput {
   origin: 'filter';
@@ -205,7 +208,7 @@ export interface SystemReportInput {
 /**
  * What {@link ReportService.fileSystem} answered: `filed` (one open report now exists), `open_exists` (one is already open for this person and
  * room, nothing filed), `capped` (the instance already filed `flagCapPerDay` filter reports today), `no_subject` (a guest: nobody to report),
- * `off` (moderation is off, the input is malformed or the store failed). @experimental
+ * `off` (moderation is off, the input is malformed or the store failed).
  */
 export type SystemReportResult = 'filed' | 'open_exists' | 'capped' | 'no_subject' | 'off';
 

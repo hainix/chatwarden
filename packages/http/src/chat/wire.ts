@@ -4,13 +4,11 @@ import type { ReportRefusal, RoomMode } from '@chatwarden/core';
 
 /**
  * The version of the frames below. A change that breaks a reader raises it.
- * @experimental
  */
 export const CHAT_WIRE_VERSION = 2;
 
 /**
  * One delivered line, as a viewer sees it. No seat, no person, no hash.
- * @experimental
  */
 export interface WireLine {
   /** The room's line number (the kit's evidence line id). Unique within one `epoch`. */
@@ -32,7 +30,6 @@ export interface WireLine {
 
 /**
  * One phrase of a phrase-only room's book, as `hello.phrases` carries it: the id to send, the canonical text and an optional group that heads a section in the picker.
- * @experimental
  */
 export interface WirePhrase {
   id: string;
@@ -42,7 +39,6 @@ export interface WirePhrase {
 
 /**
  * The phrases of a phrase-only room (version 2): `{ book }` is the room's list in picker order. The kit ships no phrases and no translations: the game's own catalogue translates by id.
- * @experimental
  */
 export interface WirePhrases {
   book: WirePhrase[];
@@ -50,7 +46,6 @@ export interface WirePhrases {
 
 /**
  * The restriction on the viewer's own chat, or null. Same meaning as `RestrictedChatLineProps`.
- * @experimental
  */
 export interface WireRestriction {
   /** Epoch ms it ends, or null when it does not end on its own. */
@@ -66,7 +61,6 @@ export interface WireRestriction {
 /**
  * A player the viewer muted or blocked, by an opaque token only the viewer can use to undo it. `block` is true for a block (the viewer and that player see none of each other's lines); a mute
  * has no key. A player is never told they were blocked: this list is the blocker's own.
- * @experimental
  */
 export interface WireMuted {
   ref: string;
@@ -81,7 +75,6 @@ export interface WireMuted {
  * and, new in version 2, `locked` and `new_account` (the room's mode, `cw.rooms.setMode`: they carry `until`, when it ends), `probation` (a new account's pause, `rooms.probation`: it carries `retryAfterMs`), `account_too_new` (a context's
  * least account age, `chat.minAccountAgeDays`) and, for phrase-only rooms, `phrases_only` (typed text in one) and `phrase_unknown` (an id the room's book lacks). A reader treats any other string as unknown.
  * Never carries text, a handle, an id or a moderator's note.
- * @experimental
  */
 export interface WireRefusal {
   reason: string;
@@ -98,7 +91,6 @@ export interface WireRefusal {
 
 /**
  * A room's mode as the chat box is told it: `kind` and when it ends (epoch ms, null for `normal`). Never who set it or why.
- * @experimental
  */
 export interface WireMode {
   kind: RoomMode;
@@ -107,11 +99,9 @@ export interface WireMode {
 
 /**
  * Why a viewer cannot post right now, when it is the room's mode and not their own restriction: `locked` (the room takes staff only) or `new_account` (an emergency, and an account too young). Absent when they can post.
- * @experimental
  */
 export type WireReadOnly = 'locked' | 'new_account';
 
-/** @experimental */
 export type ChatFrame =
   | {
       type: 'hello';
@@ -158,19 +148,15 @@ export type ChatFrame =
    */
   | { type: 'bye'; reason: 'banned' | 'room_closed' | 'shutdown' | 'replaced'; until?: number | null };
 
-/** @experimental */
 export type SendResult = { ok: true; line: WireLine } | { ok: false; refused: WireRefusal };
-/** @experimental */
 export type MuteTarget = { lineId: string } | { ref: string };
 /**
  * The answer to a mute or a block. `ok`: the kit holds the mute or block (or the unmute) now. `hiddenIds`: when it muted, the ids of the muted player's lines that are
  * still in the room's history, oldest first (the same ids as the `hide` frame), so a client can hide exactly those without waiting for the
  * stream; empty for an unmute and for anything that did nothing. At most the history size. `limit: true` (with `ok` false): the viewer's list holds as many blocks
  * as is allowed, so nothing more can be muted or blocked until one is undone.
- * @experimental
  */
 export type MuteResult = { ok: boolean; hiddenIds: string[]; limit?: true };
-/** @experimental */
 export type ReportOutcome =
   | { ok: true; remaining: number }
   | { ok: false; refused: ReportRefusal | 'not_found'; remaining?: number };
@@ -196,7 +182,6 @@ function ownField(source: object, key: string): unknown {
  * and `retryAfterMs` by name, each only when it has the right shape; every other key is dropped, so text, a seat, a subject or a handle
  * that rode along on the core refusal can never reach the wire. Never throws: anything that is not an object, or a field that cannot be
  * read, is simply absent, and a missing, non-string or over-long (more than 64 characters) `reason` is `"unknown"`.
- * @experimental
  */
 export function refusalOf(refuse: unknown): WireRefusal {
   if (typeof refuse !== 'object' || refuse === null) return { reason: 'unknown' };

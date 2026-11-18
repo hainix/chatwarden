@@ -1,6 +1,6 @@
 // `runCli` (design 5): parse, detect, resolve the answers (asking only what is neither given nor detected), plan, apply, report, and the exit code. It
 // takes the whole machine as an argument (`CliEnv`), so the tests run it over an in-memory file system with `path.win32` and a fake terminal.
-// @experimental until 0.2: `@chatwarden/http/cli`, so a `create-chatwarden` shim is three lines.
+// `@chatwarden/http/cli`, so a `create-chatwarden` shim is three lines.
 import { VERSION } from '../version.js';
 import { canPrompt, isAsked, resolveAnswers } from './answers.js';
 import type { QuestionName } from './answers.js';

@@ -17,7 +17,6 @@ import { communityStatus } from './communityStatus.js';
 // draft away. After a send it says where the term stands, in words. The browser never talks to the community service: it asks its own
 // server, which signs and sends. No string here holds a term, and nothing the service says is ever shown, only a closed set of words.
 
-/** @experimental */
 export interface ShareTermProps {
   /** The row being edited (its id is the only thing in the address). */
   termId: string;

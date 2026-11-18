@@ -9,7 +9,7 @@ import { asBytes, isBytes } from './sign.js';
 // total that can ever be allocated is bounded by the limits below. Every failure is a CorpusError('bad_zip', 'unpack') with a
 // fixed message: nothing from the archive reaches an error.
 
-/** What the reader refuses to go beyond. @experimental */
+/** What the reader refuses to go beyond. */
 export interface ZipLimits {
   /** Most entries. */
   entries: number;
@@ -21,7 +21,7 @@ export interface ZipLimits {
   name: number;
 }
 
-/** The limits of design 6.4. A caller may tighten them with `options.limits`; none can be raised above these. @experimental */
+/** The limits of design 6.4. A caller may tighten them with `options.limits`; none can be raised above these. */
 export const ZIP_LIMITS: Readonly<ZipLimits> = Object.freeze({ entries: 32, compressed: 8 * 1024 * 1024, expanded: 32 * 1024 * 1024, name: 64 });
 
 const bad = (): CorpusError => new CorpusError('bad_zip', 'unpack');
@@ -290,7 +290,6 @@ async function readEntry(view: View, e: Entry, password: Uint8Array): Promise<Ui
  * encrypted with traditional PKWARE ZipCrypto under `options.password` (default: the corpus's public password). Anything else, and
  * anything that does not hold together, rejects with `CorpusError('bad_zip', 'unpack')` and nothing else. Run it on bytes whose
  * signature has already verified.
- * @experimental
  */
 export async function readZip(
   bytes: Uint8Array,

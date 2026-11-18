@@ -8,7 +8,6 @@ const START = 1_800_000_000_000;
 
 /**
  * A clock you move by hand. `now()` is what `createChatwarden` reads.
- * @experimental
  */
 export interface FakeClock extends Clock {
   now(): number;
@@ -25,7 +24,6 @@ function instant(value: unknown): number {
 
 /**
  * A fake clock starting at `startMs` (default 1_800_000_000_000).
- * @experimental
  */
 export function createFakeClock(startMs: number = START): FakeClock {
   let current = instant(startMs);

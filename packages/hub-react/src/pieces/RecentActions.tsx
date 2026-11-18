@@ -4,7 +4,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * The props of `RecentActions`.
- * @experimental
  */
 export interface RecentActionsProps extends PieceProps {
   /** A person an action was taken against was chosen. Without it they are plain text. */
@@ -18,7 +17,6 @@ export interface RecentActionsProps extends PieceProps {
  * ```tsx
  * <RecentActions onOpenPerson={(ref) => navigate(`/people/${ref}`)} />
  * ```
- * @experimental
  */
 export function RecentActions({ className, onOpenPerson }: RecentActionsProps) {
   return (

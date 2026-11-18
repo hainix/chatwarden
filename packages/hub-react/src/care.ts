@@ -2,7 +2,6 @@
 // the choice to count what was opened, the choice of a break, and the day's count, keyed by the browser's local date. Every access to storage is in try/catch; a storage that is blocked,
 // full or missing leaves the setting for this visit (the module keeps its own copy) and nothing breaks. Eager and small on purpose: the case reads it on every open.
 
-/** @experimental */
 export interface Care {
   /** Hide the chat, the reporter's note, the AI's read and an appeal statement behind one button until the moderator opens them. Off by default, in every mode and for urgent cases. */
   hideExcerpts: boolean;

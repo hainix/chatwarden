@@ -27,7 +27,6 @@ export interface ServiceCapabilities {
   matchModes: string[];
 }
 
-/** @experimental */
 export interface ServiceOptions extends ServiceWrapperOptions {
   /** Overrides of what the handshake reports (the `sharedPacing` the kit was started with, for example). Anything left out is read from the kit. */
   capabilities?: Partial<ServiceCapabilities>;
@@ -49,7 +48,6 @@ export interface ServiceOptions extends ServiceWrapperOptions {
  * The `/v1` route table over a kit, for `toFetch({ '/v1': serviceRoutes(cw, { keys: [...] }) })`. Every route goes through one wrapper: request id, service-key authentication (401, and 429 for an address that keeps failing),
  * a per-key rate limit (429), the body cap (413) and, on the calls whose retry would be judged twice, `Idempotency-Key`. Every response carries `chatwarden-api: 1`, `x-request-id`, `cache-control: no-store`
  * and `nosniff`. `GET /` (so `GET /v1`) is the handshake: `{ api, kit, mode, processes, capabilities, warnings }`. A refusal is a 200 with `ok: false`. `SERVICE_OPENAPI` describes every route.
- * @experimental
  */
 export function serviceRoutes(cw: Chatwarden, options: ServiceOptions): RouteTable {
   if (typeof cw !== 'object' || cw === null) throw new TypeError('serviceRoutes: cw must be the kit');

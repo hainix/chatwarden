@@ -53,7 +53,7 @@ export interface TermEditor {
 export type ChangeRefusalCode = 'duplicate' | 'unblocks_known' | 'invalid' | 'not_found' | 'not_loaded' | 'build_failed';
 
 /** What {@link LiveTerms.syncPack} changed, counted over terms and exceptions together. `keptYours` is a row a human has edited (left
- *  alone), `skipped` a pack row whose word already reads as another row's word. @experimental */
+ *  alone), `skipped` a pack row whose word already reads as another row's word. */
 export interface SyncSummary {
   added: number;
   deactivated: number;
@@ -63,7 +63,7 @@ export interface SyncSummary {
   skipped: number;
 }
 
-/** The answer of {@link LiveTerms.syncPack}: the summary and the pack version, or the refusal code ({@link ChangeRefusalCode}). @experimental */
+/** The answer of {@link LiveTerms.syncPack}: the summary and the pack version, or the refusal code ({@link ChangeRefusalCode}). */
 export type SyncResult = { ok: true; summary: SyncSummary; version: string } | { ok: false; code: ChangeRefusalCode };
 
 /** `error` is a message safe to show a moderator (it never quotes a term or a line); `code` is the same refusal as data. */
@@ -356,7 +356,6 @@ export class LiveTerms implements Matcher {
    * A row is the adopter's ("touched") when `updatedBy` is set to anything that is not a `corpus:` actor, so the rows this method
    * itself changed (which {@link TermStore} stamps with `actor`) stay the corpus's to change until a human edits them. Pass
    * `corpus:<version>` as the actor. Never throws: a store failure is `build_failed` and logged (`terms.sync_failed`, error class only).
-   * @experimental
    */
   syncPack(pack: TermPack, options: { actor: string; dryRun?: boolean }): SyncResult {
     if (this.pack !== null && !this.storeLoaded) return { ok: false, code: 'not_loaded' };

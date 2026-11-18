@@ -5,7 +5,6 @@ import type { KitResponse } from '../types.js';
 
 /**
  * The service API's major version. It is in every path (`/v1`) and in every response (`chatwarden-api: 1`). Within one version a change is additive only.
- * @experimental
  */
 export const SERVICE_API_VERSION = 1;
 

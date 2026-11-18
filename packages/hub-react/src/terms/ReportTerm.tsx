@@ -13,7 +13,6 @@ import { communityStatus } from './communityStatus.js';
 // the list and the problem, never the word), a closed choice of problem and one Send. Closing it throws the choice away. There is no free
 // text, so nothing here can carry a name or a chat line. The browser never talks to the community service: its own server does.
 
-/** @experimental */
 export interface ReportTermProps {
   /** The row being edited: a term the shared list added. Its id is the term's number on the list. */
   termId: string;

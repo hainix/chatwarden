@@ -11,16 +11,16 @@ import type { Clock, CommentRow, ReportComment, Store } from './types.js';
 /** The longest comment, a note and an entry of the thread, in code points after cleaning. */
 export const COMMENT_MAX = 500;
 
-/** `add` and `escalate`'s notes: why a comment was not taken. `full` is the 50-entry cap. @experimental */
+/** `add` and `escalate`'s notes: why a comment was not taken. `full` is the 50-entry cap. */
 export type CommentResult = { ok: true; comment: ReportComment } | { ok: false; refused: 'off' | 'not_found' | 'invalid' | 'full' };
 
-/** `remove`'s answer: `not_found` is one answer for an unknown comment and someone else's, so ids cannot be probed. @experimental */
+/** `remove`'s answer: `not_found` is one answer for an unknown comment and someone else's, so ids cannot be probed. */
 export type CommentRemoveResult = { ok: true } | { ok: false; refused: 'off' | 'not_found' };
 
-/** `escalate`'s answer. `not_allowed` is the role order (an owner has no one above to ask); `closed` a decided report. @experimental */
+/** `escalate`'s answer. `not_allowed` is the role order (an owner has no one above to ask); `closed` a decided report. */
 export type EscalateResult = { ok: true } | { ok: false; refused: 'off' | 'not_found' | 'closed' | 'invalid' | 'not_allowed' };
 
-/** `clearEscalation`'s answer: ok also when there was nothing to clear. @experimental */
+/** `clearEscalation`'s answer: ok also when there was nothing to clear. */
 export type ClearEscalationResult = { ok: true } | { ok: false; refused: 'off' | 'not_found' | 'closed' | 'not_allowed' };
 
 export interface CommentServiceDeps {

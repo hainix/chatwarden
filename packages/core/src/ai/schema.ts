@@ -18,7 +18,6 @@ const REFS = { type: 'array', items: { type: 'string' } };
 
 /**
  * The answer a model returns for one report. Core validates the parsed JSON again (`validateAIOutput`); the schema only shapes it.
- * @experimental
  */
 export const AI_OUTPUT_SCHEMA: object = deepFreeze({
   type: 'object',

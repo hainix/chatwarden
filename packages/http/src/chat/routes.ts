@@ -14,7 +14,6 @@ import { randomHex } from './random.js';
 import { encodeFrame, HEARTBEAT } from './sse.js';
 import type { ChatFrame, WireRefusal } from './wire.js';
 
-/** @experimental */
 export interface ChatRoutesOptions {
   /** Who is calling. Exactly the `identify` of `playerRoutes`: the same function can be passed to both. A caller with neither `accountId` nor `clientKey` is `401 unauthorized` (an address alone cannot chat). */
   identify: (req: KitRequest) => RawWho | Promise<RawWho>;
@@ -86,7 +85,6 @@ function optionalText(body: Record<string, unknown>, key: string, max: number): 
  * Every response is `cache-control: no-store` (the stream's is `no-store, no-transform`, so a body-rewriting middleware leaves it alone).
  * No route returns a seat, a subject, a report id or a moderator field. A restriction in the `hello` and `state` frames reads a stored automatic
  * timeout as a moderator's (`WireRestriction.byModerator`); the refusal of a line is exact.
- * @experimental
  */
 export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options: ChatRoutesOptions): RouteTable {
   if (typeof cw !== 'object' || cw === null) throw new TypeError('chatRoutes: cw must be the kit');

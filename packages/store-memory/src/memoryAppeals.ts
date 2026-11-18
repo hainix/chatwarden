@@ -287,7 +287,6 @@ class MemoryAppeals extends MemoryStore {
  * Give a {@link MemoryStore} the optional appeal methods (`insertAppeal`, `decideAppeal`, the counts by rule and the rest), so a kit with
  * `appeals.enabled` can use it. Returns the same store. `createMemoryStore()` does not carry them, so an app that never turns appeals on
  * does not bundle them. A method the store already has (a subclass's override) is left as it is, and calling this twice changes nothing.
- * @experimental
  */
 export function withMemoryAppeals<S extends MemoryStore>(store: S): S & MemoryAppealMethods {
   const target = store as unknown as Record<string, unknown>;

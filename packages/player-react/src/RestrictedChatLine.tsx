@@ -15,7 +15,6 @@ export interface RestrictedChatLineProps extends PlayerUiProps {
    * A pause, not a sanction: pass the refusal's `reason` and `retryAfterMs`. When given it replaces `until` and `byModerator`, draws no
    * referee card, and says how long to wait in seconds. The end is worked out once, when the line first renders, so a re-render does not
    * restart the wait.
-   * @experimental
    */
   pace?: { reason: 'slow_mode' | 'flood' | 'duplicate'; retryAfterMs: number };
 }

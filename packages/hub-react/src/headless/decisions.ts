@@ -21,11 +21,9 @@ import type { Hold, Toasts } from './toasts.js';
 
 /**
  * How asking for a new name ended, when the decision asked for it: `asked`, `already` (they were already asked), or `failed` (the decision stands, the request did not go through).
- * @experimental
  */
 export type RenameAnswer = 'asked' | 'already' | 'failed';
 
-/** @experimental */
 export type DecisionState =
   /** In its Undo window: nothing has been sent. */
   | { status: 'held' }
@@ -38,7 +36,6 @@ export type DecisionState =
   /** Undone: nothing was sent, and the case comes back as it was. */
   | { status: 'undone' };
 
-/** @experimental */
 export interface DecisionEntry {
   reportId: string;
   person: string;
@@ -54,7 +51,6 @@ export interface DecisionEntry {
 
 /**
  * True while a decision is held for its Undo window or being sent: it is out of the moderator's hands.
- * @experimental
  */
 export const isWaiting = (entry: DecisionEntry | undefined): boolean => entry !== undefined && (entry.state.status === 'held' || entry.state.status === 'sending');
 
@@ -62,11 +58,9 @@ export const isWaiting = (entry: DecisionEntry | undefined): boolean => entry !=
  * True while the case should be off the screen: the decision is waiting, or it was sent in this visit. (An Undo, a failure or a
  * conflict brings the case back.) "Sent" counts only while the case as loaded is still open: a case that is read as closed is a
  * later visit to a decided case, and it is shown whole, with its result.
- * @experimental
  */
 export const hasLeft = (entry: DecisionEntry | undefined, reportOpen = true): boolean => isWaiting(entry) || (entry?.state.status === 'done' && reportOpen);
 
-/** @experimental */
 export interface SubmitDecision {
   reportId: string;
   person: string;
@@ -77,7 +71,6 @@ export interface SubmitDecision {
 
 /**
  * How a decision ended. A decision that is held or being sent has not ended: its promise waits.
- * @experimental
  */
 export type DecisionOutcome =
   | { status: 'done'; replay: boolean; groups: DecideResult['groups']; rename?: RenameAnswer }
@@ -88,7 +81,6 @@ export type DecisionOutcome =
   /** Undone during the hold: nothing was sent. */
   | { status: 'undone' };
 
-/** @experimental */
 export interface DecideOptions {
   /**
    * The Undo window. `true` (default): 5 seconds. A number: that many milliseconds. `false`: send at once, with no Undo (a script,
@@ -101,7 +93,6 @@ export interface DecideOptions {
  * A sweep: dismiss every open report about one person (`scope: 'person'`, their case) or from one reporter (`'reporter'`). `reportIds`
  * are the open reports the moderator was shown (for a person, they leave the queue at once and Undo brings them back; for a reporter
  * nothing is hidden in advance). The server decides on the live set when it is sent.
- * @experimental
  */
 export interface DismissOpenRequest {
   scope: 'person' | 'reporter';
@@ -120,7 +111,6 @@ export interface DismissOpenRequest {
 
 /**
  * How a sweep ended. A sweep that is held or being sent has not ended: its promise waits.
- * @experimental
  */
 export type DismissOpenOutcome =
   | { status: 'done'; result: DismissOpenResult }
@@ -129,7 +119,6 @@ export type DismissOpenOutcome =
   /** Undone during the hold: nothing was sent. */
   | { status: 'undone' };
 
-/** @experimental */
 export interface DecisionStore extends Store<ReadonlyMap<string, DecisionEntry>> {
   /** What is going on with a report's decision, or undefined. */
   entry: (reportId: string) => DecisionEntry | undefined;
@@ -153,25 +142,21 @@ export interface DecisionStore extends Store<ReadonlyMap<string, DecisionEntry>>
   /**
    * Undo the newest decision or sweep that is still in its Undo window, wherever the moderator is now. Answers the report id of the case
    * to show again (the moderator is taken back to it, as Undo does), or null when nothing is waiting.
-   * @experimental
    */
   undoLatest: () => string | null;
   /**
    * Dismiss every open report about a person or from a reporter as "nothing wrong here": held for the Undo window, then sent once. For a
    * person the case leaves the queue at once. The same sweep asked again while one waits answers what the first answers.
-   * @experimental
    */
   dismissOpen: (request: DismissOpenRequest, options?: DecideOptions) => Promise<DismissOpenOutcome>;
   /**
    * A dry run of a sweep: how many reports it would close and how many another moderator holds. Sends nothing that changes anything and holds nothing.
-   * @experimental
    */
   previewDismiss: (scope: DismissOpenInput['scope'], ref: string) => Promise<DismissOpenResult>;
 }
 
 /**
  * Where the moderator is looking: the controller's host (the router, in the React hub) tells it.
- * @experimental
  */
 export interface DecisionHost {
   /** The report the moderator has open right now, or null. */
@@ -180,7 +165,6 @@ export interface DecisionHost {
   show: (reportId: string) => void;
 }
 
-/** @experimental */
 export interface DecisionStoreOptions {
   client: HubClient;
   toasts: Toasts;
@@ -205,7 +189,6 @@ const outcomeOf = (state: DecisionState): DecisionOutcome | null => {
   }
 };
 
-/** @experimental */
 export function createDecisionStore(options: DecisionStoreOptions): DecisionStore {
   const { client, toasts, host } = options;
   const store = createStore<ReadonlyMap<string, DecisionEntry>>(new Map());

@@ -12,7 +12,6 @@ export const MODE_MAX_MS = 86_400_000;
 
 /**
  * A room's mode as it reads now: `since` and `until` (epoch ms) are the time it was set and the time it ends, both `null` for `normal`.
- * @experimental
  */
 export interface RoomModeState {
   mode: RoomMode;

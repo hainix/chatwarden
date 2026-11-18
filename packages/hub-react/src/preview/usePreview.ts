@@ -37,7 +37,7 @@ export function usePlanContext(): PlanContext & { ready: boolean } {
   const clock = useMinuteClock();
   const titles = useMemo(() => new Map((policy.data?.rules ?? []).map((r) => [r.number, r.title] as const)), [policy.data]);
   // The kit thanks a reporter by default; a server that does not say (or a role that cannot read the policy) is read as the default.
-  const reporterFeedback = policy.data?.notices?.reporterFeedback ?? true;
+  const reporterFeedback = policy.data?.notices.reporterFeedback ?? true;
   const refCode = t('hub.preview.refMade');
   const ready = !wants || !policy.loading;
   return useMemo(

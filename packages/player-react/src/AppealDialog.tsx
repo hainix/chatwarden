@@ -217,7 +217,6 @@ export function AppealBody({
  * 1000 characters), presses Send, and is told the appeal was sent; each refusal the kit can give has its own plain message, shown in the form.
  * `NoticeQueue` and `MyRecord` open it for you when you pass them `appeals`; render it yourself when you build your own screen: it
  * sends through `client.fileAppeal(noticeId, statement)`, and unmounts in your `onClose`. Focus goes back to the button that opened it.
- * @experimental
  */
 export function AppealDialog(props: AppealDialogProps) {
   const { client, noticeId, onClose, theme, className, container, returnFocusTo } = props;

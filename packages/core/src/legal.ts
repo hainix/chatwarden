@@ -4,7 +4,6 @@
 
 /**
  * Why a report is held: a closed list. No free text ever: the code is the whole statement, and what it means is the adopter's own.
- * @experimental
  */
 export const HOLD_CODES = ['law_enforcement_request', 'legal_proceeding', 'platform_request', 'safety_review', 'other'] as const;
 export type HoldCode = (typeof HOLD_CODES)[number];
@@ -17,7 +16,6 @@ export function isHoldCode(value: unknown): value is HoldCode {
 /**
  * One hold as a store keeps it. `heldBy` and `releasedBy` are staff refs (audit class: staff channels only). A released hold keeps its row (so the audit
  * story is complete) until a new hold on the same report replaces it.
- * @experimental
  */
 export interface HoldRow {
   reportId: string;
@@ -32,7 +30,6 @@ export interface HoldRow {
 /**
  * Everything the open holds protect: the held report ids and the sanction groups decided from them (a group's rows, its notices and the appeals on it
  * share the group id). The AI reads, outcomes and actions of a held report are protected by its report id.
- * @experimental
  */
 export interface HeldSet {
   reportIds: string[];

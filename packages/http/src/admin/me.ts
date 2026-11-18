@@ -15,11 +15,11 @@ export interface MeFeatures {
   keepBlocked: boolean;
   /** The shared term list is wired (`community` was passed to `adminRoutes`). Present, as `true`, only then; the hub shows its section when it is. */
   community?: boolean;
-  /** The room tools (modes, the room list, taking a line back) are part of every kit: always `true`. What a caller may do with them is `can['rooms.read']` and `can['rooms.manage']`. @experimental */
+  /** The room tools (modes, the room list, taking a line back) are part of every kit: always `true`. What a caller may do with them is `can['rooms.read']` and `can['rooms.manage']`. */
   rooms: boolean;
-  /** `desk.workflow` is on: staff comments and a second look. Read live. @experimental */
+  /** `desk.workflow` is on: staff comments and a second look. Read live. */
   workflow: boolean;
-  /** `desk.insights` is on and the store can read the rows: the Insights page. Read live. @experimental */
+  /** `desk.insights` is on and the store can read the rows: the Insights page. Read live. */
   insights: boolean;
 }
 

@@ -80,7 +80,7 @@ export interface ReportSummary {
   /**
    * Present (true) only when the queue signal feed (`feeds.queue`) is on, the caller's role holds `history.read`, and the reported person
    * meets its threshold; absent otherwise, so a server with the feed off answers exactly as before. A ranking hint (the hub's priority
-   * sort adds a capped amount): never a reason to hide a report, and it names no signal. Staff only. @experimental
+   * sort adds a capped amount): never a reason to hide a report, and it names no signal. Staff only.
    */
   boosted?: true;
   /**
@@ -94,14 +94,14 @@ export interface ReportSummary {
   originKey?: string;
   /**
    * Present (true) only on an urgent report: its reason is flagged urgent (a snapshot taken when it was filed) or a moderator marked it. Absent otherwise, so a body with none urgent is
-   * as it was. A word on the row, never a colour. Staff only. @experimental
+   * as it was. A word on the row, never a colour. Staff only.
    */
   urgent?: true;
-  /** Present only after a moderator marked the case as passed to the game's safety team: when (never who). Staff only. @experimental */
+  /** Present only after a moderator marked the case as passed to the game's safety team: when (never who). Staff only. */
   handoffAt?: number;
   /**
    * Present only with `desk.workflow` on, on an OPEN report that someone asked a senior or the owner to look at: the role asked (never who, never why). The queue is not reordered by it. Staff
-   * only. @experimental
+   * only.
    */
   escalatedTo?: 'senior' | 'owner';
   /** Present (true) only when the reported person's handle is one the matcher flags and `names.maskInHub` is on: the hub masks it until shown. Staff only. */

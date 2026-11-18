@@ -84,7 +84,6 @@ class MemoryLinks extends MemoryStore {
  * Give a {@link MemoryStore} the optional link methods (`getLink`, `putLink`, `listLinks`, `purgeLinks`), so `cw.links` is supported and the
  * Coop and EOS adapters can keep their ids. Returns the same store. `createMemoryStore()` does not carry them. A method the store already has
  * (a subclass's override) is left as it is, and calling this twice changes nothing.
- * @experimental
  */
 export function withMemoryLinks<S extends MemoryStore>(store: S): S & MemoryLinkMethods {
   const target = store as unknown as Record<string, unknown>;

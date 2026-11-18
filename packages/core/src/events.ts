@@ -78,55 +78,54 @@ export type KitEvent =
   /**
    * A player filed an appeal against a sanction. `target` is the person (canonical at emit time), `kind` the sanction's kind and `rule`
    * the Community Rule it cited. Like `report.created` it carries ids, codes and times, never the statement or the player's handle.
-   * Carries subject ids: staff channels only, never send to a player. @experimental
+   * Carries subject ids: staff channels only, never send to a player.
    */
   | { type: 'appeal.created'; appealId: string; createdAt: number; target: StaffRef; kind: SanctionKind; rule: RuleRef | null }
   /**
    * A moderator decided an appeal: `outcome` is uphold, reduce or revoke. Never the reason, the statement or a handle; an appeal made
    * moot by someone else's revoke announces nothing.
-   * Carries subject ids: staff channels only, never send to a player. @experimental
+   * Carries subject ids: staff channels only, never send to a player.
    */
   | { type: 'appeal.decided'; appealId: string; at: number; target: StaffRef; outcome: AppealOutcome; rule: RuleRef | null }
   /**
    * A moderator required a rename. It names no name and no reason: the game learns who to rename through `cw.people.accountIds(target)`
    * or a webhook that opted in to accounts. With `entity` the rename is of something the target owns (a clan, guild, team: `kind` and the game's opaque `ref`, never its label): the kit made no notice for it, and the game tells the owner in its own UI.
-   * Carries subject ids: staff channels only, never send to a player. @experimental
+   * Carries subject ids: staff channels only, never send to a player.
    */
   | { type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null; entity?: { kind: string; ref: string } }
   /**
    * A report was held for legal reasons (`cw.legal.hold`): the game's own process takes it from here. It carries the report id, the time, the closed hold `code`
    * and the person the report is about (canonical at emit time), never text. The kit forwards it to no one; the game finds the player through
    * `cw.people.accountIds(target)` or a webhook that opted in to accounts. It is emitted once, after the hold is stored, and never for a refusal or a release.
-   * Carries subject ids: staff channels only, never send to a player. @experimental
+   * Carries subject ids: staff channels only, never send to a player.
    */
   | { type: 'report.escalated'; reportId: string; at: number; code: HoldCode; target: StaffRef }
   /**
    * A moderator marked a report as passed to the game's safety team (once per report, never for a repeat): a note for colleagues and for the game's own process. It carries the
-   * report id and the time and nothing else, no staff id and no text; the kit contacts no one. @experimental
+   * report id and the time and nothing else, no staff id and no text; the kit contacts no one.
    */
   | { type: 'report.handoff'; reportId: string; at: number }
   /**
    * A moderator asked for a second look at a report (a senior's or the owner's): the desk escalation, not the legal hold (`report.escalated`). Ids, the target role and a time only;
-   * the note stays in the staff thread. @experimental
+   * the note stays in the staff thread.
    */
   | { type: 'case.escalated'; reportId: string; to: 'senior' | 'owner'; at: number }
   /**
    * A room's mode changed (a lock, an emergency, or back to normal), or expired (`expired: true`, noticed on the next line or read). `until` is when it ends, or null for normal. Who
-   * changed it is in the audit row, not here. Raised inside the chat path when it is an expiry, so listeners must be cheap. @experimental
+   * changed it is in the audit row, not here. Raised inside the chat path when it is an expiry, so listeners must be cheap.
    */
   | { type: 'room.mode'; roomId: string; mode: RoomMode; until: number | null; expired?: true; at: number }
   /**
-   * Lines were taken back for everyone (`cw.rooms.retract`). The ids are the room's own line ids; no text, no author. The room broadcaster and a game's own socket listen to it. @experimental
+   * Lines were taken back for everyone (`cw.rooms.retract`). The ids are the room's own line ids; no text, no author. The room broadcaster and a game's own socket listen to it.
    */
   | { type: 'line.retracted'; roomId: string; lineIds: readonly string[]; at: number }
   /**
-   * The Insights digest, raised by `cw.insights.emitDigest()`: counts and times only, no names and no text. @experimental
+   * The Insights digest, raised by `cw.insights.emitDigest()`: counts and times only, no names and no text.
    */
   | { type: 'insights.digest'; at: number; digest: InsightsDigest };
 
 /**
  * The numbers of an Insights digest: counts and times in milliseconds (`null` where there are too few reports for a figure). Nothing else.
- * @experimental
  */
 export interface InsightsDigest {
   /** The window length in days, and its ends (epoch ms). */

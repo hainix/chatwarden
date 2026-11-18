@@ -4,7 +4,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * The props of `PersonRecord`.
- * @experimental
  */
 export interface PersonRecordProps extends PieceProps {
   /** The person's staff ref (from the queue, a report or an action: `CaseList`'s `onOpenCase`, `onOpenPerson`). */
@@ -23,7 +22,6 @@ export interface PersonRecordProps extends PieceProps {
  * ```tsx
  * <PersonRecord person={ref} onOpenReport={(id) => navigate(`/cases/${id}`)} />
  * ```
- * @experimental
  */
 export function PersonRecord({ person, className, onOpenReport, onOpenPerson }: PersonRecordProps) {
   return (

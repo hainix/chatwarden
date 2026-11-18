@@ -4,7 +4,7 @@ import type { AdminContext } from './context.js';
 import { bodyObject, bodyRetract, bodyRoomMode, lineParam, optionalBody, roomParam } from './validate.js';
 
 /**
- * The rooms-under-attack routes (0.2.0, `@experimental`). A mode and a retraction are per process (the kit holds them in memory, like the pace): a game with several processes mounts the staff API on the
+ * The rooms-under-attack routes (0.2.0). A mode and a retraction are per process (the kit holds them in memory, like the pace): a game with several processes mounts the staff API on the
  * process that serves the room. Every body is `no-store`; nothing here carries a seat, a handle or a line's text.
  *
  * - `GET /rooms` (`rooms.read`, a moderator's by default): `{ rooms: [{ roomId, tags, seated, mode, until }] }`, the rooms this process knows (seated players, or a mode set), up to 500, the most seated first.

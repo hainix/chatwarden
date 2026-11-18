@@ -10,7 +10,6 @@ export type PaceReason = (typeof PACE_REASONS)[number];
 
 /**
  * How a room paces a player's lines. Every field optional on input; `null` or absent is off.
- * @experimental
  */
 export interface PaceSettings {
   /** The least time between one player's lines in a room, ms. 500 to 600 000. */
@@ -23,7 +22,6 @@ export interface PaceSettings {
 
 /**
  * What the kit reads: every field filled, `null` meaning off.
- * @experimental
  */
 export interface ResolvedPace {
   slowModeMs: number | null;
@@ -54,7 +52,6 @@ const PACE_KEYS = ['slowModeMs', 'burst', 'duplicateWindowMs'] as const;
 
 /**
  * Values the hub offers behind "Use suggested values". Never applied by themselves.
- * @experimental
  */
 export const PACE_SUGGESTIONS: Readonly<Record<'relaxed' | 'standard' | 'strict', ResolvedPace>> = deepFreeze({
   relaxed: { slowModeMs: null, burst: { lines: 10, windowMs: 10_000 }, duplicateWindowMs: 10_000 },
@@ -97,7 +94,6 @@ function checkBurst(v: unknown, path: string): { lines: number; windowMs: number
  * when it was given a value (`null` included), and each value was read from `input` exactly once, so what was validated is what is
  * returned even for an object with getters. Throws ProfileError like {@link resolvePace}. For a caller that must keep the override a
  * room was given (`cw.rooms.setPace`).
- * @experimental
  */
 export function checkPace(input: PaceSettings, path = 'pace'): PaceSettings {
   return checked(input, path);
@@ -116,7 +112,6 @@ function checked(input: unknown, path: string): PaceSettings {
 /**
  * Validate and fill. Throws ProfileError naming the field (`pace.burst.lines`), never echoing the value. `path` names the settings in
  * the error (default `pace`). The result is a new object that shares nothing with the input.
- * @experimental
  */
 export function resolvePace(input: PaceSettings | undefined, path = 'pace'): ResolvedPace {
   if (input === undefined) return { slowModeMs: null, burst: null, duplicateWindowMs: null };
@@ -127,7 +122,6 @@ export function resolvePace(input: PaceSettings | undefined, path = 'pace'): Res
 /**
  * `over` on top of `base`: a field left out inherits, `null` turns it off, a value sets it. `burst` is replaced whole, never merged by
  * member. `over` is validated (a ProfileError with the path `pace...`). Neither argument is changed or shared with the result.
- * @experimental
  */
 export function mergePace(base: ResolvedPace, over: PaceSettings): ResolvedPace {
   const set = checked(over, 'pace');

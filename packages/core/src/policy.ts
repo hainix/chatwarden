@@ -30,7 +30,6 @@ export const POLICY_REFRESH_MS = 10_000;
 /**
  * A stored signal feed that was dropped when the layer was read: the feed (`record`, `queue`, `ladder`, `ai`, or `unknown` for a name the kit
  * does not have) and why. A code only: never a kind id, a rule id, a label or a number from the stored layer.
- * @experimental
  */
 export interface PolicyDropped {
   feed: string;
@@ -40,7 +39,6 @@ export interface PolicyDropped {
 /**
  * The kit's own numbers the settings screens need, read only: they come from `createChatwarden` (`limits.chatRate`, `retention.signalsMs`), are
  * never part of the stored layer, and a save cannot change them.
- * @experimental
  */
 export interface PolicyLimits {
   /** The chat rate the kit enforces per room and seat: at most `count` lines in any `windowMs` (default 3 per 5 000 ms). Slow mode and burst sit beside it. */
@@ -77,13 +75,11 @@ export interface PolicyState {
    * Present only when the stored layer held signal feeds that could no longer be used (the code stopped declaring their kind, or a
    * window is longer than the retention now allows) and were left out of `layer` and of what is in force. One entry per feed, with the
    * reason of the first thing lost from it. The stored row itself is rewritten by the next save.
-   * @experimental
    */
   dropped?: readonly PolicyDropped[];
   /**
    * The chat rate limit actually in force and the signals retention window, so a settings screen can say what slow mode sits beside and how
    * far back a feed may look. Read only, deep-frozen.
-   * @experimental
    */
   limits: PolicyLimits;
 }

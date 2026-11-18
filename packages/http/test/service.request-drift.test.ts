@@ -196,6 +196,8 @@ describe('report fields: line id, reason, note, entity', () => {
   const zero = String.fromCharCode(0);
   const rlo = String.fromCharCode(0x202e);
   const zwsp = String.fromCharCode(0x200b);
+  const zwnj = String.fromCharCode(0x200c);
+  const zwj = String.fromCharCode(0x200d);
   const CASES: Array<[string, Record<string, unknown>]> = [
     ['a good line id', { lineId: 'l_1-A' }],
     ['a 64-character line id', { lineId: 'l'.repeat(64) }],
@@ -228,6 +230,10 @@ describe('report fields: line id, reason, note, entity', () => {
     ['a label with a newline', { entity: { kind: 'clan', ref: 'x', label: 'a\nb' } }],
     ['a label with a direction override', { entity: { kind: 'clan', ref: 'x', label: `a${rlo}b` } }],
     ['a label with a zero-width space', { entity: { kind: 'clan', ref: 'x', label: `a${zwsp}b` } }],
+    ['a label with a ZWNJ between two letters', { entity: { kind: 'clan', ref: 'x', label: `a${zwnj}b` } }],
+    ['a label with a ZWJ between two letters', { entity: { kind: 'clan', ref: 'x', label: `a${zwj}b` } }],
+    ['a label with a ZWNJ at the start', { entity: { kind: 'clan', ref: 'x', label: `${zwnj}ab` } }],
+    ['a label with a ZWJ at the end', { entity: { kind: 'clan', ref: 'x', label: `ab${zwj}` } }],
     ['an entity with an extra key', { entity: { kind: 'clan', ref: 'x', label: 'L', owner: 's' } }],
     ['an entity without a label', { entity: { kind: 'clan', ref: 'x' } }],
     ['an entity that is a list', { entity: [] }],

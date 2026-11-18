@@ -47,7 +47,6 @@ const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * `#/reports?x=1` -> `/reports?x=1`; an empty path is `/`.
- * @experimental
  */
 export function normalizePath(path: string): string {
   const stripped = path.replace(/^#/, '');
@@ -65,7 +64,6 @@ function decode(segment: string): string | null {
 
 /**
  * The route for a hub path (with or without a leading `#`). Never throws: a path that fits no screen is `notFound`.
- * @experimental
  */
 export function parseRoute(path: string): Route {
   const normal = normalizePath(path);
@@ -121,7 +119,6 @@ export function parseRoute(path: string): Route {
 
 /**
  * The hub path for a route. `parseRoute(buildPath(route))` is `route`.
- * @experimental
  */
 export function buildPath(route: Route): string {
   switch (route.name) {
@@ -146,7 +143,6 @@ export function buildPath(route: Route): string {
 
 /**
  * Which tab a route belongs to, or null (a path that matches nothing lights no tab).
- * @experimental
  */
 export function tabOf(route: Route): TabName | null {
   switch (route.name) {

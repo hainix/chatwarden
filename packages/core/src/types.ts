@@ -348,7 +348,6 @@ export interface AiReadRow {
  * One signal a game recorded about a player (flood control and signals, design 5.8). Staff-side data: it holds ids and numbers only, no
  * text, handle or seat. `sourceKey` is `b:<canonical by>`, `r:<roomId>` or `d:<UTC day>`; `(kind, subject, sourceKey, capBucket)` is unique,
  * which is the per-source cap.
- * @experimental
  */
 export interface SignalRow {
   id: string;
@@ -369,7 +368,6 @@ export interface SignalRow {
  * One appeal, as the store keeps it (appeals inbox, design 4.7). `statement` is the player's own text, capped at APPEAL_STATEMENT_MAX
  * characters: the only new player free text, kept here and nowhere else, nulled by retention. Private: a player sees `PlayerAppeal`, never
  * this. `rule` is the sanction's rule as TEXT (`'1'`.. or `'uncovered'`), like a sanction row.
- * @experimental
  */
 export interface AppealRow {
   /** Random, never derived. */
@@ -400,7 +398,6 @@ export interface AppealRow {
 /**
  * One blocked name kept as evidence (only when `names.keepBlocked` is on). `subject` is null when the check could not tie the name to a
  * person; `termId` is the matcher's term id for a `name_not_allowed` hit and null for `name_profane`. Private staff data on a short clock.
- * @experimental
  */
 export interface BlockedNameRow {
   id: string;
@@ -413,7 +410,6 @@ export interface BlockedNameRow {
 
 /**
  * What `listSignalSources` answers: one row per source of a kind about a subject. Rows are bounded by distinct sources, not by volume.
- * @experimental
  */
 export interface SignalSourceRow {
   subject: SubjectId;
@@ -514,14 +510,12 @@ export interface AiOutcomeRow extends AiOutcomeInsert {
 /**
  * Where an AI action stands (AI levels 3 and 4, design 6.5). `queued` waits for its hold and its confirming read; `shadow` is "would have acted" (nothing was written to a player);
  * `held_back` is a case the 20% holdback left to a person; `refused` carries a closed code; `active`, `confirmed` and `undone` belong to the acting release.
- * @experimental
  */
 export type AiActionState = 'queued' | 'shadow' | 'active' | 'confirmed' | 'undone' | 'refused' | 'held_back';
 
 /**
  * One row of `kit_ai_actions`: one per report, ever. Ids, a cell (the AI's rule and conduct level), a state, a closed code and times; no text but a reviewer's private undo note (at most
  * 500 characters, cleared with the report). Staff only: it names a report, so it never reaches a player.
- * @experimental
  */
 export interface AiActionRow {
   id: string;
@@ -666,7 +660,6 @@ export interface StrikeRow {
 
 /**
  * A "do not automate" mark as stored (AI levels 3 and 4, design 6.4). `setBy` is the senior's staff ref (audit-class: staff channels only, never a player).
- * @experimental
  */
 export interface NoAutomationRow {
   subject: string;
@@ -715,7 +708,7 @@ export interface ReportExcerptLine {
   /** Seat ids that could see the line; null means the whole room. */
   audience: string[] | null;
   p: number | null;
-  /** A moderator had taken the line back for everyone when this report was filed (`cw.rooms.retract`). Present and true only then; a report filed earlier is never rewritten. @experimental */
+  /** A moderator had taken the line back for everyone when this report was filed (`cw.rooms.retract`). Present and true only then; a report filed earlier is never rewritten. */
   retracted?: true;
 }
 
@@ -763,13 +756,11 @@ export interface StoredReport {
   /**
    * The report is urgent: a snapshot taken when it was filed (its reason is flagged urgent, or a system filter said so), changed afterwards only by a moderator
    * (`setReportUrgent`). Omitted reads as false. A store returns it on every record.
-   * @experimental
    */
   urgent?: boolean;
   /**
    * An opaque id the game gave for the evidence of the gameplay behind the report (a match, a replay): a closed alphabet with no dot or slash, supplied by the server
    * and never by a player. The kit never fetches it. Omitted or null reads as null. A store returns it on every record.
-   * @experimental
    */
   evidenceRef?: string | null;
   /**
@@ -796,7 +787,7 @@ export interface ReportEntity {
   label: string;
 }
 
-/** The origins a report can have besides a player. @experimental */
+/** The origins a report can have besides a player. */
 export type ReportOrigin = 'filter' | 'watch';
 
 /** Is this a report nobody filed (a chat filter's flag, the AI watch)? True for any origin; a record with none (or from an older custom store) is a player's report. */
@@ -804,7 +795,7 @@ export const isOriginReport = (report: { origin?: ReportOrigin | null }): boolea
 
 /**
  * One row of the chat-filter hit counters: a UTC day number (epoch ms divided by one day, rounded down), a counter key, the action applied
- * (`flag_capped` when the daily cap turned a flag into a count) and how many times. No person, room or text. @experimental
+ * (`flag_capped` when the daily cap turned a flag into a count) and how many times. No person, room or text.
  */
 export interface FilterHitRow {
   day: number;
@@ -834,18 +825,18 @@ export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedRea
    * while the report is open. Every store returns it.
    */
   detailAt: number | null;
-  /** Urgent now (see {@link StoredReport.urgent}). Every store returns it (a custom `Store` must). @experimental */
+  /** Urgent now (see {@link StoredReport.urgent}). Every store returns it (a custom `Store` must). */
   urgent: boolean;
-  /** The game's evidence id, or null (see {@link StoredReport.evidenceRef}). Every store returns it. @experimental */
+  /** The game's evidence id, or null (see {@link StoredReport.evidenceRef}). Every store returns it. */
   evidenceRef: string | null;
   /** The staff scope the room carried when the report was filed (see {@link StoredReport.scope}), or null. Every store returns it. */
   scope: string | null;
   /** The entity the report is about (see {@link StoredReport.entity}), or null. Every store returns it (a custom `Store` must). */
   entity: ReportEntity | null;
-  /** When a moderator marked the case as passed to the game's safety team, and who: the first mark only. Null until then. Staff ids, not players. @experimental */
+  /** When a moderator marked the case as passed to the game's safety team, and who: the first mark only. Null until then. Staff ids, not players. */
   handoffAt: number | null;
   handoffBy: string | null;
-  /** A second look was asked of this role (`'senior'` or `'owner'`), by whom and when; all three null while none is asked, and cleared when the report is decided. @experimental */
+  /** A second look was asked of this role (`'senior'` or `'owner'`), by whom and when; all three null while none is asked, and cleared when the report is decided. */
   escalatedTo: 'senior' | 'owner' | null;
   escalatedBy: string | null;
   escalatedAt: number | null;
@@ -869,7 +860,7 @@ export interface ReportListQuery {
   beforeId?: string;
   /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. */
   reason?: string | null;
-  /** Only urgent reports when true; false or omitted keeps all. @experimental */
+  /** Only urgent reports when true; false or omitted keeps all. */
   urgent?: boolean;
   /**
    * Only reports whose `scope` is one of these (a staff scope): applied in the query, so paging and the cursor are the unscoped ones. An empty list matches nothing and a report with no scope is
@@ -885,7 +876,7 @@ export interface OpenReportQuery {
   category?: ReportCategory;
   /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. A store must apply it. */
   reason?: string | null;
-  /** Only urgent reports when true (the urgent pass of "take next" and `GET /reports?urgent=1`); false or omitted keeps all. @experimental */
+  /** Only urgent reports when true (the urgent pass of "take next" and `GET /reports?urgent=1`); false or omitted keeps all. */
   urgent?: boolean;
   /** Keyset cursor: only reports newer than this (`createdAt` above it, or equal with an id above `afterId`). `afterId` without `after` is ignored. */
   after?: number;
@@ -898,7 +889,7 @@ export interface OpenReportQuery {
 
 /**
  * One entry of the staff thread on a report: a comment, an ask for a second look (`ask`), an escalation to the owner (`escalate`) or the note that a look was done
- * (`clear`). Staff only: `actor` is a staff ref, never a player. `text` is null for an entry with no note. Deleted with its report. @experimental
+ * (`clear`). Staff only: `actor` is a staff ref, never a player. `text` is null for an entry with no note. Deleted with its report.
  */
 export interface CommentRow {
   id: string;
@@ -913,7 +904,7 @@ export interface CommentRow {
 
 /**
  * One entry of the staff thread as the staff API shows it: `author` is a staff ref, `kind` says what it is (`comment`, `ask` for a senior, `escalate` for the owner, `clear` for "looked at")
- * and `text` is null for an entry with no note. Staff only. @experimental
+ * and `text` is null for an entry with no note. Staff only.
  */
 export interface ReportComment {
   id: string;
@@ -925,13 +916,12 @@ export interface ReportComment {
   text: string | null;
 }
 
-/** The most entries one report's thread holds: the store refuses the next. @experimental */
+/** The most entries one report's thread holds: the store refuses the next. */
 export const COMMENTS_PER_REPORT_MAX = 50;
 
 /**
  * The shared pacer's state for one player in one room (`createChatwarden({ sharedPacing: true })`): the same things the in-memory pacer keeps, so two processes can judge one player's
  * lines. Times and fingerprints only; never a line's text. `who` is the canonical subject id, or `seat:<seatId>` for a guest.
- * @experimental
  */
 export interface PaceStateRow {
   roomId: string;
@@ -948,7 +938,7 @@ export interface PaceStateRow {
   touchedAt: number;
 }
 
-/** One day of line counts (`desk.insights`): the UTC date as `YYYY-MM-DD` and two counts. No player, room or text. @experimental */
+/** One day of line counts (`desk.insights`): the UTC date as `YYYY-MM-DD` and two counts. No player, room or text. */
 export interface ChatDayRow {
   day: string;
   delivered: number;
@@ -956,7 +946,7 @@ export interface ChatDayRow {
 }
 
 /**
- * One report as Insights reads it: times, status, the reason id the reporter gave and two flags. No text, no subject, no handle, no actor. @experimental
+ * One report as Insights reads it: times, status, the reason id the reporter gave and two flags. No text, no subject, no handle, no actor.
  */
 export interface InsightRow {
   createdAt: number;
@@ -1154,7 +1144,7 @@ export interface Store {
   sanctionRefCode(groupId: string): string | null;
 
   /**
-   * OPTIONAL (0.1.12, `@experimental`). The sanction group that holds this exact ref code (`M-` plus five characters, already
+   * OPTIONAL (0.1.12). The sanction group that holds this exact ref code (`M-` plus five characters, already
    * normalised: upper case), or null. Revoked and ended groups are found: the code never changes. A store that implements it MUST also honour
    * `SanctionListQuery.groupId` (`cw.sanctions.byRef` reads the group's rows with it; a store that ignores the filter returns other groups'
    * rows and the code is silently missed). A store without it makes
@@ -1783,20 +1773,20 @@ export interface Store {
   // refuses it at construction. SYNCHRONOUS (like notices); they run inside `transaction` and are undone with it. They take a row the
   // facade has already validated, keep it as it is and return copies. A link write is not a queue change: it does not move the change token.
 
-  /** OPTIONAL (`@experimental`). The row for `(system, ref)`, a copy, or null. */
+  /** OPTIONAL . The row for `(system, ref)`, a copy, or null. */
   getLink?(system: LinkSystem, ref: string): LinkRow | null;
 
-  /** OPTIONAL (`@experimental`). Insert the row, or replace the one with the same `(system, ref)`. */
+  /** OPTIONAL . Insert the row, or replace the one with the same `(system, ref)`. */
   putLink?(row: LinkRow): void;
 
   /**
-   * OPTIONAL (`@experimental`). The `system`'s rows, oldest `at` first and then by `ref` (code point order), only this `state` when given,
+   * OPTIONAL . The `system`'s rows, oldest `at` first and then by `ref` (code point order), only this `state` when given,
    * at most `limit` (floored, clamped to 1..500; NaN is 1). The state filter applies before the limit. Copies.
    */
   listLinks?(system: LinkSystem, q: { state?: string; limit: number }): LinkRow[];
 
   /**
-   * OPTIONAL (`@experimental`). Delete rows with `at < before` (a row exactly on the line is kept); returns how many. A row that says it is live
+   * OPTIONAL . Delete rows with `at < before` (a row exactly on the line is kept); returns how many. A row that says it is live
    * is never deleted by age: an `eos-sanction` row in state `active` (a lift long after the push must still find it) and every `eos-cursor`
    * row. Once such a row is marked `removed` (or `failed`) its `at` is new and it ages out like any other.
    */
@@ -2056,20 +2046,19 @@ export interface Store {
   /** Delete the line counts of days strictly before `beforeDay`. Returns how many rows went. */
   purgeChatCounts?(beforeDay: string): number;
 
-  /** The shared pacer's row for (`roomId`, `who`), or null for none. A copy. @experimental */
+  /** The shared pacer's row for (`roomId`, `who`), or null for none. A copy. */
   paceLoad?(roomId: string, who: string): PaceStateRow | null;
 
   /**
    * Read the row (null for none), run `fn(prev)` exactly once, store what it returns for this (`roomId`, `who`) and return it, as one atomic step: two processes updating one key
    * serialise (SQLite: one `BEGIN IMMEDIATE` transaction) and none of the two updates is lost. A throw from `fn` stores nothing and rethrows. `fn` is synchronous and must not call the store.
-   * @experimental
    */
   paceUpdate?(roomId: string, who: string, fn: (prev: PaceStateRow | null) => PaceStateRow): PaceStateRow;
 
-  /** Delete one room's rows. Returns how many went. @experimental */
+  /** Delete one room's rows. Returns how many went. */
   paceDropRoom?(roomId: string): number;
 
-  /** Delete the rows whose `touchedAt` is strictly before `before`. Returns how many went. @experimental */
+  /** Delete the rows whose `touchedAt` is strictly before `before`. Returns how many went. */
   paceSweep?(before: number): number;
 
   /** The reports created at or after `since`, newest first, at most `limit` (clamped to at least 1), as {@link InsightRow}s: no text, subject, handle or actor. */

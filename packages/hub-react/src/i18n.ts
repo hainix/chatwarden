@@ -8,7 +8,6 @@
 // `{name}` marks a value to fill in. To translate, spread this catalog over yours so a missing key falls back to English:
 // `createT({ ...en, ...de }, 'de')`.
 
-/** @experimental */
 export const en = {
   'hub.title': 'Moderation',
   'hub.skip': 'Skip to the main content',
@@ -2043,7 +2042,6 @@ export const en = {
 
 /**
  * A catalog: keys to English (or translated) text. Any object of strings will do.
- * @experimental
  */
 export type HubCatalog = Readonly<Record<string, string>>;
 
@@ -2052,16 +2050,13 @@ type BaseKey<K extends string> = K extends `${infer B}.${PluralForm}` ? B : K;
 
 /**
  * Every key a component may ask for: the English catalog's keys with the plural suffix taken off.
- * @experimental
  */
 export type HubText = BaseKey<keyof typeof en>;
 
-/** @experimental */
 export type HubParams = Readonly<Record<string, string | number>>;
 
 /**
  * The `t` the hub takes: a key and optional values, always a string back.
- * @experimental
  */
 export type HubT = (key: HubText, params?: HubParams) => string;
 
@@ -2074,7 +2069,6 @@ const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isF
  * - With a numeric `count`, the plural form for the locale is used (`key.one`, `key.other`, ...), `key.zero` for 0 if it
  *   exists, and `key.other` when the locale's form is missing.
  * - A key with no text comes back as the key itself, so a gap in a translation is visible instead of blank.
- * @experimental
  */
 export function createT(catalog: HubCatalog, locale = 'en'): HubT {
   let numbers: Intl.NumberFormat;

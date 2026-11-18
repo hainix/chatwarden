@@ -169,7 +169,6 @@ interface MuteNote {
  * A moderated chat for one room: the list, one input and Send. Lines are checked by the kit on the server; a refusal is shown to its
  * author only. A restricted player sees `RestrictedChatLine` in place of the input, and gets it back when the restriction ends. Per
  * line there is one quiet control (Report, Mute); the one door at the corner (Chat options) holds the muted players and the standard.
- * @experimental
  */
 export function ChatBox(props: ChatBoxProps) {
   const { transport, room, reporting, maxLines, autoFocus = false, readOnly = false, theme, className, container, returnFocusTo, onOpenRules } = props;

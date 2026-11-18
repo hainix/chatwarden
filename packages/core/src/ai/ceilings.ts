@@ -6,13 +6,11 @@ import type { SanctionKind } from '../types.js';
 
 /**
  * The longest step the one-key accept may pre-fill, and the longest a later level 3 may take: 24 hours.
- * @experimental
  */
 export const AI_MAX_PREFILL_MS = 24 * 3_600_000;
 
 /**
  * The kinds an AI step may ever be: a note, a warning or a chat restriction. Never a ban and never an area ban. A frozen list.
- * @experimental
  */
 export const AI_MAX_KIND: readonly SanctionKind[] = Object.freeze(['note', 'warning', 'chat'] as const);
 
@@ -23,7 +21,6 @@ export function isAllowedKind(kind: unknown): kind is SanctionKind {
 
 /**
  * Thrown by `assertWithinCeilings`. `code` is a fixed string, never echoed text.
- * @experimental
  */
 export class AICeilingError extends Error {
   readonly code: 'ceiling_kind' | 'ceiling_duration' | 'ceiling_evidence';
@@ -39,7 +36,6 @@ export class AICeilingError extends Error {
  * restriction with no length, any length (any kind, a warning or note included) that is not a finite number above 0 and at most
  * {@link AI_MAX_PREFILL_MS}, or evidence with no line by the reported person.
  * `evidence.cited` is the refs the AI cited; `evidence.ownRefs` the refs of lines the reported person wrote.
- * @experimental
  */
 export function assertWithinCeilings(
   step: { kind: SanctionKind; durationMs: number | null },
@@ -60,7 +56,6 @@ export function assertWithinCeilings(
 /**
  * The kinds the AI may ever ACT with at level 3: a warning or a chat restriction. Narrower than {@link AI_MAX_KIND}: no automatic note (two notes
  * make a repeat, so a note would quietly raise the next step against a player), and never a ban or an area ban. A frozen list, not an option.
- * @experimental
  */
 export const AI_ACT_KINDS: readonly SanctionKind[] = Object.freeze(['warning', 'chat'] as const);
 
@@ -68,7 +63,6 @@ export const AI_ACT_KINDS: readonly SanctionKind[] = Object.freeze(['warning', '
  * Whether a ladder step is one the AI may ever apply on its own: a warning (no length) or a chat restriction of more than 0 and at most 24 hours.
  * A note, a ban, an area ban, a permanent restriction, a step with a wrong shape and no step at all are not. Pure; the actor repeats the whole check
  * (`assertWithinCeilings`) on the step it computes itself.
- * @experimental
  */
 export function stepWithinActCeilings(step: { kind: SanctionKind; durationMs: number | null } | null): boolean {
   if (typeof step !== 'object' || step === null) return false;
@@ -84,7 +78,6 @@ export function stepWithinActCeilings(step: { kind: SanctionKind; durationMs: nu
  * (`cw.people.automation.get(person).allowed`), injected so this module imports no store and no writer; without one, as before, every person is allowed.
  * A lookup that throws, or answers anything but `true`, means NOT allowed (fail closed). Called on every path that could ever act. Reads and drafts are
  * advice, so they are produced either way.
- * @experimental
  */
 export function automationAllowed(person: string, lookup?: (person: string) => boolean): boolean {
   if (lookup === undefined) return true;

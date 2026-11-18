@@ -17,13 +17,11 @@ const DAY_MS = 86_400_000;
 
 /**
  * Where acting stands: `off`, `shadow` (every step runs and records "would have acted", nothing is written to a player) or `on`.
- * @experimental
  */
 export type AiActingMode = 'off' | 'shadow' | 'on';
 
 /**
  * The one stored row, as the store keeps it.
- * @experimental
  */
 export interface AiActingRow {
   mode: AiActingMode;
@@ -37,7 +35,6 @@ export interface AiActingRow {
 
 /**
  * What the hub shows (`GET /ai/acting`): numbers, words and booleans, no staff ref.
- * @experimental
  */
 export interface AiActingState {
   mode: AiActingMode;
@@ -55,10 +52,8 @@ export interface AiActingState {
  * Why a step was refused. `invalid` is a wrong word, a missing reason or a bad actor; `unsupported` the code, the adapter or the store cannot do
  * acting; `no_appeals` appeals are not enabled; `not_allowed` the hub's AI level is below 2; `too_early` shadow has not run its days;
  * `wrong_state` the state is not one this step starts from.
- * @experimental
  */
 export type AiActingError = 'invalid' | 'unsupported' | 'no_appeals' | 'not_allowed' | 'too_early' | 'wrong_state';
-/** @experimental */
 export type AiActingResult = { ok: true; state: AiActingState } | { ok: false; error: AiActingError };
 
 /** What a step is given. Read as `unknown`: it comes from a route. */
@@ -139,7 +134,6 @@ export function planActing(step: ActingStep, row: AiActingRow, input: ActingInpu
 /**
  * `cw.ai.acting`. Every method answers a result and never throws on a bad input; a store that fails is thrown as its own. The role is not known here:
  * the route lets the owner start, stop and resume and a senior pause.
- * @experimental
  */
 export interface AiActingFacade {
   /** The state now, read from the store at every call (never cached, so a pause is seen by the very next act). `off` when the code pins it off. */

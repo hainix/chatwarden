@@ -94,7 +94,7 @@ loader. The list is a precision-first list that many communities keep together: 
 must never block. It is published as signed, versioned releases. Your server downloads a release, checks its signature, keeps it
 on disk and loads it as a term pack. No real slur is in this repository or in any package.
 
-Everything in this section is `@experimental` until 0.2. Until the first release exists, the loader has no trusted keys and answers
+Until the first release exists, the loader has no trusted keys and answers
 `no_trusted_keys`, and your own list is untouched.
 
 ### Turn it on
@@ -192,7 +192,7 @@ on: an answer becomes a closed code.
 The list is released under CC BY 4.0. Put this sentence in your docs, or wherever you credit your data: "Contains the Chatwarden
 community term list (chatwarden.dev), CC BY 4.0." The same sentence is in each release's manifest (`manifest.license.attribution`).
 
-### The names (`@experimental` until 0.2)
+### The names
 
 From `@chatwarden/matcher`: `LiveTerms.syncPack`, `SyncResult`, `SyncSummary`.
 

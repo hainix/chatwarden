@@ -6,7 +6,7 @@ import type { SanctionKind, SubjectId } from './types.js';
 // decide its appeal. Pure data and validation, no state and no clock; the service that acts on them comes later. Off until set, so a
 // kit that sets nothing behaves exactly as before.
 
-/** The longest statement, in characters. A constant, not a setting: it bounds what is stored. @experimental */
+/** The longest statement, in characters. A constant, not a setting: it bounds what is stored. */
 export const APPEAL_STATEMENT_MAX = 1000;
 
 /** The allowed whole-number range of `perPlayerPerWeek`, and its default. */
@@ -16,20 +16,18 @@ const PER_WEEK_DEFAULT = 3;
 
 const KEYS = ['enabled', 'perPlayerPerWeek', 'allowSelfReview'] as const;
 
-/** What a moderator may rule on an appeal: the sanction stands, is made lighter, or is lifted. @experimental */
+/** What a moderator may rule on an appeal: the sanction stands, is made lighter, or is lifted. */
 export const APPEAL_OUTCOMES = ['uphold', 'reduce', 'revoke'] as const;
 export type AppealOutcome = (typeof APPEAL_OUTCOMES)[number];
 
 /**
  * Where an appeal stands. `open` until decided; `upheld`, `reduced` and `revoked` are the three outcomes; `moot` means the sanction was
  * revoked by someone else while the appeal was open, so nobody ruled on it.
- * @experimental
  */
 export type AppealStatus = 'open' | 'upheld' | 'reduced' | 'revoked' | 'moot';
 
 /**
  * How appeals run. Every field is optional; a profile without `appeals` has them off.
- * @experimental
  */
 export interface AppealSettings {
   /** Default false. */
@@ -42,7 +40,6 @@ export interface AppealSettings {
 
 /**
  * What the kit reads: every field filled in.
- * @experimental
  */
 export interface ResolvedAppeals {
   enabled: boolean;
@@ -65,7 +62,6 @@ function given(o: Record<string, unknown>, key: string): unknown {
  * Validate and fill. Throws ProfileError naming the field (`appeals.perPlayerPerWeek`), never echoing the value. `path` names the
  * settings in the error (default `appeals`). The result is a new object that shares nothing with the input; each value is read from
  * `input` once.
- * @experimental
  */
 export function resolveAppeals(input: AppealSettings | undefined, path = 'appeals'): ResolvedAppeals {
   if (input === undefined) return { enabled: false, perPlayerPerWeek: PER_WEEK_DEFAULT, allowSelfReview: false };
@@ -86,7 +82,7 @@ export function resolveAppeals(input: AppealSettings | undefined, path = 'appeal
   };
 }
 
-/** What a player sees of an appeal. No staff field, no reason, no id of a sanction or a person. @experimental */
+/** What a player sees of an appeal. No staff field, no reason, no id of a sanction or a person. */
 export interface PlayerAppeal {
   id: string;
   /** The notice it was filed from. */
@@ -98,7 +94,6 @@ export interface PlayerAppeal {
 
 /**
  * Why a filing was refused. `not_found` is one answer for "not yours", "no such notice" and "malformed", so notice ids cannot be probed.
- * @experimental
  */
 export type AppealRefusal =
   | 'off' // appeals are not enabled
@@ -108,7 +103,6 @@ export type AppealRefusal =
   | 'already_appealed' // this sanction has had its appeal
   | 'rate'; // perPlayerPerWeek reached
 
-/** @experimental */
 export type AppealFileResult = { ok: true; appeal: PlayerAppeal } | { ok: false; refused: AppealRefusal; retryAfterMs?: number }; // retryAfterMs on 'rate'
 
 /** The most UTF-16 units of raw text the cleaner will look at: far past the cap, so a huge paste is refused without being worked through. */
@@ -135,7 +129,6 @@ const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[
  * marks, tag characters, NUL and lone surrogates are removed; every line loses its trailing space; runs of blank lines
  * collapse to one; the whole is trimmed. Pure, idempotent, never throws; anything that is not a string, and a string longer than twenty times
  * the cap, gives an empty string (which the filing refuses). Count the result in code points, not UTF-16 units.
- * @experimental
  */
 export function normalizeStatement(input: unknown): string {
   if (typeof input !== 'string' || input.length > STATEMENT_RAW_MAX) return '';
@@ -164,7 +157,6 @@ export const SANCTION_KIND_ORDER = ['warning', 'chat', 'area', 'ban'] as const;
 
 /**
  * A moderator's ruling on an appeal.
- * @experimental
  */
 export interface AppealDecision {
   appealId: string;
@@ -177,7 +169,6 @@ export interface AppealDecision {
   to?: { kind: 'warning' | 'chat' | 'area' | 'ban'; durationMs: number | null };
 }
 
-/** @experimental */
 export type AppealDecideResult =
   | { ok: true; status: 'upheld' | 'reduced' | 'revoked'; replacementGroupId?: string }
   | { ok: false; error: 'not_found' | 'already_decided' | 'invalid' | 'same_decider' | 'gone' };
@@ -192,7 +183,6 @@ export const APPEAL_RATE_HIGH = 0.3;
 /**
  * One appeal as staff see it in a list. The statement is NOT here (see {@link AppealDetail}); `statementFlagged` says whether it trips the
  * term filter, so the hub can mask it. Carries a staff ref: staff channels only, never send to a player.
- * @experimental
  */
 export interface AppealSummary {
   id: string;
@@ -207,7 +197,6 @@ export interface AppealSummary {
 
 /**
  * One appeal in full, for one staff read (audited by the route).
- * @experimental
  */
 export interface AppealDetail extends AppealSummary {
   /** The player's words. Staff only. Null once purged. Masked by the hub when `statementFlagged`. */
@@ -220,7 +209,6 @@ export interface AppealDetail extends AppealSummary {
   shown: Array<{ text: string; day: string }>;
 }
 
-/** @experimental */
 export interface AppealPage {
   items: AppealSummary[];
   /** An opaque cursor for the next page, or null when this page was not full. */
@@ -230,7 +218,6 @@ export interface AppealPage {
 /**
  * The appeal counts of one rule over a window. `granted` is REVOKED appeals only: a reduction is a severity dispute, not a false positive,
  * so it is `lightened`, shown beside the rate and never in it.
- * @experimental
  */
 export interface AppealRuleStats {
   rule: number | 'uncovered';
@@ -247,7 +234,6 @@ export interface AppealRuleStats {
   band: 'normal' | 'elevated' | 'high' | null;
 }
 
-/** @experimental */
 export interface AppealStats {
   windowDays: number;
   /** By rule number, `'uncovered'` last. */

@@ -42,7 +42,7 @@ const RANK_SLICE = 20;
 /** The most "handed to this moderator" markers `next` keeps (the oldest go). */
 const SERVED_MAX = 1000;
 
-/** With `signalBoost`, take-next looks at most this many people (oldest first) for an overdue or boosted case. @experimental */
+/** With `signalBoost`, take-next looks at most this many people (oldest first) for an overdue or boosted case. */
 export const SIGNAL_BOOST_SCAN_MAX = 200;
 
 /** A claim as staff see it. Staff only: `by` is a staff actor. */

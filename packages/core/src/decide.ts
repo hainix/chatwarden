@@ -30,13 +30,11 @@ export const DECISION_REASON_MAX = 500;
 /**
  * The reason stored for a `no_action` decision that has no actions and no typed reason (a one-click "nothing wrong
  * here"). One recognisable value, so "a human dismissed it and gave no reason" is told apart from a considered note.
- * @experimental
  */
 export const NO_ACTION_DEFAULT_REASON = 'No action needed';
 
 /**
  * True for the standard dismissal reason (trimmed); false for anything else, including null.
- * @experimental
  */
 export function isDefaultNoActionReason(reason: string | null | undefined): boolean {
   return typeof reason === 'string' && reason.trim() === NO_ACTION_DEFAULT_REASON;
@@ -98,7 +96,6 @@ export interface DecisionInput {
    * given (the server decides, from the stored read and the decision). It only tells the casebook which read the moderator saw, whether
    * they clicked accept, the conduct level of their form and their role. It never changes the decision, its key or its answer, and a
    * part that is not well formed is ignored. Agreement is computed from the stored read and the decision, never from this echo.
-   * @experimental
    */
   ai?: DecisionAiEcho;
 }
@@ -109,7 +106,6 @@ export interface DecisionInput {
  * it counts only when the decision is the pre-fill. `severity` is the conduct level their form settled on: it counts only when it fits
  * the verdict. Without the echo no example text is kept. `role` is the moderator's, for the `ai.outcome` audit row (without it none is
  * written).
- * @experimental
  */
 export interface DecisionAiEcho {
   readId?: string;

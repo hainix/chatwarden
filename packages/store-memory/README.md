@@ -65,7 +65,7 @@ console.log(store.rawReports().length); // 0: a copy of every stored report, for
 
 The kit's AI needs optional store methods (the reads, the spend ledger and the casebook). `createMemoryStore()` does not carry them, so an
 app that never turns the AI on does not bundle them. To use the AI over the in-memory store, add them with `withMemoryAi(store)`
-(`@experimental`, new in 0.1.7). It returns the same store; a method the store already has (a subclass's override) is kept, and calling it
+(new in 0.1.7). It returns the same store; a method the store already has (a subclass's override) is kept, and calling it
 twice changes nothing. The SQLite store has them built in.
 
 ```ts
@@ -84,7 +84,7 @@ Without `withMemoryAi`, a kit created with `ai` leaves the AI inert and logs `ch
 
 Signals (what a game records about a player: muted by others, kicked, `flood_triggered`) need three optional store methods
 (`insertSignal`, `listSignalSources`, `purgeSignals`). `createMemoryStore()` does not carry them, so an app that never records a signal
-does not bundle them. To use signals over the in-memory store, add them with `withMemorySignals(store)` (`@experimental`, new in 0.1.8). It
+does not bundle them. To use signals over the in-memory store, add them with `withMemorySignals(store)` (new in 0.1.8). It
 returns the same store; a method the store already has is kept, and calling it twice changes nothing. The SQLite store has them built in.
 
 ```ts
@@ -111,7 +111,7 @@ A kit that declares signal kinds or feeds over a store without the methods is re
 Appeals need optional store methods (`insertAppeal`, `loadAppeal`, `listAppeals`, `decideAppeal`, the counts the weekly cap and the mistake rate read, the
 purges and a few more). Blocked names kept as evidence (`names.keepBlocked`) need three (`insertBlockedName`, `listBlockedNames`, `purgeBlockedNames`).
 `createMemoryStore()` carries neither, so an app that uses neither does not bundle them. To use appeals over the in-memory store, add them with
-`withMemoryAppeals(store)`, and for kept names `withMemoryNames(store)` (both `@experimental`, new in 0.1.9). Each returns the same store; a method the store
+`withMemoryAppeals(store)`, and for kept names `withMemoryNames(store)` (both new in 0.1.9). Each returns the same store; a method the store
 already has is kept, and calling one twice changes nothing. The SQLite store has them built in. `withdrawNotice`, which lets a game release a required
 rename, is already on `MemoryStore`.
 
@@ -138,7 +138,7 @@ methods are simply not kept.
 
 Not for production: it is built for your own tests, over this memory store, with a fake clock and a public test secret. `@chatwarden/store-memory/testing` is a
 separate entry (the main entry does not import it), has no `node:` import, needs no test runner (a failed expectation throws a plain `ScriptMismatch` error and
-outcomes are plain strings, so it reads the same in Vitest, Jest and `node:test`), and every name in it is `@experimental` until 0.2.
+outcomes are plain strings, so it reads the same in Vitest, Jest and `node:test`), and its names are part of the API.
 
 `createTestKit` builds a kit (`retention: false`, the standard profile, no matcher) and `kit.play` runs a script: a table of players, lines, reports, mutes,
 waits and suggestions that reads as a specification. `blocked` and `swears` are word lists for the stand-in matcher and filter (whole words, ignoring case; pass
@@ -168,7 +168,7 @@ and the outcome says so (`autoRestricted`: `'first'`, then `'second'`). `kit.roo
 `sees`, `leave`), `checkLines(options, [{ text, expect }])` checks a table of independent lines on a fresh kit each, and `kit.cw` is the whole kit when a test
 needs more. It does not run HTTP, make moderator decisions or take the real matcher's place.
 
-The names in this entry, all `@experimental` until 0.2: `createTestKit`, `checkLines`, `createFakeClock`, `durationMs`, `wordFilter`, `wordMatcher`, `expectOutcomes` and
+The names in this entry: `createTestKit`, `checkLines`, `createFakeClock`, `durationMs`, `wordFilter`, `wordMatcher`, `expectOutcomes` and
 `ScriptMismatch`, and the types `TestKit`, `TestKitOptions`, `TestRoom`, `FakeClock`, `Duration`, `Step`, `Run`, `SayLabel`, `SayOutcome`, `ReportLabel` and `ReportOutcome`.
 
 ## Options

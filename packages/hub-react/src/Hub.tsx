@@ -68,7 +68,6 @@ export interface HubProps {
    * Called with the hub's controller once it exists, and again if it is replaced (a new `client`). Keep it and call
    * `controller.refresh()` to have the hub read its queue now, when your page knows something just changed. The controller is the hub's own:
    * do not `dispose()` it. It is the same headless controller as `@chatwarden/hub-react/headless`, and `refresh` only reads.
-   * @experimental
    */
   onController?: (controller: HubController) => void;
 }

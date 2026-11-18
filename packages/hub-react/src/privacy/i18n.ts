@@ -10,7 +10,6 @@ import type { HubParams, HubText } from '../i18n.js';
 //
 // Plain words, no legal claims: these screens describe what the kit stores and does. Nothing here says a request is valid or that a law is met.
 
-/** @experimental */
 export const privacyEn = {
   'hub.privacy.menu': 'Data requests',
   'hub.privacy.menu.hint': 'For a request from this person about their data. Only the owner sees this.',

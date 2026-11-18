@@ -119,8 +119,8 @@ describe('reporting in the README is one step', () => {
     expect(row).toContain('one-step');
     expect(row).not.toContain('"Add a reason"');
   });
-  it('documents the experimental extra prop with a small example, and the Tab order', () => {
-    expect(quick).toContain('`extra`, experimental');
+  it('documents the extra prop with a small example, and the Tab order', () => {
+    expect(quick).toContain('(`extra`)');
     expect(quick).toContain('Also mute this player');
     expect(quick).toContain('reason, note, yours, Report, Cancel');
     expect(readme.split(String.fromCharCode(10)).find((l) => l.startsWith('| `ReportDialog` |'))).toContain('`extra`');

@@ -465,7 +465,7 @@ declare const bot: import('@chatwarden/http/discord').DiscordBot;
 describe('the AI sections', () => {
   it('core: the AI section says what it is, that it is off until an adapter is given, what it can never do, what it costs, and how to try it', () => {
     const doc = flat(section(readme('core'), 'The AI (levels 1 and 2)'));
-    for (const needle of ['`ai`', '`ModerationAI`', '`createFakeModerationAI`', '@experimental', '0.1.7', '`AI_MAX_PREFILL_MS`', '`dailyBudgetMicros`', '`profile.ai.dailyCalls`', "`blockedLines: 'mask'`", 'examples/ai-anthropic', 'docs/adoption/moxgate.md', '`AIError`']) {
+    for (const needle of ['`ai`', '`ModerationAI`', '`createFakeModerationAI`', '0.1.7', '`AI_MAX_PREFILL_MS`', '`dailyBudgetMicros`', '`profile.ai.dailyCalls`', "`blockedLines: 'mask'`", 'examples/ai-anthropic', 'docs/adoption/moxgate.md', '`AIError`']) {
       expect(doc, needle).toContain(needle);
     }
     expect(doc).toMatch(/never writes a sanction, a strike, a mute or a notice/);
@@ -526,27 +526,27 @@ describe('the AI sections', () => {
   it('store-memory: the AI methods are opt-in through withMemoryAi, said plainly, with a snippet that compiles (it starts with an import)', () => {
     const doc = flat(readme('store-memory'));
     expect(doc).toContain('## The AI methods (opt-in)');
-    for (const needle of ['`withMemoryAi(store)`', '@experimental', '`createMemoryStore()`', '`chatwarden.ai_store_unsupported`', 'SQLite store has them']) expect(doc, needle).toContain(needle);
+    for (const needle of ['`withMemoryAi(store)`', '`createMemoryStore()`', '`chatwarden.ai_store_unsupported`', 'SQLite store has them']) expect(doc, needle).toContain(needle);
     expect(doc).toMatch(/leaves the AI inert/i);
     expect(doc).toMatch(/does not carry them/i);
     expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemoryAi[^}]*\} from '@chatwarden\/store-memory';/);
   });
 
-  it('store-memory: the test kit says first that it is not for production, names its entry, its experimental status and its plain errors, and its example starts with an import', () => {
+  it('store-memory: the test kit says first that it is not for production, names its entry, its plain errors, and its example starts with an import', () => {
     const raw = readme('store-memory');
     const section = raw.slice(raw.indexOf('## The test kit'));
     expect(section.length).toBeGreaterThan(500);
     const doc = flat(section);
     expect(doc.indexOf('Not for production')).toBeGreaterThanOrEqual(0);
     expect(doc.indexOf('Not for production')).toBeLessThan(80);
-    for (const needle of ['@chatwarden/store-memory/testing', '@experimental', 'ScriptMismatch', 'createTestKit', 'kit.play', 'checkLines', 'no `node:` import', 'invented']) expect(doc, needle).toContain(needle);
+    for (const needle of ['@chatwarden/store-memory/testing', 'ScriptMismatch', 'createTestKit', 'kit.play', 'checkLines', 'no `node:` import', 'invented']) expect(doc, needle).toContain(needle);
     expect(section).toMatch(/```ts\nimport \{[^}]*createTestKit[^}]*\} from '@chatwarden\/store-memory\/testing';/);
   });
 
   it('store-memory: the signal methods are opt-in through withMemorySignals, said plainly, with a snippet that compiles (it starts with an import)', () => {
     const doc = flat(readme('store-memory'));
     expect(doc).toContain('## The signal methods (opt-in)');
-    for (const needle of ['`withMemorySignals(store)`', '@experimental', '`createMemoryStore()`', '`chatwarden.signals_store_unsupported`', 'SQLite store has them', 'refused when it is created']) expect(doc, needle).toContain(needle);
+    for (const needle of ['`withMemorySignals(store)`', '`createMemoryStore()`', '`chatwarden.signals_store_unsupported`', 'SQLite store has them', 'refused when it is created']) expect(doc, needle).toContain(needle);
     expect(doc).toMatch(/does not carry them/i);
     expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemorySignals[^}]*\} from '@chatwarden\/store-memory';/);
   });
@@ -594,11 +594,11 @@ describe('the chat box docs', () => {
     for (const f of props) expect(propRows, `ChatBoxProps.${f}`).toContain(`\`${f}`);
   });
 
-  it('the READMEs list the @experimental names, every one the entries export', () => {
+  it('the READMEs list the chat names, every one the entries export, and none is called experimental', () => {
     const httpEntry = read('packages/http/src/chat/index.ts');
     const httpNames = [...names(httpEntry, 'value'), ...names(httpEntry, 'type')].filter((n) => !['KitStream', 'NamesRateLimit'].includes(n));
     const httpChat = flat(section(httpDoc, 'Chat'));
-    const httpList = httpChat.slice(httpChat.indexOf('Experimental names'));
+    const httpList = httpChat.slice(httpChat.indexOf('**Names:**'));
     expect(httpNames.length).toBeGreaterThan(15);
     for (const n of httpNames) expect(httpList, n).toContain(`\`${n}\``);
     const playerEntry = read('packages/player-react/src/chat/index.ts');
@@ -606,8 +606,8 @@ describe('the chat box docs', () => {
     const playerList = flat(section(playerDoc, 'The chat box'));
     expect(playerNames.length).toBeGreaterThan(15);
     for (const n of playerNames) expect(playerList, n).toContain(`\`${n}\``);
-    expect(playerList).toMatch(/`@experimental` until 0\.2/);
-    expect(httpChat).toMatch(/`@experimental` until 0\.2/);
+    expect(playerList).not.toMatch(/@experimental/);
+    expect(httpChat).not.toMatch(/@experimental/);
   });
 
   it('the root README adds chat to the install table and the package rows, with a short chat block that compiles', () => {
@@ -654,8 +654,8 @@ describe('the flood control and signals docs (0.1.8)', () => {
     for (const feed of ['`record`', '`queue`', '`ladder`', '`ai`']) expect(doc, feed).toContain(feed);
   });
 
-  it('core: the experimental list names the new API, and the table rows and retention default are there', () => {
-    const doc = flat(section(readme('core'), 'What is experimental in 0.1.8'));
+  it('core: the 0.1.8 list names the new API, and the table rows and retention default are there', () => {
+    const doc = flat(section(readme('core'), 'What 0.1.8 added'));
     for (const needle of ['`PaceSettings`', '`PACE_SUGGESTIONS`', '`cw.rooms.setPace`', '`cw.signals`', '`PolicyLimits`', '`withMemorySignals`', '`secondsLeft`', '`signalBoost`']) expect(doc, needle).toContain(needle);
     expect(core).toContain('| `cw.signals` |');
     expect(core).toContain('signals 90 (`signalsMs`, never less than 14)');
@@ -670,7 +670,7 @@ describe('the flood control and signals docs (0.1.8)', () => {
 
   it('player-react: one wait convention, said plainly (a bare duration, the sentence has the "in")', () => {
     const doc = flat(section(readme('player-react'), 'Pace words and `secondsLeft`'));
-    for (const needle of ['bare duration', 'in {left}', '`secondsLeft(ms, locale)`', '`player.pace.ready`', '`.soon`', '`RestrictedChatLine`', '@experimental']) expect(doc, needle).toContain(needle);
+    for (const needle of ['bare duration', 'in {left}', '`secondsLeft(ms, locale)`', '`player.pace.ready`', '`.soon`', '`RestrictedChatLine`']) expect(doc, needle).toContain(needle);
     expect(doc).not.toMatch(/carry their own "in"/);
   });
 
@@ -743,8 +743,8 @@ describe('the appeals and names docs (0.1.9)', () => {
     }
   });
 
-  it('core: the experimental list, the table rows, the retention defaults and the upgrade notes are there', () => {
-    const list = flat(section(coreDoc, 'What is experimental in 0.1.9'));
+  it('core: the 0.1.9 list, the table rows, the retention defaults and the upgrade notes are there', () => {
+    const list = flat(section(coreDoc, 'What 0.1.9 added'));
     for (const needle of ['`cw.appeals`', '`AppealSettings`', '`NameSettings`', '`cw.names.requireRename`', '`cw.people.accountIds`', '`rename.required`', '`withMemoryAppeals`', '`withMemoryNames`', '`AppealDialog`', '`nameReasonText`', '`appealsRateLimit`', '`includeAccounts`']) {
       expect(list, needle).toContain(needle);
     }
@@ -769,7 +769,7 @@ describe('the appeals and names docs (0.1.9)', () => {
   it('http: the appeal and name routes, the new bodies, the limiter and the webhook option are described', () => {
     for (const needle of [
       '| `GET /appeals?status&cursor&limit` |', '| `GET /appeals/:id` |', '| `POST /appeals/:id/decide` |', '| `POST /people/:ref/rename` |', '| `GET /appeals` |', '| `POST /appeals { noticeId, statement }` |',
-      '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (`@experimental`, new in 0.1.9) is `{ appeals, renames, keepBlocked, rooms, workflow, insights }`', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
+      '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (new in 0.1.9) is `{ appeals, renames, keepBlocked, rooms, workflow, insights }`', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
       '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.1.9`',
       '`name_profane`', 'Also `POST /people/:ref/rename`.',
     ]) {
@@ -864,7 +864,7 @@ describe('the appeals and names docs (0.1.9)', () => {
         '`overrides.names.maskInHub: false`', '`appeals.read` (default `moderator`', '`appeals.decide` (default `senior`', 'An older player-react shows the generic title',
         '28 keys', 'from 11 KB to 14 KB', 'from 82 KB to 88 KB', 'The AI prompt version is now 4 for everyone', 'count against your daily call and money caps',
         '`PurgeResult` gains `appeals`, `appealStatements`, `blockedNames` and `appealsClosed`', '`withdrawNotice(id, at)` is new and optional', 'a custom store without it has renames off',
-        '`closeOrphanAppeals`', '`clearStatement`', '`purgeNotices(before, unseen?)`', '`@experimental` until 0.2', 'No new package is published',
+        '`closeOrphanAppeals`', '`clearStatement`', '`purgeNotices(before, unseen?)`', 'No new package is published',
       ]) {
         expect(text, `${dir}: ${needle}`).toContain(needle);
       }
@@ -907,7 +907,7 @@ describe('the adoption docs (0.1.10)', () => {
     expect(quick).toContain('createChatwarden');
   });
 
-  it('the root README has "Test your policy", with the same example the store-memory README runs, and says it is experimental', () => {
+  it('the root README has "Test your policy", with the same example the store-memory README runs, and does not call it experimental', () => {
     const mine = section(rootDoc, 'Test your policy');
     const kit = readme('store-memory');
     const theirs = /```ts\n([\s\S]*?)```/.exec(kit.slice(kit.indexOf('## The test kit')))?.[1];
@@ -915,7 +915,7 @@ describe('the adoption docs (0.1.10)', () => {
     expect(block, 'the root block').toBeDefined();
     expect(block).toBe(theirs);
     expect(block?.startsWith("import { createTestKit, expectOutcomes } from '@chatwarden/store-memory/testing';")).toBe(true);
-    expect(flat(mine)).toContain('`@experimental` until 0.2');
+    expect(flat(mine)).not.toContain('@experimental');
     expect(flat(mine)).toContain('invented');
   });
 
@@ -929,13 +929,13 @@ describe('the adoption docs (0.1.10)', () => {
     expect(core).toContain('npx chatwarden init');
   });
 
-  it('store-memory: the README names every export of the testing entry, and says they are experimental', () => {
+  it('store-memory: the README names every export of the testing entry, and does not call them experimental', () => {
     const entry = read('packages/store-memory/src/testing/index.ts');
     const names = [...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim()).filter(Boolean));
     expect(names.length).toBeGreaterThan(15);
     const kit = flat(readme('store-memory').slice(readme('store-memory').indexOf('## The test kit')));
     for (const name of names) expect(kit, name).toContain(name);
-    expect(kit).toContain('`@experimental` until 0.2');
+    expect(kit).not.toContain('@experimental');
   });
 
   it('the project docs say it exists: status, follow-ups, CLAUDE.md, RELEASING.md and tiny-chat', () => {
@@ -1027,13 +1027,13 @@ describe('the shared term list docs (K7, 0.1.11)', () => {
     expect(doc).not.toContain('`definitelyNotAnOption`');
   });
 
-  it('the READMEs list the @experimental names of the corpus subpaths, every one the entries export, and LiveTerms.syncPack', () => {
+  it('the READMEs list the names of the corpus subpaths, every one the entries export, and LiveTerms.syncPack', () => {
     const doc = flat(section(matcherDoc, 'The community term corpus'));
     const names = [...exported(read('packages/matcher/src/corpus/index.ts')), ...exported(read('packages/matcher/src/corpus/node/index.ts'))];
     expect(names.length).toBeGreaterThan(60);
     for (const n of names) expect(doc, n).toContain(`\`${n}\``);
     for (const n of ['LiveTerms.syncPack', 'SyncResult', 'SyncSummary']) expect(doc, n).toContain(`\`${n}\``);
-    expect(doc).toMatch(/`@experimental` until 0\.2/);
+    expect(doc).not.toMatch(/@experimental/);
   });
 
   it('no README holds a term: every word in a term, phrase or line of a code block is invented or ordinary', () => {
@@ -1272,12 +1272,12 @@ describe('the AI gate dashboard and do-not-automate docs (0.1.13)', () => {
   const hub = flat(section(readme('hub-react'), 'AI levels 3 and 4, release 1 (0.1.13)'));
   const sqlite = flat(readme('store-sqlite'));
 
-  it('core: says nothing acts, what the seam is, the gate view, the mark, the migration (one-way, back up first), the unions and the experimental names', () => {
+  it('core: says nothing acts, what the seam is, the gate view, the mark, the migration (one-way, back up first), the unions and the names', () => {
     for (const needle of [
       '**Nothing in this release lets the AI act.**', '`source: \'ai\'`', '`applySanction`', '`writeSanction`', '`validateSanctionInput`', '`service`', '`cw.ai.gates()`', '`AiGatesView`',
       '`actingAvailable` is false', 'lower 95% bound', '`cw.people.automation`', '`AUTOMATION_CODES`', 'no free text', 'follows a merge', '`automationAllowed(person, lookup?)`',
       'migration 24 (SQLite)', '`kit_ai_noauto`', '**one-way**', '**back up the file before upgrading**', '`aiGateRows`', '`setNoAutomation`', '`loadNoAutomation`', '`withMemoryAi(store)`',
-      '`AUDIT_ACTIONS` gains `person.automation`', 'Experimental names',
+      '`AUDIT_ACTIONS` gains `person.automation`', '**Names:**',
     ]) {
       expect(core, needle).toContain(needle);
     }

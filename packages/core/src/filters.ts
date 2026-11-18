@@ -46,7 +46,6 @@ export type PersonalKind = (typeof PERSONAL_KINDS)[number];
 /**
  * The filters, as an owner writes them. Every field is optional; a block is on when it is present and off when it is absent or `null`.
  * Nothing is on until an owner turns it on. See the design note for what each block reads.
- * @experimental
  */
 export interface FilterSettings {
   links?: LinkSettings | null;
@@ -60,7 +59,6 @@ export interface FilterSettings {
   flagCapPerDay?: number;
 }
 
-/** @experimental */
 export interface LinkSettings {
   action: FilterAction;
   /** A Community Rule number; default 4. */
@@ -79,7 +77,6 @@ export interface LinkSettings {
   newAccountDays?: number | null;
 }
 
-/** @experimental */
 export interface PersonalInfoSettings {
   action: FilterAction;
   /** Default 2. */
@@ -92,7 +89,6 @@ export interface PersonalInfoSettings {
   address?: 'count' | 'flag' | null;
 }
 
-/** @experimental */
 export interface PhraseRuleSettings {
   /** `^[a-z][a-z0-9_-]{0,31}$`, unique: it is the counter key. */
   id: string;
@@ -108,7 +104,6 @@ export interface PhraseRuleSettings {
 /**
  * Caps, repeats, emoji and mentions. With the block present, each check is on with its defaults unless set to `null`; `action: 'mask'`
  * softens the line (lowercases it, shortens a run, cuts the extras) and never hides a span.
- * @experimental
  */
 export interface RatioSettings {
   action: FilterAction;
@@ -124,7 +119,6 @@ export interface RatioSettings {
   mentions?: { max?: number } | null;
 }
 
-/** @experimental */
 export interface ResolvedLinks {
   action: FilterAction;
   rule: number;
@@ -137,7 +131,6 @@ export interface ResolvedLinks {
   newAccountDays: number | null;
 }
 
-/** @experimental */
 export interface ResolvedPersonalInfo {
   action: FilterAction;
   rule: number;
@@ -146,7 +139,6 @@ export interface ResolvedPersonalInfo {
   address: 'count' | 'flag' | null;
 }
 
-/** @experimental */
 export interface ResolvedPhraseRule {
   id: string;
   label: string;
@@ -155,7 +147,6 @@ export interface ResolvedPhraseRule {
   phrases: string[];
 }
 
-/** @experimental */
 export interface ResolvedRatio {
   action: FilterAction;
   rule: number;
@@ -167,7 +158,6 @@ export interface ResolvedRatio {
 
 /**
  * What the kit reads: every field filled in. `links`, `personalInfo` and `ratio` are `null` when off; `phrases` is `[]` when none.
- * @experimental
  */
 export interface ResolvedFilters {
   links: ResolvedLinks | null;
@@ -452,7 +442,6 @@ function checked(input: unknown, path: string, requireAction = true): Sparse {
 /**
  * Check the shape and ranges of `input` and return what is set, as a new object that shares nothing with it: a key is present only when
  * it was given a value (`null` included), and each value was read from `input` exactly once. Throws ProfileError.
- * @experimental
  */
 export function checkFilters(input: FilterSettings, path = 'filters'): FilterSettings {
   const s = checked(input, path);
@@ -522,7 +511,6 @@ function fill(s: Sparse): ResolvedFilters {
 /**
  * Validate and fill. Throws ProfileError naming the field (`filters.links.allow[3]`), never echoing the value. `path` names the settings
  * in the error (default `filters`). The result is a new object that shares nothing with the input.
- * @experimental
  */
 export function resolveFilters(input: FilterSettings | undefined, path = 'filters'): ResolvedFilters {
   return input === undefined ? fill({}) : fill(checked(input, path));
@@ -543,7 +531,6 @@ function cloneResolved(r: ResolvedFilters): ResolvedFilters {
 /**
  * `over` on top of `base`: a field left out inherits, `null` turns a block off, a block or a list that is given replaces the base's whole
  * (never merged by member). `over` is validated (a ProfileError with the path). Neither argument is changed or shared with the result.
- * @experimental
  */
 export function mergeFilters(base: ResolvedFilters, over: FilterSettings, path = 'filters'): ResolvedFilters {
   const set = checked(over, path);
@@ -561,7 +548,6 @@ export function mergeFilters(base: ResolvedFilters, over: FilterSettings, path =
  * A room's own view: `patch` laid over `base` member by member (a room that wants "links off for new guests" sets one member, not the
  * whole block). A patch on a block that is off leaves it off unless the patch names an `action`; `null` turns a block off; lists replace
  * whole. Validated like any setting; neither argument is changed or shared with the result.
- * @experimental
  */
 export function overlayFilters(base: ResolvedFilters, patch: FilterPatch, path = 'filters'): ResolvedFilters {
   const set = checked(patch, path, false);
@@ -610,7 +596,6 @@ export function checkFilterRules(f: ResolvedFilters, isActive: (rule: number) =>
 
 /**
  * Values the hub offers behind "Use suggested values". Never applied by themselves. `rmt` is a template the owner edits.
- * @experimental
  */
 export const FILTER_SUGGESTIONS: Readonly<Record<'relaxed' | 'standard' | 'strict' | 'rmt', FilterSettings>> = deepFreeze({
   relaxed: {},

@@ -157,7 +157,6 @@ export function termErrorText(t: HubT, error: HubError): string {
  * A handle as text, and the only way one becomes text (names, design 5.5). A handle the server flags (`names.maskInHub`) is the same "hidden" label a blocked line
  * has until a moderator shows it; a handle that is not flagged, or from a server that flags nothing, is as typed. No handle is the empty string: a caller that
  * must say something else (the tag) says it. The label holds no part of the name, not even its length.
- * @experimental
  */
 export function displayName(t: HubT, name: { handle: string | null; flagged?: boolean | undefined; revealed?: boolean | undefined }): string {
   if (name.handle === null) return '';

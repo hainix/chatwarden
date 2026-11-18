@@ -8,23 +8,19 @@ import type { BlockedLine, CommunityRule, PolicyDocs, PolicyState, Reason, Repor
 
 /**
  * How long a saved reason list, the blocked lines and a reporter's record are reused.
- * @experimental
  */
 export const SESSION_TTL_MS = 5 * 60_000;
 /**
  * The most reporters remembered at once.
- * @experimental
  */
 export const SESSION_REPORTERS_MAX = 200;
 
 /**
  * What one screen hands the next without a URL (a link carries nothing but the screen, so no ref longer than the tag is ever in
  * an address): Blocked sends "add an exception for this line" or "show me this term" to Terms.
- * @experimental
  */
 export type Handoff = { kind: 'exception'; phrase: string; language: string } | { kind: 'term'; id: string; from?: 'find' };
 
-/** @experimental */
 export interface Session {
   /** The one thing waiting for the next screen, if anything. `peek` reads it, `clear` drops it (an unmount may read twice). */
   handoff: { set(h: Handoff): void; peek(): Handoff | null; clear(): void };
@@ -35,7 +31,6 @@ export interface Session {
   policy(): Promise<PolicyDocs>;
   /**
    * The Community Rules alone (`GET /policy/rules`), for a scoped moderator, who cannot read the policy but must name a rule to act. Read once; kept until the hub closes (and forgotten with `invalidatePolicy`).
-   * @experimental
    */
   rules(): Promise<CommunityRule[]>;
   /** Forget the kept policy: the steps and ladder were saved or reset, so the next ask (a decision bar, a sanction form) reads the new profile. */
@@ -43,7 +38,6 @@ export interface Session {
   /**
    * The safety settings in force (the guidance, the studio contact and the reporter's resources), from `GET /policy/profile` (needs `policy.read`; audited like any read of the settings).
    * Read once and kept for a few minutes, so an urgent case does not read the profile again each time it opens; a save or a reset of the profile forgets it.
-   * @experimental
    */
   safety(): Promise<PolicyState['effective']['safety']>;
   /** The saved reasons a moderator can use (switched-off ones left out). */
@@ -80,7 +74,6 @@ function memo<T>(load: () => Promise<T>, ttl: number | null, now: () => number):
 
 /**
  * A session over one client. `now` is the hub's clock.
- * @experimental
  */
 export function createSession(client: HubClient, now: () => number): Session {
   const reporters = new Map<string, Kept<ReporterRecord>>();

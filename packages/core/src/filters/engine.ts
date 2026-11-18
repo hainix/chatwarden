@@ -19,7 +19,6 @@ export type FilterHitKind = 'link' | 'personal_info' | 'phrase' | 'ratio';
 
 /**
  * One thing a block found: a counter key, what it is, what the owner said to do about it, and where (ranges on the line, none for a ratio).
- * @experimental
  */
 export interface FilterHit {
   /** The counter key: `link.unlisted`, `personal_info.phone`, `phrase.<id>`, `ratio.caps` ... (a closed shape, never text from a line). */
@@ -34,7 +33,6 @@ export interface FilterHit {
 
 /**
  * What the player is told when a line is refused: the kind (phrases and ratios both say `filter`) and the rule, never the matched part.
- * @experimental
  */
 export interface FilterRefusal {
   reason: 'link' | 'personal_info' | 'filter';
@@ -46,7 +44,6 @@ export interface FilterRefusal {
  * `spans` are the ranges every `mask` hit covers (ratio hits have none); `softened` is the whole delivered line when a ratio rule masks
  * (the covered ranges applied, then the soften), else null; `flags` are the hits that file a report, in the fixed order. `hits` lists every
  * hit, whatever the strongest action, so the counters are complete.
- * @experimental
  */
 export interface FilterVerdict {
   hits: FilterHit[];
@@ -221,7 +218,6 @@ export function createFilterEngine(deps: FilterEngineDeps): FilterEngine {
 
 /**
  * What `cw.filters.test` returns: the verdict, and the line as it would be delivered (null when it would be refused).
- * @experimental
  */
 export interface FilterTestResult {
   verdict: FilterVerdict;
@@ -245,7 +241,6 @@ export function shiftTestSpans(result: FilterTestResult, by: number): FilterTest
 export const CHECK_LINES_MAX = 5000;
 export const CHECK_SAMPLES_MAX = 20;
 
-/** @experimental */
 export interface FilterCheckRule {
   key: string;
   kind: FilterHitKind;
@@ -258,7 +253,6 @@ export interface FilterCheckRule {
 
 /**
  * What `cw.filters.check` returns: how many lines were read, how many would be refused or masked, and the rules that hit.
- * @experimental
  */
 export interface FilterCheckResult {
   lines: number;

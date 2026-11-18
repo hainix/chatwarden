@@ -15,7 +15,6 @@ export type ReachSuggest = (profile: ModerationProfile, records: readonly Action
 /**
  * One row of the preview. `step` is what the ladder gives (null for none); `withinCeilings` says the AI could apply it: a warning, or a chat
  * restriction of 24 hours or less. A step beyond that is shown so the owner sees why the AI would leave the case to a person.
- * @experimental
  */
 export interface AiReach {
   record: 'clean' | 'oneWarning' | 'chat24h' | 'ban7d';
@@ -30,7 +29,6 @@ const REACH_NOW = 1_700_000_000_000;
 /**
  * The four rows for the cell (`ruleNumber`, `level`), in a fixed order. A `suggest` that throws gives a row with no step that is not within the
  * ceilings; this never throws.
- * @experimental
  */
 export function reachOf(profile: ModerationProfile, ruleNumber: number, level: ConductLevel, suggest: ReachSuggest): AiReach[] {
   const samples = sampleRecords(REACH_NOW);

@@ -8,7 +8,6 @@ export type LinkSystem = (typeof LINK_SYSTEMS)[number];
 
 /**
  * One link row.
- * @experimental
  */
 export interface LinkRow {
   system: LinkSystem;

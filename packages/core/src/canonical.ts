@@ -9,7 +9,7 @@
 
 import { hmacSha256Hex, sha256Hex } from './crypto.js';
 
-/** The name of the rules above, written into a bundle so a reader knows how to check it. @experimental */
+/** The name of the rules above, written into a bundle so a reader knows how to check it. */
 export const CANONICALIZATION = 'chatwarden-json-1';
 
 const MAX_DEPTH = 64;
@@ -64,7 +64,6 @@ function write(value: unknown, depth: number): string {
 
 /**
  * The canonical text of a JSON value (see the rules at the top of this file). Throws a `TypeError` for anything JSON cannot say exactly.
- * @experimental
  */
 export function canonicalJson(value: unknown): string {
   return write(value, 0);
@@ -73,7 +72,7 @@ export function canonicalJson(value: unknown): string {
 /** The shortest secret `signBundle` accepts: the same rule as a webhook secret. */
 export const BUNDLE_SECRET_MIN = 32;
 
-/** What an evidence bundle's `integrity` says. @experimental */
+/** What an evidence bundle's `integrity` says. */
 export interface BundleIntegrity {
   algorithm: 'sha256';
   /** Hex SHA-256 of the canonical JSON of the bundle, `integrity` holding only `algorithm`, `signedAt` and `canonicalization`. */
@@ -94,7 +93,6 @@ function signedText(bundle: { integrity: BundleIntegrity }): string {
 /**
  * Fill `integrity` of a bundle whose other fields are final. With a `secret` (at least 32 characters) the HMAC is set; without one it is null.
  * Returns a new object. The signature proves the file came from this kit and was not edited since; it is not a timestamp authority.
- * @experimental
  */
 export function signBundle<B extends { integrity: BundleIntegrity }>(bundle: B, secret: string | undefined, signedAt: number): B {
   if (secret !== undefined && secret.length < BUNDLE_SECRET_MIN) throw new RangeError(`signBundle: the secret must be at least ${BUNDLE_SECRET_MIN} characters`);
@@ -114,7 +112,6 @@ function sameHex(a: string, b: string): boolean {
 /**
  * Check a bundle (an object parsed from the file). `sha256` says the content is what the kit wrote; `hmac` says the kit that holds `secret` wrote it: true, false,
  * or null when no secret is given (nothing to check against). A bundle whose integrity or fields cannot be read counts as failing, never as an error.
- * @experimental
  */
 export function verifyBundle(bundle: { integrity: BundleIntegrity }, secret?: string): { sha256: boolean; hmac: boolean | null } {
   try {

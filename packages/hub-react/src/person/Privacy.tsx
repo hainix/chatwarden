@@ -11,7 +11,7 @@ import { ErasePreview } from './ErasePreview.js';
 // role in code too). Export downloads at once: the server audits it first, so a failed audit shows an error and downloads nothing. Erase opens the dialog that counts first.
 // It is its own chunk: fetched when the owner opens a person.
 
-/** What the part is given. @experimental */
+/** What the part is given. */
 export interface PersonPrivacyProps {
   /** The staff ref of the person whose page this is. */
   person: string;

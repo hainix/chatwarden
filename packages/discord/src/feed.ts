@@ -75,7 +75,7 @@ export interface DiscordFeedOptions {
   /** A Discord role id (digits) to ping on a severe report or a severe sanction, and on nothing else but an urgent report (see `urgentMention`). */
   mentionRoleId?: string;
   /**
-   * @experimental A Discord role id (digits) to ping on an URGENT report. An urgent report posts "Urgent report. Open in the hub." with this mention and a link, and nothing else: never
+   * A Discord role id (digits) to ping on an URGENT report. An urgent report posts "Urgent report. Open in the hub." with this mention and a link, and nothing else: never
    * its reason (a welfare report's most of all), category, rule, handle or note. Without it the urgent post is the same and pings nobody. An urgent report is posted even with `severeOnly`.
    * Checked once, here (`RangeError`, never echoing it). `report.handoff` posts nothing.
    */
@@ -105,7 +105,7 @@ export interface DiscordFeedOptions {
 
 export interface DiscordFeed {
   /**
-   * @experimental Post the Insights digest of the last `days` (7, 30 or 90; default 7) to the staff channel: one message of counts and times, no names, pinging nobody. Returns true when a post was
+   * Post the Insights digest of the last `days` (7, 30 or 90; default 7) to the staff channel: one message of counts and times, no names, pinging nobody. Returns true when a post was
    * queued, false when there was nothing to post (Insights off, no `insights` on the kit, a failed read, or the feed disposed). A failed read or a failed post is logged by class and never thrown.
    * The kit has no scheduler: call this from your own timer. `RangeError` for any other `days`.
    */

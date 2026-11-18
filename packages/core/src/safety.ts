@@ -17,7 +17,6 @@ export const SAFETY_RESOURCES_MAX = 5;
 /**
  * What the "What to do" panel says when the owner has written nothing: four short paragraphs. A safe floor, not legal advice. Plain
  * text, paragraphs separated by a blank line.
- * @experimental
  */
 export const DEFAULT_SAFETY_GUIDANCE = [
   "You are not asked to judge whether anyone is at risk or whether a threat is real. Your part is to pass it on quickly, the way your studio has set it up.",
@@ -28,7 +27,6 @@ export const DEFAULT_SAFETY_GUIDANCE = [
 
 /**
  * One resource shown to a reporter. `label` is required; `detail` and `url` are optional (`url` is `https` only).
- * @experimental
  */
 export interface SafetyResourceInput {
   label: string;
@@ -38,7 +36,6 @@ export interface SafetyResourceInput {
 
 /**
  * What the owner writes. Every field optional.
- * @experimental
  */
 export interface SafetySettings {
   /** Text moderators read in the "What to do" panel, at most 1 500 characters; blank lines separate paragraphs; plain text. Unset or blank reads {@link DEFAULT_SAFETY_GUIDANCE}. */
@@ -49,7 +46,7 @@ export interface SafetySettings {
   resources?: SafetyResourceInput[];
 }
 
-/** One resource, every field filled in. @experimental */
+/** One resource, every field filled in. */
 export interface SafetyResource {
   label: string;
   detail: string;
@@ -58,7 +55,6 @@ export interface SafetyResource {
 
 /**
  * What the kit reads: every field filled in. The text has been cleaned (control, bidi and zero-width characters removed).
- * @experimental
  */
 export interface ResolvedSafety {
   guidance: string;
@@ -82,7 +78,6 @@ function resolveResource(v: unknown, path: string): SafetyResource {
 /**
  * Validate, clean and fill. Throws ProfileError naming the field (`safety.resources[1].url`), never echoing the value. `path` names the
  * settings in the error (default `safety`). The result is a new object that shares nothing with the input; each value is read once.
- * @experimental
  */
 export function resolveSafety(input: SafetySettings | undefined, path = 'safety'): ResolvedSafety {
   const out: ResolvedSafety = { guidance: DEFAULT_SAFETY_GUIDANCE, contact: '', resources: [] };

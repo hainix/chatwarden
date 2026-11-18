@@ -14,7 +14,6 @@ import type { ChatFrame, MuteResult, MuteTarget, ReportOutcome, SendResult, Wire
 
 /**
  * The game's description of a player in a room.
- * @experimental
  */
 export interface ChatMember {
   /** The display name other players see. 1 to 32 characters; control characters are removed. Checked with `cw.names.check` (see `nameCheck`). */
@@ -23,19 +22,18 @@ export interface ChatMember {
   tags?: Record<string, string>;
   /**
    * This player is staff in the game's own sense (a moderator or an admin): in a locked room they may still talk, and an emergency never makes them read-only. Only `true` counts. It comes from this
-   * hook and nowhere else: the chat routes never read it from a request. Read again on every call, so a change applies at once. @experimental
+   * hook and nowhere else: the chat routes never read it from a request. Read again on every call, so a change applies at once.
    */
   staff?: boolean;
   /**
    * The game's own id for the evidence behind this player's reports (a match or replay id): 1 to 128 of `A-Z a-z 0-9 _ : -`. A report this player files from the chat box carries it (staff see it as
-   * the case's evidence, with a link built from `reporting.evidenceUrl`). From this hook only, never from a request; an invalid one is dropped by the kit, the report is still taken. @experimental
+   * the case's evidence, with a link built from `reporting.evidenceUrl`). From this hook only, never from a request; an invalid one is dropped by the kit, the report is still taken.
    */
   evidenceRef?: string;
 }
 
 /**
  * Where frames go: an SSE response, a socket, a test.
- * @experimental
  */
 export interface ChatSink {
   /** Deliver one frame. Return `false` when the receiver is backed up; the broadcaster drops a stream that stays backed up. */
@@ -54,7 +52,6 @@ export interface ChatSink {
 
 /**
  * A live stream.
- * @experimental
  */
 export interface ChatStream {
   /** Stop sending and release the seat reference. Safe to call twice. */
@@ -67,7 +64,6 @@ export interface ChatStream {
  * A session holds no credential. While the player is seated it refreshes the seat's grace on every call; once the seat is released (the grace ran
  * out, the room was closed, the broadcaster closed) it has nothing to seat the player with again and answers like an unseated player: `send` is
  * refused `gate`, `open` is refused, `mute` is `false`. Make a new session from the next request (the routes do, per request).
- * @experimental
  */
 export interface ChatSession {
   readonly name: string;
@@ -94,7 +90,6 @@ export interface ChatSession {
   report(input: { lineId: string; reason?: string; note?: string }): Promise<ReportOutcome>;
 }
 
-/** @experimental */
 export interface RoomBroadcasterOptions {
   /** History kept per room for late joiners. `lines` 1 to 100 (default 50); `maxAgeMs` 1 000 to `EVIDENCE_MAX_AGE_MS` (default `EVIDENCE_MAX_AGE_MS`). */
   history?: { lines?: number; maxAgeMs?: number };
@@ -127,7 +122,6 @@ export interface RoomBroadcasterOptions {
   logger?: Logger;
 }
 
-/** @experimental */
 export interface RoomBroadcaster {
   /**
    * A session for this player in this room, seating them if needed. `{ refused }` when the door is shut to them (a ban: `reason`
@@ -154,7 +148,6 @@ export interface RoomBroadcaster {
 
 /**
  * The values in force when an option is left out.
- * @experimental
  */
 export const ROOM_BROADCASTER_DEFAULTS = {
   historyLines: HISTORY_LINES_DEFAULT,
@@ -256,7 +249,6 @@ const bye = (reason: 'banned' | 'room_closed' | 'shutdown'): ChatFrame => ({ typ
 /**
  * Build the broadcaster. `cw` is the kit; it must have `rooms`, `chat`, `mutes`, `reports`, `doors` and `names` (the facade). Every option
  * is validated here (`RangeError`, never echoing a value), like `playerRoutes`.
- * @experimental
  */
 export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOptions = {}): RoomBroadcaster {
   if (typeof options !== 'object' || options === null || Array.isArray(options)) {

@@ -156,7 +156,6 @@ class MemorySignals extends MemoryStore {
  * signal kinds or feeds can use it, and `flood_triggered` is recorded. Returns the same store. `createMemoryStore()` does not carry them, so
  * an app that never records a signal does not bundle them. A method the store already has (a subclass's override) is left as it is, and
  * calling this twice changes nothing.
- * @experimental
  */
 export function withMemorySignals<S extends MemoryStore>(store: S): S & MemorySignalMethods {
   const target = store as unknown as Record<string, unknown>;

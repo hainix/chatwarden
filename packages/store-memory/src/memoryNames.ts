@@ -95,7 +95,6 @@ class MemoryNames extends MemoryStore {
  * Give a {@link MemoryStore} the optional blocked-name methods (`insertBlockedName`, `listBlockedNames`, `purgeBlockedNames`), so a kit with
  * `names.keepBlocked` can keep a blocked name as evidence. Returns the same store. `createMemoryStore()` does not carry them. A method the
  * store already has (a subclass's override) is left as it is, and calling this twice changes nothing.
- * @experimental
  */
 export function withMemoryNames<S extends MemoryStore>(store: S): S & MemoryNameMethods {
   const target = store as unknown as Record<string, unknown>;

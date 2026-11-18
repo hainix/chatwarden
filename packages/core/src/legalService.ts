@@ -28,7 +28,6 @@ export interface BundlePerson {
 /**
  * The evidence bundle of one report (`cw.legal.bundle`). No hash, raw key, address or other player's id outside `people`; no free text of staff beyond the report's own
  * note, the sanction reasons and the appeal statements. `integrity` signs everything (see `verifyBundle`).
- * @experimental
  */
 export interface EvidenceBundle {
   format: 'chatwarden.evidence-bundle';
@@ -68,10 +67,10 @@ export interface EvidenceBundle {
   integrity: BundleIntegrity;
 }
 
-/** What `hold` answers. @experimental */
+/** What `hold` answers. */
 export type HoldResult = { ok: true } | { ok: false; error: 'not_found' | 'already_held' | 'invalid' };
 
-/** `cw.legal`. @experimental */
+/** `cw.legal`. */
 export interface LegalService {
   /** Hold a report so no purge and no erase reaches it, for a code on the closed list. A senior's in the HTTP layer; here any actor string. */
   hold(reportId: string, input: { code: HoldCode; actor: string }): Promise<HoldResult>;

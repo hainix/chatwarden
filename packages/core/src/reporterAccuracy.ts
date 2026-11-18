@@ -7,28 +7,28 @@ import type { Store, SubjectId } from './types.js';
 // The window is on the FILING time (`created_at`), so the read uses the reporter index and needs no join. Computed from one
 // grouped store query (`Store.reporterOutcomes`), so a queue page of 200 reporters is one statement.
 
-/** The window the rate is read over: 30 days of filing time, the same as the reporting suspension window. @experimental */
+/** The window the rate is read over: 30 days of filing time, the same as the reporting suspension window. */
 export const REPORTER_ACCURACY_WINDOW_MS = 30 * 86_400_000;
 
-/** Fewer decided reports than this and there is no rate: nobody is shown a line or ranked down. @experimental */
+/** Fewer decided reports than this and there is no rate: nobody is shown a line or ranked down. */
 export const REPORTER_ACCURACY_MIN_DECIDED = 5;
 
-/** From this false-report rate up, the case shows a line about the reporter. @experimental */
+/** From this false-report rate up, the case shows a line about the reporter. */
 export const REPORTER_FALSE_RATE_NOTICEABLE = 0.6;
 
-/** From this false-report rate up, the reporter's reports rank lower (never hidden). @experimental */
+/** From this false-report rate up, the reporter's reports rank lower (never hidden). */
 export const REPORTER_FALSE_RATE_HABITUAL = 0.8;
 
-/** The most people one {@link reporterAccuracyFor} call reads; more is a `RangeError`. @experimental */
+/** The most people one {@link reporterAccuracyFor} call reads; more is a `RangeError`. */
 export const REPORTER_ACCURACY_BATCH_MAX = 200;
 
 /**
  * Take-next with `rankDownHabitual`: a case that has waited this long ranks normally whoever reported it (the hub's "overdue" line,
- * 24 hours). The safety against burying a real report from a habitual reporter. @experimental
+ * 24 hours). The safety against burying a real report from a habitual reporter.
  */
 export const REPORTER_RANK_LAPSE_MS = 24 * 3_600_000;
 
-/** Take-next with `rankDownHabitual`: open reports read, at most, while looking for a case that is not ranked down. @experimental */
+/** Take-next with `rankDownHabitual`: open reports read, at most, while looking for a case that is not ranked down. */
 export const RANK_DOWN_SCAN_MAX = 1_000;
 
 /**
@@ -37,7 +37,6 @@ export const RANK_DOWN_SCAN_MAX = 1_000;
  * `noted` and `upheld` are both founded: something was found. `falseRate` is `unfounded / decided`, null below
  * {@link REPORTER_ACCURACY_MIN_DECIDED} decided. Open reports are never counted.
  * Staff only: never send to a player.
- * @experimental
  */
 export interface ReporterAccuracy {
   decided: number;
@@ -53,7 +52,7 @@ export interface ReporterAccuracy {
   windowMs: number;
 }
 
-/** The pure part: outcome counts in, the summary out. @experimental */
+/** The pure part: outcome counts in, the summary out. */
 export function summarizeOutcomes(c: { actioned: number; noAction: number; badFaith: number }): ReporterAccuracy {
   const decided = c.actioned + c.noAction + c.badFaith;
   const unfounded = c.noAction + c.badFaith;

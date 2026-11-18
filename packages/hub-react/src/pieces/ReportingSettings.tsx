@@ -4,7 +4,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * The props of `ReportingSettings`: a class name.
- * @experimental
  */
 export type ReportingSettingsProps = PieceProps;
 
@@ -17,7 +16,6 @@ export type ReportingSettingsProps = PieceProps;
  * ```tsx
  * <ReportingSettings />
  * ```
- * @experimental
  */
 export function ReportingSettings({ className }: ReportingSettingsProps) {
   return (

@@ -130,7 +130,7 @@ export function ReportMessage({ client, line, name, close }: { client: PlayerCli
   `GET /rules` cannot be loaded. Pass `reporting` before the dialog opens: one that arrives later changes the flow under the player.
 - **Stale settings.** If the studio changes the list while a dialog is open, the kit refuses an unknown reason (`reason_unknown`) or a
   missing one (`reason_required`) and the dialog says so. Read `GET /rules` again before the next report.
-- **Your own controls (`extra`, experimental).** A node placed inside the form under the reason and the note, above Report and Cancel,
+- **Your own controls (`extra`).** A node placed inside the form under the reason and the note, above Report and Cancel,
   for something of your own, such as an "Also mute this player" checkbox. You own its state; the dialog only places it (spacing, no other
   styling), keeps its controls in the Tab order (reason, note, yours, Report, Cancel) and in the focus trap, and drops it once the report
   is sent. It is inside the dialog's form, so give your buttons `type="button"`: a plain `<button>`, or Enter in a text field of
@@ -236,12 +236,12 @@ Theming).
 
 | Component | What it shows | Props besides the common ones |
 | --- | --- | --- |
-| `NoticeQueue` | The pending notices, oldest first, one at a time in a modal dialog. A warning has an Acknowledge button; every other notice has Got it. Both call `POST /notices/:id/ack`. Nothing is rendered when there is nothing to show. | `client`, `canShow` (default `true`), `appealUrl`, `appeals` (`@experimental`, see [Appeals](#appeals)), `refreshKey`, `onAcknowledged(notice)`, `onPendingChange(count)` |
-| `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `appeals` (`@experimental`), `refreshKey` |
+| `NoticeQueue` | The pending notices, oldest first, one at a time in a modal dialog. A warning has an Acknowledge button; every other notice has Got it. Both call `POST /notices/:id/ack`. Nothing is rendered when there is nothing to show. | `client`, `canShow` (default `true`), `appealUrl`, `appeals` (see [Appeals](#appeals)), `refreshKey`, `onAcknowledged(notice)`, `onPendingChange(count)` |
+| `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `appeals`, `refreshKey` |
 | `RulesPage` | The summary and the numbered rules from `GET /rules`. The numbers are the kit's: a retired rule leaves a gap. | `client`, `refreshKey` |
-| `ReportDialog` | A one-step report: "Report this message?", the line, an optional "Why?" select (the studio's reasons in groups; required in the reason-required flow) and a note behind "Add a note". Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `line`, `targetName`, `extra` (experimental: your own controls in the form) (`onAddDetail` is deprecated and unused) |
-| `AppealDialog` | `@experimental`, new in 0.1.9. "Ask for a second look": one textarea with a live count against 1000 characters, Send and Cancel, an inline message for each refusal, and focus back on the button that opened it. `NoticeQueue` and `MyRecord` open it for you with `appeals`; render it yourself for your own screen. | `client`, `noticeId`, `onClose(sent?)`, `container`, `returnFocusTo` |
-| `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when; or, with `pace`, a pause (slow mode, too many lines, the same line again) and how long to wait, with no referee card. | `until` (epoch ms or `null`), `byModerator`, `refCode`; or `pace` (`{ reason: 'slow_mode' \| 'flood' \| 'duplicate', retryAfterMs }`, `@experimental`, new in 0.1.8: the refusal's own values; the end is worked out once on the first render, and the line is not a live countdown: it shows `player.pace.ready` only if the parent renders again after the wait) |
+| `ReportDialog` | A one-step report: "Report this message?", the line, an optional "Why?" select (the studio's reasons in groups; required in the reason-required flow) and a note behind "Add a note". Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `line`, `targetName`, `extra` (your own controls in the form) (`onAddDetail` is deprecated and unused) |
+| `AppealDialog` | New in 0.1.9. "Ask for a second look": one textarea with a live count against 1000 characters, Send and Cancel, an inline message for each refusal, and focus back on the button that opened it. `NoticeQueue` and `MyRecord` open it for you with `appeals`; render it yourself for your own screen. | `client`, `noticeId`, `onClose(sent?)`, `container`, `returnFocusTo` |
+| `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when; or, with `pace`, a pause (slow mode, too many lines, the same line again) and how long to wait, with no referee card. | `until` (epoch ms or `null`), `byModerator`, `refCode`; or `pace` (`{ reason: 'slow_mode' \| 'flood' \| 'duplicate', retryAfterMs }`, new in 0.1.8: the refusal's own values; the end is worked out once on the first render, and the line is not a live countdown: it shows `player.pace.ready` only if the parent renders again after the wait) |
 
 - **The hold.** `canShow={false}` keeps notices and shows nothing, so a notice never interrupts a match. They are kept, not dropped and
   not acknowledged, and appear in order when `canShow` turns `true`. The list is asked for once more at that moment, so a warning that
@@ -277,12 +277,12 @@ Theming).
 | `ack(id)` | `POST /notices/:id/ack` (`true`, or `false` for a notice that is not the caller's or is gone) |
 | `record()` | `GET /record` |
 | `rules()` | `GET /rules` |
-| `appeals()` | `GET /appeals` (`@experimental`): the player's own appeals, only `id`, `noticeId`, `status`, `createdAt` and `decidedAt`. A 404 `PlayerError` while appeals are off. |
-| `fileAppeal(noticeId, statement)` | `POST /appeals` (`@experimental`): `{ ok: true, appeal }`, or `{ ok: false, refused, retryAfter? }` for a 400 (`statement_invalid`), 404 (`not_found`), 409 (`already_appealed`) or 429 (`rate`, `retryAfter` in whole seconds). Any other failure rejects with a `PlayerError`. The statement is sent as typed; the server cleans it. |
+| `appeals()` | `GET /appeals`: the player's own appeals, only `id`, `noticeId`, `status`, `createdAt` and `decidedAt`. A 404 `PlayerError` while appeals are off. |
+| `fileAppeal(noticeId, statement)` | `POST /appeals`: `{ ok: true, appeal }`, or `{ ok: false, refused, retryAfter? }` for a 400 (`statement_invalid`), 404 (`not_found`), 409 (`already_appealed`) or 429 (`rate`, `retryAfter` in whole seconds). Any other failure rejects with a `PlayerError`. The statement is sent as typed; the server cleans it. |
 
 ### Appeals
 
-New in 0.1.9, `@experimental` until 0.2. Appeals are off until the studio turns them on (`profile.appeals.enabled`, or in the hub). Pass `appeals` to
+New in 0.1.9. Appeals are off until the studio turns them on (`profile.appeals.enabled`, or in the hub). Pass `appeals` to
 `NoticeQueue` and `MyRecord` and "Think this is a mistake?" becomes a button on each warning, restriction and ban: it opens the appeal
 form (in `NoticeQueue`, in place of the notice inside the same dialog; in `MyRecord`, `AppealDialog`). `appealUrl` is not used then. Without
 `appeals` (the default) the `appealUrl` link behaves exactly as in 0.1.7, and no request is made.
@@ -305,7 +305,7 @@ form (in `NoticeQueue`, in place of the notice inside the same dialog; in `MyRec
   notice kinds (`player.notice.title.*` and `player.notice.body.*`, 8 keys). A catalog that spreads `en` under your own words, as in "Words and languages",
   shows them in English until you translate them; a catalog that does not shows the bare key. Translate them before you turn `appeals` on. A
   `@chatwarden/player-react` older than 0.1.9 does not know the four new kinds and shows the generic message above for them.
-- **Names.** `nameReasonText(t, reason)` (`@experimental`) turns the reason of a refused name check (`name_not_allowed`, `name_profane`) into the
+- **Names.** `nameReasonText(t, reason)` turns the reason of a refused name check (`name_not_allowed`, `name_profane`) into the
   sentence to show beside your sign-up field. A key your catalog lacks falls back to the English words.
 
 ```ts
@@ -351,7 +351,7 @@ plain words, never shaming, and it says what happened, until when, and what the 
 `<ChatBox>` is a moderated chat for one room: the list, one input and Send. It lives at its own subpath, `@chatwarden/player-react/chat`
 (with `@chatwarden/player-react/chat.css`), so the main entry and its size are untouched; a page that never shows chat never loads it.
 The server side is `createRoomBroadcaster` and `chatRoutes` in `@chatwarden/http` (see its README, "Chat"). Every name here is
-`@experimental` until 0.2.
+part of the API.
 
 ```tsx
 import '@chatwarden/player-react/styles.css';
@@ -470,7 +470,7 @@ player components, the chat entry on its own is about 15 KB, and `chat.css` is a
 `ChatBox`, `sseTransport`, `chatReducer`, `createChatState`, `initialChatState` and `readFrame` (the pure parts, for a game's own UI),
 `enChat`, and the types `ChatBoxProps`, `ChatRefusal`, `ChatTransport`, `ChatConnection`, `ChatTransportEvents`, `ChatStatus`,
 `ChatClosedWhy`, `SseTransportOptions`, `ChatFrame`, `WireLine`, `WireMode`, `WireMuted`, `WirePhrase`, `WirePhrases`, `WireReadOnly`, `WireRefusal`, `WireRestriction`, `SendResult`,
-`MuteResult`, `MuteTarget`, `ChatState`, `StateLine` and `ChatAction`. All are `@experimental` until 0.2.
+`MuteResult`, `MuteTarget`, `ChatState`, `StateLine` and `ChatAction`. All are part of the API.
 
 ## Languages
 
@@ -555,7 +555,7 @@ it from the values below.
 
 ## Pace words and `secondsLeft`
 
-New in 0.1.8, `@experimental` until 0.2. When a game turns pacing on, a refusal can be `slow_mode`, `flood` or `duplicate` and carries `retryAfterMs`. The box words
+New in 0.1.8. When a game turns pacing on, a refusal can be `slow_mode`, `flood` or `duplicate` and carries `retryAfterMs`. The box words
 it itself (`player.chat.refused.*`, with the wait held on Send); for your own UI, `RestrictedChatLine` takes `pace` and says the same in `player.pace.*`, and
 `secondsLeft(ms, locale)` turns a wait into a **bare duration** in the locale's words ("3 seconds", "3 minutes", "3 hours"), `null` for no usable wait.
 
@@ -566,7 +566,7 @@ what `RestrictedChatLine` says once the wait is over; it appears only when the p
 
 ## Chat filter words
 
-New in 0.2.0, `@experimental`. When the owner turns on a chat filter a refusal can also be `link`, `personal_info` or `filter` (a phrase, caps or repeats), with the
+New in 0.2.0. When the owner turns on a chat filter a refusal can also be `link`, `personal_info` or `filter` (a phrase, caps or repeats), with the
 Community Rule the owner chose. The box words each one (`player.chat.refused.link`, `player.chat.refused.personal_info`, `player.chat.refused.filter`: "Links are not
 allowed in chat here.", "Please don't share personal details such as phone numbers or emails.", "That message was not sent. It breaks a chat rule.") and adds
 "Community Rule N." when the refusal names one, as it does for `blocked`. Nothing says which pattern matched. A line the filter masks reaches its author as the
@@ -574,7 +574,7 @@ delivered text, so the box shows what everyone else sees. A reason the box does 
 
 ## A room under attack, a line taken back, and help after a report
 
-New in 0.2.0, `@experimental`; the wire is version 2 (`CHAT_WIRE_VERSION`), and the box refuses a server that says another version in its `hello` with the same offline sentence as any server it cannot read, and does not retry. A moderator can lock a room or put it in an emergency (`cw.rooms.setMode`): while the mode is not normal the box adds one polite line to the status above the input, `player.chat.locked` ("Chat is locked until 2:30 PM.") or `player.chat.modeEmergency` ("Slow mode is on.") and, for a new account that is read-only, `player.chat.readOnlyNew` ("New accounts can only read right now."). A viewer who cannot post keeps the input in the tab order, `aria-disabled` and read-only, with that line as its accessible description, and Send does nothing; a staff member (the game's `join` hook said so) is never made read-only. The mode ends by itself and the box follows the server's `mode` frame (and its own clock). A refusal of `locked`, `new_account` or `probation` has words of its own (`player.chat.probation`: "New accounts chat a little slower. You can send another message in {left}.", with `player.chat.probationSoon` when there is no wait); an unknown reason still gets the generic sentence.
+New in 0.2.0; the wire is version 2 (`CHAT_WIRE_VERSION`), and the box refuses a server that says another version in its `hello` with the same offline sentence as any server it cannot read, and does not retry. A moderator can lock a room or put it in an emergency (`cw.rooms.setMode`): while the mode is not normal the box adds one polite line to the status above the input, `player.chat.locked` ("Chat is locked until 2:30 PM.") or `player.chat.modeEmergency` ("Slow mode is on.") and, for a new account that is read-only, `player.chat.readOnlyNew` ("New accounts can only read right now."). A viewer who cannot post keeps the input in the tab order, `aria-disabled` and read-only, with that line as its accessible description, and Send does nothing; a staff member (the game's `join` hook said so) is never made read-only. The mode ends by itself and the box follows the server's `mode` frame (and its own clock). A refusal of `locked`, `new_account` or `probation` has words of its own (`player.chat.probation`: "New accounts chat a little slower. You can send another message in {left}.", with `player.chat.probationSoon` when there is no wait); an unknown reason still gets the generic sentence.
 
 When a moderator takes a line back (`cw.rooms.retract`) the box replaces it, in place, with `player.chat.removed` ("Message removed by a moderator."): the text is dropped from the box's state (not just hidden), the placeholder has no controls and no tab stop, and a line retracted before it was ever shown never appears. Several lines are one polite announcement (`player.chat.removedLive`: "3 messages were removed by a moderator."); nothing is assertive. A report dialog open on a line that is then taken back stops quoting it.
 
@@ -582,7 +582,7 @@ After a report the dialog thanks with the reason's own words when the owner wrot
 
 ## Phrase-only rooms and names (0.2.0)
 
-New in 0.2.0, `@experimental`. A room whose context sets `chat.phrases` (see `@chatwarden/core`, "Phrase-only rooms") sends a `phrases` list in its `hello`, and the box then shows a **phrase picker** in place of the input: a labelled list of buttons, grouped under the phrases' `group` headings, with a filter box once the list is longer than 12. It has one tab stop (the arrow keys, Home and End move between phrases; Enter or Space sends), keeps its place after a send, and says what happened in a polite live line ("Sent: Good game!"). While a lock, an emergency or a restriction keeps the player from posting, the phrases stay in the tab order and send nothing (`aria-disabled`).
+New in 0.2.0. A room whose context sets `chat.phrases` (see `@chatwarden/core`, "Phrase-only rooms") sends a `phrases` list in its `hello`, and the box then shows a **phrase picker** in place of the input: a labelled list of buttons, grouped under the phrases' `group` headings, with a filter box once the list is longer than 12. It has one tab stop (the arrow keys, Home and End move between phrases; Enter or Space sends), keeps its place after a send, and says what happened in a polite live line ("Sent: Good game!"). While a lock, an emergency or a restriction keeps the player from posting, the phrases stay in the tab order and send nothing (`aria-disabled`).
 
 - **The transport.** `ChatTransport.sendPhrase(id)` is optional: `sseTransport` sends `POST /rooms/:room/phrases { phrase }` (`@chatwarden/http`). A custom transport with no phrase rooms leaves it out, and a box in a phrase room then says it could not send. A sent phrase comes back as an ordinary line with `phrase` set (`WireLine.phrase`); `WirePhrase` and `WirePhrases` are the wire shapes.
 - **The words.** The kit ships no phrase text. A viewer's own catalogue may hold `phrase.<id>` for each phrase id: the box shows it in place of the phrase's text, in the list, in the line the player sent and in the lines of the others; a key the catalogue lacks falls back to the text the server sent. `enChat` gains `player.chat.phrases`, `player.chat.phraseFilter`, `player.chat.phraseNone`, `player.chat.phraseSent`, `player.chat.phraseMatches.one`, `player.chat.phraseMatches.other` and the two refusals `player.chat.refused.phrases_only` ("This chat uses phrases. Choose one from the list.") and `player.chat.refused.phrase_unknown`.

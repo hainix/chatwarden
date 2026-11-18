@@ -13,6 +13,7 @@ const WHAT: Record<string, string[]> = {
   CHATWARDEN_ADMIN_TOKEN: [
     'Signs staff in to the hub and the staff routes: at least 24 characters. Without it every staff route answers 401.',
     'This is a starter for one or two moderators; replace it with your own sign-in before a team uses it.',
+    'The sign-in cookie is Secure, so over plain http (local development only) a browser may drop it: set CHATWARDEN_INSECURE_STAFF_COOKIE=1 in your environment to send it without Secure.',
   ],
   CHATWARDEN_DB: ['Where the moderation database file lives. When empty it is ./chatwarden.db.'],
   DISCORD_WEBHOOK_URL: ['The forum channel webhook that new reports and outcomes are posted to. When empty the Discord feed is off.'],

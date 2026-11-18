@@ -6,7 +6,6 @@ import type { SubjectId } from './types.js';
 
 /**
  * The kinds of place a person can be found. A category groups the tables that follow the same rule. The list only ever grows at the end.
- * @experimental
  */
 export const PRIVACY_CATEGORIES = [
   'subjects',
@@ -29,7 +28,7 @@ export const PRIVACY_CATEGORIES = [
 ] as const;
 export type PrivacyCategory = (typeof PRIVACY_CATEGORIES)[number];
 
-/** What an erase keeps. `safety` (the default) keeps the minimal remainder that lets a ban in force still apply and a hold still hold; `none` keeps only held reports. @experimental */
+/** What an erase keeps. `safety` (the default) keeps the minimal remainder that lets a ban in force still apply and a hold still hold; `none` keeps only held reports. */
 export type EraseMode = 'safety' | 'none';
 
 /**
@@ -51,7 +50,6 @@ export type PrivacyClock =
 
 /**
  * One line of the registry. `export`, `eraseSafety` and `eraseNone` are plain words (no jargon) for the hub and the adopter's own policy text.
- * @experimental
  */
 export interface PrivacyRule {
   category: PrivacyCategory;
@@ -81,7 +79,6 @@ export interface PrivacyRule {
 /**
  * Every category and what it does. Test-pinned (`privacy-registry.test.ts`): a category with a blank rule fails, and the SQLite completeness test fails
  * when a table is in none of these lists.
- * @experimental
  */
 export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
   {
@@ -244,7 +241,6 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
 
 /**
  * Tables that hold no person, with the reason. A new `kit_` table must be in a rule's `tables` or here; the completeness test fails otherwise.
- * @experimental
  */
 export const NO_PERSON_TABLES: Readonly<Record<string, string>> = {
   kit_meta: 'Counters and the schema version; no person.',
@@ -262,7 +258,6 @@ export const NO_PERSON_TABLES: Readonly<Record<string, string>> = {
 /**
  * The `_json` columns that hold no person, with the reason: the counterpart of a rule's `jsonColumns`. The completeness test lists every `_json` column of every
  * `kit_` table and fails for one that is in neither, and the data test checks that none of these holds a seeded person.
- * @experimental
  */
 export const NO_PERSON_JSON_COLUMNS: Readonly<Record<string, string>> = {
   'kit_pace.stamps_json': 'The times of the player\'s last few lines in one room: whole numbers of milliseconds, no person, no text.',
@@ -286,7 +281,6 @@ export const NO_PERSON_JSON_COLUMNS: Readonly<Record<string, string>> = {
 
 /**
  * What the owner asked a store to erase: the person's whole alias set (the canonical subject and every subject merged into it).
- * @experimental
  */
 export interface ErasePlan {
   /** The canonical subject and every alias. A store expands it to every subject merged into any of these. */
@@ -302,13 +296,12 @@ export interface ErasePlan {
   dryRun?: boolean;
 }
 
-/** Rows removed per category. A category with nothing removed is absent. @experimental */
+/** Rows removed per category. A category with nothing removed is absent. */
 export type ErasureRemoved = Partial<Record<PrivacyCategory, number>>;
 
 /**
  * What `eraseSubjects` did, or with `dryRun` would do. `kept.identifiers` is true while the subject and identifier rows are kept for a sanction in
  * force; `pending` is the canonical subject that remainder belongs to (null when nothing is kept). It never reaches a receipt.
- * @experimental
  */
 export interface ErasureCounts {
   removed: ErasureRemoved;
@@ -327,7 +320,6 @@ export interface ErasureCounts {
 /**
  * The receipt row a store keeps. `counts` is what the receipt shows (no subject, no text). `pendingSubject` is set only while a remainder is kept, and is
  * cleared when the erase finishes.
- * @experimental
  */
 export interface ErasureRow {
   id: string;
@@ -339,7 +331,7 @@ export interface ErasureRow {
   pendingSubject: SubjectId | null;
 }
 
-/** What `erase` with `dryRun` returns. @experimental */
+/** What `erase` with `dryRun` returns. */
 export interface ErasePreview {
   dryRun: true;
   mode: EraseMode;
@@ -350,7 +342,6 @@ export interface ErasePreview {
 /**
  * What an erase hands back: counts per category, what was kept, and nothing about the person. `auditFailed` is set when the audit row written after the
  * commit failed (the erase stands).
- * @experimental
  */
 export interface ErasureReceipt {
   id: string;
@@ -367,7 +358,6 @@ export const EXPORT_SECTION_MAX = 5000;
 /**
  * One person's data as a store reads it, before the facade adds the reference and the registry's notes. No hash, no other player's id or line, no
  * reporter identity and no staff ref. `truncated` names the sections cut at {@link EXPORT_SECTION_MAX}.
- * @experimental
  */
 export interface SubjectExport {
   /** False when no subject of the request exists. */
@@ -418,7 +408,6 @@ export interface SubjectExport {
 
 /**
  * A person's export as `cw.privacy.export` returns it (a JSON-safe object).
- * @experimental
  */
 export interface PrivacyExport {
   format: 'chatwarden.privacy-export';

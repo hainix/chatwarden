@@ -11,20 +11,18 @@ import type { ReportRecord, Store, SubjectId } from './types.js';
 // transaction, so every invariant of `decide` holds and each report gets its `report.closed` event. A bulk never uses `bad_faith`:
 // that needs written evidence and counts toward a reporting suspension. The staff layer writes the audit trail around this call.
 
-/** The most reports one {@link dismissMany} call closes; the answer says `more: true` past it. @experimental */
+/** The most reports one {@link dismissMany} call closes; the answer says `more: true` past it. */
 export const BULK_DISMISS_MAX = 200;
 
 /**
  * Reports read when a store cannot list a reporter's open reports (no `listOpenReportsByReporter`) and the scan fallback is used.
  * With more open reports than this in the whole store, a reporter's sweep from such a store may find only some of theirs.
- * @experimental
  */
 export const BULK_REPORTER_SCAN_MAX = 5_000;
 
-/** What to dismiss: every open report about a person, or every open report from a reporter. A staff ref; aliases are folded. @experimental */
+/** What to dismiss: every open report about a person, or every open report from a reporter. A staff ref; aliases are folded. */
 export type DismissScope = { person: SubjectId } | { reporter: SubjectId };
 
-/** @experimental */
 export interface DismissManyInput {
   scope: DismissScope;
   /** The audit trail's actor rule (`RangeError` otherwise, as `cases.*`). */
@@ -41,14 +39,12 @@ export interface DismissManyInput {
    * Called right after each report is closed (`replay` true when an identical dismissal had already closed it), in order, never for
    * a skip or a dry run. The staff layer writes its per-report audit row here, so the trail has a row for every report closed even
    * when a later one fails and the call rejects. A throw is swallowed: it never stops the sweep.
-   * @experimental
    */
   onClosed?: (reportId: string, replay: boolean) => void;
 }
 
 /**
  * The answer to `dismissMany`. Carries subject ids: staff channels only, never send to a player.
- * @experimental
  */
 export type DismissManyResult =
   | {

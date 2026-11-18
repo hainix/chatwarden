@@ -69,6 +69,5 @@ export function buildServiceOpenApi(): Doc {
 
 /**
  * The service API as an OpenAPI 3.1 document.
- * @experimental
  */
 export const SERVICE_OPENAPI: Readonly<Record<string, unknown>> = buildServiceOpenApi();

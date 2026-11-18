@@ -10,7 +10,6 @@ import type { Clock, Store } from './types.js';
 
 /**
  * What `setUrgent` and `handoff` answer: done (including a repeat that changed nothing), or why not. `not_found` is an unknown report id; `closed` is a report that has been decided.
- * @experimental
  */
 export type CaseMarkResult = { ok: true } | { ok: false; refused: 'not_found' | 'closed' };
 

@@ -11,7 +11,6 @@ const freeze = <T extends object>(o: T): Readonly<T> => Object.freeze(o);
 /**
  * What the `priority` sort adds up: the wait (0 to 2, whatever the AI said), the open reports beyond the first (0 to 0.5), the AI's read (severity x
  * confidence, 0.7 when stale, 1.2 when unread or flagged) and the reporter signal (clamped to plus or minus 0.5).
- * @experimental
  */
 export const RANK_WEIGHTS = freeze({
   severity: freeze({ banter: 0, rude: 1, hostile: 2.5, severe: 5 }),
@@ -28,7 +27,7 @@ export const RANK_WEIGHTS = freeze({
   conductClamp: 0.5,
 });
 
-/** What a person who meets the queue signal feed (`boosted`) adds to the `priority` score: half a point, the clamp of its seam. @experimental */
+/** What a person who meets the queue signal feed (`boosted`) adds to the `priority` score: half a point, the clamp of its seam. */
 export const SIGNAL_BOOST = 0.5;
 
 const known = (table: Readonly<Record<string, number>>, key: string): number | undefined => (Object.hasOwn(table, key) ? table[key] : undefined);
@@ -69,7 +68,6 @@ export function readsOf(g: Pick<QueueGroup, 'summaries'>): { ai: AiBrief | null;
 /**
  * The hub's reporter signal for the `priority` sort: a reporter whose reports hold up more often than not raises a case, one whose reports mostly
  * do not lowers it (0.5 minus the false-report rate, clamped by the sort to plus or minus half a point). Zero when the server tells nothing.
- * @experimental
  */
 export const reporterSignal = (g: QueueGroup): number => {
   const { rate } = readsOf(g);
@@ -79,7 +77,6 @@ export const reporterSignal = (g: QueueGroup): number => {
 /**
  * The hub's conduct signal for the `priority` sort: {@link SIGNAL_BOOST} for a person the server marked `boosted` (they meet the queue signal feed),
  * else 0. Staff set the feed in Settings, Advanced, Signals; nothing is shown for it.
- * @experimental
  */
 export const conductSignal = (g: QueueGroup): number => (g.boosted === true ? SIGNAL_BOOST : 0);
 
@@ -96,7 +93,6 @@ function said(fn: ((g: QueueGroup) => number) | undefined, g: QueueGroup, clamp:
 /**
  * The `priority` score of a case at `now`: wait + volume + ai + reporter. A weight, not a filter: nothing is hidden, and after 24 hours any case
  * outranks a fresh unread one. The seam for the triage-speed plan's reporter signal.
- * @experimental
  */
 export function priorityScore(g: QueueGroup, now: number, signals: RankSignals = {}): number {
   const w = RANK_WEIGHTS;

@@ -18,23 +18,19 @@ import type { Toasts } from './toasts.js';
 
 /**
  * While a case is open and the tab is visible, the claim is renewed this often.
- * @experimental
  */
 export const CLAIM_BEAT_MS = 60_000;
 /**
  * The "viewing" hint lasts 30 seconds on the server, so it is renewed more often than that.
- * @experimental
  */
 export const VIEWING_BEAT_MS = 20_000;
 /**
  * After taking a case, "Take next" ignores another press for this long (a double click, a held key).
- * @experimental
  */
 export const TAKE_COOLDOWN_MS = 500;
 
 /**
  * The case the moderator has open: the report, and the person it is about once the queue has shown it (else null).
- * @experimental
  */
 export interface OpenCase {
   reportId: string;
@@ -43,7 +39,6 @@ export interface OpenCase {
 
 /**
  * How Take next went.
- * @experimental
  */
 export type TakeOutcome =
   /** A case is yours now: open `reportId`. */
@@ -56,11 +51,9 @@ export type TakeOutcome =
 
 /**
  * What to do once a decision is on its way: the same person's next open report (`same`), else how Take next went.
- * @experimental
  */
 export type ContinueOutcome = { status: 'same'; reportId: string } | TakeOutcome;
 
-/** @experimental */
 export interface CaseStore {
   /** The case that is open (see `open`), or null. */
   opened: Store<OpenCase | null>;
@@ -95,7 +88,6 @@ export interface CaseStore {
   dispose: () => void;
 }
 
-/** @experimental */
 export interface CaseStoreOptions {
   client: HubClient;
   now: () => number;
@@ -119,7 +111,6 @@ interface Active {
   first: Promise<void>;
 }
 
-/** @experimental */
 export function createCaseStore(options: CaseStoreOptions): CaseStore {
   const { client, now, timers, page, toasts, decisions } = options;
   const opened = createStore<OpenCase | null>(null);

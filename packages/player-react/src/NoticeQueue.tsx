@@ -23,7 +23,7 @@ export interface NoticeQueueProps extends PlayerUiProps, DialogHostProps {
   /** Where "Think this is a mistake?" goes: an `https` address or a relative one (`/appeal`). Left out when absent or unsafe. Not used with `appeals`. */
   appealUrl?: string;
   /**
-   * @experimental Let the player appeal a sanction from here (the kit's appeals, `profile.appeals`, must be on). "Think this is a mistake?" is then
+   * Let the player appeal a sanction from here (the kit's appeals, `profile.appeals`, must be on). "Think this is a mistake?" is then
    * a button that opens the appeal form in place of the notice, and `appealUrl` is not used; once an appeal is sent the same place reads
    * "Appeal sent <date>", and later the outcome in words. Default false: the `appealUrl` link, exactly as before, and no extra request.
    */

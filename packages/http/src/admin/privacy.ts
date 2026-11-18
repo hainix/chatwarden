@@ -30,7 +30,7 @@ function bodyErase(body: Record<string, unknown>): { keep: 'safety' | 'none'; co
 }
 
 /**
- * The privacy routes (0.2.0, `@experimental`): the owner's, fixed in code (a `permissions` option cannot lower them), on no player route. Every body is `no-store`.
+ * The privacy routes (0.2.0): the owner's, fixed in code (a `permissions` option cannot lower them), on no player route. Every body is `no-store`.
  * They hold no line, handle, hash, key or secret except where an export, by its nature, returns the person's own data.
  *
  * - `POST /privacy/find { accountId }`: `{ ref }`, the person's staff ref, or `{ ref: null }`. Finds by the game's account id; creates no one. 400 `invalid_request` for a body that is

@@ -99,7 +99,7 @@ export const ADD_IT = {
   /** The setup command, first in the section: the two lines are copied from the @chatwarden/http README (test/content.test.ts checks them). */
   init: {
     title: 'Start with the setup command',
-    body: `It writes the wiring for Express, Fastify, Next.js or anything on Web Request and Response, and asks only what it cannot detect. It never overwrites a file, and it is experimental until 0.2. With nothing installed yet, run ${INIT_ALTERNATIVE}. Or write it by hand, in the steps below.`,
+    body: `It writes the wiring for Express, Fastify, Next.js or anything on Web Request and Response, and asks only what it cannot detect. It never overwrites a file. With nothing installed yet, run ${INIT_ALTERNATIVE}. Or write it by hand, in the steps below.`,
     lang: 'sh',
     file: 'terminal',
     copyLabel: 'Copy the setup command',
@@ -325,7 +325,7 @@ const FAQ_BASE: FaqItem[] = [
   {
     id: 'chat',
     q: 'Does Chatwarden give my game a chat?',
-    a: 'Not by default. It moderates the chat you already have: your server still sends the messages, and asks Chatwarden first. A game with no chat can add the moderated chat box from @chatwarden/player-react (experimental).',
+    a: 'Not by default. It moderates the chat you already have: your server still sends the messages, and asks Chatwarden first. A game with no chat can add the moderated chat box from @chatwarden/player-react.',
   },
   {
     id: 'server',
@@ -336,7 +336,7 @@ const FAQ_BASE: FaqItem[] = [
     id: 'words',
     q: 'Which words does it block?',
     links: [{ label: '@chatwarden/profanity', href: PROFANITY_URL }],
-    a: "Slurs from a word list you provide. There's no shared list yet, so you bring your own, and moderators can edit it from the hub while the game runs. The kit can load a signed community list once one is published (experimental); nothing is on by default. Ordinary swearing uses the optional @chatwarden/profanity package, with a built-in English list that you can allow, star or block. Words with spaces between the letters are not caught, on purpose, because that would block innocent messages. Players can report those.",
+    a: "Slurs from a word list you provide. There's no shared list yet, so you bring your own, and moderators can edit it from the hub while the game runs. The kit can load a signed community list once one is published; nothing is on by default. Ordinary swearing uses the optional @chatwarden/profanity package, with a built-in English list that you can allow, star or block. Words with spaces between the letters are not caught, on purpose, because that would block innocent messages. Players can report those.",
   },
   {
     id: 'signin',

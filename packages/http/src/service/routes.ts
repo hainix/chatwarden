@@ -47,8 +47,11 @@ const orNull = (schema: Schema): Schema => ({ ...schema, type: [schema.type as s
 // The patterns the handlers enforce, written as the regular expressions OpenAPI carries (ECMA 262, no flags). The unicode escapes are built, so this file holds none.
 const BS = String.fromCharCode(92);
 const u = (...ranges: Array<number | [number, number]>): string => ranges.map((r) => (Array.isArray(r) ? `${BS}u${r[0].toString(16).padStart(4, '0')}-${BS}u${r[1].toString(16).padStart(4, '0')}` : `${BS}u${r.toString(16).padStart(4, '0')}`)).join('');
-/** An entity label: not blank, no control, direction or zero-width character (the kit refuses them: `entity_invalid`, a 400). */
-const LABEL_PATTERN = `^(?=.*${BS}S)[^${BS}x00-${BS}x1f${BS}x7f-${BS}x9f${BS}xad${u(0x061c, [0x200b, 0x200f], [0x2028, 0x202e], 0x2060, [0x2066, 0x2069], 0xfeff)}]{1,64}$`;
+/**
+ * An entity label: not blank, no control, direction or zero-width character (the kit refuses them: `entity_invalid`, a 400). The one exception is a ZWNJ or ZWJ between two letters (Persian and Indic names). A pattern with no flags cannot say "letter", so the schema
+ * refuses a joiner at either edge and leaves the rest to the kit, which also refuses one beside a space, a digit or another joiner (still a 400).
+ */
+const LABEL_PATTERN = `^(?=.*${BS}S)(?![${u(0x200c, 0x200d)}])[^${BS}x00-${BS}x1f${BS}x7f-${BS}x9f${BS}xad${u(0x061c, 0x200b, [0x200e, 0x200f], [0x2028, 0x202e], 0x2060, [0x2066, 0x2069], 0xfeff)}]{1,64}(?<![${u(0x200c, 0x200d)}])$`;
 const ENTITY: Schema = obj(
   {
     kind: { type: 'string', pattern: '^[a-z][a-z_]{0,23}$' },

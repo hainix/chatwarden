@@ -24,7 +24,6 @@ export interface KeyLike {
 /**
  * How long after a move (with Quick keys on) the case under the cursor is opened. Every further move starts it again, so a held key
  * opens only the row it stops on.
- * @experimental
  */
 export const QUEUE_OPEN_DELAY_MS = 200;
 
@@ -50,7 +49,6 @@ export function arrowsMoveCases(e: Pick<KeyLike, 'target' | 'composedPath'>): bo
  * handled the key. Ctrl or Cmd with K opens the command bar; every other combination with Ctrl, Cmd or Alt belongs to the
  * browser or the system and is left alone. `N` and `U` do not repeat, so holding them cannot take case after case or undo decision after
  * decision; `J`, `K` and the arrow keys only move, so they do. The arrow keys move between cases only where {@link arrowsMoveCases} says so.
- * @experimental
  */
 export function shortcutFor(e: KeyLike): ShortcutAction | null {
   if (e.defaultPrevented === true || e.isComposing === true || isTypingTarget(e)) return null;

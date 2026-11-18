@@ -4,7 +4,7 @@ export { Hub } from './Hub.js';
 export type { HubProps } from './Hub.js';
 export type { HubMode } from './mode.js';
 
-// Embedding: the provider, the pieces and the hooks. All `@experimental` until 0.2 (see the README's list).
+// Embedding: the provider, the pieces and the hooks.
 export { HubProvider, useHubController } from './provider.js';
 export type { HubControllerSource, HubProviderOptions, HubProviderProps } from './provider.js';
 export type { PieceLinks, PieceProps } from './pieces/Piece.js';
@@ -44,10 +44,10 @@ export type { FetchTransportOptions, RouterTransportOptions, Transport, Transpor
 
 export { createT, en } from './i18n.js';
 export type { HubCatalog, HubParams, HubT, HubText } from './i18n.js';
-/** Which shipped language (`es`, `pt`) a locale tag asks for, or `null`. @experimental */
+/** Which shipped language (`es`, `pt`) a locale tag asks for, or `null`. */
 export { matchLocale } from './locales/match.js';
 export type { ShippedLocale } from './locales/match.js';
-/** The hub's words for a locale as one catalogue for `createT` (the English under Spanish or Portuguese; English for anything else). Loaded on demand. @experimental */
+/** The hub's words for a locale as one catalogue for `createT` (the English under Spanish or Portuguese; English for anything else). Loaded on demand. */
 export { loadHubCatalog } from './locales/load.js';
 export type { LocaleMeta } from './locales/meta.js';
 import type { HubCatalog as AiCatalog } from './i18n.js';
@@ -56,10 +56,9 @@ import type { HubCatalog as AiCatalog } from './i18n.js';
  * The English of the AI's parts (the strip on a case, its menu, the pre-filled decision, Settings > AI). They are loaded when first
  * needed, not with the hub, so they are not in `en`. To translate them, spread this under your own words with `en`:
  * `createT({ ...en, ...(await loadAiWords()), ...de }, 'de')`. A key you leave out reads in English.
- * @experimental
  */
 export const loadAiWords = (): Promise<AiCatalog> => import('./ai/i18n.js').then((m) => m.aiEn);
-/** The English words of the privacy and legal-hold parts (the Person page's Data requests, the erase dialog, Settings > Advanced > Privacy requests, the case's Legal hold), for an adopter to spread into their own catalog. Loaded on demand. @experimental */
+/** The English words of the privacy and legal-hold parts (the Person page's Data requests, the erase dialog, Settings > Advanced > Privacy requests, the case's Legal hold), for an adopter to spread into their own catalog. Loaded on demand. */
 export const loadPrivacyWords = (): Promise<Readonly<Record<string, string>>> => import('./privacy/i18n.js').then((m) => m.privacyEn);
 
 export { buildPath, hashRouter, memoryRouter, normalizePath, parseRoute, tabOf } from './router.js';

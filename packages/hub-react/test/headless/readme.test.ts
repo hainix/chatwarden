@@ -25,10 +25,10 @@ describe('the README headless example', () => {
     }
   });
 
-  it('says that /headless needs no React, and documents the host callbacks as experimental', () => {
+  it('says that /headless needs no React, and documents the host callbacks', () => {
     expect(section).toMatch(/needs no React/);
     expect(section).toContain('host: { openReport: () => looking, show }');
-    expect(section).toMatch(/@experimental/);
+    expect(section).not.toMatch(/@experimental/);
     expect(section).toMatch(/peerDependenciesMeta|optional peer/);
   });
 

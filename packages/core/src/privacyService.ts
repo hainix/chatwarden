@@ -48,7 +48,7 @@ export const EXPORT_NOTES: readonly string[] = [
 /** What `erase` answers when it cannot: an unknown person, or an input outside the closed lists. */
 export type PrivacyRefusal = { ok: false; error: 'not_found' | 'invalid' };
 
-/** `cw.privacy`. @experimental */
+/** `cw.privacy`. */
 export interface PrivacyService {
   /** Find a person by what the game knows (an account id or a client key). Never creates a subject; null for an unknown caller; an address alone finds nobody. */
   find(who: RawWho): SubjectId | null;

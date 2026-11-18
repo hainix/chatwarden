@@ -50,7 +50,6 @@ function bare(n: number, unit: 'second' | 'minute' | 'hour' | 'day', locale: str
  *
  * One convention for every wait sentence the kit words (the pace words and the chat box's refusal words): the value is bare and the sentence
  * has its own "in", as in "You can send another message in {left}." A translation that follows it never reads "in in 3 seconds".
- * @experimental
  */
 export function secondsLeft(ms: number, locale: string): string | null {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || !(ms > 0)) return null;

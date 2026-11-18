@@ -19,12 +19,12 @@ import { ZIP_LIMITS, readZip } from './zip.js';
 // The same loader reads an eval set (`kind: 'eval'`, design 6.10 and 12): the download, the verification and the cache are the same;
 // what is read from the archive is an `EvalSet` (`release()`), there is no pack to apply, and its cache names are its own.
 
-/** A timer the loader can be given: run `fn` once after `ms` milliseconds, and return a function that cancels it. @experimental */
+/** A timer the loader can be given: run `fn` once after `ms` milliseconds, and return a function that cancels it. */
 export interface Schedule {
   after(ms: number, fn: () => void): () => void;
 }
 
-/** The place a loader keeps what it verified (design 8.2). The disk is untrusted; a cache that cannot write rejects. @experimental */
+/** The place a loader keeps what it verified (design 8.2). The disk is untrusted; a cache that cannot write rejects. */
 export interface CorpusCache {
   read(name: string): Promise<Uint8Array | null>;
   /** Atomic: all or nothing. */
@@ -32,7 +32,6 @@ export interface CorpusCache {
   remove(name: string): Promise<void>;
 }
 
-/** @experimental */
 export type CorpusLoaderOptions = {
   kind?: CorpusKind;
   select: PackSelection;
@@ -55,10 +54,8 @@ export type CorpusLoaderOptions = {
   schedule?: Schedule;
 } & ({ pin: string; follow?: never } | { follow: 'stable'; pin?: never });
 
-/** @experimental */
 export type CorpusState = 'none' | 'ready' | 'stale' | 'offline' | 'failed';
 
-/** @experimental */
 export interface CorpusStatus {
   state: CorpusState;
   /** The version in the live list. */
@@ -71,7 +68,6 @@ export interface CorpusStatus {
   pending: SyncSummary | null;
 }
 
-/** @experimental */
 export interface RefreshResult {
   status: CorpusStatus;
   changed: boolean;
@@ -80,13 +76,11 @@ export interface RefreshResult {
 /**
  * What `createCorpusLoader({ kind: 'eval' })` returns: the same refresh, status and start, with `release()` answering the verified
  * {@link EvalSet} (only the selected languages' cases; its manifest is whole). There is nothing to apply.
- * @experimental
  */
 export interface CorpusEvalLoader extends Omit<CorpusLoader, 'release' | 'pack' | 'applyTo'> {
   release(): EvalSet | null;
 }
 
-/** @experimental */
 export interface CorpusLoader {
   /** Never rejects. A second call while one is running returns the same promise. */
   refresh(): Promise<RefreshResult>;
@@ -197,7 +191,6 @@ function sigUrlOf(zipUrl: string): string {
  * Make a loader for the shared term list. Throws a `RangeError` (naming the option, never a value) for a configuration that can never
  * work: neither or both of `pin` and `follow`, a missing cache or clock, a bad `kit` or `apply`, a `kind` that is neither `terms` nor
  * `eval`, or a `select` with no language.
- * @experimental
  */
 export function createCorpusLoader(options: CorpusLoaderOptions & { kind: 'eval' }): CorpusEvalLoader;
 export function createCorpusLoader(options: CorpusLoaderOptions & { kind?: 'terms' }): CorpusLoader;

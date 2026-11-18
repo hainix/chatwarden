@@ -13,7 +13,7 @@ export interface MyRecordProps extends PlayerUiProps, DialogHostProps {
   /** Where "Think this is a mistake?" goes: an `http(s)` address or a path starting with `/`. Left out when absent or unsafe. */
   appealUrl?: string;
   /**
-   * @experimental Let the player appeal a sanction from here (the kit's appeals, `profile.appeals`, must be on). Each sanction then has a
+   * Let the player appeal a sanction from here (the kit's appeals, `profile.appeals`, must be on). Each sanction then has a
    * "Think this is a mistake?" button that opens `AppealDialog`, and `appealUrl` is not used; once an appeal is sent the same place reads
    * "Appeal sent <date>", and later the outcome in words. Default false: the `appealUrl` link, exactly as before, and no extra request.
    */

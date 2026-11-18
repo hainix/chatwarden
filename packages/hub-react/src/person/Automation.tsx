@@ -21,7 +21,7 @@ const CODES: ReadonlyArray<{ code: AutomationCode; label: AiText }> = [
   { code: 'other', label: 'hub.ai.person.automation.code.else' },
 ];
 
-/** What the part is given. @experimental */
+/** What the part is given. */
 export interface PersonAutomationProps {
   person: string;
   /** The mark the server sent with the person's history, or null. */

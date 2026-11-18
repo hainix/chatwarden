@@ -18,7 +18,7 @@ function bodyHold(body: Record<string, unknown>): HoldCode {
 }
 
 /**
- * The legal-hold routes (0.2.0, `@experimental`). A hold keeps one report, and what hangs on it, out of every retention purge and every erase; it is a mechanism, not
+ * The legal-hold routes (0.2.0). A hold keeps one report, and what hangs on it, out of every retention purge and every erase; it is a mechanism, not
  * a legal conclusion. Every body is `no-store`.
  *
  * - `PUT /reports/:id/hold { code }` (`legal.hold`, a senior's by default, lowerable): hold the report for one of `law_enforcement_request`, `legal_proceeding`,
