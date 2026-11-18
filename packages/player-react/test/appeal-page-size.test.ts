@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 const entry = fileURLToPath(new URL('../src/appeal/index.ts', import.meta.url));
 const main = fileURLToPath(new URL('../src/index.ts', import.meta.url));
-// Measured 4,217 bytes gzipped (10,767 minified) at 0.2.1; the budget is that plus about 10 percent, which is also what it takes to draw every state, in en, es and pt through the
+// Measured 4,198 bytes gzipped (10,748 minified) at 0.2.1; the budget is that plus about 10 percent, which is also what it takes to draw every state, in en, es and pt through the
 // kit's own words (the words themselves stay in core's `notice-locales`, which is a peer import, not part of this size).
 const JS_BUDGET = 4.5 * 1024;
 

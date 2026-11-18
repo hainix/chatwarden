@@ -371,6 +371,15 @@ describe('RELEASING.md', () => {
     expect(text).toMatch(/set every peer range to `\^0\.3\.0` by hand first/);
     expect(text).toMatch(/For a 0\.x minor, set every range to the new minor before `npm run version`/);
   });
+  it('says 0.2.1 raised six floors by hand (so it stayed a patch), that the table lives in scripts/manifests.test.ts, and that every other peer stays ^0.2.0', () => {
+    const text = flat(doc);
+    expect(text).toMatch(/0\.2\.1 was that case again/);
+    expect(text).toMatch(/six peer ranges/);
+    expect(text).toContain('the table of floors is in `scripts/manifests.test.ts`');
+    expect(text).toMatch(/the stores, `matcher`, `profanity` and the optional peers of `http` stay at `\^0\.2\.0`/);
+    expect(text).toMatch(/set (them|the ranges) by hand before `npm run version`/);
+    expect(text).not.toContain('every `@chatwarden/*` peer is `^0.2.0`)');
+  });
   it('says http does not dev-depend on hub-element and that an optional peer is never imported statically', () => {
     const text = flat(doc);
     expect(text).toContain('`http` does not dev-depend on `hub-element`');
@@ -779,7 +788,7 @@ describe('the appeals and names docs (0.1.9)', () => {
     for (const needle of [
       '| `GET /appeals?status&cursor&limit` |', '| `GET /appeals/:id` |', '| `POST /appeals/:id/decide` |', '| `POST /people/:ref/rename` |', '| `GET /appeals` |', '| `POST /appeals { noticeId, statement }` |',
       '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (new in 0.1.9) is `{ appeals, renames, keepBlocked, rooms, workflow, insights }`', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
-      '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.2.0`',
+      '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.2.1`',
       '`name_profane`', 'Also `POST /people/:ref/rename`.',
     ]) {
       expect(httpDoc, needle).toContain(needle);
@@ -793,7 +802,7 @@ describe('the appeals and names docs (0.1.9)', () => {
 
   it('player-react: the appeals section says what the prop does, the new words to translate (counted from the catalog), and the older version', () => {
     const doc = flat(section(playerDoc, 'Install') + playerDoc.slice(playerDoc.indexOf('### Appeals'), playerDoc.indexOf('### Transports')));
-    for (const needle of ['`appeals`', '`AppealDialog`', '`appealUrl` is not used then', 'older than 0.1.9', '`nameReasonText(t, reason)`', '`@chatwarden/core` is a peer too (`^0.2.0`)', '`AppealRefusal`, `PlayerAppeal` and `NameReason`']) {
+    for (const needle of ['`appeals`', '`AppealDialog`', '`appealUrl` is not used then', 'older than 0.1.9', '`nameReasonText(t, reason)`', '`@chatwarden/core` is a peer too (`^0.2.1`)', '`AppealRefusal`, `PlayerAppeal` and `NameReason`']) {
       expect(doc, needle).toContain(needle);
     }
     const catalog = read('packages/player-react/src/i18n.ts');
@@ -821,14 +830,14 @@ describe('the appeals and names docs (0.1.9)', () => {
     const mounted = ['LazyPaceSettings', 'LazySignalSettings', 'LazyAppealSettings', 'LazyNameSettings'].map((n) => advanced.indexOf(`<${n} `));
     expect([...mounted].sort((a, b) => a - b)).toEqual(mounted);
     const doc = flat(hubDoc);
-    for (const needle of ['a custom length is never offered', 'shows on the Person page in Simple too', '`^0.2.0` for both', 'Translators: words new in 0.1.9', '`displayName(t, { handle, flagged, revealed })`']) {
+    for (const needle of ['a custom length is never offered', 'shows on the Person page in Simple too', '`^0.2.1` for both', 'Translators: words new in 0.1.9', '`displayName(t, { handle, flagged, revealed })`']) {
       expect(doc, needle).toContain(needle);
     }
   });
 
   it('discord: the two appeal posts, what they never carry, severeOnly and the peer floor', () => {
     const doc = flat(readme('discord'));
-    for (const needle of ['Appeal filed against a 24-hour chat restriction, Rule 2.', 'Appeal decided: lighter.', 'never carries the statement', '`rename.required`', 'only appeals under a severe rule post', '`^0.2.0`', 'no appeal statement']) {
+    for (const needle of ['Appeal filed against a 24-hour chat restriction, Rule 2.', 'Appeal decided: lighter.', 'never carries the statement', '`rename.required`', 'only appeals under a severe rule post', '`^0.2.1`', 'no appeal statement']) {
       expect(doc, needle).toContain(needle);
     }
   });
@@ -1701,5 +1710,29 @@ describe('the appeals landing docs (0.2.1)', () => {
         expect(new RegExp(`CREATE (?:UNIQUE )?(?:TABLE|INDEX)(?: IF NOT EXISTS)? ${name}\\b`).test(migrations), `${name} is a table or index the migrations create`).toBe(true);
       }
     });
+  });
+});
+
+describe('docs/status.md and the follow-ups after the 0.2.1 build', () => {
+  const status = flat(read('docs', 'status.md'));
+  const head = status.slice(0, status.indexOf('## 0.2.0: published'));
+  const followUps = flat(read('docs', 'plans', 'follow-ups.md'));
+
+  it('status.md has a 0.2.1 section above 0.2.0 that says built, not yet published, additive, migration 27 and the floors', () => {
+    expect(status).toMatch(/## 0\.2\.1: built on branch `appeals-landing`, not yet published/);
+    expect(status.indexOf('## 0.2.1')).toBeLessThan(status.indexOf('## 0.2.0: published'));
+    for (const needle of ['additive', 'migration 27 (one-way', '`^0.2.1`', '`^0.2.0`', 'patch', 'docs/recipes/appeal-emails.md']) expect(head, needle).toContain(needle);
+  });
+
+  it('status.md lists what is verified and what is still the owner\'s: a real-browser pass at desktop and 360 px in light and dark, a native read of the new words, the Moxgate wiring after publish, the production flip', () => {
+    for (const needle of ['Verified', 'Still the owner\'s', 'real-browser pass', '360 px', 'light and dark', 'native', 'Spanish and Portuguese', 'Moxgate', 'production']) expect(head, needle).toContain(needle);
+    expect(head).not.toMatch(/(published|released) to npm/i);
+  });
+
+  it('follow-ups.md parks what 0.2.1 left: a hub editor for appeals.words, multi-process strike forgiveness, a delivery outbox and AI triage of appeals', () => {
+    const at = followUps.indexOf('## Appeal links, delivery and feedback (0.2.1), parked');
+    expect(at).toBeGreaterThan(-1);
+    const part0201 = followUps.slice(at);
+    for (const needle of ['`appeals.words`', 'strike forgiveness', 'delivery outbox', 'AI triage of appeals']) expect(part0201, needle).toContain(needle);
   });
 });

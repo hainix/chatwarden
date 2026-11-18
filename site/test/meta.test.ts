@@ -146,6 +146,12 @@ describe('crawler files', () => {
 describe('llms.txt', () => {
   const txt = () => read('llms.txt');
   const urls = () => [...txt().matchAll(/https?:\/\/[^\s)>\]]+/g)].map((m) => m[0].replace(/[.,]$/, ''));
+  it('names the 0.2.1 appeal entry points and links the appeal email recipe', () => {
+    const t = txt();
+    for (const needle of ['`@chatwarden/player-react/appeal`', '`@chatwarden/core/notice-locales`', '`GET /appeal`', '`/appeal/case`', '`notices.deliver`', '`CHATWARDEN_PUBLIC_URL`']) expect(t, needle).toContain(needle);
+    expect(urls()).toContain('https://github.com/hainix/chatwarden/blob/main/docs/recipes/appeal-emails.md');
+    expect(t).toMatch(/- \[Recipe: Appeal links and emails\]\(https:\/\/github\.com\/hainix\/chatwarden\/blob\/main\/docs\/recipes\/appeal-emails\.md\): .{10,}/);
+  });
   it('starts with the project name and a one-line summary, then lists links with descriptions', () => {
     expect(txt()).toMatch(/^# Chatwarden\n/);
     expect(txt()).toMatch(/^> .{20,}/m);

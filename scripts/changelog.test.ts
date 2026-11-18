@@ -698,7 +698,7 @@ describe('the 0.2.1 notes (appeals landing, delivery and feedback; a patch), in 
     const s = block(dir, '**Types the kit produces', '**New public names, by package**');
     for (const needle of [
       '`appeal.decided`', '`reason`', '`AppealDetail.cause`', '`AppealDetail.decided.reasonCode`', '`ReporterAccuracy.overturned`', '`ResolvedAppeals`', '`linkTtlMs`', '`contact`', '`emailsOutcome`', '`words`',
-      "`'invalid_reason'`", '`AppealDecideResult`', '`Chatwarden`', 'never build one by hand',
+      "`'invalid_reason'`", '`AppealDecideResult`', '`Chatwarden`', 'build one of these by hand',
     ]) expect(s, needle).toContain(needle);
   });
 

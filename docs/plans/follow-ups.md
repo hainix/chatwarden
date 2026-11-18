@@ -2,6 +2,16 @@
 
 Things found while building, not yet done. Each one names where it came from.
 
+## Appeal links, delivery and feedback (0.2.1), parked
+
+Found building the appeal landing page, the delivery hook and the feedback from an overturned appeal (design: `docs/design/2026-11-18-appeals-landing-and-feedback.md`).
+
+- **A hub editor for `appeals.words`.** The game's own wording for the appeal page and the delivery text is set in the profile file; the hub shows the three new appeal settings but has no editor for the words by language.
+- **Multi-process strike forgiveness.** The strikes an overturned appeal sets aside are set aside in the process that decided it and are read from the store after a restart; another running process catches up when it restarts. A shared tally would need the shared store of K14.
+- **A delivery outbox.** The hook is called once per notice and the service webhook retries a few times in memory; a process that stops before it delivers loses that call. A table of pending deliveries, retried until it is acknowledged, would make delivery durable.
+- **AI triage of appeals.** The owner's "later design": the AI reading an appeal and suggesting an outcome, the way it reads a report. Nothing of it is built, and it would follow the same gate as AI acting.
+- **A real-browser pass** of the served page and `AppealPage` at desktop and 360 px, light and dark, and a native read of the new Spanish and Portuguese words (see `docs/status.md`).
+
 ## Open: privacy requests and legal hold, parked (0.2.0)
 
 Found building `cw.privacy` and `cw.legal` (design: `docs/design/2026-11-17-filter-rules-and-privacy.md`, runbook: `docs/privacy-requests.md`). None of it is a claim about any law.
