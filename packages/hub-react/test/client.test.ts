@@ -123,7 +123,7 @@ describe('every staff route has a client method', () => {
   };
 
   /** The world every route is exercised in: appeals and renames are on, so their routes answer instead of 404. */
-  const world = () => appealsHub({ role: 'owner', ai: { level: 2, options: { maxLevel: 3, act: {} } }, names: { renames: true }, overrides: { desk: { workflow: true } } });
+  const world = () => appealsHub({ role: 'owner', ai: { level: 2, options: { maxLevel: 3, act: {} } }, names: { renames: true }, overrides: { desk: { workflow: true, insights: true } } });
 
   async function exercise(w: AppealsHub) {
     const { id, person } = await w.file({ target: 'Mallory', reporter: 'Rita' });
@@ -152,7 +152,16 @@ describe('every staff route has a client method', () => {
     const filed = await w.appeal({ target: 'Appellant' });
     const renamed = await w.file({ target: 'Mallory2', reporter: 'Rita2' });
 
-    type Expect = { method: string; path: string; query?: Record<string, string | number>; body?: unknown };
+    // A line in a room the kit knows, said when asked (the evidence buffer keeps a line 15 minutes, and a later call moves the clock by days).
+    w.cw.rooms.seat('RX', 'p1', { clientKey: 'rooms-key-RX-p1-aaaaaaaa' }, 'Handle-p1');
+    let lineId = 'missing';
+    const sayLine = (): void => {
+      w.clock.t += 6000;
+      const said = w.cw.chat.accept('RX', 'p1', 'a delivered line');
+      if ('deliver' in said) lineId = said.deliver.lineId;
+    };
+
+    type Expect = { method: string; path: string | (() => string); query?: Record<string, string | number>; body?: unknown };
     const calls: Array<[string, () => Promise<unknown>, Expect]> = [
       ['me', () => c.me(), { method: 'GET', path: '/me' }],
       ['listReports', () => c.listReports({ status: 'open', limit: 5 }), { method: 'GET', path: '/reports', query: { status: 'open', limit: 5 } }],
@@ -273,6 +282,21 @@ describe('every staff route has a client method', () => {
       ['privacyStatement', () => c.privacyStatement(), { method: 'GET', path: '/privacy/statement' }],
       ['holdReport', () => c.holdReport(renamed.id, 'safety_review'), { method: 'PUT', path: `/reports/${renamed.id}/hold`, body: { code: 'safety_review' } }],
       ['releaseHold', () => c.releaseHold(renamed.id), { method: 'DELETE', path: `/reports/${renamed.id}/hold` }],
+      // Rooms, Insights and linked accounts (0.2.0): the room and line as given (encoded), the mode body as given, the days as a query.
+      ['insights', () => c.insights(), { method: 'GET', path: '/insights' }],
+      ['insights 7 days', () => c.insights(7), { method: 'GET', path: '/insights', query: { days: 7 } }],
+      ['rooms', () => c.rooms(), { method: 'GET', path: '/rooms' }],
+      ['setRoomMode locked', () => c.setRoomMode('RX', 'locked', 120_000), { method: 'POST', path: '/rooms/RX/mode', body: { mode: 'locked', forMs: 120_000 } }],
+      ['setRoomMode normal sends no length', () => c.setRoomMode('RX', 'normal'), { method: 'POST', path: '/rooms/RX/mode', body: { mode: 'normal' } }],
+      ['personLinks', () => c.personLinks(person), { method: 'GET', path: `/people/${person}/links` }],
+      [
+        'retractLine',
+        () => {
+          sayLine();
+          return c.retractLine('RX', lineId);
+        },
+        { method: 'POST', path: () => `/rooms/RX/lines/${lineId}/retract` },
+      ],
       ['reportBundle', () => c.reportBundle(renamed.id), { method: 'GET', path: `/reports/${renamed.id}/bundle` }],
       ['reportBundle with accounts', () => c.reportBundle(renamed.id, { accounts: true }), { method: 'GET', path: `/reports/${renamed.id}/bundle`, query: { accounts: '1' } }],
     ];
@@ -282,7 +306,7 @@ describe('every staff route has a client method', () => {
       const before = w.sent.length;
       results.push(await call().catch((e: unknown) => `${name} threw ${String(e)}`));
       const req = w.sent[before]!;
-      expect(req, name).toMatchObject({ method: want.method, path: want.path });
+      expect(req, name).toMatchObject({ method: want.method, path: typeof want.path === 'function' ? want.path() : want.path });
       expect(req.query ?? {}, name).toEqual(want.query ?? {});
       if (want.body === undefined) expect(req.body, name).toBeUndefined();
       else expect(req.body, name).toEqual(want.body);
