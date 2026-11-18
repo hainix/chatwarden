@@ -164,3 +164,91 @@ describe('POST /people/:ref/rename with an entity', () => {
     expect((await rename(w, f.target, { reason: REASON, entity: { kind: 'clan', ref: 'x' } })).status).toBe(400);
   });
 });
+
+// Review m11: a rename that carries an entity is only for an entity an OPEN report about THAT person names.
+describe('POST /people/:ref/rename with an entity: the entity must be on an open report about the person (review m11)', () => {
+  const body = (entity: unknown) => ({ reason: REASON, rule: 2, entity });
+
+  it('an entity no report names is refused 400 invalid_request, and nothing is written, announced or audited', async () => {
+    const w = await kit();
+    const f = await fileAbout(w, ENTITY);
+    const events: KitEvent[] = [];
+    w.cw.on('rename.required', (e) => void events.push(e));
+    const res = await rename(w, f.target, body({ kind: 'clan', ref: 'clan-9999' }));
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toBe('invalid_request');
+    expect(events).toEqual([]);
+    expect(w.routeAudit()).toEqual([]);
+  });
+
+  it('kind and ref must both match: the right ref under another kind, and the right kind with another ref, are refused', async () => {
+    const w = await kit();
+    const f = await fileAbout(w, ENTITY);
+    for (const entity of [{ kind: 'guild', ref: 'clan-4711' }, { kind: 'clan', ref: 'clan-4712' }, { kind: 'clan', ref: 'CLAN-4711' }, { kind: 'clan', ref: 'clan-471' }]) {
+      expect((await rename(w, f.target, body(entity))).status, JSON.stringify(entity)).toBe(400);
+    }
+    expect((await rename(w, f.target, body({ kind: 'clan', ref: 'clan-4711' }))).status).toBe(200);
+  });
+
+  it('an entity that another person\'s report names is refused for this person', async () => {
+    const w = await kit();
+    const a = await fileAbout(w, { kind: 'clan', ref: 'clan-aaa', label: 'Alpha' });
+    const b = await fileAbout(w, { kind: 'clan', ref: 'clan-bbb', label: 'Beta' });
+    expect((await rename(w, a.target, body({ kind: 'clan', ref: 'clan-bbb' }))).status).toBe(400);
+    expect((await rename(w, b.target, body({ kind: 'clan', ref: 'clan-aaa' }))).status).toBe(400);
+    expect((await rename(w, a.target, body({ kind: 'clan', ref: 'clan-aaa' }))).status).toBe(200);
+    expect((await rename(w, b.target, body({ kind: 'clan', ref: 'clan-bbb' }))).status).toBe(200);
+  });
+
+  it('a report that was decided no longer counts: once the case is closed the entity is refused', async () => {
+    const w = await kit();
+    const f = await fileAbout(w, ENTITY);
+    expect((await rename(w, f.target, body({ kind: 'clan', ref: 'clan-4711' }))).status).toBe(200);
+    const done = await w.cw.decide({ reportId: f.id, verdict: 'no_action', actions: [], actor: 'ann' });
+    expect(done.ok).toBe(true);
+    expect((await rename(w, f.target, body({ kind: 'clan', ref: 'clan-4711' }))).status).toBe(400);
+  });
+
+  it('a person with several open reports may name any entity of them, and a report with no entity names none', async () => {
+    const w = await kit();
+    const room = 'multi-room';
+    w.cw.rooms.seat(room, 'p1', { clientKey: 'raw-client-key-rep-multi-1', ip: '198.51.100.41' }, 'Rep1');
+    w.cw.rooms.seat(room, 'p2', { clientKey: 'raw-client-key-owner-multi', ip: '198.51.100.42' }, 'Owner');
+    w.cw.rooms.seat(room, 'p3', { clientKey: 'raw-client-key-rep-multi-3', ip: '198.51.100.43' }, 'Rep3');
+    w.cw.rooms.seat(room, 'p4', { clientKey: 'raw-client-key-rep-multi-4', ip: '198.51.100.44' }, 'Rep4');
+    w.cw.chat.accept(room, 'p2', 'a line from the owner');
+    w.clock.t += 1000;
+    const ids: string[] = [];
+    for (const [reporter, entity] of [['p1', { kind: 'clan', ref: 'clan-one', label: 'One' }], ['p3', { kind: 'guild', ref: 'guild-two', label: 'Two' }], ['p4', undefined]] as const) {
+      const res = await w.cw.reports.submit({ roomId: room, reporterSeat: reporter, targetSeat: 'p2', ...(entity === undefined ? {} : { entity }) } as never);
+      if (!res.ok) throw new Error(`refused: ${res.refused}`);
+      ids.push(res.reportId);
+      w.clock.t += 1000;
+    }
+    const target = w.cw.reports.get(ids[0] as string)?.targetPerson as string;
+    expect((await rename(w, target, body({ kind: 'clan', ref: 'clan-one' }))).status).toBe(200);
+    expect((await rename(w, target, body({ kind: 'guild', ref: 'guild-two' }))).status).toBe(200);
+    expect((await rename(w, target, body({ kind: 'clan', ref: 'clan-three' }))).status).toBe(400);
+  });
+
+  it('a rename without an entity, or with entity null, needs no report at all', async () => {
+    const w = await kit();
+    const f = await fileAbout(w, undefined);
+    expect((await rename(w, f.target, { reason: REASON, rule: 2, entity: null })).status).toBe(200);
+  });
+
+  it('the refusal comes before the claim gate: a person another moderator is handling is not taken over by a refused entity', async () => {
+    const w = await kit();
+    const f = await fileAbout(w, ENTITY);
+    const res = await rename(w, f.target, { ...body({ kind: 'clan', ref: 'nope' }), takeOver: true }, 'owner');
+    expect(res.status).toBe(400);
+    expect(w.routeAudit()).toEqual([]);
+  });
+
+  it('the refusal never echoes the entity it was sent', async () => {
+    const w = await kit();
+    const f = await fileAbout(w, ENTITY);
+    const res = await rename(w, f.target, body({ kind: 'clan', ref: 'SECRET-ENTITY-REF' }));
+    expect(JSON.stringify(res.body)).not.toContain('SECRET-ENTITY-REF');
+  });
+});

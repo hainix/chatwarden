@@ -11,7 +11,7 @@ import { bodyObject, bodyRename } from './validate.js';
  * - 404 `not_found` while renames are off (`names.renames`), or when the store cannot release a rename (the same test `GET /me`'s
  *   `features.renames` applies, so a hub never offers a rename that always 404s), or for a person the kit does not hold. Checked before the body.
  * - 409 `pending_rename` while an earlier request is still waiting for the game to release the player.
- * - `entity: { kind, ref }` (a clan, guild or team the player owns; never a label, else 400) makes it a rename of that: the kit makes no notice and sets no pending flag, so it never answers 409 and may repeat; the game hears
+ * - `entity: { kind, ref }` (a clan, guild or team the player owns; never a label, else 400) makes it a rename of that, and it must be an entity an OPEN report about this person names, else 400 `invalid_request` (before any claim is taken or anything written): the kit makes no notice and sets no pending flag, so it never answers 409 and may repeat; the game hears
  *   `rename.required` with the entity and tells the owner in its own UI. Audited the same.
  * - 400 for a reason that is missing, blank or over 500 characters, a rule that is missing or is not an active whole-number rule, or a malformed body.
  * - 409 `claimed` and `takeOver` work as for `POST /sanctions` (`gateCase`): another moderator's live claim on the person stops the request unless
@@ -19,6 +19,11 @@ import { bodyObject, bodyRename } from './validate.js';
  * The actor is the authenticated caller, never the body. Audits `name.rename_required` with the person as target, best-effort, after the write (the
  * notice holds neither the reason nor the actor, so the trail is where they are recorded; it keeps no reason either).
  */
+/** Does an open report filed against this person name this entity (kind and ref)? Looks at their newest 200 reports. */
+function namedByOpenReport(cw: AdminContext['cw'], person: string, entity: { kind: string; ref: string }): boolean {
+  return cw.reports.list({ person, limit: 200 }).items.some((r) => r.status === 'open' && r.entity !== null && r.entity.kind === entity.kind && r.entity.ref === entity.ref);
+}
+
 export function nameRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
   return {
@@ -27,6 +32,8 @@ export function nameRoutes(ctx: AdminContext): RouteTable {
       if (!cw.names.renamesEnabled()) throw new NotFoundError();
       const ref = c.params.ref as string;
       const ask = bodyRename(bodyObject(c.req));
+      // A rename of a clan, guild or team is for one an OPEN report about this person names (the hub offers no other), checked before anything is claimed or written. Not found there is 400, like any bad body.
+      if (ask.entity !== null && !namedByOpenReport(cw, ref, ask.entity)) throw new ValidationError();
       gateCase(ctx, c, ref, ask.takeOver);
       const res = cw.names.requireRename({ subject: ref, actor: c.authz.actor, reason: ask.reason, rule: ask.rule, ...(ask.entity === null ? {} : { entity: ask.entity }) });
       if (!res.ok) {
