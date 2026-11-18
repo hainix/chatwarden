@@ -28,10 +28,10 @@ export interface KeyState {
  * NFKC, lower-case, then only letters, digits and the combining marks that belong to them: what "the same line again" means. Marks stay
  * because in many scripts (Devanagari, Thai) the vowel signs are marks, and without them different words look alike. Variation
  * selectors (U+FE00 to U+FE0F, which pick text or emoji presentation) are marks too but carry no meaning of their own, so they go
- * first: `1️⃣` and `1⃣` are one line, and an emoji line leaves nothing to count. Never stored.
+ * first: a keycap digit with and without the selector are one line, and an emoji line leaves nothing to count. Never stored.
  */
 export function normalizeForRepeat(text: string): string {
-  return text.normalize('NFKC').toLowerCase().replace(/[︀-️]/g, '').replace(/[^\p{L}\p{N}\p{M}]/gu, '');
+  return text.normalize('NFKC').toLowerCase().replace(/[\uFE00-\uFE0F]/g, '').replace(/[^\p{L}\p{N}\p{M}]/gu, '');
 }
 
 /** Letters and digits in a normalized line: marks do not count toward the minimum length, so a line of marks alone is never a repeat. */

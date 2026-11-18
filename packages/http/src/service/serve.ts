@@ -118,7 +118,7 @@ async function readJson(read: (path: string) => Promise<string>, path: string, w
     throw new ServeError(`The ${what} file could not be read.`);
   }
   try {
-    return JSON.parse(text.startsWith('﻿') ? text.slice(1) : text) as unknown;
+    return JSON.parse(text.startsWith('\uFEFF') ? text.slice(1) : text) as unknown;
   } catch {
     throw new ServeError(`The ${what} file is not valid JSON.`);
   }

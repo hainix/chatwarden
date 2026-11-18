@@ -2914,7 +2914,17 @@ export class SqliteStore implements Store, TermStore {
       this.db.exec('ROLLBACK');
       throw err;
     }
-    this.db.exec('COMMIT');
+    try {
+      this.db.exec('COMMIT');
+    } catch (err) {
+      // A COMMIT that fails (a full disk) must not leave the transaction open: a later BEGIN would then nest and never commit.
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        /* the transaction is already gone */
+      }
+      throw err;
+    }
     return done;
   }
 

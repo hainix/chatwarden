@@ -153,4 +153,39 @@ describe('SqliteStore pace', () => {
     // the update path stores a good row over it only if fn does not need the broken one
     expect(() => store.paceUpdate?.('r', 'w', () => row())).toThrow();
   });
+
+  it('a COMMIT that throws rolls back and leaves no transaction open: the next update writes and persists (review m7)', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    const realExec = db.exec.bind(db);
+    let failNext = true;
+    db.exec = ((sql: string) => {
+      if (sql === 'COMMIT' && failNext) {
+        failNext = false;
+        throw new Error('disk full');
+      }
+      return realExec(sql);
+    }) as typeof db.exec;
+    expect(() => store.paceUpdate?.('r', 'w', () => row())).toThrow(/disk full/);
+    // the failed update left nothing behind and no open transaction: a BEGIN works and the write lands
+    expect(store.paceLoad?.('r', 'w')).toBeNull();
+    const written = store.paceUpdate?.('r', 'w', () => row({ lastAt: T + 5 }));
+    expect(written?.lastAt).toBe(T + 5);
+    expect(store.paceLoad?.('r', 'w')?.lastAt).toBe(T + 5);
+    // and a third and a fourth keep working
+    store.paceUpdate?.('r', 'w2', () => row({ who: 'w2' }));
+    expect(store.paceLoad?.('r', 'w2')).not.toBeNull();
+  });
+
+  it('a COMMIT that throws is rethrown as the same error, and a failed ROLLBACK does not hide it', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    const realExec = db.exec.bind(db);
+    db.exec = ((sql: string) => {
+      if (sql === 'COMMIT') throw new Error('commit failed');
+      if (sql === 'ROLLBACK') throw new Error('rollback failed');
+      return realExec(sql);
+    }) as typeof db.exec;
+    expect(() => store.paceUpdate?.('r', 'w', () => row())).toThrow(/commit failed/);
+  });
 });
