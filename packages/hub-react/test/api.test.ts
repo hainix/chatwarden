@@ -1112,6 +1112,7 @@ describe('what is marked @experimental', () => {
         "ReportSummary.handoffAt",
         "ReportSummary.urgent",
         "ReporterRecord.accuracy",
+        "Session.rules",
         "Session.safety",
         "StaffReport.evidence",
         "StaffReport.surge",
