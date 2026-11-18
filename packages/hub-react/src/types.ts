@@ -43,7 +43,7 @@ import type {
   Suggestion,
 } from '@chatwarden/core';
 import type { ErasePreview, ErasureReceipt, FilterCheckResult, FilterKeyCounts, FilterTestResult, HoldCode, PrivacyExport, PrivacyStatement, PromptExcluded, TeamNote } from '@chatwarden/core';
-import type { GameKind, PresetName } from '@chatwarden/core';
+import type { EvidenceKind, GameKind, PresetName } from '@chatwarden/core';
 import type { AiReadAgainBody, ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
 export type { PolicyLayer, PolicySection, PromptExcluded, TeamNote };
@@ -247,6 +247,8 @@ export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
   /** With `desk.workflow` on: the second look asked of a senior or the owner, or null. Absent with it off. */
   escalation?: ReportEscalation | null;
   reportedReasonLabel?: string | null;
+  /** What the report is about, from its reason as it is now (0.2.2): `chat`, `play` or `name`. Absent when it is neutral, and from an older server. */
+  evidenceKind?: EvidenceKind;
   targetHandleFlagged?: boolean;
   reporterHandleFlagged?: boolean;
   /** Present only while the report is held for legal reasons (`legal.hold`): the code and the time, never who. */
@@ -346,6 +348,11 @@ export interface DecideInput {
   reason?: string;
   actions: DecisionAction[];
   evidence?: string;
+  /**
+   * What the decision is about, the moderator's own word over the report's (0.2.2): `chat` accepts the chat lines a report about play or a name refuses; `null` is neutral.
+   * Not the bad-faith `evidence` note above. An older server answers 400.
+   */
+  evidenceKind?: EvidenceKind | null;
   /** A senior or owner moving another moderator's live claim to themselves (audited by the server). */
   takeOver?: boolean;
   /**

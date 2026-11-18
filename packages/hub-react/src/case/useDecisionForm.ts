@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { EvidenceKind } from '@chatwarden/core';
 import { toHubError } from '../client.js';
 import type { HubError } from '../client.js';
 import { useHub } from '../context.js';
@@ -83,6 +84,10 @@ export interface DecisionDraft {
   patchAction: (uid: string, patch: Partial<Draft>) => void;
   toggleLine: (uid: string, lineId: string) => void;
   addEmptyAction: () => string | null;
+  /** What the case is about now: the moderator's own word ("Add a line" on a report about play or a name says chat), else the report's. Absent: neutral. */
+  evidence: EvidenceKind | undefined;
+  /** "Add a line" on a report about play or a name: the decision is about chat from here on, so their lines are accepted. */
+  showChatLines: () => void;
   removeAction: (uid: string, n: number) => void;
   announcement: Announcement;
   announce: (text: string) => void;
@@ -153,8 +158,9 @@ export function useDecisionForm({
       canApply,
       canPermanent,
       ownLineIds: report?.ownLineIds ?? {},
+      evidence: report?.evidenceKind,
     }),
-    [target, people, rules, canApply, canPermanent, report?.ownLineIds],
+    [target, people, rules, canApply, canPermanent, report?.ownLineIds, report?.evidenceKind],
   );
 
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
@@ -345,6 +351,10 @@ export function useDecisionForm({
     );
   }, []);
 
+  const showChatLines = useCallback((): void => {
+    setFormState((f) => (f === null ? f : { ...f, evidenceKind: 'chat' }));
+  }, []);
+
   const addEmptyAction = useCallback((): string | null => {
     if (formState === null || !ctx.canApply || formState.actions.length >= MAX_ACTIONS || detail === undefined) return null;
     const uid = nextUid();
@@ -364,7 +374,7 @@ export function useDecisionForm({
   const useSuggestion = useCallback((): void => {
     if (formState === null || current === undefined || detail === undefined) return;
     // Added from an AI suggestion, the step is the ladder's but the rule and the lines are the AI's.
-    const lines = addHint?.lines ?? defaultLines(ctx.ownLineIds[target] ?? [], reportedLine);
+    const lines = addHint?.lines ?? defaultLines(ctx.ownLineIds[target] ?? [], reportedLine, formState.evidenceKind ?? ctx.evidence);
     const next = withSuggestion(formState, ctx, current.outcome, addHint?.rule ?? detail.rule, nextUid(), lines);
     if (next === null) return;
     setFormState(next);
@@ -404,6 +414,8 @@ export function useDecisionForm({
     patchAction,
     toggleLine,
     addEmptyAction,
+    evidence: formState?.evidenceKind ?? report?.evidenceKind,
+    showChatLines,
     removeAction,
     announcement,
     announce,

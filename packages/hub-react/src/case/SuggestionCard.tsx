@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import { useHub } from '../context.js';
-import { MAX_ACTIONS, needsBanPermission, outcomeChoice } from '../decision.js';
+import { MAX_ACTIONS, levelKey, needsBanPermission, outcomeChoice } from '../decision.js';
 import type { Problem } from '../decision.js';
 import { decideErrorText, outcomeLabel } from '../labels.js';
 import { Card, Notice, Segmented } from '../ui.js';
@@ -74,9 +74,10 @@ export function SuggestionCard({
           <Segmented
             label={t('hub.decide.suggest.level')}
             value={draft.level ?? ''}
-            options={LEVELS.map((l) => ({ value: l as string, label: t(`hub.decide.suggest.level.${l}`) }))}
+            options={LEVELS.map((l) => ({ value: l as string, label: t(levelKey(l, draft.evidence)) }))}
             onChange={(v) => draft.pickLevel(v as (typeof LEVELS)[number])}
           />
+          {(draft.evidence === 'play' || draft.evidence === 'name') && <p className="cw-hint">{t(`hub.decide.suggest.level.hint.${draft.evidence}`)}</p>}
         </div>
       )}
       {draft.levelError !== null && (

@@ -76,15 +76,15 @@ describe('the new appeals words', () => {
 
   it('the nine English reason labels are the sentences the person is shown (spec 5.2), and core\'s own words', () => {
     const shown: Record<string, string> = {
-      'hub.appeals.reasonCode.uphold.rule_applies': 'The rule applies to what was said.',
-      'hub.appeals.reasonCode.uphold.evidence_clear': 'The chat record shows the rule was broken.',
-      'hub.appeals.reasonCode.uphold.context_considered': 'We looked at the whole conversation, and the decision stands.',
+      'hub.appeals.reasonCode.uphold.rule_applies': 'The rule applies to what happened.',
+      'hub.appeals.reasonCode.uphold.evidence_clear': 'The record shows the rule was broken.',
+      'hub.appeals.reasonCode.uphold.context_considered': 'We looked at the whole situation, and the decision stands.',
       'hub.appeals.reasonCode.reduce.first_offence': 'We lightened it because this was a first offence.',
       'hub.appeals.reasonCode.reduce.lighter_fits': 'A lighter action fits what happened.',
-      'hub.appeals.reasonCode.reduce.context_considered': 'We looked at the whole conversation and lightened it.',
+      'hub.appeals.reasonCode.reduce.context_considered': 'We looked at the whole situation and lightened it.',
       'hub.appeals.reasonCode.revoke.mistake': 'This was our mistake. We are sorry.',
-      'hub.appeals.reasonCode.revoke.not_a_violation': 'What was said does not break the rules.',
-      'hub.appeals.reasonCode.revoke.context_considered': 'We looked at the whole conversation and lifted it.',
+      'hub.appeals.reasonCode.revoke.not_a_violation': 'What happened does not break the rules.',
+      'hub.appeals.reasonCode.revoke.context_considered': 'We looked at the whole situation and lifted it.',
     };
     const OUTCOME = { uphold: 'upheld', reduce: 'reduced', revoke: 'revoked' } as const;
     const core = APPEAL_WORDS as Record<string, string>;

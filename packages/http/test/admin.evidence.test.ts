@@ -106,3 +106,46 @@ describe('the reason settings take a kind', () => {
     expect(w.cw.profile.reporting.reasons.some((r) => r.id === 'zorbak')).toBe(false);
   });
 });
+
+describe('POST /reports/:id/decide takes the kind', () => {
+  const decideAfk = async (body: Record<string, unknown>) => {
+    const w = await world();
+    const room = `ev-decide-${++seq}`;
+    w.cw.rooms.seat(room, 'p1', { clientKey: `dk-r-${seq}` }, 'Rep');
+    w.cw.rooms.seat(room, 'p2', { clientKey: `dk-t-${seq}` }, 'Tgt');
+    w.cw.chat.accept(room, 'p2', 'Hello');
+    w.clock.t += 1000;
+    const res = await w.cw.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', reason: 'afk' });
+    if (!res.ok) throw new Error('refused');
+    const report = w.cw.reports.get(res.reportId);
+    if (report === null) throw new Error('missing');
+    const line = (report.ownLineIds[report.targetPerson] ?? [])[0] as string;
+    const out = await w.call('POST', `/reports/${res.reportId}/decide`, {
+      role: 'senior',
+      body: { verdict: 'upheld', reason: 'left', actions: [{ subject: report.targetPerson, kind: 'warning', durationMs: null, rule: 6, lineIds: [line] }], ...body },
+    });
+    return { out, w, who: { clientKey: `dk-t-${seq}` } };
+  };
+  it('a line on an AFK report is refused, as the core refuses it, and nothing is written', async () => {
+    const { out, w, who } = await decideAfk({});
+    expect(out.status).toBe(400);
+    expect(w.cw.notices.pending(who)).toEqual([]);
+  });
+  it('with evidenceKind chat the same decision is taken and the player is told it is about chat', async () => {
+    const { out, w, who } = await decideAfk({ evidenceKind: 'chat' });
+    expect(out.status).toBe(200);
+    expect(w.cw.notices.pending(who)[0]).toMatchObject({ kind: 'warning', evidence: 'chat' });
+  });
+  it.each(['gameplay', 4, {}, ''])('a bad evidenceKind %j is 400 invalid_request', async (bad) => {
+    const { out } = await decideAfk({ evidenceKind: bad });
+    expect(out.status).toBe(400);
+  });
+  it('null is neutral: accepted, a line may be attached and the notice carries no kind', async () => {
+    const { out, w, who } = await decideAfk({ evidenceKind: null });
+    expect(out.status).toBe(200);
+    const n = w.cw.notices.pending(who)[0];
+    expect(n?.kind).toBe('warning');
+    expect(n?.excerpt).toHaveLength(1);
+    expect(Object.hasOwn(n as object, 'evidence')).toBe(false);
+  });
+});

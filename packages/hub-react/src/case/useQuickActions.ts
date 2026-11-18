@@ -149,7 +149,7 @@ export function useQuickActions({ enabled = true, paused = false, refresh = fals
     if (!usable || report === undefined || !c.settled() || isRepeatClick(click)) return;
     rememberQuick(report.id, kind);
     const ai = c.echo(false, form);
-    const input = toInput(form);
+    const input = toInput(form, report.evidenceKind);
     decisions.submit({ reportId: report.id, person: report.targetPerson, name, input: ai === undefined ? input : { ...input, ai }, snapshot: form });
     void actions.continueFrom({ reportId: report.id, person: report.targetPerson }, { quick: true });
   };

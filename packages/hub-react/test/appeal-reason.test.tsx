@@ -14,9 +14,9 @@ const SENIOR: WorldOptions = { role: 'senior', actor: 'bea@example.test' };
 const decides = (w: AppealsHub): TransportRequest[] => w.sent.filter((r) => r.method === 'POST' && /^\/appeals\/[^/]+\/decide$/.test(r.path));
 
 const SENTENCES = {
-  uphold: ['The rule applies to what was said.', 'The chat record shows the rule was broken.', 'We looked at the whole conversation, and the decision stands.'],
-  reduce: ['We lightened it because this was a first offence.', 'A lighter action fits what happened.', 'We looked at the whole conversation and lightened it.'],
-  revoke: ['This was our mistake. We are sorry.', 'What was said does not break the rules.', 'We looked at the whole conversation and lifted it.'],
+  uphold: ['The rule applies to what happened.', 'The record shows the rule was broken.', 'We looked at the whole situation, and the decision stands.'],
+  reduce: ['We lightened it because this was a first offence.', 'A lighter action fits what happened.', 'We looked at the whole situation and lightened it.'],
+  revoke: ['This was our mistake. We are sorry.', 'What happened does not break the rules.', 'We looked at the whole situation and lifted it.'],
 } as const;
 const OUTCOME_LABEL = { uphold: 'Keep the decision', reduce: 'Make it lighter', revoke: 'Remove it' } as const;
 type Outcome = keyof typeof SENTENCES;

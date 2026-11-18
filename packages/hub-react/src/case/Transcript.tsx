@@ -136,8 +136,10 @@ export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: 
 }
 
 /** The saved chat around the report, with a filter to one person, the blocked-words switch and a warning when someone sent nothing. */
-export function Transcript({ report, people, picks }: { report: StaffReport; people: ReportPerson[]; picks: LinePicks | null }) {
+export function Transcript({ report, people, picks }: { report: StaffReport & { evidenceKind?: 'chat' | 'play' | 'name' }; people: ReportPerson[]; picks: LinePicks | null }) {
   const { t } = useHub();
+  // A report about play or a name keeps the chat as context: its heading says so and a reported person who wrote nothing is not a data problem.
+  const offKind = report.evidenceKind === 'play' || report.evidenceKind === 'name' ? report.evidenceKind : undefined;
   const { reveal } = useCase();
   const headingId = useId();
   const [only, setOnly] = useState('');
@@ -158,7 +160,7 @@ export function Transcript({ report, people, picks }: { report: StaffReport; peo
   return (
     <section className="cw-transcript" aria-labelledby={headingId}>
       <h3 id={headingId} className="cw-sr">
-        {t('hub.report.excerpt.title')}
+        {t(offKind === undefined ? 'hub.report.excerpt.title' : 'hub.report.excerpt.title.context')}
       </h3>
       {all.length === 0 ? (
         <Empty>{t('hub.report.excerpt.empty')}</Empty>
@@ -183,7 +185,8 @@ export function Transcript({ report, people, picks }: { report: StaffReport; peo
             )}
             {picks !== null && <p className="cw-hint cw-tr-picks">{t('hub.report.excerpt.picks', { name: picks.name, chosen: picks.chosen.length, max: picks.max })}</p>}
           </div>
-          {quiet !== undefined && <Notice tone="warn">{t('hub.report.excerpt.silent', { name: personName(quiet, people, t) })}</Notice>}
+          {quiet !== undefined && offKind !== undefined && <p className="cw-hint">{t(`hub.report.excerpt.context.${offKind}`)}</p>}
+          {quiet !== undefined && offKind === undefined && <Notice tone="warn">{t('hub.report.excerpt.silent', { name: personName(quiet, people, t) })}</Notice>}
           {shown.length > 0 && (
             <ol className="cw-lines" aria-label={t('hub.report.excerpt.label')}>
               {shown.map((l) => (

@@ -399,6 +399,8 @@ describe('the suggestion and the three controls', () => {
   it('a step that restricts the area is named for it, under its own rule', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK, category: 'cheating' });
+    // A first cheating report is a warning (it is not hostile chat); with a warning on the record the next step is the ban from public rooms.
+    await w.sanction(f.person, 'warning', 1, null);
     await open(w, f.id);
     expect(within(decision()).getByRole('button', { name: /^Restrict area, 24 hours/ })).toHaveClass('cw-btn--primary');
     await waitFor(() => expect(screen.getByRole('region', { name: 'What the player sees' })).toHaveTextContent(`Community Rule ${CATEGORY_TO_RULE.cheating as number}`));

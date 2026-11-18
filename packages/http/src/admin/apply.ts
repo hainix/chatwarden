@@ -1,5 +1,5 @@
-import { validateSanctionInput } from '@chatwarden/core';
-import type { Chatwarden, DecisionAction, DecisionInput, Role, SanctionInput, SanctionKind, Source, StaffReport } from '@chatwarden/core';
+import { isEvidenceKind, validateSanctionInput } from '@chatwarden/core';
+import type { Chatwarden, DecisionAction, DecisionInput, EvidenceKind, Role, SanctionInput, SanctionKind, Source, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { PermissionKey } from '../permissions.js';
 import type { ScopedLimits } from './context.js';
@@ -36,6 +36,8 @@ export interface ParsedDecision {
   /** Absent when the body has none: the core stores the standard reason, and only for a `no_action` with no actions. */
   reason?: string;
   evidence?: string;
+  /** What the decision is about (0.2.2), the moderator's own choice over the report's: `null` is neutral. Absent: the report's reason says. */
+  evidenceKind?: EvidenceKind | null;
 }
 
 /**
@@ -53,11 +55,14 @@ export function parseDecision(body: Record<string, unknown>): ParsedDecision {
   const actions = body.actions.map(parseAction);
   const reason = has(body, 'reason') ? bodyText(body.reason) : undefined;
   const evidence = has(body, 'evidence') ? bodyText(body.evidence) : undefined;
+  const kind = body.evidenceKind;
+  if (has(body, 'evidenceKind') && kind !== null && !isEvidenceKind(kind)) throw new ValidationError();
   return {
     verdict: verdict as DecisionInput['verdict'],
     actions,
     ...(reason === undefined ? {} : { reason }),
     ...(evidence === undefined ? {} : { evidence }),
+    ...(has(body, 'evidenceKind') ? { evidenceKind: kind as EvidenceKind | null } : {}),
   };
 }
 
@@ -144,6 +149,7 @@ export async function applyDecision(
     reportId,
     verdict: decision.verdict,
     ...(decision.evidence === undefined ? {} : { evidence: decision.evidence }),
+    ...(decision.evidenceKind === undefined ? {} : { evidenceKind: decision.evidenceKind }),
     actions: decision.actions,
     // Never from the body: the caller is who the auth hook says (or the webhook's configured actor), always a moderator's.
     actor,

@@ -156,7 +156,7 @@ function Suggest() {
         </div>
       </div>
       {/* What the player is sent when the suggestion is accepted: the same panel as everywhere. */}
-      <LazyPlayerPreview op={decideOp(from.form, { target: parts.target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order })} nameOf={parts.nameOf} reporter={parts.reporter} />
+      <LazyPlayerPreview op={decideOp(from.form, { target: parts.target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order, evidence: parts.evidence })} nameOf={parts.nameOf} reporter={parts.reporter} />
       {from.kind !== 'dismiss' && <p className="cw-hint cw-scard-fine">{hubT('hub.simple.undo', { seconds: SECONDS })}</p>}
     </div>
   );

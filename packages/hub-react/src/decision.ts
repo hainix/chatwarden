@@ -1,5 +1,5 @@
-import { LADDER_TABLE } from '@chatwarden/core';
-import type { LadderRow } from '@chatwarden/core';
+import { LADDER_TABLE, evidenceOfRule } from '@chatwarden/core';
+import type { EvidenceKind, LadderRow } from '@chatwarden/core';
 import type { HubParams, HubText } from './i18n.js';
 import { MAX_LENGTH_MS, resolveLength } from './policy/length.js';
 import type { LengthUnit } from './policy/length.js';
@@ -139,6 +139,11 @@ export interface DecisionForm {
    * Only with the verdict "fair" and only of the reported person.
    */
   rename: { rule: string } | null;
+  /**
+   * The moderator's own word on what the decision is about, over the report's (0.2.2): set by "Add a line" on a report about play or a name, so the lines they
+   * add are accepted. Absent unless they chose it; sent as `evidenceKind`. Not the bad-faith `evidence` note above.
+   */
+  evidenceKind?: EvidenceKind;
 }
 
 export const emptyForm = (): DecisionForm => ({ verdict: null, evidence: '', reason: '', actions: [], rename: null });
@@ -184,21 +189,32 @@ const isPlainDismissal = (form: DecisionForm): boolean => form.verdict === 'not_
  * The body for `POST /reports/:id/decide`. Call it on a form that has passed {@link validate}. A plain dismissal with a blank reason
  * sends no `reason` at all (the kit stores its standard one); a typed reason is sent as written.
  */
-export function toInput(form: DecisionForm): DecideInput {
+export function toInput(form: DecisionForm, evidence?: EvidenceKind): DecideInput {
   const actions = form.actions.map((d): DecisionAction => {
     const choice = resolveDraft(d) as Choice;
     const uncovered = d.rule === 'uncovered';
     const action: DecisionAction = { subject: d.person, kind: choice.kind, durationMs: choice.durationMs, rule: uncovered ? 'uncovered' : Number(d.rule) };
     if (uncovered) action.gapNote = d.gapNote.trim();
-    if (choice.kind !== 'note' && d.lineIds.length > 0) action.lineIds = [...d.lineIds];
+    // What the server will read this action as: the moderator's own word, else the report's kind, else the rule's (CR 5 and 6 play, CR 7 name). It refuses a chat line for play and name.
+    const kind = form.evidenceKind ?? evidence ?? (uncovered ? undefined : evidenceOfRule(Number(d.rule)));
+    if (choice.kind !== 'note' && d.lineIds.length > 0 && kind !== 'play' && kind !== 'name') action.lineIds = [...d.lineIds];
     return action;
   });
   const reason = form.reason.trim();
   const input: DecideInput = { verdict: serverVerdict(form), actions };
   if (reason !== '' || !isPlainDismissal(form)) input.reason = reason;
   if (form.verdict === 'bad_faith') input.evidence = form.evidence.trim();
+  if (form.evidenceKind !== undefined) input.evidenceKind = form.evidenceKind;
   if (form.rename !== null) input.rename = { rule: Number(form.rename.rule) };
   return input;
+}
+
+/**
+ * The catalog key of a conduct level's name in the severity picker: the four chat words ("Banter", "Rude", "Hostile", "Severe") unless the report is about `play` or a `name`,
+ * which have words of their own. The level ids are the same: only the label changes.
+ */
+export function levelKey(level: ConductLevel, evidence?: EvidenceKind): HubText {
+  return (evidence === 'play' || evidence === 'name' ? `hub.decide.suggest.level.${evidence}.${level}` : `hub.decide.suggest.level.${level}`) as HubText;
 }
 
 /** What the checks need to know about the report and the signed-in role. */
@@ -215,6 +231,8 @@ export interface ValidationContext {
   canPermanent: boolean;
   /** For each person, the ids of the lines they wrote themselves. */
   ownLineIds: Readonly<Record<string, readonly string[]>>;
+  /** What the report is about (the reason's kind, or the moderator's own choice): `chat`, `play` or `name`. Absent is neutral: no chat line is attached on its own. */
+  evidence?: EvidenceKind | undefined;
 }
 
 /** A refusal as a catalog key, with the values it needs. */
@@ -397,10 +415,13 @@ export function withSuggestion(
 }
 
 /**
- * Which of the person's own lines the player is shown by default: at most {@link LINES_MAX}, in the order they were said. The
- * reported line is always among them when it is theirs; the rest are their latest.
+ * Which of the person's own lines the player is shown by default. For a `chat` report: at most {@link LINES_MAX}, in the order they were said, the reported line always among
+ * them when it is theirs and the rest their latest. For `play` and `name` none (the server refuses a chat line there). With no kind (neutral) none either, except the one line that
+ * was pointed at when it is theirs. The moderator can always add more.
  */
-export function defaultLines(own: readonly string[], reported: string | null): string[] {
+export function defaultLines(own: readonly string[], reported: string | null, evidence?: EvidenceKind): string[] {
+  if (evidence === 'play' || evidence === 'name') return [];
+  if (evidence !== 'chat') return reported !== null && own.includes(reported) ? [reported] : [];
   if (own.length <= LINES_MAX) return [...own];
   const keep = new Set(own.slice(-LINES_MAX));
   if (reported !== null && own.includes(reported) && !keep.has(reported)) {
@@ -418,7 +439,7 @@ export function defaultLines(own: readonly string[], reported: string | null): s
 export function initialForm(ctx: ValidationContext, outcome: Suggestion['outcome'], reportRule: number | 'uncovered', reportedLine: string | null, uid: string): DecisionForm {
   const choice = outcomeChoice(outcome);
   if (choice === null || !ctx.canApply || (needsBanPermission(choice) && !ctx.canPermanent)) return emptyForm();
-  const lines = defaultLines(ctx.ownLineIds[ctx.target] ?? [], reportedLine);
+  const lines = defaultLines(ctx.ownLineIds[ctx.target] ?? [], reportedLine, ctx.evidence);
   const form = withSuggestion(emptyForm(), ctx, outcome, reportRule, uid, lines);
   return form === null ? emptyForm() : { ...form, verdict: null };
 }

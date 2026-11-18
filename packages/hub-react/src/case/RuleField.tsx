@@ -10,7 +10,7 @@ import type { RulePick } from './useRulePick.js';
  * changed; when no rule is clear it asks, leading with the rules the reason usually means. Nothing is suggested until one is picked. A
  * suggestion that could not be fetched says so, with Try again.
  */
-export function RuleField({ pick, rules, report }: { pick: RulePick; rules: ReadonlyArray<{ number: number; title: string }>; report: StaffReport & { reportedReasonLabel?: string | null } }) {
+export function RuleField({ pick, rules, report }: { pick: RulePick; rules: ReadonlyArray<{ number: number; title: string }>; report: StaffReport & { reportedReasonLabel?: string | null; evidenceKind?: 'chat' | 'play' | 'name' } }) {
   const { t } = useHub();
   const id = useId();
   const ask = pick.mode === 'ask';
@@ -26,7 +26,7 @@ export function RuleField({ pick, rules, report }: { pick: RulePick; rules: Read
     ? pick.picked === null
       ? t('hub.simple.rule.askHint')
       : undefined
-    : t('hub.simple.rule.knownHint', { reason: report.reportedReasonLabel ?? report.reportedReason ?? '', rule: pick.picked ?? '' });
+    : t(report.evidenceKind === 'play' ? 'hub.simple.rule.knownHint.play' : report.evidenceKind === 'name' ? 'hub.simple.rule.knownHint.name' : 'hub.simple.rule.knownHint', { reason: report.reportedReasonLabel ?? report.reportedReason ?? '', rule: pick.picked ?? '' });
   return (
     <div className="cw-scard-rule">
       <Field id={`${id}-rule`} label={t(ask ? 'hub.simple.rule.ask' : 'hub.simple.rule.known')} {...(hint === undefined ? {} : { hint })}>

@@ -467,27 +467,27 @@ describe('presets from the adopter profile', () => {
   });
 });
 
-describe('defaultLines: the lines the player is shown by default', () => {
+describe('defaultLines: the lines the player is shown by default (a chat report: evidence-kind.test.ts has the other kinds)', () => {
   it('is all of them up to five, in order', () => {
-    expect(defaultLines([], null)).toEqual([]);
-    expect(defaultLines(['a', 'b'], 'b')).toEqual(['a', 'b']);
-    expect(defaultLines(['a', 'b', 'c', 'd', 'e'], null)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(defaultLines([], null, 'chat')).toEqual([]);
+    expect(defaultLines(['a', 'b'], 'b', 'chat')).toEqual(['a', 'b']);
+    expect(defaultLines(['a', 'b', 'c', 'd', 'e'], null, 'chat')).toEqual(['a', 'b', 'c', 'd', 'e']);
   });
   it('is the latest five when there are more', () => {
-    expect(defaultLines(['1', '2', '3', '4', '5', '6', '7'], null)).toEqual(['3', '4', '5', '6', '7']);
+    expect(defaultLines(['1', '2', '3', '4', '5', '6', '7'], null, 'chat')).toEqual(['3', '4', '5', '6', '7']);
   });
   it('keeps the reported line in, dropping the oldest of the five instead', () => {
-    expect(defaultLines(['1', '2', '3', '4', '5', '6', '7'], '1')).toEqual(['1', '4', '5', '6', '7']);
-    expect(defaultLines(['1', '2', '3', '4', '5', '6', '7'], '5')).toEqual(['3', '4', '5', '6', '7']);
+    expect(defaultLines(['1', '2', '3', '4', '5', '6', '7'], '1', 'chat')).toEqual(['1', '4', '5', '6', '7']);
+    expect(defaultLines(['1', '2', '3', '4', '5', '6', '7'], '5', 'chat')).toEqual(['3', '4', '5', '6', '7']);
   });
   it('ignores a reported line that is not theirs', () => {
-    expect(defaultLines(['1', '2', '3', '4', '5', '6'], 'zz')).toEqual(['2', '3', '4', '5', '6']);
+    expect(defaultLines(['1', '2', '3', '4', '5', '6'], 'zz', 'chat')).toEqual(['2', '3', '4', '5', '6']);
   });
 });
 
 describe('initialForm: a case opens with the suggestion ready and nothing decided', () => {
   it('has the suggested action for the reported person, their own lines, the report rule and no verdict', () => {
-    const f = initialForm(ctx(), { kind: 'chat', durationMs: 86_400_000 }, 3, 't3', 'u1');
+    const f = initialForm(ctx({ evidence: 'chat' }), { kind: 'chat', durationMs: 86_400_000 }, 3, 't3', 'u1');
     expect(f.verdict).toBeNull();
     expect(f.reason).toBe('');
     expect(f.actions).toHaveLength(1);

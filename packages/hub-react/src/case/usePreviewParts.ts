@@ -15,6 +15,8 @@ export interface CasePreviewParts {
   lineOf: (lineId: string) => { text: string; day: string } | null;
   /** The ids of the report's lines, in the report's order: the order the player's notice lists lines in. */
   order: readonly string[];
+  /** What the report is about (0.2.2): `chat`, `play` or `name`; absent is neutral. The panel words the notice for it. */
+  evidence: 'chat' | 'play' | 'name' | undefined;
 }
 
 /**
@@ -44,5 +46,6 @@ export function usePreviewParts(report: ReportDetail['report'] | undefined): Cas
       return person === undefined ? t('hub.person.unnamed', { tag: ref.slice(0, 8) }) : personName(person, people, t);
     },
     ...previewLines(report),
+    evidence: report?.evidenceKind,
   };
 }

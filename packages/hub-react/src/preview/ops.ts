@@ -1,4 +1,6 @@
 import type { NoticeOp, PlanAction, PlanLine } from '@chatwarden/core/notice-copy';
+import { evidenceOfRule } from '@chatwarden/core';
+import type { EvidenceKind } from '@chatwarden/core';
 import { hasLength, resolveDraft, serverVerdict } from '../decision.js';
 import type { DecisionForm } from '../decision.js';
 import type { SanctionGroupView, SanctionKind } from '../types.js';
@@ -33,7 +35,7 @@ function linesInOrder(lineIds: readonly string[], o: { lineOf: (lineId: string) 
  * chosen, a rule cited), the lines the player is shown (`lineOf` answers the server's masked text for a line, or null: a line with no masked text is never shown), and the
  * rename when its rule is chosen. A problem elsewhere in the form never blanks it: it is what the valid part would send. Null while nothing is chosen.
  */
-export function decideOp(form: DecisionForm, o: { target: string; reporter: string; lineOf: (lineId: string) => PlanLine | null; order: readonly string[] }): NoticeOp | null {
+export function decideOp(form: DecisionForm, o: { target: string; reporter: string; lineOf: (lineId: string) => PlanLine | null; order: readonly string[]; evidence?: EvidenceKind | undefined }): NoticeOp | null {
   const dismissal = form.verdict === 'not_a_problem' || form.verdict === 'bad_faith';
   if (form.verdict === null && form.actions.length === 0 && form.rename === null) return null;
   const actions: PlanAction[] = [];
@@ -45,7 +47,10 @@ export function decideOp(form: DecisionForm, o: { target: string; reporter: stri
     actions.push({ person: d.person, kind: choice.kind, durationMs: hasLength(choice.kind) ? choice.durationMs : null, rule, lines });
   }
   const rename = !dismissal && form.rename !== null && /^[1-9]\d*$/.test(form.rename.rule) ? { rule: Number(form.rename.rule) } : null;
-  return { op: 'decide', verdict: serverVerdict(form), target: o.target, reporter: o.reporter, actions, rename };
+  // What the notice is about, as the server will word it: the moderator's own word, else the report's, else the rule's (CR 5 and 6 play, CR 7 name).
+  const first = actions[0]?.rule;
+  const evidenceKind = form.evidenceKind ?? o.evidence ?? (typeof first === 'number' ? evidenceOfRule(first) : undefined);
+  return { op: 'decide', verdict: serverVerdict(form), target: o.target, reporter: o.reporter, actions, rename, ...(evidenceKind === undefined ? {} : { evidenceKind }) };
 }
 
 /** The rename the Person page asks for, once a numbered rule is chosen. */

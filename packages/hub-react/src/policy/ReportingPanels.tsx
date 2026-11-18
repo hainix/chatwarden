@@ -77,6 +77,18 @@ function UrgentFields({ r, draft, saved, patch, problem }: { r: ReasonDraft; dra
   const shown = own.trim() === '' ? draft.thanks.trim() : own.trim();
   return (
     <div className="cw-reason-more" role="group" aria-label={t('hub.settings.reporting.after', { name })}>
+      <div className="cw-field">
+        <label htmlFor={`${id}-evidence`}>{t('hub.settings.reporting.evidence')}</label>
+        <select id={`${id}-evidence`} value={r.evidence} aria-describedby={`${id}-evidence-hint`} onChange={(e) => patch({ evidence: e.target.value as ReasonDraft['evidence'] })}>
+          <option value="">{t('hub.settings.reporting.evidence.none')}</option>
+          <option value="chat">{t('hub.settings.reporting.evidence.chat')}</option>
+          <option value="play">{t('hub.settings.reporting.evidence.play')}</option>
+          <option value="name">{t('hub.settings.reporting.evidence.name')}</option>
+        </select>
+        <p id={`${id}-evidence-hint`} className="cw-hint">
+          {t('hub.settings.reporting.evidence.hint')}
+        </p>
+      </div>
       <label className="cw-tick">
         <input type="checkbox" checked={r.urgent} aria-describedby={`${id}-urgent-hint`} onChange={(e) => patch({ urgent: e.target.checked })} />
         <span>{t('hub.settings.reporting.urgent')}</span>
