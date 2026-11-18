@@ -116,7 +116,7 @@ export interface ReportInput {
   evidenceRef?: string | null;
   /**
    * The clan, guild, team, deck or other entity the report is about: `{ kind, ref, label }`, `kind` a word of the game's (`^[a-z][a-z_]{0,23}$`), `ref` its opaque id (1 to 64 of `A-Za-z0-9_:-`), `label` its name as players see it
-   * (1 to 64 characters, no control character; trimmed). The report is filed against the owner's seat (`targetSeat` or the line's author) as always, so the person is the case; the entity is stored with the report and shown as one extra
+   * (1 to 64 characters, no control, direction or zero-width character; trimmed). The report is filed against the owner's seat (`targetSeat` or the line's author) as always, so the person is the case; the entity is stored with the report and shown as one extra
    * row. Anything else (a missing key, an extra key, a bad value) is refused `entity_invalid` before the budget is touched. Omitted or null: none. No event, log line or webhook carries it.
    */
   entity?: ReportEntity | null;
@@ -127,6 +127,8 @@ const ENTITY_KIND_RE = /^[a-z][a-z_]{0,23}$/;
 const ENTITY_REF_RE = /^[A-Za-z0-9_:-]{1,64}$/;
 // eslint-disable-next-line no-control-regex
 const ENTITY_LABEL_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+// Direction controls and zero-width or soft-hyphen characters: they reorder or hide what a moderator reads in the case row (as `phrases` refuses them), so a label holding one anywhere is refused, edges included.
+const ENTITY_LABEL_INVISIBLE = /[\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
 const ENTITY_LABEL_MAX = 64;
 
 /**
@@ -145,7 +147,7 @@ export function readEntity(raw: unknown): ReportEntity | null | 'invalid' {
   if (typeof ref !== 'string' || !ENTITY_REF_RE.test(ref)) return 'invalid';
   if (typeof label !== 'string') return 'invalid';
   const name = label.trim();
-  if (name === '' || name.length > ENTITY_LABEL_MAX || ENTITY_LABEL_CONTROL.test(name)) return 'invalid';
+  if (name === '' || name.length > ENTITY_LABEL_MAX || ENTITY_LABEL_CONTROL.test(name) || ENTITY_LABEL_INVISIBLE.test(label)) return 'invalid';
   return { kind, ref, label: name };
 }
 

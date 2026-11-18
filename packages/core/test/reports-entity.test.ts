@@ -60,6 +60,22 @@ describe('the grammar', () => {
     }
   });
 
+  it('a label with a direction control or a zero-width character is refused: it could reorder or hide what a moderator reads (review m8)', async () => {
+    const k = await kit();
+    const bad = [0x061c, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2060, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff, 0x00ad].map((cp) => String.fromCodePoint(cp));
+    for (const ch of bad) {
+      for (const label of [`Blue${ch}Wolves`, `${ch}Blue Wolves`, `Blue Wolves${ch}`]) {
+        const t = k.table();
+        expect(await k.submit(t.room, { entity: { ...ENTITY, label } }), `U+${ch.codePointAt(0)?.toString(16)}`).toEqual({ ok: false, refused: 'entity_invalid' });
+      }
+    }
+    // the neighbours of those ranges stay fine: a hyphen, a no-break space, an arrow, an emoji, Arabic and Hebrew letters
+    for (const ok of ['Blue\u2010Wolves', 'Blue\u00a0Wolves', 'Wolves \u2192 Bears', '\u{1F43A} Wolves', '\u0627\u0644\u0630\u0626\u0627\u0628', '\u05d6\u05d0\u05d1\u05d9\u05dd']) {
+      const t = k.table();
+      expect((await k.submit(t.room, { entity: { ...ENTITY, label: ok } })).ok, ok).toBe(true);
+    }
+  });
+
   it('the entity is an object with exactly kind, ref and label: other shapes and extra keys are refused', async () => {
     const k = await kit();
     for (const bad of ['clan', 5, [], [ENTITY], { kind: 'clan', ref: 'x' }, { ...ENTITY, extra: 1 }, { ...ENTITY, owner: 's_1' }, Object.assign(Object.create({ kind: 'clan' }) as object, { ref: 'a', label: 'b' })]) {

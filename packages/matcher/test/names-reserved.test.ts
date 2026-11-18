@@ -156,3 +156,12 @@ describe('the matcher carries it', () => {
     expect(matcher.matchReserved?.('Mod_Anna', ['admin'], [])).toBe(false);
   });
 });
+
+describe('an entry matches itself exactly when it protects something (the kit probes this, review m9)', () => {
+  it('a Latin entry matches itself; an entry with no Latin skeleton (Han, dashes) does not', () => {
+    const han = String.fromCodePoint(0x7ba1, 0x7406, 0x5458);
+    const entries = ['mod', 'M0derator', han, '---', 'staff team'];
+    const verdicts = entries.map((e) => matchReserved(e, entries, []));
+    expect(verdicts).toEqual([true, true, false, false, true]);
+  });
+});

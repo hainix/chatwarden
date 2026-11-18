@@ -67,6 +67,8 @@ interface Verdict {
   termId: string | null;
 }
 
+const NO_ALLOW: readonly string[] = Object.freeze([]);
+
 export class NameService {
   private readonly d: NameServiceDeps;
   private readonly limiter = new NameEvidenceLimiter();
@@ -75,6 +77,8 @@ export class NameService {
   private readonly reservedWarn: ThrottledWarn;
   /** The unsupported matcher is said once, not once a minute: a matcher does not grow the method later. */
   private unsupportedSaid = false;
+  /** The reserved list last probed for entries that protect nothing (by identity: a changed list is probed again). */
+  private probed: readonly string[] | null = null;
 
   constructor(deps: NameServiceDeps) {
     this.d = deps;
@@ -153,11 +157,34 @@ export class NameService {
       }
       return false;
     }
+    this.probeInert(m, settings.reserved);
     try {
       return m.matchReserved(text, settings.reserved, settings.reservedAllow) === true;
     } catch (err) {
       this.reservedWarn.warn('chatwarden.names_reserved_failed', { error: errName(err) });
       return false;
+    }
+  }
+
+  /**
+   * Say once per list which entries protect nothing: an entry the matcher cannot even match to itself (a script with no Latin skeleton, in 0.2.0) is silently inert, so the owner is told how many and where the first is
+   * (the position, never the entry). Fenced: a matcher that throws is the real check's to log.
+   */
+  // (the entries are the settings' own array, so a matcher that compiles each list once compiles it once)
+  private probeInert(m: Matcher, entries: readonly string[]): void {
+    if (this.probed === entries) return;
+    this.probed = entries;
+    try {
+      let count = 0;
+      let first = -1;
+      for (const [i, entry] of entries.entries()) {
+        if (m.matchReserved?.(entry, entries, NO_ALLOW) === true) continue;
+        count += 1;
+        if (first === -1) first = i;
+      }
+      if (count > 0) safeWarn(this.d.logger, 'chatwarden.names_reserved_inert', { count, first });
+    } catch {
+      /* the real check below logs a failing matcher */
     }
   }
 

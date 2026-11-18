@@ -10,7 +10,7 @@ const text = (rel: string): string => readFileSync(new URL(rel, import.meta.url)
 describe('paceDecide source', () => {
   it('is ASCII only, so the variation-selector class is written with unicode escapes', () => {
     const src = text('../src/paceDecide.ts');
-    expect(src).not.toMatch(/[^\x00-\x7F]/);
+    expect(/^[\p{ASCII}]*$/u.test(src)).toBe(true);
     expect(src).toContain(`[${BS}uFE00-${BS}uFE0F]`);
   });
 

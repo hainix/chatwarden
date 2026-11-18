@@ -129,9 +129,12 @@ describe('settings', () => {
     expect(k.cw.profile.names.reserved).toBe(k.cw.profile.names.reserved);
     k.cw.names.check('Anna');
     k.cw.names.check('Bo');
-    expect(k.m.reservedCalls).toHaveLength(2);
-    expect(k.m.reservedCalls[0]?.entries).toBe(k.m.reservedCalls[1]?.entries);
-    expect(k.m.reservedCalls[0]?.allow).toBe(k.m.reservedCalls[1]?.allow);
+    // (the one probe for entries that protect nothing uses the same entries array and no allow list)
+    const calls = k.m.reservedCalls.filter((c) => c.allow === k.cw.profile.names.reservedAllow);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.entries).toBe(calls[1]?.entries);
+    expect(calls[0]?.entries).toBe(k.cw.profile.names.reserved);
+    expect(k.m.reservedCalls.filter((c) => c.allow !== k.cw.profile.names.reservedAllow).every((c) => c.entries === calls[0]?.entries)).toBe(true);
   });
 
   it('an inactive reservedRule is refused at creation with the path, and a layer that names one is refused at save and at preview', async () => {
@@ -283,5 +286,60 @@ describe('privacy', () => {
   it('the answer of a refused name carries only the reason and the rule', async () => {
     const k = await kit({ reserved: ['admin'] });
     expect(Object.keys(k.cw.names.check('Admin') as object).sort()).toEqual(['ok', 'reason', 'rule']);
+  });
+});
+
+describe('an entry that protects nothing is said once (review m9)', () => {
+  // The real matcher keys an entry by its Latin skeleton: an entry with none (a Han entry) matches no name. This stand-in does the same.
+  const HAN = String.fromCodePoint(0x7ba1, 0x7406, 0x5458);
+  const strict = (name: string, entries: readonly string[], allow: readonly string[]): boolean => {
+    if (allow.some((a) => norm(a) === norm(name))) return false;
+    const keys = entries.map(norm).filter((k) => k !== '');
+    return keys.includes(norm(name)) || wordsOf(name).some((w) => keys.includes(w));
+  };
+  const inert = (k: { logged: Array<[string, Record<string, unknown> | undefined]> }) => k.logged.filter(([e]) => e === 'chatwarden.names_reserved_inert');
+
+  async function strictKit(names: Record<string, unknown>) {
+    const k = await kit(names);
+    k.m.matchReserved = strict;
+    return k;
+  }
+
+  it('one warning names the count and the first position, never an entry; later checks stay quiet', async () => {
+    const k = await strictKit({ reserved: ['mod', HAN, 'staff', `${HAN}x`.replace('x', '!')] });
+    k.cw.names.check('Anna');
+    k.cw.names.check('Mod Anna');
+    k.cw.names.check('Bert');
+    expect(inert(k)).toHaveLength(1);
+    expect(inert(k)[0]?.[1]).toEqual({ count: 2, first: 1 });
+    expect(JSON.stringify(k.logged)).not.toContain(HAN);
+    // and the working entries still work
+    expect(k.cw.names.check('Mod_Anna')).toMatchObject({ ok: false, reason: 'name_reserved' });
+  });
+
+  it('a list of working entries, no list, and a list with only allow names are quiet', async () => {
+    for (const names of [{ reserved: ['mod', 'staff'] }, {}, { reservedAllow: ['mod'] }]) {
+      const k = await strictKit(names);
+      k.cw.names.check('Anna');
+      expect(inert(k), JSON.stringify(names)).toEqual([]);
+    }
+  });
+
+  it('a matcher without matchReserved, and one that throws, add no inert warning (they have their own)', async () => {
+    const none = await kit({ reserved: [HAN] }, { noReserved: true });
+    none.cw.names.check('Anna');
+    expect(inert(none)).toEqual([]);
+    const boom = await kit({ reserved: [HAN] });
+    boom.m.matchReserved = () => {
+      throw new Error('boom');
+    };
+    expect(() => boom.cw.names.check('Anna')).not.toThrow();
+    expect(inert(boom)).toEqual([]);
+  });
+
+  it('the check never changes a verdict: a name is refused or passed exactly as before', async () => {
+    const k = await strictKit({ reserved: [HAN, 'mod'] });
+    expect(k.cw.names.check(HAN)).toMatchObject({ ok: true });
+    expect(k.cw.names.check('Mod')).toMatchObject({ ok: false, reason: 'name_reserved' });
   });
 });
