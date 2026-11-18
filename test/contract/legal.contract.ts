@@ -95,6 +95,8 @@ async function build(s: Store, id: string, target: string): Promise<void> {
   s.insertSanctionGroup([sanction(`g-${id}`, `M-${id.toUpperCase().padEnd(5, 'X').slice(0, 5)}`, target, 'subject', id), sanction(`g-${id}`, `M-${id.toUpperCase().padEnd(5, 'X').slice(0, 5)}`, `iphash-${id}`, 'ip', id)]);
   s.insertNotice(notice(`n-${id}`, target, `g-${id}`));
   x.insertAppeal(appeal(`ap-${id}`, target, `g-${id}`, id));
+  // The overturn of that sanction group (0.2.1): the row a legal hold keeps with the group (R3 important 2).
+  s.recordOverturn?.({ groupId: `g-${id}`, at: OLD + 10, subject: target, aliases: [target], source: 'moderator', termId: `t-${id}`, filterKey: null, reportId: id, strikes: null });
   const r = x.reserveAiRead({ reportId: id, inputHash: `h-${id}`, promptVersion: 1, adapter: 'fake:one' }, NOW + 60_000, OLD);
   if (!r.reserved) throw new Error('expected a reservation');
   x.completeAiRead(r.id, r.lease, {
@@ -171,6 +173,7 @@ function purgeEverything(s: Store): void {
   s.purgeNotices(late, { appealBefore: late, renameBefore: late });
   x.clearAppealStatements(late);
   x.purgeAppeals(late);
+  s.purgeOverturns?.(late);
   x.purgeAi(late, late, late);
   x.purgeAiActions(late, late);
   s.purgeAudit(late);
@@ -184,6 +187,7 @@ const state = (s: Store, id: string) => {
     sanctionRows: s.loadSubjectActions(0).filter((r) => r.groupId === `g-${id}`).length + s.loadSanctions(0).filter((r) => r.groupId === `g-${id}` && r.targetType === 'ip').length,
     notice: s.findNoticeForGroup(`g-${id}`) !== null || s.loadNotices([id === 'rA' ? 's_a' : 's_b']).length > 0,
     appeal: x.loadAppeal(`ap-${id}`) !== null,
+    overturn: (s.overturnedTermCounts?.(0) ?? []).some((c) => c.termId === `t-${id}`),
     read: x.loadAiRead(id) !== null,
     outcome: x.loadAiOutcome(id) !== null,
     action: x.loadAiAction(id) !== null,
@@ -273,13 +277,13 @@ export function legalContract(name: string, make: () => Store): void {
         const s = make();
         await build(s, 'rA', 's_a');
         await build(s, 'rB', 's_b');
-        const full = { report: true, decision: true, sanctionRows: 2, notice: true, appeal: true, read: true, outcome: true, action: true, audit: 2 };
+        const full = { report: true, decision: true, sanctionRows: 2, notice: true, appeal: true, overturn: true, read: true, outcome: true, action: true, audit: 2 };
         expect(state(s, 'rA')).toEqual(full);
         expect(state(s, 'rB')).toEqual(full);
         s.placeHold(hold('rA'));
         purgeEverything(s);
         expect(state(s, 'rA')).toEqual(full);
-        expect(state(s, 'rB')).toEqual({ report: false, decision: false, sanctionRows: 0, notice: false, appeal: false, read: false, outcome: false, action: false, audit: 0 });
+        expect(state(s, 'rB')).toEqual({ report: false, decision: false, sanctionRows: 0, notice: false, appeal: false, overturn: false, read: false, outcome: false, action: false, audit: 0 });
       });
 
       it('the held rows keep their text: the excerpt lines of another player, the notice line, the appeal statement, the example, the undo note', async () => {
@@ -317,7 +321,7 @@ export function legalContract(name: string, make: () => Store): void {
         expect(state(s, 'rA').report).toBe(true);
         s.releaseHold('rA', 'owner_a', NOW);
         purgeEverything(s);
-        expect(state(s, 'rA')).toEqual({ report: false, decision: false, sanctionRows: 0, notice: false, appeal: false, read: false, outcome: false, action: false, audit: 0 });
+        expect(state(s, 'rA')).toEqual({ report: false, decision: false, sanctionRows: 0, notice: false, appeal: false, overturn: false, read: false, outcome: false, action: false, audit: 0 });
       });
 
       it('a hold protects only its own report: another report of the same person goes', async () => {
@@ -351,7 +355,7 @@ export function legalContract(name: string, make: () => Store): void {
         s.placeHold(hold('rA'));
         const counts = s.eraseSubjects(plan());
         expect(counts.kept.heldReports).toBe(1);
-        expect(state(s, 'rA')).toEqual({ report: true, decision: true, sanctionRows: 2, notice: true, appeal: true, read: true, outcome: true, action: true, audit: 2 });
+        expect(state(s, 'rA')).toEqual({ report: true, decision: true, sanctionRows: 2, notice: true, appeal: true, overturn: true, read: true, outcome: true, action: true, audit: 2 });
         expect(s.loadReport('rA')?.excerpt.map((l) => l.raw)).toEqual(['tarvo reporter line', 'zorbak target line']);
       });
 

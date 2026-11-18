@@ -315,7 +315,9 @@ class MemoryAppeals extends MemoryStore {
 
   purgeOverturns(before: number): number {
     const s = this.appealState();
-    const gone = [...s.overturns.values()].filter((r) => r.at < before);
+    // A group decided from a report under an open legal hold keeps its overturn, as it keeps its appeal.
+    const heldGroups = this.heldGroupIds();
+    const gone = [...s.overturns.values()].filter((r) => r.at < before && !heldGroups.has(r.groupId));
     if (gone.length === 0) return 0;
     this.dropOverturns(s, gone);
     this.bump();

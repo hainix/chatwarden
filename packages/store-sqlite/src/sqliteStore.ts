@@ -245,8 +245,8 @@ export const OVERTURN_TERM_COUNTS_SQL =
 /** Overturned groups per filter key since a time. Binds: since. */
 export const OVERTURN_FILTER_COUNTS_SQL =
   'SELECT filter_key, COUNT(*) AS n FROM kit_overturns WHERE filter_key IS NOT NULL AND at >= ? GROUP BY filter_key ORDER BY filter_key';
-/** Delete overturn rows before a time. Binds: before. */
-export const OVERTURN_PURGE_SQL = 'DELETE FROM kit_overturns WHERE at < ?';
+/** Delete overturn rows before a time, except those of a sanction group decided from a report under an open legal hold (a hold keeps the overturn with the group). Binds: before. */
+export const OVERTURN_PURGE_SQL = `DELETE FROM kit_overturns WHERE at < ? AND group_id NOT IN ${HELD_GROUP_IDS}`;
 /** Set aside the strikes of `n` subject ids in a window (inclusive). Binds: the ids, then from, then to. */
 export const overturnStrikesSql = (n: number): string =>
   `UPDATE kit_strikes SET overturned = 1 WHERE subject_id IN (${Array.from({ length: n }, () => '?').join(', ')}) AND at >= ? AND at <= ?`;

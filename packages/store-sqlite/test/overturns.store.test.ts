@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { OverturnInput, SanctionRow, StoredReport } from '@chatwarden/core';
 import { openStore } from '../src/index.js';
-import { latestAutoChatStartSql, OVERTURN_FILTER_COUNTS_SQL, OVERTURN_TERM_COUNTS_SQL } from '../src/sqliteStore.js';
+import { latestAutoChatStartSql, OVERTURN_FILTER_COUNTS_SQL, OVERTURN_PURGE_SQL, OVERTURN_TERM_COUNTS_SQL } from '../src/sqliteStore.js';
 import { seedWorld } from '../../../test/contract/privacy.contract.js';
 
 // What only the SQLite store can show about the overturn methods: the raw rows, the query plans, the chunked list and the erase's unlink of report ids.
@@ -196,7 +196,19 @@ describe('the erase on SQLite', () => {
 describe('purgeOverturns on SQLite', () => {
   it('the retention delete is answered through the time index', () => {
     const { db } = open();
-    const plan = db.prepare('EXPLAIN QUERY PLAN DELETE FROM kit_overturns WHERE at < ?').all(1).map((r) => String(r.detail)).join(' | ');
+    // The exported statement itself, with the hold filter: it must still start from the time index.
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${OVERTURN_PURGE_SQL}`).all(1).map((r) => String(r.detail)).join(' | ');
     expect(plan).toContain('kit_overturns_by_at');
+    expect(OVERTURN_PURGE_SQL).toContain('NOT IN (SELECT group_id FROM kit_sanctions');
+  });
+
+  it('keeps the overturn row of a held group in the table itself, and deletes the rest', () => {
+    const { db, store } = open();
+    store.insertSanctionGroup([sanction('gh', 'M-HHHHH', { reportId: 'rh' }), sanction('gu', 'M-UUUUU', { reportId: 'ru' })]);
+    store.recordOverturn?.(input({ groupId: 'gh', reportId: null, termId: 'th', strikes: null, at: NOW }));
+    store.recordOverturn?.(input({ groupId: 'gu', reportId: null, termId: 'tu', strikes: null, at: NOW }));
+    store.placeHold({ reportId: 'rh', code: 'legal_proceeding', heldBy: 'senior_a', heldAt: NOW, releasedBy: null, releasedAt: null });
+    expect(store.purgeOverturns?.(NOW + DAY)).toBe(1);
+    expect(db.prepare('SELECT group_id FROM kit_overturns').all()).toEqual([{ group_id: 'gh' }]);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { OverturnInput, SanctionRow, Store, StoredReport, StrikeRow } from '@chatwarden/core';
+import type { HoldRow, OverturnInput, SanctionRow, Store, StoredReport, StrikeRow } from '@chatwarden/core';
 
 // The contract of the optional overturn methods of the Store (0.2.1, appeals landing): `recordOverturn`, `latestAutoChatStart`, `overturnedTermCounts`,
 // `overturnedFilterCounts` and `purgeOverturns`, plus the three reads they change (`loadStrikes`, `loadAutoChatStarts`, `reporterOutcomes`). One suite, run
@@ -358,6 +358,90 @@ export function overturnsContract(name: string, make: () => Store): void {
         s.recordOverturn(input({ groupId: 'p1', at: NOW, strikes: null }));
         s.purgeOverturns(NOW + 1);
         expect(s.recordOverturn(input({ groupId: 'p1', at: NOW + 5, strikes: null }))).toBe(true);
+      });
+
+      describe('and a legal hold (R3 important 2: the overturn is kept with the hold, as the docs say)', () => {
+        const hold = (reportId: string, over: Partial<HoldRow> = {}): HoldRow => ({ reportId, code: 'legal_proceeding', heldBy: 'senior_a', heldAt: NOW - DAY, releasedBy: null, releasedAt: null, ...over });
+        /** A sanction group decided from report `reportId`, overturned at `at` with the term `termId` (the overturn row names the report too, unless `linked` is false). */
+        const overturned = (s: Overturns & Store, groupId: string, reportId: string | null, at: number, termId: string, linked = true): void => {
+          s.insertSanctionGroup([sanction({ groupId, refCode: `M-${groupId.toUpperCase().padEnd(5, 'X').slice(0, 5)}`, reportId })]);
+          expect(s.recordOverturn(input({ groupId, at, termId, reportId: linked ? reportId : null, strikes: null }))).toBe(true);
+        };
+        const terms = (s: Overturns & Store) => s.overturnedTermCounts(0).map((c) => c.termId);
+
+        it('keeps the overturn of a group decided from a held report and purges the others', () => {
+          const s = store();
+          decided(s, 'rh');
+          decided(s, 'ru');
+          overturned(s, 'gh', 'rh', NOW, 'th');
+          overturned(s, 'gu', 'ru', NOW, 'tu');
+          overturned(s, 'gn', null, NOW, 'tn'); // a group with no report at all
+          s.placeHold(hold('rh'));
+          expect(s.purgeOverturns(NOW + 1)).toBe(2);
+          expect(terms(s)).toEqual(['th']);
+        });
+
+        it('the group decides, not the overturn row: a held group stays even when the row names no report', () => {
+          const s = store();
+          decided(s, 'rh');
+          overturned(s, 'gh', 'rh', NOW, 'th', false);
+          s.placeHold(hold('rh'));
+          expect(s.purgeOverturns(NOW + 1)).toBe(0);
+          expect(terms(s)).toEqual(['th']);
+        });
+
+        it('an address row of the held group counts too', () => {
+          const s = store();
+          decided(s, 'rh');
+          s.insertSanctionGroup([sanction({ groupId: 'gh', refCode: 'M-HHHHH', reportId: 'rh' }), sanction({ groupId: 'gh', refCode: 'M-HHHHH', targetType: 'ip', value: 'iphash-h', reportId: 'rh' })]);
+          s.recordOverturn(input({ groupId: 'gh', at: NOW, termId: 'th', reportId: 'rh', strikes: null }));
+          s.placeHold(hold('rh'));
+          expect(s.purgeOverturns(NOW + 1)).toBe(0);
+        });
+
+        it('released: the next purge removes it; held again: it is kept again', () => {
+          const s = store();
+          decided(s, 'rh');
+          overturned(s, 'gh', 'rh', NOW, 'th');
+          s.placeHold(hold('rh'));
+          expect(s.purgeOverturns(NOW + 1)).toBe(0);
+          expect(s.releaseHold('rh', 'owner_a', NOW + 2)).toBe(true);
+          s.placeHold(hold('rh', { heldAt: NOW + 3 }));
+          expect(s.purgeOverturns(NOW + 1)).toBe(0);
+          expect(terms(s)).toEqual(['th']);
+          s.releaseHold('rh', 'owner_a', NOW + 4);
+          expect(s.purgeOverturns(NOW + 1)).toBe(1);
+          expect(terms(s)).toEqual([]);
+        });
+
+        it('a hold on another report keeps nothing of this group', () => {
+          const s = store();
+          decided(s, 'rh');
+          decided(s, 'ru');
+          overturned(s, 'gu', 'ru', NOW, 'tu');
+          s.placeHold(hold('rh'));
+          expect(s.purgeOverturns(NOW + 1)).toBe(1);
+        });
+
+        it('the change token moves only when a row went: a purge that finds only held rows changes nothing', () => {
+          const s = store();
+          decided(s, 'rh');
+          overturned(s, 'gh', 'rh', NOW, 'th');
+          s.placeHold(hold('rh'));
+          const t = s.changeToken();
+          expect(s.purgeOverturns(NOW + 1)).toBe(0);
+          expect(s.changeToken()).toBe(t);
+        });
+
+        it('a held overturn is still counted for the terms, the filters and the reporter, as it was', () => {
+          const s = store();
+          decided(s, 'rh');
+          overturned(s, 'gh', 'rh', NOW, 'th');
+          s.placeHold(hold('rh'));
+          s.purgeOverturns(NOW + 1000 * DAY);
+          expect(s.overturnedTermCounts(0)).toEqual([{ termId: 'th', overturned: 1, lastAt: NOW }]);
+          expect(outcome(s)?.overturned).toBe(1);
+        });
       });
     });
 
