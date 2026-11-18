@@ -33,13 +33,13 @@ player's language, with the link in them. Look the address up in your own accoun
 ```ts
 import type { NoticeDelivery } from '@chatwarden/core';
 export async function deliver(d: NoticeDelivery): Promise<void> {
-  if (d.sanction.automated && d.sanction.until !== null && d.sanction.until - Date.now() < 3_600_000) return;
+  if (d.kind === 'sanction' && d.sanction.automated && d.sanction.until !== null && d.sanction.until - Date.now() < 3_600_000) return;
   const to = await emailOf(d.to.accountId);
   if (to !== null) await sendMail({ to, subject: d.subject, text: d.text, html: d.html });
 }
 ```
 
-`emailOf` is yours, and so is `sendMail({ to, subject, text, html })`. The example skips a short automatic restriction (`d.sanction.automated`, `d.sanction.until`): an hour-long timeout does not need an email, and you decide where that line is.
+`emailOf` is yours, and so is `sendMail({ to, subject, text, html })`. The example skips the first email for a short automatic restriction (`d.kind === 'sanction'`, `d.sanction.automated`, `d.sanction.until`): an hour-long timeout does not need an email, and you decide where that line is. An outcome is always sent: for `appeal_outcome` the `sanction` is the original one, and a player who was told "we will email you when it is decided" (`appeals.emailsOutcome`) must get that email.
 Never log `d`: it holds the link, and the link is a capability. The hook is not awaited and a throw is logged by class only, so it never holds up or fails a sanction. `d.noticeId` is the stable key for dedupe and for a retry of your own. The kit calls the hook once per
 notice and has no retry or queue of its own: a hook that fails, or a process that stops before it runs, loses that call. So make the hook durable on your side (put the mail in your own queue) and let the player ask again from the game.
 
@@ -60,7 +60,7 @@ write your own, hold to them.
 ## The link is a capability
 
 The link is a capability for one sanction: anyone who holds it can read that one sanction and file one appeal. It is not a login, it names no account, and it opens nothing else. It stops working when it expires
-(`appeals.linkTtlMs`), when the sanction ends, or when the appeal is closed. Treat it like a password reset link:
+(`appeals.linkTtlMs`), when the sanction ends, or when the appeal is moot (the sanction is gone or was replaced). A decided appeal's link keeps showing the outcome until it expires. Treat it like a password reset link:
 
 - **Keep query strings out of your access logs,** and out of the click-tracking of your mail service: the token is in the query string (`?t=`). The served page sends no referrer, and sets `cache-control: no-store`, but a proxy that logs full URLs keeps the token.
 - Never post it in a public channel, a ticket that many people read or an analytics event.

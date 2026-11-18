@@ -278,9 +278,12 @@ export function AppealPage(props: AppealPageProps) {
         </>
       )}
       {view.kind === 'failed' && (
-        <p role="alert" className="cw-error">
-          {t(view.busy ? 'player.appealPage.refused.busy' : 'player.appealPage.refused.failed')}
-        </p>
+        <>
+          <p role="alert" className="cw-error">
+            {t(view.busy ? 'player.appealPage.refused.busy' : 'player.appealPage.refused.failed')}
+          </p>
+          {contactLine(contact)}
+        </>
       )}
       {view.kind === 'case' && caseBody(view.case)}
     </Root>

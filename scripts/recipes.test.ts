@@ -413,6 +413,22 @@ describe('docs/recipes: appeal-emails (0.2.1)', () => {
     expect(guide).toMatch(/until it restarts/);
   });
 
+  it('the hook example never skips the outcome email: only a short automatic restriction (kind sanction) is skipped, and the page says an outcome is always sent (R3 minor 2)', () => {
+    const code = tsBlocks();
+    const skip = code.split('\n').find((l) => l.includes('d.sanction.automated'));
+    expect(skip).toBeDefined();
+    expect(skip).toContain("d.kind === 'sanction'");
+    expect(skip).toMatch(/return;/);
+    expect(guide).toMatch(/an outcome (email )?is always sent/i);
+    expect(guide).toContain('`appeal_outcome`');
+  });
+
+  it('says the link stops working when the appeal is moot, not "closed", and that a decided appeal shows the outcome until the link expires (R3 minor 3)', () => {
+    expect(guide).not.toMatch(/when the appeal is closed/);
+    expect(guide).toMatch(/when the appeal is moot/);
+    expect(guide).toMatch(/the link of a decided appeal still shows the outcome until it expires/);
+  });
+
   it('says the Spanish and Portuguese words are machine drafts that a person has not read', () => {
     expect(guide).toMatch(/Spanish and Portuguese are machine-drafted/);
     expect(guide).toMatch(/not been reviewed by a person/);

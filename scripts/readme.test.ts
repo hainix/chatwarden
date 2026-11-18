@@ -1503,6 +1503,12 @@ describe('the appeals landing docs (0.2.1)', () => {
     ]);
   });
 
+  it('core: says once that landingOrigins is an option of createChatwarden, not a profile key (R3 minor 3)', () => {
+    const text = part(readme('core'), '## Appeal links, delivery and feedback (0.2.1)').replace(/\s+/g, ' ');
+    expect(text).not.toMatch(/`appeals\.landingOrigins` is the origin list above/);
+    expect(text).toMatch(/the `landingOrigins` option of `createChatwarden`'s `appeals`.{0,80}not a profile key/);
+  });
+
   it('core: has the table of the nine fixed reasons by outcome, with every code', async () => {
     const { APPEAL_REASONS } = await import('@chatwarden/core');
     const text = part(readme('core'), '## Appeal links, delivery and feedback (0.2.1)');

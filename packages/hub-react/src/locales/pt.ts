@@ -1414,7 +1414,7 @@ export const pt = {
   'hub.appeals.fail.alreadyDecided': 'Outra pessoa j\u00e1 decidiu esta apela\u00e7\u00e3o.',
   'hub.appeals.fail.gone': 'A san\u00e7\u00e3o n\u00e3o existe mais, ent\u00e3o esta apela\u00e7\u00e3o est\u00e1 encerrada.',
   'hub.appeals.fail.invalid': 'O servidor n\u00e3o p\u00f4de usar isso. Confira o motivo e tente de novo.',
-  'hub.appeals.fail.reason': 'Esse motivo não combina com esta decisão. Escolha um dos motivos da lista.',
+  'hub.appeals.fail.reason': 'Esse motivo n\u00e3o combina com esta decis\u00e3o. Escolha um dos motivos da lista.',
   'hub.appeals.reasonCode.legend': 'O motivo mostrado \u00e0 pessoa',
   'hub.appeals.reasonCode.uphold.rule_applies': 'A regra se aplica ao que foi dito.',
   'hub.appeals.reasonCode.uphold.evidence_clear': 'O registro do chat mostra que a regra foi violada.',

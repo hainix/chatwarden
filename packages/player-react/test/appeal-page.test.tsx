@@ -281,6 +281,33 @@ describe('loading and failing to load', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
   });
+
+  it.each(['en', 'es', 'pt'])('%s: after a failed load the game\'s contact line is under the alert, as on the served busy page (R3 minor 6)', async (locale) => {
+    const { words, locale: chosen } = noticeWordsFor(locale);
+    for (const error of [new PlayerError({ status: 500, code: 'http_500', message: 'x' }), new PlayerError({ status: 0, code: 'network', message: 'x' }), new PlayerError({ status: 429, code: 'rate_limited', message: 'x', retryAfter: 5 })]) {
+      const spy = fake(() => Promise.reject(error));
+      const view = render(<AppealPage {...props(spy, { locale, contact: 'help@game.example' })} />);
+      const alert = await screen.findByRole('alert');
+      const line = (words['player.appealPage.contact'] as string).replace('{contact}', 'help@game.example');
+      expect(view.container.textContent, `${error.status}`).toContain(line);
+      expect(alert.nextElementSibling?.textContent).toBe(line);
+      expect(screen.queryByRole('textbox')).toBeNull();
+      if (error.status === 429) expect(blocks(view.container)).toEqual(servedBlocks({ state: 'busy', locale: chosen, words, contact: 'help@game.example' }));
+      view.unmount();
+    }
+  });
+
+  it('a failed load with no contact shows the alert alone, and a contact with markup is text', async () => {
+    const spy = fake(() => Promise.reject(new PlayerError({ status: 500, code: 'http_500', message: 'x' })));
+    const bare = render(<AppealPage {...props(spy)} />);
+    const alert = await screen.findByRole('alert');
+    expect(alert.nextElementSibling).toBeNull();
+    bare.unmount();
+    const hostile = render(<AppealPage {...props(spy, { contact: '<img src=x onerror=alert(1)>' })} />);
+    await screen.findByRole('alert');
+    expect(hostile.container.querySelector('img')).toBeNull();
+    expect(hostile.container.textContent).toContain('<img src=x onerror=alert(1)>');
+  });
 });
 
 describe('focus', () => {
