@@ -1299,7 +1299,8 @@ describe('DecisionPanel: a late preview announcement never replaces the decided 
     await reason(user);
     await user.click(decideButton());
     await user.click(within(panel()).getByRole('button', { name: 'Undo' }));
+    // A note sends the player nothing, so its sentence is "nothing is sent": different from every sentence said before (those name what the player sees), whatever the timing.
     await pick(user, within(group).getByLabelText('What happens'), /^Note/);
-    await waitFor(() => expect(live()).toHaveTextContent(/Preview updated: they see /), { timeout: lateMs + 2000 });
+    await waitFor(() => expect(live()).toHaveTextContent('Preview updated: nothing is sent.'), { timeout: lateMs + 2000 });
   });
 });
