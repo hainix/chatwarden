@@ -260,7 +260,7 @@ describe('an appeal outcome', () => {
     // the link is the decided view of the withdrawn notice
     expect(d.appealUrl).not.toBeNull();
     const shown = k.cw.appeals.caseByLink(tokenOf(d.appealUrl));
-    expect(shown).toMatchObject({ ok: true, case: { canAppeal: false, standing: null, appeal: { status: 'revoked', reason: 'mistake' } } });
+    expect(shown).toMatchObject({ ok: true, case: { canAppeal: false, standing: { kind: 'chat', state: 'lifted' }, appeal: { status: 'revoked', reason: 'mistake' } } });
   });
 
   it('revoked with no landing page: the link is null and the text has no link', async () => {
