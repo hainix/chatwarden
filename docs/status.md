@@ -4,7 +4,7 @@ Updated 2026-11-18. The full roadmap and the reasoning behind it: [design/2026-1
 
 ## 0.2.1: published (2026-11-18, all ten packages on npm, tag `v0.2.1`, PR #42)
 
-A patch release, additive: nothing in it breaks a 0.2.0 input. Appeal links, a landing page, delivery and feedback. Not tagged, not published; the owner's steps are in [RELEASING.md](../RELEASING.md).
+A patch release, additive: nothing in it breaks a 0.2.0 input. Appeal links, a landing page, delivery and feedback. Published from tag `v0.2.1` through npm trusted publishing; chatwarden.dev is redeployed.
 
 - **What 0.2.1 is.** A sanction notice can carry a signed appeal link; the kit serves a page for it (`GET /appeal`, `/appeal/case`; `@chatwarden/player-react/appeal` has the same page as `AppealPage`) where the player reads what happened and files one appeal, with no sign-in. A delivery hook (`notices.deliver`, or the signed delivery webhook of `chatwarden serve`) hands the notice and the outcome to the game's own mail system; the kit never sends email. A moderator picks one of nine fixed reasons, and an overturned appeal sets the strikes aside and flags the term, filter and reporter numbers. The recipe is [recipes/appeal-emails.md](recipes/appeal-emails.md) (`docs/recipes/appeal-emails.md`).
 - **Additive.** Every new setting is off or unset by default and every new `Store` method is optional. SQLite migration 27 (one-way: back up the database file) is the one migration of the release. The few new required members are on types the kit produces; the changelog names them.

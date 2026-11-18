@@ -1718,8 +1718,8 @@ describe('docs/status.md and the follow-ups after the 0.2.1 build', () => {
   const head = status.slice(0, status.indexOf('## 0.2.0: published'));
   const followUps = flat(read('docs', 'plans', 'follow-ups.md'));
 
-  it('status.md has a 0.2.1 section above 0.2.0 that says built, not yet published, additive, migration 27 and the floors', () => {
-    expect(status).toMatch(/## 0\.2\.1: built on branch `appeals-landing`, not yet published/);
+  it('status.md has a 0.2.1 section above 0.2.0 that says published, additive, migration 27 and the floors', () => {
+    expect(status).toMatch(/## 0\.2\.1: published \(2026-11-18, all ten packages on npm, tag `v0\.2\.1`/);
     expect(status.indexOf('## 0.2.1')).toBeLessThan(status.indexOf('## 0.2.0: published'));
     for (const needle of ['additive', 'migration 27 (one-way', '`^0.2.1`', '`^0.2.0`', 'patch', 'docs/recipes/appeal-emails.md']) expect(head, needle).toContain(needle);
   });
