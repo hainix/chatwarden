@@ -192,8 +192,8 @@ describe('POST /setup/apply', () => {
     const body = res.body as ApplyBody;
     expect(Object.keys(body).sort()).toEqual(['base', 'canSave', 'changed', 'effective', 'layer', 'limits', 'ok', 'promptExcluded', 'version']);
     expect(body.ok).toBe(true);
-    // the ladder is shared by the three presets: stored, but not listed
-    expect(body.changed).toEqual(['firstOffense', 'repeat', 'guidelines', 'aiContext']);
+    // every section the apply stored on a fresh kit (the ladder too: it is stored whole although the presets share it)
+    expect(body.changed).toEqual(['ladder', 'firstOffense', 'repeat', 'guidelines', 'aiContext']);
     expect(body.version).toBe(1);
     expect(body.canSave).toBe(true);
     for (const k of ['ladder', 'firstOffense', 'repeat', 'guidelines', 'aiContext'] as const) expect(body.effective[k], k).toEqual(json(PRESETS.strict[k]));
@@ -207,7 +207,7 @@ describe('POST /setup/apply', () => {
         actor: 'owner_ann',
         role: 'owner',
         action: 'policy.update',
-        detail: { sections: ['firstOffense', 'repeat', 'guidelines', 'aiContext'], reason: 'Applied the recommended principles for kids games' },
+        detail: { sections: ['ladder', 'firstOffense', 'repeat', 'guidelines', 'aiContext'], reason: 'Applied the recommended principles for kids games' },
       },
     ]);
     // the state the answer carries is what GET /policy/profile says now
@@ -240,7 +240,7 @@ describe('POST /setup/apply', () => {
     const w = await world();
     const res = await apply(w, { game: 'creator', version: 0 });
     expect((res.body as ApplyBody).effective.teamNotes.map((n) => n.text)).toEqual(['Protect the creator and their guests from targeted abuse']);
-    expect((res.body as ApplyBody).changed).toEqual(['teamNotes']);
+    expect((res.body as ApplyBody).changed).toEqual(['ladder', 'firstOffense', 'repeat', 'guidelines', 'teamNotes', 'aiContext']);
     const policy = (await w.call('GET', '/policy', OWNER)).body as { documents: { moderatorGuide: string }; profile: { teamNotes: Array<{ text: string }> } };
     expect(policy.documents.moderatorGuide).toContain('Team notes');
     expect(policy.documents.moderatorGuide).toContain('Protect the creator and their guests from targeted abuse');
@@ -265,6 +265,24 @@ describe('POST /setup/apply', () => {
     expect(body.layer.reporting).toEqual(before);
     expect(body.changed).not.toContain('reporting');
     expect(body.effective.guidelines).toEqual(json(PRESETS.strict.guidelines));
+  });
+
+  it('a customised ladder that the apply resets is in changed and in the policy.update audit row; a section it leaves alone is in neither', async () => {
+    const w = await world();
+    const ladder = json(PRESETS.standard.ladder);
+    ladder[0]!.lowMedium.label = 'Our own first step';
+    const put = await w.call('PUT', '/policy/profile', { ...OWNER, body: { layer: { ladder, pace: { slowModeMs: 2000 } }, version: 0, reason: 'seed' } });
+    expect(put.status).toBe(200);
+    const res = await apply(w, { game: 'kids', version: 1 });
+    expect(res.status).toBe(200);
+    const body = res.body as ApplyBody;
+    expect(body.changed).toEqual(['ladder', 'firstOffense', 'repeat', 'guidelines', 'aiContext']);
+    expect(body.changed).not.toContain('pace');
+    expect(body.effective.ladder).toEqual(json(PRESETS.strict.ladder));
+    // two rows share the clock tick, so pick the apply row by its reason, not by position
+    const last = rows(w).find((r) => (r.detail as { reason: string }).reason !== 'seed')!;
+    expect(rows(w)).toHaveLength(2);
+    expect(last.detail).toEqual({ sections: ['ladder', 'firstOffense', 'repeat', 'guidelines', 'aiContext'], reason: 'Applied the recommended principles for kids games' });
   });
 
   it('after apply the first-run state is show false', async () => {

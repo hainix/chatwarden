@@ -188,57 +188,84 @@ describe('cw.policy.setup and dismissSetup', () => {
 });
 
 describe('cw.policy.applyRecommendation', () => {
-  const differing = (game: GameKind): string[] => {
-    const layer = recommendFor(game).layer as Record<string, unknown>;
-    const base = PRESETS.standard as unknown as Record<string, unknown>;
-    return POLICY_SECTIONS.filter((s) => Object.hasOwn(layer, s) && JSON.stringify(layer[s]) !== JSON.stringify(base[s]));
+  /** What the ruling says `changed` is: the sections whose stored value differs from the previous layer (absent on one side counts as different). */
+  const storedDiff = (before: Record<string, unknown>, after: Record<string, unknown>): string[] =>
+    POLICY_SECTIONS.filter((s) => Object.hasOwn(before, s) !== Object.hasOwn(after, s) || (Object.hasOwn(before, s) && JSON.stringify(before[s]) !== JSON.stringify(after[s])));
+  const layerOf = (cw: Kit): Record<string, unknown> => JSON.parse(JSON.stringify(cw.policy.get().layer)) as Record<string, unknown>;
+  const customLadder = (): PolicyLayer['ladder'] => {
+    const ladder = JSON.parse(JSON.stringify(PRESETS.standard.ladder)) as NonNullable<PolicyLayer['ladder']>;
+    ladder[0]!.lowMedium.label = 'Our own first step';
+    return ladder;
   };
 
-  it("applyRecommendation('kids', ctx) bumps the version once and answers ok with only the sections that differ from the base, in POLICY_SECTIONS order", async () => {
+  it("applyRecommendation('kids', ctx) on a fresh kit bumps the version once and lists every section it stored, in POLICY_SECTIONS order", async () => {
     const { cw } = await kit();
     const res = cw.policy.applyRecommendation('kids', ctxOf(cw));
-    // the ladder is shared by the three presets: it is stored, but it equals the base, so it is not listed
-    expect(res).toEqual({ ok: true, version: 1, changed: ['firstOffense', 'repeat', 'guidelines', 'aiContext'] });
+    expect(res).toEqual({ ok: true, version: 1, changed: ['ladder', 'firstOffense', 'repeat', 'guidelines', 'aiContext'] });
     expect(version(cw)).toBe(1);
-    expect(differing('kids')).not.toContain('ladder');
-    expect((res as { changed: string[] }).changed).toEqual(differing('kids'));
   });
 
-  it('changed lists exactly the sections whose value differs from the base, for every game over every base', async () => {
+  it('changed is the sections whose stored value differs from the previous layer, for every game over every base and over a customised layer', async () => {
     for (const game of GAME_KINDS) {
       for (const profile of ['relaxed', 'standard', 'strict'] as const) {
-        const { cw } = await kit({ profile });
-        const res = cw.policy.applyRecommendation(game, ctxOf(cw));
-        const base = PRESETS[profile] as unknown as Record<string, unknown>;
-        const eff = cw.policy.get().effective as unknown as Record<string, unknown>;
-        const want = POLICY_SECTIONS.filter((s) => JSON.stringify(eff[s]) !== JSON.stringify(base[s]));
-        expect((res as { changed: string[] }).changed, `${game} over ${profile}`).toEqual(want);
+        for (const seed of [false, true]) {
+          const { cw } = await kit({ profile });
+          if (seed) expect(cw.policy.save({ ladder: customLadder(), pace: { slowModeMs: 2000 }, aiContext: 'Our own standard.' }, { version: 0, ...BY })).toMatchObject({ ok: true });
+          const before = layerOf(cw);
+          const res = cw.policy.applyRecommendation(game, ctxOf(cw));
+          expect(res.ok, `${game} over ${profile}`).toBe(true);
+          expect((res as { changed: string[] }).changed, `${game} over ${profile} seed ${String(seed)}`).toEqual(storedDiff(before, layerOf(cw)));
+        }
       }
     }
   });
 
-  it('applying the recommendation that equals the base lists nothing (kids over strict, social over standard) yet stores it and bumps the version', async () => {
-    const strict = await kit({ profile: 'strict' });
-    expect(strict.cw.policy.applyRecommendation('kids', ctxOf(strict.cw))).toEqual({ ok: true, version: 1, changed: [] });
-    expect(strict.cw.policy.setup().show).toBe(false);
-    expect(Object.keys(strict.cw.policy.get().layer).sort()).toEqual(['aiContext', 'firstOffense', 'guidelines', 'ladder', 'repeat']);
-    const standard = await kit();
-    expect(standard.cw.policy.applyRecommendation('social', ctxOf(standard.cw))).toEqual({ ok: true, version: 1, changed: [] });
-  });
-
-  it('creator lists teamNotes (the base has none) and a second apply lists nothing', async () => {
+  it('a customised ladder that the apply resets is listed; a customised pace that it leaves alone is not', async () => {
     const { cw } = await kit();
-    expect(cw.policy.applyRecommendation('creator', ctxOf(cw))).toEqual({ ok: true, version: 1, changed: ['teamNotes'] });
-    expect(cw.policy.applyRecommendation('creator', ctxOf(cw))).toEqual({ ok: true, version: 2, changed: [] });
+    cw.policy.save({ ladder: customLadder(), pace: { slowModeMs: 2000 } }, { version: 0, ...BY });
+    const res = cw.policy.applyRecommendation('kids', ctxOf(cw));
+    expect(res).toEqual({ ok: true, version: 2, changed: ['ladder', 'firstOffense', 'repeat', 'guidelines', 'aiContext'] });
+    expect((res as { changed: string[] }).changed).not.toContain('pace');
+    expect(cw.policy.get().effective.ladder).toEqual(PRESETS.strict.ladder);
   });
 
-  it('a section the owner had changed and the recommendation sets back to the base is not listed; a section the apply leaves alone is not either', async () => {
+  it('a customised standard (aiContext) that the apply replaces is listed', async () => {
+    const { cw } = await kit();
+    cw.policy.save({ aiContext: 'Our own standard.' }, { version: 0, ...BY });
+    const res = cw.policy.applyRecommendation('social', ctxOf(cw));
+    expect((res as { changed: string[] }).changed).toContain('aiContext');
+  });
+
+  it('a section already stored equal to the recommendation is not listed (the ladder saved equal to the kids ladder)', async () => {
     const { cw } = await kit();
     cw.policy.save({ pace: { slowModeMs: 2000 }, ladder: recommendFor('kids').layer.ladder }, { version: 0, ...BY });
     const res = cw.policy.applyRecommendation('kids', ctxOf(cw));
     expect(res).toMatchObject({ ok: true });
-    expect((res as { changed: string[] }).changed).not.toContain('pace');
     expect((res as { changed: string[] }).changed).not.toContain('ladder');
+    expect((res as { changed: string[] }).changed).not.toContain('pace');
+  });
+
+  it('the first apply of the recommendation that equals the base lists what it stored; applying the same one again lists nothing but still bumps the version', async () => {
+    const strict = await kit({ profile: 'strict' });
+    expect(strict.cw.policy.applyRecommendation('kids', ctxOf(strict.cw))).toEqual({ ok: true, version: 1, changed: ['ladder', 'firstOffense', 'repeat', 'guidelines', 'aiContext'] });
+    expect(strict.cw.policy.setup().show).toBe(false);
+    expect(Object.keys(strict.cw.policy.get().layer).sort()).toEqual(['aiContext', 'firstOffense', 'guidelines', 'ladder', 'repeat']);
+    expect(strict.cw.policy.applyRecommendation('kids', ctxOf(strict.cw))).toEqual({ ok: true, version: 2, changed: [] });
+  });
+
+  it('creator lists teamNotes with the rest, and a second apply lists nothing', async () => {
+    const { cw } = await kit();
+    expect(cw.policy.applyRecommendation('creator', ctxOf(cw))).toEqual({ ok: true, version: 1, changed: ['ladder', 'firstOffense', 'repeat', 'guidelines', 'teamNotes', 'aiContext'] });
+    expect(cw.policy.applyRecommendation('creator', ctxOf(cw))).toEqual({ ok: true, version: 2, changed: [] });
+  });
+
+  it('a different game after the first lists the sections that differ between the two recommendations', async () => {
+    const { cw } = await kit();
+    cw.policy.applyRecommendation('competitive', ctxOf(cw));
+    const before = layerOf(cw);
+    const res = cw.policy.applyRecommendation('kids', ctxOf(cw));
+    expect((res as { changed: string[] }).changed).toEqual(storedDiff(before, layerOf(cw)));
+    expect((res as { changed: string[] }).changed).toEqual(expect.arrayContaining(['guidelines', 'aiContext']));
   });
 
   it("afterwards the guide's first-offence table and ladder table are the strict preset's and cw.policy.setup().show is false", async () => {

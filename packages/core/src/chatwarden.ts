@@ -971,7 +971,7 @@ export interface Chatwarden {
     /**
      * Save the recommended starting point for a kind of game (`competitive`, `social`, `kids` or `creator`, see `recommendFor`) as one layer: the principles
      * (guidelines), first-offence table, repeat rule, ladder and AI standard replaced, other sections kept, and for `creator` one team note added. Checked and
-     * answered like `save` (`conflict`, `invalid` with a path, `unsupported`), but `changed` lists only the sections whose value differs from the base; an unknown game is `invalid` at path `game`.
+     * answered like `save` (`conflict`, `invalid` with a path, `unsupported`), but `changed` lists the sections whose stored value differs from the previous layer (a customised section the apply resets is listed); an unknown game is `invalid` at path `game`.
      */
     applyRecommendation(game: GameKind, ctx: PolicySaveContext): PolicySaveResult;
   };
