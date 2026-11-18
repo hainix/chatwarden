@@ -450,6 +450,26 @@ function swearingForPlayer(profile: ModerationProfile): string {
 }
 
 /**
+ * What the code of conduct says comes first, and next, for the rules about play and names: read from the profile, not fixed. The first step is what the profile does for a first
+ * offence that is not about chat (the `rude` outcome); a name that breaks the rules is at least a warning, so that is said when the first step is gentler. The next steps are the
+ * area ban only when one of these rules is an area rule of the profile.
+ */
+function playedSteps(profile: DocumentPolicy['profile'], numbers: readonly number[]): string {
+  const first = profile.firstOffense.rude;
+  let sentence: string;
+  if (first === 'warning') sentence = 'Usually a warning comes first.';
+  else if (first === 'note') sentence = 'Usually the first time is only noted for the moderators, and you are not sent a warning.';
+  else if (first === 'none') sentence = 'Usually the first time is not acted on.';
+  else sentence = 'Usually a restriction comes first.';
+  if (first !== 'warning' && numbers.includes(7)) sentence += ' A name that breaks the rules gets a warning.';
+  const area = profile.areaRules ?? DEFAULT_AREA_RULES;
+  const next = numbers.some((n) => area.includes(n))
+    ? 'If you carry on, the next steps are a ban from public rooms and matchmaking, then longer bans.'
+    : 'If you carry on, the steps get stricter.';
+  return `${sentence} ${next}`;
+}
+
+/**
  * The player-facing code of conduct, for a website or a rules page: the summary, the numbered Community Rules, what
  * happens in plain words, how to report, what a notice means and what to do about a mistake. It is written to
  * "you" and uses none of the moderators' internal terms; records are only ever "a private record".
@@ -488,7 +508,7 @@ export function codeOfConduct(policy: DocumentPolicy, options: CodeOfConductOpti
       { k: 'h', level: 3, text: 'Playing and names' },
       {
         k: 'p',
-        text: `${list} are about how you play and the name you choose, not about what you write in chat. They are judged on what happened. Usually a warning comes first. If you carry on, the next steps are a ban from public rooms and matchmaking, then longer bans.`,
+        text: `${list} are about how you play and the name you choose, not about what you write in chat. They are judged on what happened. ${playedSteps(profile, played.map((r) => r.number))}`,
       },
     );
   }

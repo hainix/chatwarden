@@ -183,7 +183,7 @@ export interface SuggestContext {
   /**
    * What the report is about (0.2.2): `chat`, `play` or `name`, from the report's reason. Absent (or anything else) falls back to the rule (CR 5 and 6 are `play`, CR 7 is `name`), else it
    * is chat as before. For `play` and `name` the words say gameplay conduct or an offensive name, a null level is not read as hostile, a chat restriction is never the step (a ban from public rooms
-   * instead), and a name with renames on is suggested a rename first.
+   * instead), and a name with renames on is told to ask for a new name first (in the sentence, not a field).
    */
   evidence?: EvidenceKind | null;
   /**
@@ -212,8 +212,6 @@ export interface Suggestion {
   why: string;
   /** Present only when a signal rule fired: the ids of the rules, and whether one of them raised the suggestion by a step. */
   signals?: { raised: boolean; ids: string[] };
-  /** Present (true) only for a name report with a clean record when the profile's `names.renames` is on: ask for a new name first (the outcome is the warning to fall back on). */
-  rename?: true;
 }
 
 function plural(n: number, unit: string): string {
@@ -395,7 +393,6 @@ export function suggest(
 
   let pick: Pick;
   let reason: string;
-  let asksRename = false;
   if (severe) {
     pick = stronger(first, cellPick(row.high));
     reason = `severe conduct is acted on at once, never below the first-offense outcome or the ladder step for the record: ${lowerFirst(pick.label ?? outcomeLabel(pick.outcome))}`;
@@ -415,10 +412,7 @@ export function suggest(
       reason = live.some((r) => r.kind === 'note')
         ? `the earlier notes do not yet add up to a repeat, so the ${nouns[effective]} ${verb}`
         : `first ${nouns[effective]} with a clean record ${verb}`;
-      if (offKind === 'name' && !severe && profile.names?.renames === true) {
-        reason += '; ask for a new name first';
-        asksRename = true;
-      }
+      if (offKind === 'name' && !severe && profile.names?.renames === true) reason += '; ask for a new name first';
     }
   }
 
@@ -455,8 +449,7 @@ export function suggest(
     }
   }
   const why = `${name} profile: ${reason}${areaNote}.${sentences.map((s) => ` ${s}`).join('')}`;
-  const base: Suggestion = hits.length === 0 || context.hideSignalText === true ? { outcome, label, why } : { outcome, label, why, signals: { raised, ids: hits.map((h) => h.id) } };
-  return asksRename ? { ...base, rename: true } : base;
+  return hits.length === 0 || context.hideSignalText === true ? { outcome, label, why } : { outcome, label, why, signals: { raised, ids: hits.map((h) => h.id) } };
 }
 
 /** The hits `suggest` will use: well-formed ones only (a string id and text, a known effect), at most 20. Never throws. */

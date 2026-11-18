@@ -249,9 +249,9 @@ export interface ChatwardenOptions {
    * Floors, checked at creation (and on every `purge(policy)`), each a `ProfileError` naming the field:
    * `sanctionAfterEndMs` and `noticesMs` at least 90 days (the ladder and "My record" reach back that far),
    * `auditMs` at least 90 days (default 365), `appealsMs` at least 90 days (default 365), `badFaithMs` at least
-   * `limits.reports.suspendWindowMs`. `appealStatementsMs` (default 90 days) and `blockedNamesMs` (default 30 days) may be 0. Every field
-   * `subjectsMs` (default 400 days, at least 90) is how long a person with no record anywhere keeps their identity rows (account id, key and address hashes) after they were last seen. Every field
-   * must be a finite number (Infinity and NaN are refused). Not enforced, but `strikesMs` should be at least
+   * `limits.reports.suspendWindowMs`. `appealStatementsMs` (default 90 days) and `blockedNamesMs` (default 30 days) may be 0. `subjectsMs`
+   * (default 400 days, at least 90) is how long a person with no record anywhere keeps their identity rows (account id, key and address hashes) after they were last seen.
+   * Every field must be a finite number (Infinity and NaN are refused). Not enforced, but `strikesMs` should be at least
    * `limits.strikes.windowMs`, or strikes are deleted before the window that counts them closes. When you leave
    * `badFaithMs` out it follows a longer suspension window.
    */

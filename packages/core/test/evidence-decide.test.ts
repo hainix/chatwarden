@@ -116,21 +116,18 @@ describe('the notice carries the decision kind', () => {
   });
 });
 
-describe('the server refuses chat lines for play and name (P4)', () => {
+describe('the server takes chat lines for play and name (P4, review R2 M1)', () => {
   it.each([
     ['afk', 6],
     ['griefing', 6],
     ['cheating', 5],
     ['name', 7],
-  ] as const)('a %s report refuses lineIds and writes nothing', async (reason, rule) => {
-    const store = new MemoryStore();
-    const f = await filed(reason, {}, store);
-    const before = JSON.stringify([store.rawNotices(), store.rawSanctions(), store.rawDecisions()]);
-    expect(await f.decide({ rule, lineIds: [f.own[0] as string] })).toEqual({ ok: false, error: 'invalid' });
-    expect(JSON.stringify([store.rawNotices(), store.rawSanctions(), store.rawDecisions()])).toBe(before);
-    expect(f.w.cw.reports.get(f.res.reportId)?.status).toBe('open');
-    // The same decision with no lines is taken.
-    expect((await f.decide({ rule })).ok).toBe(true);
+  ] as const)('a %s report takes lineIds: stored on the notice, the kind unchanged', async (reason, rule) => {
+    const f = await filed(reason);
+    expect((await f.decide({ rule, lineIds: [f.own[0] as string] })).ok).toBe(true);
+    const n = f.pending()[0];
+    expect(n?.excerpt).toHaveLength(1);
+    expect(n?.evidence).toBe(reason === 'name' ? 'name' : 'play');
   });
 
   it('an empty lineIds list is not a refusal', async () => {
@@ -138,9 +135,10 @@ describe('the server refuses chat lines for play and name (P4)', () => {
     expect((await f.decide({ lineIds: [] })).ok).toBe(true);
   });
 
-  it('the rule is a fallback for the refusal too: no reason and CR 7 refuses a line', async () => {
+  it('the rule is a fallback for the kind too: no reason and CR 7 takes a line and stays a name', async () => {
     const f = await filed(undefined);
-    expect(await f.decide({ rule: 7, lineIds: [f.own[0] as string] })).toEqual({ ok: false, error: 'invalid' });
+    expect((await f.decide({ rule: 7, lineIds: [f.own[0] as string] })).ok).toBe(true);
+    expect(f.pending()[0]?.evidence).toBe('name');
   });
 
   it('chat evidence still takes up to five of the target own lines, as before', async () => {
@@ -167,9 +165,10 @@ describe('a decision may override the kind', () => {
     expect((await f.decide({ evidenceKind: 'chat', lineIds: [f.own[0] as string] })).ok).toBe(true);
     expect(f.pending()[0]).toMatchObject({ evidence: 'chat' });
   });
-  it('name over a chat report: a line is refused', async () => {
+  it('name over a chat report: the line is taken and the kind is name', async () => {
     const f = await filed('harassment');
-    expect(await f.decide({ rule: 2, evidenceKind: 'name', lineIds: [f.own[0] as string] })).toEqual({ ok: false, error: 'invalid' });
+    expect((await f.decide({ rule: 2, evidenceKind: 'name', lineIds: [f.own[0] as string] })).ok).toBe(true);
+    expect(f.pending()[0]).toMatchObject({ evidence: 'name' });
   });
   it('null clears the kind to neutral', async () => {
     const f = await filed('afk');

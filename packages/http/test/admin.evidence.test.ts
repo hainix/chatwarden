@@ -126,10 +126,11 @@ describe('POST /reports/:id/decide takes the kind', () => {
     });
     return { out, w, who: { clientKey: `dk-t-${seq}` } };
   };
-  it('a line on an AFK report is refused, as the core refuses it, and nothing is written', async () => {
+  it('a line on an AFK report is taken (0.2.2 accepts what an older hub attached): stored, and the notice stays about play', async () => {
     const { out, w, who } = await decideAfk({});
-    expect(out.status).toBe(400);
-    expect(w.cw.notices.pending(who)).toEqual([]);
+    expect(out.status).toBe(200);
+    expect(w.cw.notices.pending(who)[0]).toMatchObject({ kind: 'warning', evidence: 'play' });
+    expect(w.cw.notices.pending(who)[0]?.excerpt).toHaveLength(1);
   });
   it('with evidenceKind chat the same decision is taken and the player is told it is about chat', async () => {
     const { out, w, who } = await decideAfk({ evidenceKind: 'chat' });

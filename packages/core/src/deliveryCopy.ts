@@ -4,6 +4,8 @@
 
 import type { AppealReasonCode } from './appeals.js';
 import { APPEAL_WORDS } from './appealWords.js';
+import { isEvidenceKind } from './evidenceKind.js';
+import type { EvidenceKind } from './evidenceKind.js';
 import { bodyKey, durationText, fillWords, isSanction, NOTICE_WORDS, titleKey, untilText, WARNING_DAYS } from './noticeCopy.js';
 import type { RuleRef } from './rules.js';
 import type { NoticeKind, SanctionKind } from './types.js';
@@ -14,8 +16,11 @@ export interface DeliveryContentInput {
   /** The language of the words (`en`, `es`, `pt` or a game's own): numbers, dates and the HTML `lang`. */
   locale: string;
   kind: 'sanction' | 'appeal_outcome';
-  /** The sanction notice (kind 'sanction'), or the appeal outcome notice (kind appeal_upheld | appeal_reduced | appeal_revoked). Only these fields are read: never a line of the player. */
-  notice: { kind: NoticeKind; rule: RuleRef | null; ruleLabel: string | null; until: number | null; refCode: string | null; createdAt: number };
+  /**
+   * The sanction notice (kind 'sanction'), or the appeal outcome notice (kind appeal_upheld | appeal_reduced | appeal_revoked). Only these fields are read: never a line of the player.
+   * `evidence` (0.2.2) is what the decision was about (`chat`, `play` or `name`): the body says it the way the notice does. Absent reads the neutral body.
+   */
+  notice: { kind: NoticeKind; rule: RuleRef | null; ruleLabel: string | null; until: number | null; refCode: string | null; createdAt: number; evidence?: EvidenceKind | undefined };
   outcome?: { status: 'upheld' | 'reduced' | 'revoked'; reason: AppealReasonCode };
   /** appeal_outcome: the sanction as it stands now (null when lifted). */
   standing?: { kind: SanctionKind; until: number | null } | null;
@@ -93,7 +98,9 @@ export function buildDeliveryContent(i: DeliveryContentInput): { subject: string
   }
 
   const title = word(titleKey(n.kind));
-  const body = word(bodyKey(n.kind));
+  // The variant written for the decision's kind; a catalog that predates it (a game's own translation) reads its own neutral body, never English mixed into its language.
+  const variant = bodyKey(n.kind, isEvidenceKind(n.evidence) ? n.evidence : undefined);
+  const body = Object.hasOwn(i.words, variant) ? word(variant) : word(bodyKey(n.kind));
   const hint = word(isOutcome ? 'delivery.outcomeHint' : 'delivery.appealHint');
   const linkText = word(isOutcome ? 'delivery.outcomeLink' : 'delivery.appealLink');
   const times = word('delivery.times');

@@ -84,33 +84,32 @@ describe('P12: the swap follows the evidence kind', () => {
 
 describe('P12: a name suggests a rename first', () => {
   const renames = resolveProfile('relaxed', { names: { renames: true } });
-  it('with renames on, a clean-record name is a warning with the rename flag and the words say so', () => {
+  it('with renames on, a clean-record name is a warning and the words say to ask for a new name first', () => {
     const s = suggest(renames, [], null, 7, NOW, { evidence: 'name' });
     expect(s.outcome).toBe('warning');
-    expect(s.rename).toBe(true);
+    expect(Object.hasOwn(s, 'rename')).toBe(false);
     expect(s.why).toMatch(/offensive name/);
     expect(s.why).toMatch(/new name/);
     expect(s.why).not.toMatch(CHATWORDS);
   });
-  it('with renames off there is no rename flag and the step is the warning', () => {
+  it('with renames off the step is the warning', () => {
     const s = suggest(RELAXED, [], null, 7, NOW, { evidence: 'name' });
     expect(s.outcome).toBe('warning');
-    expect(s.rename).toBeUndefined();
     expect(Object.hasOwn(s, 'rename')).toBe(false);
     expect(s.why).not.toMatch(CHATWORDS);
   });
-  it('play and chat never carry the rename flag', () => {
-    expect(suggest(renames, [], 'rude', 6, NOW, { evidence: 'play' }).rename).toBeUndefined();
-    expect(suggest(renames, [], 'hostile', 2, NOW, { evidence: 'chat' }).rename).toBeUndefined();
+  it('play and chat never carry a rename field', () => {
+    expect(Object.hasOwn(suggest(renames, [], 'rude', 6, NOW, { evidence: 'play' }), 'rename')).toBe(false);
+    expect(Object.hasOwn(suggest(renames, [], 'hostile', 2, NOW, { evidence: 'chat' }), 'rename')).toBe(false);
   });
   it('a name under a record with a warning is not asked to rename again: the ladder step applies, in rooms not chat', () => {
     const s = suggest(renames, [warned], 'hostile', 7, NOW, { evidence: 'name' });
     expect(kindOf(s.outcome)).toBe('area');
-    expect(s.rename).toBeUndefined();
+    expect(Object.hasOwn(s, 'rename')).toBe(false);
   });
   it('a name with banter level is still not acted on', () => {
     const s = suggest(renames, [], 'banter', 7, NOW, { evidence: 'name' });
     expect(s.outcome).toBe('none');
-    expect(s.rename).toBeUndefined();
+    expect(Object.hasOwn(s, 'rename')).toBe(false);
   });
 });

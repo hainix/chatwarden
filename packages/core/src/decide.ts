@@ -61,8 +61,8 @@ export interface DecisionAction {
   /** Also sanction the subject's latest IP (at most 24 h). Not for a warning or a note. */
   includeIp?: boolean;
   /**
-   * Up to five of THIS person's own lines in the report, shown to them in the notice (a note has no notice). Refused (`invalid`) when the decision's evidence kind is `play` or
-   * `name`: a report about play or a name has no chat line that is evidence, and a stale client must not attach one.
+   * Up to five of THIS person's own lines in the report, shown to them in the notice (a note has no notice). Taken whatever the decision's evidence kind: on a decision about `play`
+   * or a `name` they are stored and shown under the neutral heading, and the notice still says what it is about (0.2.2; a 0.2.1 hub attaches its default lines to every decision).
    */
   lineIds?: string[];
 }
@@ -517,9 +517,9 @@ export class DecisionService {
       if (isDismissal(norm.verdict) && a.subject === target) return bad();
       if (!this.rules.isCitable(a.rule)) return bad();
       validateSanctionInput(this.sanctionInput(norm, a, report.roomId));
-      // What this is about: the decision's own kind, else the report's reason, else the rule. A report about play or a name has no chat line that is evidence.
+      // What this is about: the decision's own kind, else the report's reason, else the rule. Lines are taken whatever the kind (a hub of 0.2.1 attaches its default lines to every
+      // decision): they are stored, the kind stays what it is and the words stay those of the kind.
       const evidence = norm.evidenceKind === undefined ? evidenceKindOf(this.reasons(), report.reportedReason, a.rule) : (norm.evidenceKind ?? undefined);
-      if (a.lineIds.length > 0 && (evidence === 'play' || evidence === 'name')) return bad();
       const lines = a.lineIds.length === 0 ? [] : ownLines(report, a.subject, a.lineIds, this.subjects);
       if (!lines.every(lineIsSound)) return bad();
       return { action: a, lines, evidence };
