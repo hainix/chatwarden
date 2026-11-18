@@ -371,7 +371,7 @@ function parseSetupState(value: unknown): SetupState | null {
   return null;
 }
 
-const NOTICE_COLUMNS = 'id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at';
+const NOTICE_COLUMNS = 'id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at, evidence';
 /** One notice by id, whatever its owner or state. Binds: the id. */
 export const NOTICE_BY_ID_SQL = `SELECT ${NOTICE_COLUMNS} FROM kit_notices WHERE id = ?`;
 
@@ -388,6 +388,7 @@ function toNoticeRow(r: Record<string, unknown>): NoticeRow {
     createdAt: Number(r.created_at),
     ackedAt: r.acked_at === null ? null : Number(r.acked_at),
     withdrawnAt: r.withdrawn_at === null ? null : Number(r.withdrawn_at),
+    ...(r.evidence === 'chat' || r.evidence === 'play' || r.evidence === 'name' ? { evidence: r.evidence } : {}),
   };
 }
 
@@ -3167,8 +3168,8 @@ export class SqliteStore implements Store, TermStore {
     this.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO kit_notices (id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO kit_notices (id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at, evidence)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           row.id,
@@ -3182,6 +3183,7 @@ export class SqliteStore implements Store, TermStore {
           row.createdAt,
           row.ackedAt,
           row.withdrawnAt,
+          row.evidence ?? null,
         );
     });
   }

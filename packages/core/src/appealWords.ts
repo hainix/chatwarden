@@ -6,15 +6,15 @@
 
 const WORDS = {
   // The nine fixed reasons: the outcome and the code the moderator chose.
-  'player.appeal.reason.upheld.rule_applies': 'The rule applies to what was said.',
-  'player.appeal.reason.upheld.evidence_clear': 'The chat record shows the rule was broken.',
-  'player.appeal.reason.upheld.context_considered': 'We looked at the whole conversation, and the decision stands.',
+  'player.appeal.reason.upheld.rule_applies': 'The rule applies to what happened.',
+  'player.appeal.reason.upheld.evidence_clear': 'The record shows the rule was broken.',
+  'player.appeal.reason.upheld.context_considered': 'We looked at the whole situation, and the decision stands.',
   'player.appeal.reason.reduced.first_offence': 'We lightened it because this was a first offence.',
   'player.appeal.reason.reduced.lighter_fits': 'A lighter action fits what happened.',
-  'player.appeal.reason.reduced.context_considered': 'We looked at the whole conversation and lightened it.',
+  'player.appeal.reason.reduced.context_considered': 'We looked at the whole situation and lightened it.',
   'player.appeal.reason.revoked.mistake': 'This was our mistake. We are sorry.',
-  'player.appeal.reason.revoked.not_a_violation': 'What was said does not break the rules.',
-  'player.appeal.reason.revoked.context_considered': 'We looked at the whole conversation and lifted it.',
+  'player.appeal.reason.revoked.not_a_violation': 'What happened does not break the rules.',
+  'player.appeal.reason.revoked.context_considered': 'We looked at the whole situation and lifted it.',
   // The page.
   'player.appealPage.title': 'Appeal a decision',
   'player.appealPage.invalid': 'This link is no longer valid.',

@@ -1638,6 +1638,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           audit: (input) => audit.record(input),
         });
   const decisions = new DecisionService({
+    reasons: () => policy.profileNow().reporting.reasons,
     store,
     subjects,
     rules,

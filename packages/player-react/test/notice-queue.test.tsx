@@ -55,7 +55,7 @@ describe('a warning', () => {
     expect(d).toHaveAccessibleName('You have a warning');
     const heading = within(d).getByRole('heading', { level: 2, name: 'You have a warning' });
     expect(d).toHaveAttribute('aria-labelledby', heading.id);
-    expect(d).toHaveTextContent('A moderator gave you a warning for something you wrote. You can keep playing.');
+    expect(d).toHaveTextContent('A moderator gave you a warning for breaking a community rule. You can keep playing.');
     // The rule, as the kit labels it.
     const rule = w.pending()[0]?.ruleLabel as string;
     expect(rule).toMatch(/^Community Rule 2/);
@@ -72,7 +72,7 @@ describe('a warning', () => {
     await w.warn(ALICE, { lines: ['you play like a snerp', 'honestly tarvo'] });
     renderUi(<NoticeQueue {...props(w)} />);
     const d = await dialog();
-    const list = within(d).getByRole('list', { name: 'Your messages that led to this' });
+    const list = within(d).getByRole('list', { name: 'What led to this' });
     const items = within(list).getAllByRole('listitem');
     expect(items.map((i) => i.textContent)).toEqual([
       `${dayText('2027-01-15', 'en')}you play like a snerp`,
@@ -205,7 +205,7 @@ describe('own lines are text, never HTML', () => {
     await w.warn(ALICE, { lines });
     renderUi(<NoticeQueue {...props(w)} />);
     const d = await dialog();
-    const items = within(within(d).getByRole('list', { name: 'Your messages that led to this' })).getAllByRole('listitem');
+    const items = within(within(d).getByRole('list', { name: 'What led to this' })).getAllByRole('listitem');
     expect(items.map((i) => i.querySelector('.cw-line-text')?.textContent)).toEqual(w.pending()[0]?.excerpt.map((l) => l.text));
     expect(d.querySelector('img, script, b')).toBeNull();
     expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();

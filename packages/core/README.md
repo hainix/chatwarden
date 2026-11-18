@@ -573,15 +573,15 @@ A decision now carries one of three fixed reasons for its outcome, in addition t
 
 | Outcome | Code | The player reads (English) |
 | --- | --- | --- |
-| `uphold` | `rule_applies` | The rule applies to what was said. |
-| `uphold` | `evidence_clear` | The chat record shows the rule was broken. |
-| `uphold` | `context_considered` | We looked at the whole conversation, and the decision stands. |
+| `uphold` | `rule_applies` | The rule applies to what happened. |
+| `uphold` | `evidence_clear` | The record shows the rule was broken. |
+| `uphold` | `context_considered` | We looked at the whole situation, and the decision stands. |
 | `reduce` | `first_offence` | We lightened it because this was a first offence. |
 | `reduce` | `lighter_fits` | A lighter action fits what happened. |
-| `reduce` | `context_considered` | We looked at the whole conversation and lightened it. |
+| `reduce` | `context_considered` | We looked at the whole situation and lightened it. |
 | `revoke` | `mistake` | This was our mistake. We are sorry. |
-| `revoke` | `not_a_violation` | What was said does not break the rules. |
-| `revoke` | `context_considered` | We looked at the whole conversation and lifted it. |
+| `revoke` | `not_a_violation` | What happened does not break the rules. |
+| `revoke` | `context_considered` | We looked at the whole situation and lifted it. |
 
 ### What a granted appeal teaches the kit
 
@@ -667,7 +667,7 @@ cw.names.renamed(who);
 
 The text a player reads in a notice lives in one small module, so the game's notice card and a hub's preview of it cannot word a notice differently.
 Import it from the subpath (`import { noticeView, NOTICE_WORDS } from '@chatwarden/core/notice-copy'`); it is plain code with no Node module and no React,
-and a bundler that reads `sideEffects: false` takes only this file. It exports `NOTICE_WORDS` (39 keys: 36 notice words and the three restricted-chat words), the English words, keyed as `@chatwarden/player-react` keys
+and a bundler that reads `sideEffects: false` takes only this file. It exports `NOTICE_WORDS` (43 keys: 36 notice words, the three restricted-chat words and the four evidence words), the English words, keyed as `@chatwarden/player-react` keys
 them: `player.notice.title.warning`, `player.notice.gotIt`, `player.restricted.moderator.until`, and the rest, with `englishWords()` (a copy to spread under your
 own translation) and the types `NoticeWordKey` and `NoticeWords`; `titleKey`, `bodyKey`, `isSanction` and `WARNING_DAYS` (90); `dayText`, `untilText` and `timeLeft`;
 `noticeView(notice, { words, locale, timeZone?, now, record? })`, which returns a `NoticeView` (`kind`, `title`, `body`, `facts`, `refHint`, `linesLabel`, `lines`,

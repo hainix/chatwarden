@@ -17,7 +17,7 @@ describe('the word sets', () => {
     const notice = Object.keys(NOTICE_WORDS);
     const appeal = Object.keys(APPEAL_WORDS);
     expect(notice.filter((k) => appeal.includes(k))).toEqual([]);
-    expect(notice).toHaveLength(39);
+    expect(notice).toHaveLength(43);
     expect(appeal).toHaveLength(50);
     expect(Object.keys(noticeWordsFor('en').words).sort()).toEqual([...notice, ...appeal].sort());
   });
@@ -65,15 +65,15 @@ describe('the word sets', () => {
     expect(
       Object.fromEntries(Object.entries(APPEAL_WORDS).filter(([k]) => k.startsWith('player.appeal.reason.'))),
     ).toEqual({
-      'player.appeal.reason.upheld.rule_applies': 'The rule applies to what was said.',
-      'player.appeal.reason.upheld.evidence_clear': 'The chat record shows the rule was broken.',
-      'player.appeal.reason.upheld.context_considered': 'We looked at the whole conversation, and the decision stands.',
+      'player.appeal.reason.upheld.rule_applies': 'The rule applies to what happened.',
+      'player.appeal.reason.upheld.evidence_clear': 'The record shows the rule was broken.',
+      'player.appeal.reason.upheld.context_considered': 'We looked at the whole situation, and the decision stands.',
       'player.appeal.reason.reduced.first_offence': 'We lightened it because this was a first offence.',
       'player.appeal.reason.reduced.lighter_fits': 'A lighter action fits what happened.',
-      'player.appeal.reason.reduced.context_considered': 'We looked at the whole conversation and lightened it.',
+      'player.appeal.reason.reduced.context_considered': 'We looked at the whole situation and lightened it.',
       'player.appeal.reason.revoked.mistake': 'This was our mistake. We are sorry.',
-      'player.appeal.reason.revoked.not_a_violation': 'What was said does not break the rules.',
-      'player.appeal.reason.revoked.context_considered': 'We looked at the whole conversation and lifted it.',
+      'player.appeal.reason.revoked.not_a_violation': 'What happened does not break the rules.',
+      'player.appeal.reason.revoked.context_considered': 'We looked at the whole situation and lifted it.',
     });
   });
 

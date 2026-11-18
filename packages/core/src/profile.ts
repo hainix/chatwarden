@@ -15,6 +15,7 @@ import {
   REPORT_LABEL_MAX,
   REPORT_THANKS_MAX,
   fillReporting,
+  isEvidenceKind,
   isReasonId,
   resolveReporting,
 } from './reporting.js';
@@ -518,8 +519,8 @@ function validateGuidelines(v: unknown, path: string): void {
 }
 
 const REPORTING_KEYS = ['flow', 'reasons', 'thanks', 'evidenceUrl'] as const;
-const REASON_KEYS = ['id', 'label', 'hint', 'group', 'rules', 'asksNote', 'enabled', 'urgent', 'thanks', 'showResources'] as const;
-const REASON_OPTIONAL: readonly string[] = ['hint', 'group', 'rules', 'asksNote', 'enabled', 'urgent', 'thanks', 'showResources'];
+const REASON_KEYS = ['id', 'label', 'hint', 'group', 'rules', 'asksNote', 'enabled', 'urgent', 'thanks', 'showResources', 'evidence'] as const;
+const REASON_OPTIONAL: readonly string[] = ['hint', 'group', 'rules', 'asksNote', 'enabled', 'urgent', 'thanks', 'showResources', 'evidence'];
 
 /** A line of text of `min` to `max` characters (not blank when `min` is 1). */
 function lineOf(v: unknown, path: string, min: 0 | 1, max: number): void {
@@ -588,6 +589,9 @@ function validateReporting(v: unknown, path: string): void {
     if (Object.hasOwn(reason, 'thanks') && reason['thanks'] !== null) lineOf(reason['thanks'], `${ip}.thanks`, 1, REPORT_THANKS_MAX);
     for (const key of ['asksNote', 'enabled', 'urgent', 'showResources'] as const) {
       if (Object.hasOwn(reason, key) && typeof reason[key] !== 'boolean') fail(`${ip}.${key}`, 'must be true or false');
+    }
+    if (Object.hasOwn(reason, 'evidence') && reason['evidence'] !== null && !isEvidenceKind(reason['evidence'])) {
+      fail(`${ip}.evidence`, "must be 'chat', 'play', 'name' or null");
     }
   });
   const on = (r: unknown): boolean => !isPlain(r) || r['enabled'] !== false;

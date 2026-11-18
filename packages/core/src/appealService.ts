@@ -549,8 +549,18 @@ export class AppealService {
             now,
             pending,
           );
+          // The replacement is about the same thing as the sanction it lightens: it keeps the original notice's evidence kind.
+          const evidence = store.loadNotice?.(appeal.noticeId)?.evidence;
           notices.createForSanction(
-            { groupId: written.groupId, refCode: written.refCode, kind: plan.kind, until: plan.kind === 'warning' ? null : written.endsAt, rule: ruleRefOf(appeal.rule), subject: person },
+            {
+              groupId: written.groupId,
+              refCode: written.refCode,
+              kind: plan.kind,
+              until: plan.kind === 'warning' ? null : written.endsAt,
+              rule: ruleRefOf(appeal.rule),
+              subject: person,
+              ...(evidence === undefined ? {} : { evidence }),
+            },
             [],
             { notify: false },
           );

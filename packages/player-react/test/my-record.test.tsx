@@ -144,7 +144,7 @@ describe('MyRecord items', () => {
     await w.warn(ALICE, { lines: ['<i>italic</i> & "quotes"', 'second snerp'] });
     renderUi(<MyRecord {...props(w)} />);
     await screen.findByRole('list', { name: 'Your record' });
-    const lines = within(items()[0] as HTMLElement).getByRole('list', { name: 'Your messages that led to this' });
+    const lines = within(items()[0] as HTMLElement).getByRole('list', { name: 'What led to this' });
     expect(within(lines).getAllByRole('listitem').map((l) => l.textContent)).toEqual([
       `${dayText('2027-01-15', 'en')}<i>italic</i> & "quotes"`,
       `${dayText('2027-01-15', 'en')}second snerp`,

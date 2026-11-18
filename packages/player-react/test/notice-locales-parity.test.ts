@@ -11,7 +11,7 @@ describe('core and player-react word the notice the same way', () => {
   const keys = Object.keys(NOTICE_WORDS) as Array<keyof typeof NOTICE_WORDS>;
 
   it('every NoticeWordKey: the Spanish text is the same', () => {
-    expect(keys.length).toBe(39);
+    expect(keys.length).toBe(43);
     for (const key of keys) expect(NOTICE_WORDS_ES[key], key).toBe((es as Record<string, string>)[key]);
   });
 

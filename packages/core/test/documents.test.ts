@@ -402,7 +402,7 @@ describe('code of conduct: player-facing', () => {
   it('does not say the moderators read the messages, and never says a note is kept for severe', () => {
     for (const name of PRESET_NAMES) {
       const doc = codeOfConduct(policyOf(name), { format: 'text', gameName: GAME });
-      expect(doc).toContain('Reported messages are reviewed before a decision is made.');
+      expect(doc).toContain('Reports are reviewed by a moderator before a decision is made.');
       expect(doc).not.toContain('The moderators read');
       expect(doc).not.toMatch(/Severe\n[^]*Nothing happens/);
     }

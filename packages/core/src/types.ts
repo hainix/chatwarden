@@ -11,6 +11,7 @@ import type { LinkRow, LinkSystem } from './links.js';
 import type { NameReason } from './names.js';
 import type { ErasePlan, ErasureCounts, ErasureRow, SubjectExport } from './privacy.js';
 import type { PolicyLayer } from './profile.js';
+import type { EvidenceKind } from './evidenceKind.js';
 import type { RuleRef } from './rules.js';
 
 // ---------------------------------------------------------------------------
@@ -1121,6 +1122,11 @@ export interface NoticeRow {
   createdAt: number;
   ackedAt: number | null;
   withdrawnAt: number | null;
+  /**
+   * What the sanction was about, so the notice is worded for it: `chat`, `play` or `name` (0.2.2). Absent for a notice made before then, for a report outcome and a message,
+   * and when the decision had no kind (neutral). A store keeps it as given; an unknown stored value reads as absent.
+   */
+  evidence?: EvidenceKind;
 }
 
 // ---------------------------------------------------------------------------

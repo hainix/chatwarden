@@ -6,6 +6,7 @@
 // The keys are player-react's (`player.notice.title.warning`, ...), so a studio's translation of those keys keeps working: spread
 // `NOTICE_WORDS` (or `englishWords()`) under yours and a key you leave out falls back to English.
 
+import type { EvidenceKind } from './evidenceKind.js';
 import type { PlayerNotice } from './notices.js';
 import type { RuleRef } from './rules.js';
 import type { NoticeKind } from './types.js';
@@ -21,7 +22,10 @@ const WORDS = {
   'player.notice.title.appeal_reduced': 'We looked again and changed the decision',
   'player.notice.title.appeal_revoked': 'We looked again and removed the decision',
   'player.notice.title.fallback': 'A message from the moderators',
-  'player.notice.body.warning': 'A moderator gave you a warning for something you wrote. You can keep playing.',
+  'player.notice.body.warning': 'A moderator gave you a warning for breaking a community rule. You can keep playing.',
+  'player.notice.body.warning.chat': 'A moderator gave you a warning for something you wrote. You can keep playing.',
+  'player.notice.body.warning.play': 'A moderator gave you a warning for how you played. You can keep playing.',
+  'player.notice.body.warning.name': 'A moderator gave you a warning about your name. You can keep playing.',
   'player.notice.body.chat': 'A moderator turned off your chat. You can still play.',
   'player.notice.body.area': 'A moderator stopped you joining public rooms and matchmaking. You can still play in private rooms.',
   'player.notice.body.ban': 'A moderator banned you from playing.',
@@ -40,7 +44,8 @@ const WORDS = {
   'player.notice.untilLeft': '{when} ({left})',
   'player.notice.ref': 'Reference',
   'player.notice.refHint': 'Quote this code if you contact us.',
-  'player.notice.lines': 'Your messages that led to this',
+  'player.notice.lines': 'What led to this',
+  'player.notice.lines.chat': 'Your messages that led to this',
   'player.notice.todo.warning': 'Press Acknowledge to confirm you saw this.',
   'player.notice.acknowledge': 'Acknowledge',
   'player.notice.gotIt': 'Got it',
@@ -102,8 +107,17 @@ const BODIES: Readonly<Record<NoticeKind, NoticeWordKey>> = {
 /** The key of a notice kind's title; the fallback title for a kind this version does not know. */
 export const titleKey = (kind: NoticeKind | string): NoticeWordKey => (Object.hasOwn(TITLES, kind) ? (TITLES[kind as NoticeKind] as NoticeWordKey) : 'player.notice.title.fallback');
 
-/** The key of a notice kind's body; the fallback body for a kind this version does not know. */
-export const bodyKey = (kind: NoticeKind | string): NoticeWordKey => (Object.hasOwn(BODIES, kind) ? (BODIES[kind as NoticeKind] as NoticeWordKey) : 'player.notice.body.fallback');
+/**
+ * The key of a notice kind's body; the fallback body for a kind this version does not know. With the notice's evidence kind it is the variant written for it
+ * (`player.notice.body.warning.chat`, `.play`, `.name`) when there is one; a kind with no variant, and a notice with no evidence kind, read the neutral body.
+ */
+export const bodyKey = (kind: NoticeKind | string, evidence?: EvidenceKind | null): NoticeWordKey => {
+  if (!Object.hasOwn(BODIES, kind)) return 'player.notice.body.fallback';
+  const base = BODIES[kind as NoticeKind] as NoticeWordKey;
+  if (evidence === undefined || evidence === null) return base;
+  const variant = `${base}.${evidence}`;
+  return Object.hasOwn(WORDS, variant) ? (variant as NoticeWordKey) : base;
+};
 
 /** A sanction a player can contest (a thank-you for a report, a required rename and the outcome of an appeal are not one). */
 export const isSanction = (kind: string): boolean => kind === 'warning' || kind === 'chat' || kind === 'area' || kind === 'ban';
@@ -184,7 +198,7 @@ export interface NoticeView {
   facts: NoticeFact[];
   /** "Quote this code if you contact us.", or null when the notice has no reference code. */
   refHint: string | null;
-  /** "Your messages that led to this", or null when the notice has no lines. */
+  /** "What led to this" ("Your messages that led to this" for a chat notice), or null when the notice has no lines. */
   linesLabel: string | null;
   lines: Array<{ day: string; text: string }>;
   /** True for a warning, and for anything the kit says must be acknowledged. */
@@ -195,6 +209,8 @@ export interface NoticeView {
   button: string;
   /** A sanction the player can contest: a notice of any other kind has no appeal slot. */
   sanction: boolean;
+  /** What the notice is about (0.2.2): `chat`, `play` or `name`. Absent when it is neutral. An adopter drawing its own screen can branch on it. */
+  evidence?: EvidenceKind;
 }
 
 /** A template with its `{name}` values filled in; a name with no value stays as written. */
@@ -246,18 +262,24 @@ export function noticeView(notice: PlayerNotice, ctx: NoticeViewContext): Notice
   }
   if (notice.refCode !== null) facts.push({ id: 'ref', term: word('player.notice.ref'), value: notice.refCode });
   const mustAcknowledge = notice.kind === 'warning' || notice.mustAcknowledge;
+  const evidence = notice.evidence === 'chat' || notice.evidence === 'play' || notice.evidence === 'name' ? notice.evidence : undefined;
+  // A catalog that predates the variants (a studio's own translation) reads its own neutral body, never English mixed into its language.
+  const variant = bodyKey(notice.kind, evidence);
+  const body = Object.hasOwn(ctx.words, variant) ? word(variant) : word(bodyKey(notice.kind));
+  const linesKey: NoticeWordKey = evidence === 'chat' && Object.hasOwn(ctx.words, 'player.notice.lines.chat') ? 'player.notice.lines.chat' : 'player.notice.lines';
   return {
     kind: notice.kind,
     title: word(titleKey(notice.kind)),
-    body: word(bodyKey(notice.kind)),
+    body,
     facts,
     refHint: notice.refCode === null ? null : word('player.notice.refHint'),
-    linesLabel: notice.excerpt.length === 0 ? null : word('player.notice.lines'),
+    linesLabel: notice.excerpt.length === 0 ? null : word(linesKey),
     lines: notice.excerpt.map((l) => ({ day: dayText(l.day, locale), text: l.text })),
     mustAcknowledge,
     todo: mustAcknowledge ? word('player.notice.todo.warning') : null,
     button: word(mustAcknowledge ? 'player.notice.acknowledge' : 'player.notice.gotIt'),
     sanction: isSanction(notice.kind),
+    ...(evidence === undefined ? {} : { evidence }),
   };
 }
 

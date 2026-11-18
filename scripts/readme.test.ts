@@ -1385,11 +1385,11 @@ describe('the rooms sections (0.2.0)', () => {
     expect(matcher).toMatch(/never the chat/i);
   });
 
-  it('the core README says how many words NOTICE_WORDS holds, and the number is the real one (39: 36 notice words and the three restricted-chat words)', async () => {
+  it('the core README says how many words NOTICE_WORDS holds, and the number is the real one (43: 36 notice words, the three restricted-chat words and the four evidence words)', async () => {
     const { NOTICE_WORDS } = await import('@chatwarden/core/notice-copy');
     const count = Object.keys(NOTICE_WORDS).length;
-    expect(count).toBe(39);
-    expect(flat(readme('core'))).toContain(`\`NOTICE_WORDS\` (${count} keys: 36 notice words and the three restricted-chat words)`);
+    expect(count).toBe(43);
+    expect(flat(readme('core'))).toContain(`\`NOTICE_WORDS\` (${count} keys: 36 notice words, the three restricted-chat words and the four evidence words)`);
   });
 
   it('the READMEs say the Spanish and Portuguese catalogues are machine drafts that a person has not read', () => {

@@ -325,7 +325,7 @@ describe('GET /reports/:id', () => {
     const r = await file('cheating');
     await call('GET', `/reports/${r.id}`);
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenCalledWith(r.target, null, CATEGORY_TO_RULE.cheating, { roomId: r.report.roomId });
+    expect(spy).toHaveBeenCalledWith(r.target, null, CATEGORY_TO_RULE.cheating, { roomId: r.report.roomId, evidence: 'play' });
   });
 
   it('reads the level from ?level=, defaulting to null', async () => {
@@ -395,7 +395,7 @@ describe('POST /reports/:id/suggest', () => {
     const res = await call('POST', `/reports/${r.id}/suggest`, { body: { level: 'rude' } });
     expect(res.status).toBe(200);
     expect(res.body).toEqual(cw.suggest(r.target, 'rude', CATEGORY_TO_RULE.spam, { roomId: r.report.roomId }));
-    expect(spy).toHaveBeenCalledWith(r.target, 'rude', CATEGORY_TO_RULE.spam, { roomId: r.report.roomId });
+    expect(spy).toHaveBeenCalledWith(r.target, 'rude', CATEGORY_TO_RULE.spam, { roomId: r.report.roomId, evidence: 'chat' });
     expect(audit().map((a) => [a.action, a.target])).toEqual([['suggest', { type: 'report', ref: r.id }]]);
   });
 
@@ -412,7 +412,7 @@ describe('POST /reports/:id/suggest', () => {
     });
     const r = await file();
     await call('POST', `/reports/${r.id}/suggest`, { body: { level: 'rude', roomId: 'elsewhere' } });
-    expect(spy.mock.calls[0]?.[3]).toEqual({ roomId: r.report.roomId });
+    expect(spy.mock.calls[0]?.[3]).toEqual({ roomId: r.report.roomId, evidence: 'chat' });
   });
 
   it('accepts every conduct level and null; a missing level is null', async () => {

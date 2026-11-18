@@ -56,11 +56,11 @@ describe('migration 27, block 2: kit_appeals.reason_code', () => {
     expect(() => db.prepare("UPDATE kit_appeals SET reason_code = 'anything'").run()).not.toThrow();
   });
 
-  it('the migration carries a Block 2 label, and it is the same entry as block 1 (no 28)', () => {
+  it('the migration carries a Block 2 label, and it is the same entry as block 1 (28 is release 0.2.2)', () => {
     expect(M27?.sql ?? '').toMatch(/-- Block 1/);
     expect(M27?.sql ?? '').toMatch(/-- Block 2 \(appeals landing, fixed reasons\)/);
     expect(M27?.sql ?? '').toContain('ALTER TABLE kit_appeals ADD COLUMN reason_code TEXT;');
-    expect(MIGRATIONS.find((m) => m.version === 28)).toBeUndefined();
+    expect(MIGRATIONS.find((m) => m.version === 29)).toBeUndefined();
   });
 
   it('a version 26 database with decided and open appeals upgrades: every row is untouched and reads without a code', () => {
@@ -97,7 +97,7 @@ describe('migration 27, block 2: kit_appeals.reason_code', () => {
     expect(openStore({ db, migrations: UP_TO_26 }).schemaVersion()).toBe(26);
     expect(columns(db, 'kit_appeals').map((c) => c.name)).not.toContain('reason_code');
     expect(db.prepare('SELECT COUNT(*) AS n FROM kit_appeals').get()).toEqual({ n: 1 });
-    expect(openStore({ db }).schemaVersion()).toBe(27);
+    expect(openStore({ db }).schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
   });
 });
 

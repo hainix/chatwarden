@@ -19,19 +19,20 @@ const FLAVOURS = ['relaxed', 'standard', 'strict'] as const;
 const ids = () => DEFAULT_REPORT_REASONS.map((r) => r.id);
 
 describe('the name reason', () => {
-  it('name is a default reason: label, hint, group Chat, rules [7], no note, enabled, after personal_info', () => {
+  it('name is a default reason: label, hint, group Players, rules [7], no note, enabled, name evidence, after personal_info', () => {
     const name = DEFAULT_REPORT_REASONS.find((r) => r.id === 'name');
     expect(name).toEqual({
       id: 'name',
       label: 'Inappropriate name',
       hint: 'An offensive or inappropriate player name',
-      group: 'Chat',
+      group: 'Players',
       rules: [7],
       asksNote: false,
       enabled: true,
       urgent: false,
       thanks: null,
       showResources: false,
+      evidence: 'name',
     });
     expect(ids().indexOf('name')).toBe(6);
     expect(ids().indexOf('name')).toBe(ids().indexOf('personal_info') + 1);
@@ -77,13 +78,13 @@ describe('the name reason', () => {
     expect(reasonLabel(reasons.filter((r) => r.id !== 'name'), 'name')).toBeNull();
   });
 
-  it('players read it under Chat with no rule mapping', () => {
+  it('players read it under Players (not Chat) with no rule mapping', () => {
     const p = playerReporting(defaultReporting());
     expect(p.reasons.find((r) => r.id === 'name')).toEqual({
       id: 'name',
       label: 'Inappropriate name',
       hint: 'An offensive or inappropriate player name',
-      group: 'Chat',
+      group: 'Players',
       asksNote: false,
       thanks: null,
       showResources: false,

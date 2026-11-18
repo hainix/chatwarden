@@ -159,7 +159,12 @@ export {
   DEFAULT_REPORT_REASONS,
   DEFAULT_REPORT_THANKS,
   defaultReporting,
+  EVIDENCE_KINDS,
+  evidenceKindOf,
+  evidenceOfReason,
+  evidenceOfRule,
   findReason,
+  isEvidenceKind,
   isReasonId,
   legacyCategoryOf,
   LEGACY_REASON_ALIASES,
@@ -174,6 +179,7 @@ export {
   suggestedRule,
 } from './reporting.js';
 export type {
+  EvidenceKind,
   PlayerReporting,
   ReportFlow,
   ReportingSettings,

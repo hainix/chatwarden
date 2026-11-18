@@ -58,6 +58,7 @@ describe('migration 8: kit_notices', () => {
     const cols = db.prepare('PRAGMA table_info(kit_notices)').all().map((c) => String(c.name));
     expect(cols).toEqual([
       'id', 'subject_id', 'group_id', 'kind', 'rule', 'until', 'ref_code', 'excerpt_json', 'created_at', 'acked_at', 'withdrawn_at',
+      'evidence', // migration 28 (0.2.2)
     ]);
     const idx = db.prepare('PRAGMA index_list(kit_notices)').all().map((i) => String(i.name));
     expect(idx).toContain('kit_notices_by_subject');

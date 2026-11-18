@@ -37,7 +37,7 @@ describe('GET /rules: reporting', () => {
   it('lists Inappropriate name under Chat, with no rule mapping', async () => {
     const { rules } = await setup();
     const name = reportingOf(await rules()).reasons.find((x) => x.id === 'name');
-    expect(name).toEqual({ id: 'name', label: 'Inappropriate name', hint: 'An offensive or inappropriate player name', group: 'Chat', asksNote: false, thanks: null, showResources: false });
+    expect(name).toEqual({ id: 'name', label: 'Inappropriate name', hint: 'An offensive or inappropriate player name', group: 'Players', asksNote: false, thanks: null, showResources: false });
   });
 
   it('carries the default flow, the twelve default reasons in order and the default thank-you', async () => {
@@ -53,7 +53,7 @@ describe('GET /rules: reporting', () => {
     expect(r.reasons.map((x) => x.label)).toEqual([
       'Insults or harassment', 'Hate', 'Sexual content', 'Threats', 'Spam or ads', 'Sharing personal info', 'Inappropriate name', 'Cheating', 'Throwing or griefing', 'Leaving or AFK', 'Something else',
     ]);
-    expect(r.reasons.map((x) => x.group)).toEqual(['Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Gameplay', 'Gameplay', 'Gameplay', '']);
+    expect(r.reasons.map((x) => x.group)).toEqual(['Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Chat', 'Players', 'Gameplay', 'Gameplay', 'Gameplay', '']);
     expect(r.reasons.map((x) => x.asksNote)).toEqual([false, false, false, false, false, false, false, false, false, false, true]);
   });
 

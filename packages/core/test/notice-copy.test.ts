@@ -43,7 +43,7 @@ describe('noticeView: a warning', () => {
     expect(v).toMatchObject({
       kind: 'warning',
       title: 'You have a warning',
-      body: 'A moderator gave you a warning for something you wrote. You can keep playing.',
+      body: 'A moderator gave you a warning for breaking a community rule. You can keep playing.',
       refHint: 'Quote this code if you contact us.',
       linesLabel: null,
       lines: [],
@@ -137,7 +137,7 @@ describe('noticeView: parts that come and go', () => {
   it('five lines are listed with their day, in order, and the label is there; none has no label', () => {
     const excerpt = Array.from({ length: 5 }, (_, i) => ({ day: `2027-01-${String(10 + i).padStart(2, '0')}`, text: `line ${i}` }));
     const v = noticeView(notice({ excerpt }), ctx());
-    expect(v.linesLabel).toBe('Your messages that led to this');
+    expect(v.linesLabel).toBe('What led to this');
     expect(v.lines).toEqual([
       { day: 'Jan 10, 2027', text: 'line 0' },
       { day: 'Jan 11, 2027', text: 'line 1' },

@@ -5,6 +5,8 @@
 // Pure: no store, no clock of its own (the time is passed in), no Node built-in module. The input types carry NO moderator-only field: no reason,
 // evidence, gap note, actor, staff ref, group id, IP flag, AI read or appeal statement. A leak needs a type change.
 
+import { isEvidenceKind } from './evidenceKind.js';
+import type { EvidenceKind } from './evidenceKind.js';
 import type { PlayerNotice } from './notices.js';
 import type { RuleRef } from './rules.js';
 import type { NoticeKind, SanctionKind } from './types.js';
@@ -36,6 +38,8 @@ export type NoticeOp =
       reporter: string;
       actions: PlanAction[];
       rename: { rule: number } | null;
+      /** What the decision is about (0.2.2): the kind of the report's reason or the moderator's own choice. Optional: absent is neutral. */
+      evidenceKind?: EvidenceKind | null;
     }
   | { op: 'sanction'; kind: SanctionKind; durationMs: number | null; person?: string }
   | { op: 'note'; person?: string }
@@ -44,7 +48,7 @@ export type NoticeOp =
   | {
       op: 'appeal';
       outcome: 'uphold' | 'reduce' | 'revoke';
-      original: { kind: SanctionKind; startsAt: number; endsAt: number | null; rule: RuleRef | null; refCode: string };
+      original: { kind: SanctionKind; startsAt: number; endsAt: number | null; rule: RuleRef | null; refCode: string; evidenceKind?: EvidenceKind | null };
       /** For `reduce`: the lighter kind and length. */
       to?: { kind: SanctionKind; durationMs: number | null };
       person?: string;
@@ -155,7 +159,7 @@ class Context {
     return rule === null ? null : this.ctx.ruleLabel(rule);
   }
   /** A notice draft: the shape the player reads, with a placeholder id. */
-  notice(kind: NoticeKind, o: { rule: RuleRef | null; until: number | null; refCode: string | null; excerpt?: PlanLine[] }): PlayerNotice {
+  notice(kind: NoticeKind, o: { rule: RuleRef | null; until: number | null; refCode: string | null; excerpt?: PlanLine[]; evidence?: unknown }): PlayerNotice {
     return {
       id: `plan-${++this.seq}`,
       kind,
@@ -166,6 +170,7 @@ class Context {
       excerpt: (o.excerpt ?? []).slice(0, SHOWN_LINES_MAX).map((l) => ({ text: l.text, day: l.day })),
       createdAt: this.now(),
       mustAcknowledge: kind === 'warning',
+      ...(isEvidenceKind(o.evidence) ? { evidence: o.evidence } : {}),
     };
   }
 }
@@ -196,7 +201,7 @@ function decide(op: Extract<NoticeOp, { op: 'decide' }>, c: Context): NoticePlan
   for (const a of actions) {
     if (a.kind === 'note') continue;
     const until = endOf(a.kind, a.durationMs, now);
-    notices.push({ to: a.person, notice: c.notice(a.kind, { rule: a.rule, until, refCode: c.ctx.refCode, excerpt: a.lines }) });
+    notices.push({ to: a.person, notice: c.notice(a.kind, { rule: a.rule, until, refCode: c.ctx.refCode, excerpt: a.lines, evidence: op.evidenceKind }) });
     const effect = restriction(a.kind, a.person, until);
     effects.push(effect ?? { code: 'warning_on_record', to: a.person });
     if (a.kind === 'ban' || a.kind === 'area') held.add(a.person);
@@ -242,7 +247,7 @@ function appeal(op: Extract<NoticeOp, { op: 'appeal' }>, c: Context): NoticePlan
     const replacement = appealReduction(o, op.to ?? null);
     if (replacement === null) return EMPTY;
     const end = replacement.kind === 'warning' ? null : appealReplacementEnd(o, replacement.durationMs === null ? { durationMs: null } : { durationMs: replacement.durationMs });
-    notices.push({ to, notice: c.notice(replacement.kind, { rule: o.rule, until: end, refCode: c.ctx.refCode }) });
+    notices.push({ to, notice: c.notice(replacement.kind, { rule: o.rule, until: end, refCode: c.ctx.refCode, evidence: o.evidenceKind }) });
     notices.push(outcome('appeal_reduced'));
     effects.push({ code: 'first_withdrawn' });
     if (replacement.kind !== 'warning') {

@@ -471,9 +471,23 @@ export function codeOfConduct(policy: DocumentPolicy, options: CodeOfConductOpti
     { k: 'h', level: 2, text: 'The rules' },
     { k: 'ul', items: ruleItems(rules) },
     { k: 'h', level: 2, text: 'What happens if you break a rule' },
-    { k: 'p', text: 'What happens depends on what you did and on whether it has happened before. Reported messages are reviewed before a decision is made.' },
+    { k: 'p', text: 'What happens depends on what you did and on whether it has happened before. Reports are reviewed by a moderator before a decision is made. Depending on the report that can be chat, how the game was played, or a player name.' },
   ];
   for (const tier of profile.guidelines) blocks.push(...playerTierBlocks(profile, tier));
+
+  // The tiers above are about what is written; cheating, throwing, leaving and names are judged on what happened, so the page says so for the rules that cover them.
+  const played = rules.active().filter((r) => r.number === 5 || r.number === 6 || r.number === 7);
+  if (played.length > 0) {
+    const names = played.map((r) => `CR ${r.number} (${clean(r.title)})`);
+    const list = names.length === 1 ? (names[0] as string) : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] as string}`;
+    blocks.push(
+      { k: 'h', level: 3, text: 'Playing and names' },
+      {
+        k: 'p',
+        text: `${list} are about how you play and the name you choose, not about what you write in chat. They are judged on what happened. Usually a warning comes first. If you carry on, the next steps are a ban from public rooms and matchmaking, then longer bans.`,
+      },
+    );
+  }
 
   const area = areaRuleList(snapshot);
   const severe = severeRuleList(snapshot);
@@ -493,7 +507,7 @@ export function codeOfConduct(policy: DocumentPolicy, options: CodeOfConductOpti
     { k: 'h', level: 2, text: 'How to report' },
     {
       k: 'p',
-      text: 'Use the report option in the game. Pick the reason that fits best and describe what happened. Recent chat from that game is reviewed before a decision is made.',
+      text: 'Use the report option in the game. Pick the reason that fits best and describe what happened.',
     },
     {
       k: 'p',
@@ -591,7 +605,7 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
     { k: 'h', level: 2, text: 'First offense' },
     { k: 'p', text: 'What a person with a clean record gets for each level.' },
     { k: 'table', head: ['Level', 'Outcome'], rows: CONDUCT_LEVELS.map((l) => [l, outcomeLabel(profile.firstOffense[l])]) },
-    { k: 'p', text: 'Banter is never acted on, whatever the record.' },
+    { k: 'p', text: 'The lowest level, banter, is never acted on, whatever the record. In chat that is salt and trash talk; in play, a minor slip.' },
     { k: 'h', level: 2, text: 'Repeated behaviour' },
     { k: 'p', text: `${capitalise(repeatRule(profile))}.` },
     {
@@ -608,7 +622,7 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
       },
       {
         k: 'table',
-        head: ['Step', 'Low / medium (banter, rude)', 'High (hostile with a record, severe)'],
+        head: ['Step', 'Low / medium (minor or isolated)', 'High (serious or repeated, or severe)'],
         rows: profile.ladder.map((row) => [String(row.step), clean(row.lowMedium.label), clean(row.high.label)]),
       },
     );
@@ -633,7 +647,7 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
     { k: 'h', level: 2, text: 'Writing a reason' },
     {
       k: 'p',
-      text: 'Write the reason in your own words: what was said, and why it breaks the rule you cite. The reason is for the record. The player never sees it, only the rule number and a reference code.',
+      text: 'Write the reason in your own words: what happened, and why it breaks the rule you cite. The reason is for the record. The player never sees it, only the rule number and a reference code.',
     },
     { k: 'h', level: 2, text: 'Dismissing a report' },
     {
@@ -685,7 +699,7 @@ export function agentBrief(policy: DocumentPolicy): string {
     ...CONDUCT_LEVELS.map((l) => `- ${l}: ${outcomeLabel(profile.firstOffense[l])}`),
     `Repeated: ${repeatRule(profile)}. Applies only while the record holds no warning or restriction, and is never milder than the first offense.`,
     `Record steps: ${RECORD_STEPS}.`,
-    'Escalation after the first offense. Step = heaviest action on the record in the last 90 days. Low = banter and rude; high = hostile once the record has a warning or restriction, and severe:',
+    'Escalation after the first offense. Step = heaviest action on the record in the last 90 days. Low = banter and rude (minor or isolated conduct); high = hostile once the record has a warning or restriction (serious or repeated conduct), and severe:',
     ...profile.ladder.map((row) => `- step ${row.step}: low ${clean(row.lowMedium.label)} | high ${clean(row.high.label)}`),
   ];
   const area = areaRuleList(snapshot);

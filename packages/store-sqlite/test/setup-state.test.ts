@@ -74,9 +74,10 @@ describe('the setup state in kit_meta', () => {
     expect(store.getSetupState?.()).toEqual({ dismissedAt: null });
   });
 
-  it('MIGRATIONS ends at 27: no migration was added for it', () => {
-    expect(MIGRATIONS.at(-1)?.version).toBe(27);
-    expect(MIGRATIONS).toHaveLength(27);
+  it('the setup state added no migration of its own: 28 is the evidence kind (release 0.2.2) and mentions neither kit_meta nor the setup', () => {
+    expect(MIGRATIONS.at(-1)?.version).toBe(28);
+    expect(MIGRATIONS).toHaveLength(28);
+    expect(MIGRATIONS.at(-1)?.sql ?? '').not.toMatch(/kit_meta|setup/i);
   });
 
   it('the kit_meta rows other than schema_version are unchanged by a fresh store (control)', () => {
