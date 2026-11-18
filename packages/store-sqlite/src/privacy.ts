@@ -99,6 +99,8 @@ export const NOTICES_DELETE_SQL = `DELETE FROM kit_notices WHERE subject_id IN $
 /** The notices of in-force groups that stay with their quoted lines cleared. Binds: the set, the groups. */
 export const NOTICES_CLEAR_SQL = `UPDATE kit_notices SET excerpt_json = '[]' WHERE subject_id IN ${IN_ARG} AND group_id IN ${IN_ARG} AND excerpt_json <> '[]'`;
 export const STRIKES_DELETE_SQL = `DELETE FROM kit_strikes WHERE subject_id IN ${IN_ARG}`;
+/** The shared pacer's rows of the set. Binds: the set. */
+export const PACE_DELETE_SQL = `DELETE FROM kit_pace WHERE who IN ${IN_ARG}`;
 export const MUTES_DELETE_SQL = `DELETE FROM kit_mutes WHERE viewer_id IN ${IN_ARG} OR target_id IN ${IN_ARG}`;
 export const BLOCKED_NAMES_DELETE_SQL = `DELETE FROM kit_blocked_names WHERE subject_id IN ${IN_ARG}`;
 /** Appeals of the set, except those on a sanction group a hold protects. Binds: the set, the protected groups. */
@@ -162,6 +164,8 @@ export const EXPORT_STRIKES_SQL = `SELECT at, room_id, raw_line FROM kit_strikes
 export const EXPORT_NAMES_SQL = `SELECT at, name, reason FROM kit_blocked_names WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
 export const EXPORT_APPEALS_SQL = `SELECT created_at, kind, rule, status, statement, decided_at FROM kit_appeals WHERE subject_id IN ${IN_ARG} ORDER BY created_at DESC, id DESC LIMIT ?`;
 export const EXPORT_SIGNALS_SQL = `SELECT at, kind FROM kit_signals WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
+/** In how many rooms the pacer holds state for the set. Binds: the set. */
+export const EXPORT_PACE_SQL = `SELECT COUNT(*) AS n FROM kit_pace WHERE who IN ${IN_ARG}`;
 export const EXPORT_MUTES_SQL = `SELECT SUM(viewer_id IN ${IN_ARG}) AS placed, SUM(target_id IN ${IN_ARG} AND block = 0) AS received FROM kit_mutes WHERE viewer_id IN ${IN_ARG} OR target_id IN ${IN_ARG}`;
 export const EXPORT_NOAUTO_SQL = `SELECT code FROM kit_ai_noauto WHERE subject_id IN ${IN_ARG} ORDER BY set_at DESC LIMIT 1`;
 export const EXPORT_AI_READS_SQL = `SELECT COUNT(*) AS n FROM kit_ai_reads WHERE report_id IN (SELECT id FROM kit_reports WHERE target_subject IN ${IN_ARG})`;
@@ -343,6 +347,7 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bu
   if (clearGroups.length > 0) addCount(removed, 'notices', num(db.prepare(NOTICES_CLEAR_SQL).run(setJ, j(clearGroups)).changes));
   addCount(removed, 'strikes', num(db.prepare(STRIKES_DELETE_SQL).run(setJ).changes));
   addCount(removed, 'mutes', num(db.prepare(MUTES_DELETE_SQL).run(setJ, setJ).changes));
+  addCount(removed, 'pace', num(db.prepare(PACE_DELETE_SQL).run(setJ).changes));
   addCount(removed, 'blocked_names', num(db.prepare(BLOCKED_NAMES_DELETE_SQL).run(setJ).changes));
   addCount(removed, 'appeals', num(db.prepare(APPEALS_DELETE_SQL).run(setJ, j(heldGroups)).changes));
   addCount(removed, 'signals', num(db.prepare(SIGNALS_DELETE_SQL).run(setJ, setJ).changes));
@@ -456,6 +461,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
       audit: [],
       holds: { reports: 0 },
       workflow: { comments: 0 },
+      pace: { rooms: 0 },
       truncated: [],
     };
     if (set.length === 0) return empty;
@@ -472,6 +478,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
     const head = db.prepare(EXPORT_SUBJECTS_SQL).get(setJ);
     const ids = db.prepare(EXPORT_IDENTIFIERS_SQL).get(setJ);
     const mutes = db.prepare(EXPORT_MUTES_SQL).get(setJ, setJ, setJ, setJ);
+    const paceRooms = num(db.prepare(EXPORT_PACE_SQL).get(setJ)?.n);
     const noauto = db.prepare(EXPORT_NOAUTO_SQL).get(setJ);
     const outcomes = db.prepare(EXPORT_AI_OUTCOMES_SQL).all(setJ, cap);
     if (outcomes.length > EXPORT_SECTION_MAX) truncated.push('ai');
@@ -542,6 +549,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
         outcomes: outcomes.slice(0, EXPORT_SECTION_MAX).map((r) => ({ verdict: String(r.verdict), agreement: String(r.agreement) })),
       },
       audit: section('audit', EXPORT_AUDIT_SQL, (r) => ({ at: num(r.at), action: String(r.action) })),
+      pace: { rooms: paceRooms },
       holds: { reports: holds },
       workflow: { comments: num(db.prepare(EXPORT_COMMENTS_SQL).get(setJ, setJ, setJ)?.n) },
       truncated,

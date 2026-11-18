@@ -4,6 +4,7 @@ import type {
   AuditListQuery,
   AuditRow,
   ChatDayRow,
+  PaceStateRow,
   ClaimAttempt,
   ClaimMode,
   ClaimRow,
@@ -108,6 +109,8 @@ export class MemoryStore implements Store {
   protected comments: CommentRow[] = [];
   /** The daily line counts by UTC day (`desk.insights`). */
   protected chatDays = new Map<string, ChatDayRow>();
+  /** The shared pacer's rows by (room, person). Operational state: kept out of the undo log, so a rolled-back decision does not roll a player's pacing back. */
+  protected pace = new Map<string, PaceStateRow>();
   /** Recorded decisions by key. */
   protected decisions = new Map<string, DecisionRow>();
   /** Notices in insertion order (stands in for SQLite's rowid). */
@@ -1140,6 +1143,46 @@ export class MemoryStore implements Store {
       .map((r) => ({ ...r }));
   }
 
+  private static paceKey(roomId: string, who: string): string {
+    // Length-prefixed, so no pair of ids can read as another (an id may hold any character).
+    return `${roomId.length}:${roomId}:${who}`;
+  }
+
+  paceLoad(roomId: string, who: string): PaceStateRow | null {
+    const held = this.pace.get(MemoryStore.paceKey(roomId, who));
+    return held === undefined ? null : structuredClone(held);
+  }
+
+  paceUpdate(roomId: string, who: string, fn: (prev: PaceStateRow | null) => PaceStateRow): PaceStateRow {
+    const key = MemoryStore.paceKey(roomId, who);
+    const held = this.pace.get(key);
+    const next = fn(held === undefined ? null : structuredClone(held));
+    // Whatever key the function wrote on its row, the row is stored under the key asked for.
+    const stored: PaceStateRow = { ...structuredClone(next), roomId, who };
+    this.pace.set(key, stored);
+    return structuredClone(stored);
+  }
+
+  paceDropRoom(roomId: string): number {
+    let gone = 0;
+    for (const [key, row] of [...this.pace]) {
+      if (row.roomId !== roomId) continue;
+      this.pace.delete(key);
+      gone++;
+    }
+    return gone;
+  }
+
+  paceSweep(before: number): number {
+    let gone = 0;
+    for (const [key, row] of [...this.pace]) {
+      if (row.touchedAt >= before) continue;
+      this.pace.delete(key);
+      gone++;
+    }
+    return gone;
+  }
+
   purgeChatCounts(beforeDay: string): number {
     const gone = [...this.chatDays].filter(([day]) => day < beforeDay);
     for (const [day] of gone) this.chatDays.delete(day);
@@ -1504,6 +1547,11 @@ export class MemoryStore implements Store {
     add('mutes', mutes.size - keptMutes.size);
     if (keptMutes.size !== mutes.size) this.swap(mutes, keptMutes, (v) => (this.mutes = v));
 
+    const pace = this.pace;
+    const keptPace = new Map([...pace].filter(([, r]) => !set.has(r.who)));
+    add('pace', pace.size - keptPace.size);
+    if (keptPace.size !== pace.size) this.swap(pace, keptPace, (v) => (this.pace = v));
+
     add('blocked_names', hooks.privacyEraseBlockedNames?.(set) ?? 0);
     add('appeals', hooks.privacyEraseAppeals?.(set, heldGroups) ?? 0);
     add('signals', hooks.privacyEraseSignals?.(set) ?? 0);
@@ -1710,6 +1758,7 @@ export class MemoryStore implements Store {
         audit: [],
         holds: { reports: 0 },
         workflow: { comments: 0 },
+        pace: { rooms: 0 },
         truncated,
       };
     }
@@ -1818,6 +1867,8 @@ export class MemoryStore implements Store {
           return this.comments.filter((c) => c.text !== null && naming.has(c.reportId)).length;
         })(),
       },
+      // In how many rooms the pacer holds timing state for the person: a count, never a time or a digest.
+      pace: { rooms: [...this.pace.values()].filter((r) => set.has(r.who)).length },
       // Only that something is held: a count, never which report, why or since when.
       holds: { reports: this.listHolds().filter((h) => this.reports.some((r) => r.id === h.reportId && (set.has(r.targetSubject) || set.has(r.reporterSubject)))).length },
       truncated,

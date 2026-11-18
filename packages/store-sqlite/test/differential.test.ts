@@ -608,3 +608,43 @@ describe('the desk methods: urgent, hand-off, escalation, comments, day counts a
     same('the change token', (s) => s.changeToken());
   });
 });
+
+describe('shared pace state', () => {
+  it('memory and sqlite give the same answer to one script of updates, loads, throws, sweeps and room drops', () => {
+    const a = mem();
+    const b = sql();
+    for (const s of [a, b]) for (const m of ['paceLoad', 'paceUpdate', 'paceDropRoom', 'paceSweep'] as const) expect(typeof s[m], m).toBe('function');
+    const same = (label: string, f: (s: Store) => unknown): void => {
+      const x = f(a);
+      const y = f(b);
+      expect(y, label).toEqual(x);
+    };
+    const row = (roomId: string, who: string, lastAt: number) => ({ roomId, who, lastAt, stamps: [lastAt - 2, lastAt - 1, lastAt], recent: [{ h: `h${lastAt}`.padEnd(16, '0'), at: lastAt }], floodSignalAt: lastAt % 3 === 0 ? lastAt : null, touchedAt: NOW + lastAt });
+    const rooms = ['r1', 'r2', 'r3'];
+    const people = ['s_p1', 's_p2', 'seat:g1', 'a:b'];
+    for (let i = 0; i < 60; i++) {
+      const room = rooms[i % 3] as string;
+      const who = people[i % 4] as string;
+      same(`update ${i}`, (s) => s.paceUpdate?.(room, who, (prev) => ({ ...row(room, who, i), stamps: [...(prev?.stamps ?? []), i].slice(-5) })));
+      if (i % 7 === 0) same(`load ${i}`, (s) => s.paceLoad?.(room, who));
+      if (i % 11 === 0)
+        same(`throw ${i}`, (s) => {
+          try {
+            s.paceUpdate?.(room, who, () => {
+              throw new Error('x');
+            });
+            return 'no throw';
+          } catch (e) {
+            return (e as Error).message;
+          }
+        });
+    }
+    for (const room of rooms) for (const who of people) same(`load ${room} ${who}`, (s) => s.paceLoad?.(room, who));
+    same('sweep', (s) => s.paceSweep?.(NOW + 30));
+    for (const room of rooms) for (const who of people) same(`after sweep ${room} ${who}`, (s) => s.paceLoad?.(room, who));
+    same('drop r2', (s) => s.paceDropRoom?.('r2'));
+    same('drop r2 again', (s) => s.paceDropRoom?.('r2'));
+    same('sweep all', (s) => s.paceSweep?.(NOW + 1_000));
+    for (const room of rooms) for (const who of people) same(`end ${room} ${who}`, (s) => s.paceLoad?.(room, who));
+  });
+});

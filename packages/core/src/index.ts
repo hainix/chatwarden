@@ -67,6 +67,7 @@ export type {
   FilterHitRow,
   ReportOrigin,
   ChatDayRow,
+  PaceStateRow,
   CommentRow,
   InsightRow,
   ReportComment,

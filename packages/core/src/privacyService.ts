@@ -109,7 +109,7 @@ export function createPrivacy(deps: PrivacyDeps): PrivacyService {
       const out = store.exportSubjects(set);
       if (!out.found) return { ok: false, error: 'not_found' };
       const { createdAt, aliases, accounts, identifiers, truncated } = out;
-      const { sanctions, notices, reportsFiled, reportsAbout, strikes, blockedNames, appeals, signals, mutes, ai, audit, holds, workflow } = out;
+      const { sanctions, notices, reportsFiled, reportsAbout, strikes, blockedNames, appeals, signals, mutes, ai, audit, holds, workflow, pace } = out;
       return {
         format: 'chatwarden.privacy-export',
         version: 1,
@@ -117,7 +117,7 @@ export function createPrivacy(deps: PrivacyDeps): PrivacyService {
         person: { ref: subjects.canonical(person), createdAt, aliases },
         accounts,
         identifiers,
-        sections: { sanctions, notices, reportsFiled, reportsAbout, strikes, blockedNames, appeals, signals, mutes, ai, audit, holds, workflow },
+        sections: { sanctions, notices, reportsFiled, reportsAbout, strikes, blockedNames, appeals, signals, mutes, ai, audit, holds, workflow, pace },
         truncated,
         notes: [...EXPORT_NOTES],
       };

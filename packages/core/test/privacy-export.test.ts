@@ -23,7 +23,7 @@ describe('export: the sections of the registry', () => {
     expect(e.person.aliases).toBe(1);
     expect(e.accounts).toEqual([A.account]);
     expect(e.identifiers).toMatchObject({ keys: 1, addresses: 1 });
-    expect(Object.keys(e.sections).sort()).toEqual(['ai', 'appeals', 'audit', 'blockedNames', 'holds', 'mutes', 'notices', 'reportsAbout', 'reportsFiled', 'sanctions', 'signals', 'strikes', 'workflow']);
+    expect(Object.keys(e.sections).sort()).toEqual(['ai', 'appeals', 'audit', 'blockedNames', 'holds', 'mutes', 'notices', 'pace', 'reportsAbout', 'reportsFiled', 'sanctions', 'signals', 'strikes', 'workflow']);
     expect(e.sections.strikes.map((s) => s.line)).toEqual([A_LINE]);
     expect(e.sections.reportsFiled.map((r) => r.note)).toEqual(['alpha note about bravo']);
     expect(e.sections.reportsAbout.length).toBe(1);

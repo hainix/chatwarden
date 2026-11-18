@@ -16,6 +16,7 @@ import { linksContract } from './links.contract.js';
 import { mutesContract } from './mutes.contract.js';
 import { namesContract } from './names.contract.js';
 import { noticesContract } from './notices.contract.js';
+import { paceContract } from './pace.contract.js';
 import { policyContract } from './policy.contract.js';
 import { privacyContract } from './privacy.contract.js';
 import { reportReasonsContract } from './reportReasons.contract.js';
@@ -45,6 +46,7 @@ export {
   mutesContract,
   namesContract,
   noticesContract,
+  paceContract,
   policyContract,
   privacyContract,
   reportReasonsContract,
@@ -90,6 +92,7 @@ export const CONTRACT_AREAS = [
   'legal',
   'desk',
   'scope',
+  'pace',
 ] as const;
 
 /**
@@ -124,4 +127,5 @@ export function storeContract(name: string, make: () => Store, dump?: (s: Store)
   legalContract(name, make);
   deskContract(name, make);
   scopeContract(name, make);
+  paceContract(name, make);
 }

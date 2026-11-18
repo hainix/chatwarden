@@ -21,7 +21,7 @@ const WORD = 'ERASE';
 type Keep = 'safety' | 'none';
 
 /** The categories of a count, in the order the kit lists them. An unknown category from a newer kit is shown under its own name. */
-const ORDER = ['subjects', 'identifiers', 'sanctions', 'notices', 'reports_filed', 'reports_about', 'report_lines', 'strikes', 'mutes', 'blocked_names', 'appeals', 'signals', 'ai', 'workflow', 'audit', 'holds'] as const;
+const ORDER = ['subjects', 'identifiers', 'sanctions', 'notices', 'reports_filed', 'reports_about', 'report_lines', 'strikes', 'mutes', 'blocked_names', 'appeals', 'signals', 'ai', 'workflow', 'audit', 'holds', 'pace'] as const;
 
 type Counts = Partial<Record<string, number>>;
 

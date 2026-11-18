@@ -928,6 +928,26 @@ export interface ReportComment {
 /** The most entries one report's thread holds: the store refuses the next. @experimental */
 export const COMMENTS_PER_REPORT_MAX = 50;
 
+/**
+ * The shared pacer's state for one player in one room (`createChatwarden({ sharedPacing: true })`): the same things the in-memory pacer keeps, so two processes can judge one player's
+ * lines. Times and fingerprints only; never a line's text. `who` is the canonical subject id, or `seat:<seatId>` for a guest.
+ * @experimental
+ */
+export interface PaceStateRow {
+  roomId: string;
+  who: string;
+  /** The time of the last committed line, epoch ms. */
+  lastAt: number;
+  /** The times of the last committed lines (at most the burst's `lines`), oldest first. */
+  stamps: number[];
+  /** The 16-hex-character fingerprints of the last 8 committed lines with their times, oldest first. */
+  recent: Array<{ h: string; at: number }>;
+  /** When a flood signal was last sent for this player in this room, or null. */
+  floodSignalAt: number | null;
+  /** When the row was last written: the sweep deletes rows not touched for an hour. */
+  touchedAt: number;
+}
+
 /** One day of line counts (`desk.insights`): the UTC date as `YYYY-MM-DD` and two counts. No player, room or text. @experimental */
 export interface ChatDayRow {
   day: string;
@@ -2035,6 +2055,22 @@ export interface Store {
 
   /** Delete the line counts of days strictly before `beforeDay`. Returns how many rows went. */
   purgeChatCounts?(beforeDay: string): number;
+
+  /** The shared pacer's row for (`roomId`, `who`), or null for none. A copy. @experimental */
+  paceLoad?(roomId: string, who: string): PaceStateRow | null;
+
+  /**
+   * Read the row (null for none), run `fn(prev)` exactly once, store what it returns for this (`roomId`, `who`) and return it, as one atomic step: two processes updating one key
+   * serialise (SQLite: one `BEGIN IMMEDIATE` transaction) and none of the two updates is lost. A throw from `fn` stores nothing and rethrows. `fn` is synchronous and must not call the store.
+   * @experimental
+   */
+  paceUpdate?(roomId: string, who: string, fn: (prev: PaceStateRow | null) => PaceStateRow): PaceStateRow;
+
+  /** Delete one room's rows. Returns how many went. @experimental */
+  paceDropRoom?(roomId: string): number;
+
+  /** Delete the rows whose `touchedAt` is strictly before `before`. Returns how many went. @experimental */
+  paceSweep?(before: number): number;
 
   /** The reports created at or after `since`, newest first, at most `limit` (clamped to at least 1), as {@link InsightRow}s: no text, subject, handle or actor. */
   insightRows?(since: number, limit: number): InsightRow[];

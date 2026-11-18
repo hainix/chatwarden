@@ -26,6 +26,10 @@ import {
   FILTER_HITS_PURGE_SQL,
   INSIGHT_ROWS_SQL,
   ORIGIN_REPORTS_COUNT_SQL,
+  PACE_DROP_ROOM_SQL,
+  PACE_LOAD_SQL,
+  PACE_SWEEP_SQL,
+  PACE_UPSERT_SQL,
   REASON_PURGE_WHERE,
   REPORT_ESCALATION_SET_SQL,
   REPORT_HANDOFF_SET_SQL,
@@ -213,6 +217,10 @@ describe('the desk statements (migration 26, the urgent-lane block) bind exactly
       ['CHAT_COUNTS_LIST_SQL', CHAT_COUNTS_LIST_SQL, 2],
       ['CHAT_COUNTS_PURGE_SQL', CHAT_COUNTS_PURGE_SQL, 1],
       ['INSIGHT_ROWS_SQL', INSIGHT_ROWS_SQL, 2],
+      ['PACE_LOAD_SQL', PACE_LOAD_SQL, 2],
+      ['PACE_UPSERT_SQL', PACE_UPSERT_SQL, 7],
+      ['PACE_SWEEP_SQL', PACE_SWEEP_SQL, 1],
+      ['PACE_DROP_ROOM_SQL', PACE_DROP_ROOM_SQL, 1],
     ];
     for (const [name, sql, n] of counts) {
       expect(placeholders(sql), name).toBe(n);
@@ -259,6 +267,10 @@ describe('the desk statements (migration 26, the urgent-lane block) bind exactly
     store.addChatCounts?.('2026-11-17', 1, 2);
     store.chatCounts?.('2026-11-17', '2026-11-17');
     store.purgeChatCounts?.('2026-11-18');
+    store.paceLoad?.('r', 'w');
+    store.paceUpdate?.('r', 'w', () => ({ roomId: 'r', who: 'w', lastAt: 1, stamps: [1], recent: [], floodSignalAt: null, touchedAt: 1 }));
+    store.paceSweep?.(0);
+    store.paceDropRoom?.('r');
     store.insightRows?.(0, 10);
     store.purgeReportsByReason?.('welfare', 10);
     store.purgeReports(10, 0);
@@ -302,6 +314,8 @@ describe('the privacy statements bind exactly as many values as they have placeh
     ERASURES_PENDING_SQL: 0,
     ERASURES_PURGE_SQL: 1,
     EXPORT_MUTES_SQL: 4,
+    PACE_DELETE_SQL: 1,
+    EXPORT_PACE_SQL: 1,
     EXPORT_SANCTIONS_SQL: 2,
     'STRAY_BEFORE_SQL.STRIKES': 1,
     'STRAY_BEFORE_SQL.NOTICES': 1,

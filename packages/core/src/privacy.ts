@@ -25,6 +25,7 @@ export const PRIVACY_CATEGORIES = [
   'workflow',
   'audit',
   'holds',
+  'pace',
 ] as const;
 export type PrivacyCategory = (typeof PRIVACY_CATEGORIES)[number];
 
@@ -230,6 +231,15 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     retention: null,
     jsonColumns: [],
   },
+  {
+    category: 'pace',
+    tables: ['kit_pace'],
+    export: 'Only in how many rooms the pacer holds timing state for the person (when their last lines were and a short fingerprint of each, never the text). It is swept after an hour; the export says how many rooms, nothing else.',
+    eraseSafety: 'Deleted.',
+    eraseNone: 'Deleted.',
+    retention: null,
+    jsonColumns: [],
+  },
 ];
 
 /**
@@ -255,6 +265,8 @@ export const NO_PERSON_TABLES: Readonly<Record<string, string>> = {
  * @experimental
  */
 export const NO_PERSON_JSON_COLUMNS: Readonly<Record<string, string>> = {
+  'kit_pace.stamps_json': 'The times of the player\'s last few lines in one room: whole numbers of milliseconds, no person, no text.',
+  'kit_pace.recent_json': 'Short fingerprints (16 hex characters) of the player\'s last lines in one room, with the time of each: never the text, never a person. The row\'s own `who` column is the person, and it is erased with the person.',
   'kit_reports.tags_json': 'The room tags the game gave (mode, region): never a person.',
   'kit_reports.entity_json': 'The clan, guild or team a report names (kind, the id the game gave it, label): no subject id. A label may be a name a player chose, so it is cleared when the reporter is erased and goes with the report when its target is.',
   'kit_audit.before_json': 'The earlier value of a changed setting: settings only.',
@@ -399,6 +411,8 @@ export interface SubjectExport {
   holds: { reports: number };
   /** How many free-text staff comments sit on reports that name the person (as the player reported, the reporter or a speaker in the lines). Only the count: never the text, the report or the staff member. */
   workflow: { comments: number };
+  /** In how many rooms the shared pacer holds timing state for the person (the rows of `kit_pace` for them and every alias). Only the number: never a time or a digest. */
+  pace: { rooms: number };
   truncated: string[];
 }
 
@@ -427,6 +441,7 @@ export interface PrivacyExport {
     audit: SubjectExport['audit'];
     holds: SubjectExport['holds'];
     workflow: SubjectExport['workflow'];
+    pace: SubjectExport['pace'];
   };
   truncated: string[];
   /** What the kit does not put in an export, and why (from the registry). */

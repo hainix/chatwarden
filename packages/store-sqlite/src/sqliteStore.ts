@@ -35,6 +35,7 @@ import type {
   FilterHitRow,
   ReportOrigin,
   ChatDayRow,
+  PaceStateRow,
   ClaimAttempt,
   ClaimMode,
   ClaimRow,
@@ -205,6 +206,15 @@ export const CHAT_COUNTS_ADD_SQL =
 export const CHAT_COUNTS_LIST_SQL = 'SELECT day, delivered, refused FROM kit_chat_days WHERE day >= ? AND day <= ? ORDER BY day';
 /** Delete the line counts of days before a day. Binds: the day. */
 export const CHAT_COUNTS_PURGE_SQL = 'DELETE FROM kit_chat_days WHERE day < ?';
+/** The shared pacer's row of one player in one room. Binds: room, who. */
+export const PACE_LOAD_SQL = 'SELECT room_id, who, last_at, stamps_json, recent_json, flood_signal_at, touched_at FROM kit_pace WHERE room_id = ? AND who = ?';
+/** Store the pacer's row, replacing the one there. Binds: room, who, last_at, stamps_json, recent_json, flood_signal_at, touched_at. */
+export const PACE_UPSERT_SQL =
+  'INSERT INTO kit_pace (room_id, who, last_at, stamps_json, recent_json, flood_signal_at, touched_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (room_id, who) DO UPDATE SET last_at = excluded.last_at, stamps_json = excluded.stamps_json, recent_json = excluded.recent_json, flood_signal_at = excluded.flood_signal_at, touched_at = excluded.touched_at';
+/** Delete the pacer's rows not touched since a time (strictly before it). Binds: the time. */
+export const PACE_SWEEP_SQL = 'DELETE FROM kit_pace WHERE touched_at < ?';
+/** Delete one room's pacer rows. Binds: the room. */
+export const PACE_DROP_ROOM_SQL = 'DELETE FROM kit_pace WHERE room_id = ?';
 /** The reports Insights reads: since a time, newest first. Binds: the time, the limit. */
 export const INSIGHT_ROWS_SQL =
   'SELECT created_at, actioned_at, status, reported_reason, urgent, bad_faith FROM kit_reports WHERE created_at >= ? ORDER BY created_at DESC, id DESC LIMIT ?';
@@ -733,6 +743,19 @@ function holdRowOf(r: Record<string, unknown>): HoldRow {
     heldAt: Number(r.held_at),
     releasedBy: r.released_by === null ? null : String(r.released_by),
     releasedAt: r.released_at === null ? null : Number(r.released_at),
+  };
+}
+
+/** A `kit_pace` row as the facade's {@link PaceStateRow}. */
+function paceRowOf(r: Record<string, unknown>): PaceStateRow {
+  return {
+    roomId: String(r.room_id),
+    who: String(r.who),
+    lastAt: Number(r.last_at),
+    stamps: (JSON.parse(String(r.stamps_json)) as unknown[]).map(Number),
+    recent: (JSON.parse(String(r.recent_json)) as Array<{ h: unknown; at: unknown }>).map((e) => ({ h: String(e.h), at: Number(e.at) })),
+    floodSignalAt: r.flood_signal_at === null ? null : Number(r.flood_signal_at),
+    touchedAt: Number(r.touched_at),
   };
 }
 
@@ -2859,6 +2882,48 @@ export class SqliteStore implements Store, TermStore {
 
   purgeChatCounts(beforeDay: string): number {
     return this.transaction(() => Number(this.db.prepare(CHAT_COUNTS_PURGE_SQL).run(beforeDay).changes));
+  }
+
+  paceLoad(roomId: string, who: string): PaceStateRow | null {
+    const r = this.db.prepare(PACE_LOAD_SQL).get(roomId, who);
+    return r === undefined ? null : paceRowOf(r);
+  }
+
+  /**
+   * Read, decide and write as one step under the database's write lock, so two processes updating one player serialise and both updates count. A caller already inside a transaction
+   * (a savepoint nests) joins it instead. A busy database past `busy_timeout` throws the driver's "database is locked" error: the pacer catches it and fails open.
+   */
+  paceUpdate(roomId: string, who: string, fn: (prev: PaceStateRow | null) => PaceStateRow): PaceStateRow {
+    const step = (): PaceStateRow => {
+      const found = this.db.prepare(PACE_LOAD_SQL).get(roomId, who);
+      const next = { ...fn(found === undefined ? null : paceRowOf(found)), roomId, who };
+      this.db.prepare(PACE_UPSERT_SQL).run(roomId, who, next.lastAt, JSON.stringify(next.stamps), JSON.stringify(next.recent), next.floodSignalAt, next.touchedAt);
+      return structuredClone(next);
+    };
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+    } catch (err) {
+      // Already inside a transaction (the caller's): nest as a savepoint. Any other failure, a locked database included, is the caller's to catch.
+      if (/within a transaction/i.test(String((err as { message?: unknown }).message))) return this.transaction(step);
+      throw err;
+    }
+    let done: PaceStateRow;
+    try {
+      done = step();
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    this.db.exec('COMMIT');
+    return done;
+  }
+
+  paceDropRoom(roomId: string): number {
+    return this.transaction(() => Number(this.db.prepare(PACE_DROP_ROOM_SQL).run(roomId).changes));
+  }
+
+  paceSweep(before: number): number {
+    return this.transaction(() => Number(this.db.prepare(PACE_SWEEP_SQL).run(before).changes));
   }
 
   insightRows(since: number, limit: number): InsightRow[] {

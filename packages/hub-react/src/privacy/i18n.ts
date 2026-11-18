@@ -50,6 +50,7 @@ export const privacyEn = {
   'hub.privacy.erase.cat.signals': 'Signals',
   'hub.privacy.erase.cat.ai': 'AI reads, marks and outcomes',
   'hub.privacy.erase.cat.workflow': 'Case claims and links',
+  'hub.privacy.erase.cat.pace': 'Chat pacing state',
   'hub.privacy.erase.cat.audit': 'Audit entries now pointing at the receipt',
   'hub.privacy.erase.cat.holds': 'Holds',
   'hub.privacy.erase.word': 'Type ERASE to confirm',
