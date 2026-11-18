@@ -16,12 +16,23 @@ const BUILT = fileURLToPath(new URL('../dist/src/index.js', import.meta.url));
 function run(path: string, id: number, gate: SharedArrayBuffer, rounds: number, keep: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(WORKER, { workerData: { path, id, rounds, gate, keep } });
-    worker.once('message', () => resolve());
+    // Resolve on the worker's exit, not on its message: the thread's file handles are released when it ends, and on Windows a temp directory cannot be removed while one is open.
+    let done = false;
+    worker.once('message', () => {
+      done = true;
+    });
     worker.once('error', reject);
     worker.once('exit', (code) => {
       if (code !== 0) reject(new Error(`worker exited with ${code}`));
+      else if (!done) reject(new Error('worker exited without finishing'));
+      else resolve();
     });
   });
+}
+
+/** Remove a temp directory, retrying: Windows holds a SQLite file (and its -wal and -shm) for a moment after the last handle closes. */
+function removeDir(dir: string): void {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
 }
 
 describe('shared pace state across connections', () => {
@@ -52,7 +63,7 @@ describe('shared pace state across connections', () => {
       const mine = (id: number) => (row?.stamps ?? []).filter((s) => Math.floor(s / 100_000) === id);
       for (const id of [1, 2]) expect(mine(id)).toEqual([...mine(id)].sort((a, b) => a - b));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeDir(dir);
     }
   }, 60_000);
 
@@ -70,7 +81,7 @@ describe('shared pace state across connections', () => {
       db.close();
       expect(row?.stamps.length).toBeLessThanOrEqual(30);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeDir(dir);
     }
   }, 60_000);
 });

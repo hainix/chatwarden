@@ -39,7 +39,7 @@ describe('the Web hub (hub element)', () => {
     const login = await call(`${ORIGIN}/chatwarden/mod/login`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `token=${encodeURIComponent(LONG_TOKEN)}`, redirect: 'manual' });
     expect(login.status).toBe(303);
     const cookie = login.headers.get('set-cookie') ?? '';
-    expect(cookie).toMatch(/^chatwarden_staff=[0-9a-f]{64}; HttpOnly; SameSite=Strict; Path=\/chatwarden$/);
+    expect(cookie).toMatch(/^chatwarden_staff=[0-9a-f]{64}; HttpOnly; SameSite=Strict; Path=\/chatwarden; Secure$/);
     expect(cookie).not.toContain(LONG_TOKEN);
     const pair = cookie.split(';')[0] as string;
     const page = await call(`${ORIGIN}/chatwarden/mod`, { headers: { cookie: pair } });

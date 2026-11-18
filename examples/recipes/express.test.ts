@@ -118,7 +118,7 @@ describe('staff routes and the hub page are closed without a long token', () => 
     expect(login.status).toBe(303);
     expect(login.headers.get('location')).toBe('/chatwarden/mod');
     const setCookie = login.headers.get('set-cookie') ?? '';
-    expect(setCookie).toMatch(/^chatwarden_staff=[0-9a-f]{64}; HttpOnly; SameSite=Strict; Path=\/chatwarden$/);
+    expect(setCookie).toMatch(/^chatwarden_staff=[0-9a-f]{64}; HttpOnly; SameSite=Strict; Path=\/chatwarden; Secure$/);
     expect(setCookie).not.toContain(LONG_TOKEN);
     const cookie = setCookie.split(';')[0] as string;
 

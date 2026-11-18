@@ -50,8 +50,10 @@ export function openStore(opts: OpenOptions): SqliteStore {
   const db = 'path' in opts ? new DatabaseSync(opts.path) : opts.db;
   try {
     db.exec('PRAGMA foreign_keys = ON');
-    if (ownsDb) db.exec('PRAGMA journal_mode = WAL');
+    // The busy timeout first: switching to WAL takes locks, and two connections opening one file at the same moment (two processes, or two threads) would otherwise
+    // fail the second with "database is locked" at open.
     if (Number(db.prepare('PRAGMA busy_timeout').get()?.timeout ?? 0) === 0) db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    if (ownsDb) db.exec('PRAGMA journal_mode = WAL');
 
     db.exec('CREATE TABLE IF NOT EXISTS kit_meta (key TEXT PRIMARY KEY, value TEXT)');
     const latest = migrations.at(-1)?.version ?? 0;

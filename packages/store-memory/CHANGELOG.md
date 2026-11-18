@@ -34,7 +34,7 @@
   - **Service mode.** `@chatwarden/http/service` is a `/v1` API for a game server in any language, with service keys, rate limits and idempotency, an OpenAPI description, `createServiceClient`, `chatwarden serve` and `chatwarden init --service`.
   - **Shared pacing.** `createChatwarden({ sharedPacing: true })` keeps pace state in the store so several processes judge one player's lines together.
   - **Spanish and Portuguese.** The player components and the hub have `es` and `pt` catalogues as lazy subpaths. **They are machine drafts and have not been read by a person**: have a native speaker read them, the notice and refusal words above all, before you turn the language on for players.
-  - **Smaller changes.** `@chatwarden/hub-element` and `@chatwarden/hub-react` ship the new screens; entity labels may hold a ZWNJ or ZWJ between two letters (Persian and Indic names); `@chatwarden/http` and `@chatwarden/hub-element` no longer dev-depend on each other.
+  - **Smaller changes.** `@chatwarden/hub-element` and `@chatwarden/hub-react` ship the new screens; entity labels may hold a ZWNJ or ZWJ between two letters (Persian and Indic names); `@chatwarden/http` and `@chatwarden/hub-element` no longer dev-depend on each other. `openStore` sets the busy timeout before it switches the file to WAL, so two connections opening one database file at the same moment (two processes sharing pacing, say) no longer fail with "database is locked".
 
 ## 0.1.14
 
