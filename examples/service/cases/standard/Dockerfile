@@ -2,7 +2,7 @@
 # Written by `chatwarden init --service`. It is yours now: edit freely. Re-running never overwrites a file you changed.
 
 FROM node:22-slim
-ARG CHATWARDEN_VERSION=0.2.1
+ARG CHATWARDEN_VERSION=0.2.2
 WORKDIR /app
 RUN npm install --omit=dev --no-audit --no-fund \
     @chatwarden/core@${CHATWARDEN_VERSION} \

@@ -197,6 +197,7 @@ How it behaves:
 - **The editable profile.** It implements `loadPolicyLayer` and `savePolicyLayer`, so `cw.policy.save` works. The stored layer lives in
   the heap with everything else: it is lost when the process ends, so a profile edited at runtime goes back to your code's profile
   on restart. Use the SQLite store (or your own) for edits that must last.
+- **The first-run setup flag and the identity age-out (0.2.2).** It implements `getSetupState` and `saveSetupState` (the owner's dismissal of the first-run panel, kept in the heap like everything else) and `purgeIdleSubjects` (people with no record, last seen before the retention window, `retention.subjectsMs` in `@chatwarden/core`), all optional on the `Store` interface.
 - **One process, one thread.** It is a set of objects in your heap. Two processes, or two workers, each get their own empty store.
 - **No size limit.** Memory grows with what you store until the retention purge runs or the process ends.
 

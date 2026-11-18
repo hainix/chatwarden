@@ -788,7 +788,7 @@ describe('the appeals and names docs (0.1.9)', () => {
     for (const needle of [
       '| `GET /appeals?status&cursor&limit` |', '| `GET /appeals/:id` |', '| `POST /appeals/:id/decide` |', '| `POST /people/:ref/rename` |', '| `GET /appeals` |', '| `POST /appeals { noticeId, statement }` |',
       '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (new in 0.1.9) is `{ appeals, renames, keepBlocked, rooms, workflow, insights }`', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
-      '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.2.1`',
+      '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.2.2`',
       '`name_profane`', 'Also `POST /people/:ref/rename`.',
     ]) {
       expect(httpDoc, needle).toContain(needle);
@@ -830,7 +830,7 @@ describe('the appeals and names docs (0.1.9)', () => {
     const mounted = ['LazyPaceSettings', 'LazySignalSettings', 'LazyAppealSettings', 'LazyNameSettings'].map((n) => advanced.indexOf(`<${n} `));
     expect([...mounted].sort((a, b) => a - b)).toEqual(mounted);
     const doc = flat(hubDoc);
-    for (const needle of ['a custom length is never offered', 'shows on the Person page in Simple too', '`^0.2.1` for both', 'Translators: words new in 0.1.9', '`displayName(t, { handle, flagged, revealed })`']) {
+    for (const needle of ['a custom length is never offered', 'shows on the Person page in Simple too', '`^0.2.2` for both', 'Translators: words new in 0.1.9', '`displayName(t, { handle, flagged, revealed })`']) {
       expect(doc, needle).toContain(needle);
     }
   });

@@ -384,3 +384,17 @@ Found building contexts, scope, block, phrases, reserved names and unspaced matc
 - **Unspaced terms.** `contains` and `segment` are the only modes; there is no stemming, no script conversion (traditional and simplified Han, kana and romaji are different words) and no spaced non-Latin script (Arabic, Cyrillic, Hebrew). How `Intl.Segmenter` cuts a Thai or Khmer run depends on the ICU data of the Node build, so a boundary can differ between builds; the dry run in the hub is the check.
 - **Match for exceptions.** An exception phrase has no mode; the choice is on terms only. The loader accepts a `matchMode` on a corpus term, but the published community list has no unspaced terms yet.
 - **A real-browser check** of the phrase picker (one layout test runs in a real browser; it does not cover every locale, theme or width), the entity row, the Match choice and the Room contexts list, light and dark.
+
+## Moderation principles, team notes and recommended setup (0.2.2), parked
+
+Found building the principles, the first-run setup, the evidence kind and the identity age-out (design: `docs/design/2026-11-18-moderation-principles.md`; the audits that followed are in the branch's ledger).
+
+- **The Moxgate wording and notes move.** Moxgate's own wording and its "Moxgate notes" page become team notes and principles after 0.2.2 publishes, then the page is deleted. A separate change in Moxgate, not in the kit; the rest of the Moxgate audit (refusal reasons, retract frames, a report after the seat is released, banned screens, welfare resources, account deletion calling `cw.privacy.erase`) is the same.
+- **A hub view of what the AI prompt received.** The hub says which principle, note or standard was left out and why, but not the prompt itself. A read-only "what the AI saw" view would need a stored prompt or a rebuild by the same function, and a decision on who may read it.
+- **Per-room principles.** One list of principles and notes for the whole community. A context (room kind) that carries its own would need the layer by context that the ladder lacks too (see "Rooms, many players and unspaced scripts").
+- **Whether `after_warning` principles belong in the prompt.** A principle that covers only `repeated` or `after_warning` has no line in the AI prompt, because those are about the record, which the AI does not weigh. If a team writes real guidance there, it reaches the guide and the brief only.
+- **The first-run panel again, on request.** It shows once and then only through Settings. A "show it again" control would need the flag to clear and a place for the button.
+- **The case card for a neutral reason.** A report about play filed under a neutral reason (such as "something else") is still read by the AI as chat, with the unchanged prompt, so the read can say `no_action` for a real report. Giving the AI the evidence kind, or skipping neutral reports whose lines are unrelated, is a follow-up.
+- **The identity age-out reads the whole index per pass.** One read of the subject and identifier tables per purge, plus a scan of two JSON columns when there are candidates. Fine at current sizes; an index on `last_seen` or a batch would be the next step for a very large table.
+- **Gameplay examples in the level texts.** The preset level texts (`levels`) reach the AI prompt, which reads chat only, so the examples for play (a slow turn, leaving a match once, stalling, cheating) are in the hub's level hint for a report about play, not in the presets. If the AI ever reads play, they move to the presets.
+

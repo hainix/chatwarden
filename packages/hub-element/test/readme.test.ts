@@ -186,7 +186,7 @@ describe('the README is plain', () => {
 
   it('names the installed size honestly: the number in the Size section is within the budget in the size test', () => {
     const size = section('Size');
-    expect(size.replace(/\s+/g, ' ')).toMatch(/about 1,468 KB minified, about 382 KB gzipped \(gzip -9\) and about 303 KB with brotli/);
+    expect(size.replace(/\s+/g, ' ')).toMatch(/about 1,493 KB minified, about 390 KB gzipped \(gzip -9\) and about 307 KB with brotli/);
     expect(size).toMatch(/THIRD_PARTY_NOTICES\.txt/);
     expect(size).toMatch(/under 400 KB gzipped/);
     // why it is this big now: every lazy chunk and both catalogues are inlined, and a page that wants one language uses the module with its own bundler

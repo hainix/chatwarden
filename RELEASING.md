@@ -62,7 +62,7 @@ The `@chatwarden/http` package also ships a command, `chatwarden` (the `bin` in 
 
 1. **Describe the change.** In the pull request that changes a package, run `npx changeset`. Pick the packages (the group
    moves together; the text goes into the `CHANGELOG.md` of each package you pick), the bump (patch, minor or major) and write
-   plain sentences. Commit the file it creates under `.changeset/`. Every `@chatwarden/*` peer range is `^0.2.0` since 0.2.0 (that release reset the floors by hand, which is why it was a minor), except the six that 0.2.1 raised to `^0.2.1` by hand because their packages use new API (the table of floors is in `scripts/manifests.test.ts`), so a patch or a minor inside 0.2.x
+   plain sentences. Commit the file it creates under `.changeset/`. Every `@chatwarden/*` peer range is `^0.2.0` since 0.2.0 (that release reset the floors by hand, which is why it was a minor), except the six that 0.2.1 raised to `^0.2.1` by hand because their packages use new API (the table of floors is in `scripts/manifests.test.ts`), and 0.2.2 raised five more the same way, so a patch or a minor inside 0.2.x
    stays inside every range. The next 0.x minor (0.3.0) falls outside every `^0.2.x` peer range, so changesets would take it as a breaking change for every
    dependent and make them major bumps (a fixed group moves together, so that would be 1.0.0): set every peer range to `^0.3.0` by hand first (see "When a peer floor
    must rise"), then run `npm run version`, as 0.2.0 did. A release that only fixes things is a patch.
@@ -97,6 +97,8 @@ The `@chatwarden/http` package also ships a command, `chatwarden` (the `bin` in 
    `^0.1.0`.
 
    0.2.1 was that case again, and it stayed a patch: `http`, `discord`, `hub-react` and `player-react` use new API of `@chatwarden/core` (the appeal link calls, the `sanction.overturned` event, `AppealDetail.cause`, `@chatwarden/core/notice-locales`), `hub-react` also uses new `http` routes, and `hub-element` bundles the new hub, so six peer ranges are `^0.2.1` (`core` for those four, `http` for `hub-react`, `hub-react` for `hub-element`), while the stores, `matcher`, `profanity` and the optional peers of `http` stay at `^0.2.0`. The release stays a patch only because the ranges were already `^0.2.1`, a version the new group satisfies, when `npm run version` ran: set them by hand before `npm run version`, so that changesets never sees one out of range. The table of floors is in `scripts/manifests.test.ts` (`RAISED`), each entry with the API that forced it.
+
+   0.2.2 was that case a third time, and again a patch: `http`, `hub-react` and `store-sqlite` peer on `@chatwarden/core` `^0.2.2` (`http` uses `recommendFor`, `cw.policy.setup` and the whole-form layer; `hub-react` the whole-form layer, `PolicyState.promptExcluded` and the evidence kind; `store-sqlite` imports `registrySubjectColumns` at run time), `hub-react` peers on `@chatwarden/http` `^0.2.2` (the `/setup` routes) and `hub-element` on `@chatwarden/hub-react` `^0.2.2`. `discord` and `player-react` stay at `^0.2.1`, and the memory store, `matcher`, `profanity` and the optional peers of `http` stay at `^0.2.0`. They were set by hand before `npm run version`, and `scripts/manifests.test.ts` holds the table.
 
    This deliberately overrides `onlyUpdatePeerDependentsWhenOutOfRange`, by hand, for correctness. For a 0.x minor, set every range to the new minor
    before `npm run version` (as 0.2.0 did), so that changesets never sees one out of range and turns the fixed group into a major. When a release makes a package use a
@@ -166,7 +168,7 @@ Until the packages are on npm, an adopter can build the exact tarballs from a ch
 
    Add `profanity` and `discord` the same way if you use them. `$@chatwarden/core` means "the version named in my own
    `dependencies`". Run `npm install`; `npm ls @chatwarden/core` should show exactly one copy.
-4. When the packages reach npm, replace each `file:` line with `^0.2.1` and delete the `overrides` block.
+4. When the packages reach npm, replace each `file:` line with `^0.2.2` and delete the `overrides` block.
 
 ### Docker
 

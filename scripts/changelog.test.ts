@@ -721,3 +721,141 @@ describe('the 0.2.1 notes (appeals landing, delivery and feedback; a patch), in 
     }
   });
 });
+
+describe('the 0.2.2 notes (moderation principles, evidence kind, identity age-out; a patch), in all ten CHANGELOGs', () => {
+  const section0202 = (dir: string): string => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    const at = text.indexOf('## 0.2.2');
+    const end = text.indexOf('\n## 0.2.1', at);
+    return at < 0 ? '' : text.slice(at, end < 0 ? undefined : end);
+  };
+  const flat = (dir: string): string => section0202(dir).replace(/\s+/g, ' ');
+  /** The text from `from` up to `to` (or the end of the section when `to` is omitted), with white space collapsed. */
+  const block = (dir: string, from: string, to?: string): string => {
+    const s = section0202(dir);
+    const at = s.indexOf(from);
+    const end = to === undefined ? -1 : s.indexOf(to, at + from.length);
+    return at < 0 ? '' : s.slice(at, end < 0 ? undefined : end).replace(/\s+/g, ' ');
+  };
+  const read = (...parts: string[]): string => readFileSync(join(root, ...parts), 'utf8');
+
+  it.each(dirs)('%s: has a 0.2.2 section above 0.2.1, as a patch change', (dir) => {
+    const text = read('packages', dir, 'CHANGELOG.md').replace(/\r\n/g, '\n');
+    expect(text.indexOf('## 0.2.2'), dir).toBeGreaterThan(-1);
+    expect(text.indexOf('## 0.2.2'), dir).toBeLessThan(text.indexOf('## 0.2.1'));
+    expect(section0202(dir), dir).toMatch(/### Patch Changes/);
+    expect(section0202(dir), dir).not.toMatch(/### (Minor|Major) Changes/);
+  });
+
+  it('all ten carry exactly the same text', () => {
+    const first = section0202(dirs[0] as string);
+    expect(first.length).toBeGreaterThan(4500);
+    for (const dir of dirs) expect(section0202(dir), dir).toBe(first);
+  });
+
+  it.each(dirs)('%s: says it is additive and that nothing in it breaks a 0.2.1 input, and has no breaking-changes list', (dir) => {
+    const s = flat(dir);
+    expect(s, dir).toMatch(/additive/i);
+    expect(s, dir).toMatch(/Nothing in this release breaks code, data or settings written for 0\.2\.1/);
+    expect(s, dir).toMatch(/every new setting is off or unset by default/i);
+    expect(s, dir).not.toContain('Breaking changes for adopters');
+  });
+
+  it.each(dirs)('%s: says migration 28 is one-way, to back up the database file, and that the setup flag is a kit_meta row; says what the release is for', (dir) => {
+    const s = flat(dir);
+    expect(s, dir).toMatch(/migration 28 is one-way/i);
+    expect(s, dir).toMatch(/back up the database file/i);
+    expect(s, dir).toMatch(/setup flag is a `kit_meta` row/);
+    for (const needle of ['moderation principles', 'team notes', 'recommended setup', 'chatwarden init --game', 'evidence kind', 'identity age-out']) expect(s.toLowerCase(), needle).toContain(needle.toLowerCase());
+  });
+
+  it.each(dirs)('%s: says the prompt version moved, what that costs, and that stored reads are stale once', (dir) => {
+    const s = block(dir, '**Prompt version 6', '**Evidence kind');
+    for (const needle of ['`AI_PROMPT_VERSION` is now 6', '`AI_CONFIRM_PROMPT_VERSION` is now 2', 'every stored read is stale once', 'daily call and spend caps', 'cache starts cold', 'no outcome']) expect(s, needle).toContain(needle);
+  });
+
+  it.each(dirs)('%s: says what the evidence kind changes, that custom reasons from 0.2.1 read neutral until it is set, and what a 0.2.1 hub meets', (dir) => {
+    const s = block(dir, '**Evidence kind', '**Identity age-out');
+    for (const needle of ['`ReportReason.evidence`', 'custom reason', 'reads neutral until', 'server takes chat lines', 'older hub', '`evidenceKind`', 'reads chat only']) expect(s, needle).toContain(needle);
+  });
+
+  it.each(dirs)('%s: says what the identity age-out deletes, its default and floor, that there is no grace period and that it cannot be undone', (dir) => {
+    const s = block(dir, '**Identity age-out', '**Peer floors**');
+    for (const needle of ['`retention.subjectsMs`', '400 days', 'at least 90', 'no grace period', 'cannot be undone', '`PurgeResult.idleSubjects`', 'no record']) expect(s, needle).toContain(needle);
+  });
+
+  it.each(dirs)('%s: names the raised floors and the API that forced each, and says the others stay', (dir) => {
+    const s = block(dir, '**Peer floors**', '**New optional `Store` methods**');
+    expect(s.length, dir).toBeGreaterThan(500);
+    for (const needle of [
+      '`@chatwarden/http` asks for `@chatwarden/core` `^0.2.2`', '`recommendFor`', '`cw.policy.applyRecommendation`',
+      '`@chatwarden/hub-react` asks for `@chatwarden/core` `^0.2.2`', '`PolicyState.promptExcluded`', '`@chatwarden/http` `^0.2.2`',
+      '`@chatwarden/hub-element` asks for `@chatwarden/hub-react` `^0.2.2`',
+      '`@chatwarden/store-sqlite` asks for `@chatwarden/core` `^0.2.2`', '`registrySubjectColumns`',
+      '`@chatwarden/discord` and `@chatwarden/player-react` stay at `^0.2.1`', '`@chatwarden/store-memory`', '`@chatwarden/matcher`', '`@chatwarden/profanity`', '`^0.2.0`',
+    ]) expect(s, needle).toContain(needle);
+  });
+
+  it('the new optional Store methods named are really on the Store interface, optional, and the list is the whole set', () => {
+    const { optional } = storeMethods();
+    const s = block('store-sqlite', '**New optional `Store` methods**', '**Types the kit produces');
+    const named = [...s.matchAll(/`([a-zA-Z]+)`/g)].map((m) => m[1] as string).filter((n) => /^[a-z]/.test(n) && n !== 'Store');
+    const wanted = ['getSetupState', 'saveSetupState', 'purgeIdleSubjects'];
+    expect([...new Set(named)].sort()).toEqual(wanted.sort());
+    for (const name of wanted) expect(optional, name).toContain(name);
+    expect(s).toMatch(/optional/);
+    expect(s).toMatch(/needs none of it/);
+  });
+
+  it.each(dirs)('%s: names the members that are now required on types the kit produces', (dir) => {
+    const s = block(dir, '**Types the kit produces', '**New public names, by package**');
+    for (const needle of [
+      '`PurgeResult.idleSubjects`', '`PrivacyStatement.categories[].retentionNote`', '`AiFacade.chatOnly`', '`ResolvedProfile.teamNotes`', '`cw.policy.setup`', '`dismissSetup`', '`applyRecommendation`',
+      '`HubClient`', '`applySetup`', 'build one of these by hand',
+    ]) expect(s, needle).toContain(needle);
+  });
+
+  it.each(dirs)('%s: lists the new public names by package, and names this package in the list', (dir) => {
+    const names = block(dir, '**New public names, by package**', '**Turning it on**');
+    expect(names.length, dir).toBeGreaterThan(800);
+    expect(names, dir).toContain(`@chatwarden/${dir}`);
+  });
+
+  it('the new public names of core and hub-react are really exported (read from the source)', () => {
+    const names = block('core', '**New public names, by package**', '**Turning it on**');
+    const coreIndex = read('packages', 'core', 'src', 'index.ts');
+    for (const name of [
+      'TeamNote', 'TEAM_NOTES_MAX', 'TEAM_NOTE_MAX', 'PolicyGuidelinesWhole', 'PromptExcluded', 'PromptPrinciples', 'promptPrinciples', 'GAME_KINDS', 'GameKind', 'GAME_PRESET', 'CREATOR_TEAM_NOTE', 'recommendFor',
+      'isGameKind', 'Recommendation', 'SetupState', 'PolicySetup', 'EvidenceKind', 'EVIDENCE_KINDS', 'isEvidenceKind', 'evidenceKindOf', 'evidenceOfReason', 'evidenceOfRule', 'registrySubjectColumns',
+      'NO_SUBJECT_COLUMNS', 'MAX_AI_CONTEXT', 'MAX_TIER_TITLE', 'MAX_TIER_DESCRIPTION', 'MAX_TIER_EXAMPLES', 'MAX_TIER_EXAMPLE', 'PRINCIPLES_BLOCK_MAX', 'PRINCIPLES_LINE_MAX',
+    ]) {
+      expect(names, name).toContain(`\`${name}\``);
+      expect(coreIndex, name).toContain(name);
+    }
+    const hubTypes = read('packages', 'hub-react', 'src', 'types.ts');
+    const hubNames = block('hub-react', '**New public names, by package**', '**Turning it on**');
+    for (const name of ['GameKind', 'PromptExcluded', 'SetupOption', 'SetupState', 'TeamNote']) {
+      expect(hubNames, name).toContain(`\`${name}\``);
+      expect(hubTypes, name).toContain(name);
+    }
+  });
+
+  it('turns on in a few lines and says what stays the adopter\u2019s', () => {
+    const s = block('core', '**Turning it on**');
+    for (const needle of ['chatwarden init --game competitive|social|kids|creator', '`cw.policy.setup()`', '`ReportReason.evidence`', '`retention.subjectsMs`', 'What stays yours', 'Spanish and Portuguese']) expect(s, needle).toContain(needle);
+  });
+
+  it('uses no em dash, no emoji and no real term (synthetic only)', () => {
+    const s = section0202('core');
+    expect(s).not.toContain('\u2014');
+    expect(s).not.toMatch(/[\u{1F300}-\u{1FAFF}\u2600-\u27bf]/u);
+  });
+
+  it('the 0.2.1 section is still there, once, and so is the 0.2.2 one', () => {
+    for (const dir of dirs) {
+      const text = read('packages', dir, 'CHANGELOG.md');
+      expect(text.split('\n## 0.2.1').length - 1, dir).toBe(1);
+      expect(text.split('\n## 0.2.2').length - 1, dir).toBe(1);
+    }
+  });
+});
