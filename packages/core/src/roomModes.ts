@@ -66,20 +66,31 @@ export class RoomModes {
     if (typeof roomId !== 'string' || roomId === '') throw new TypeError('rooms.setMode: roomId must be a non-empty string');
     if (typeof mode !== 'string' || !(ROOM_MODES as readonly string[]).includes(mode)) throw new RangeError('rooms.setMode: mode must be normal, locked or emergency');
     const now = this.clock.now();
+    // A mode set for a room id nobody reads again would stay until a `get` or `active` found it. Every write sweeps the ones that have ended, so the map holds only modes still running.
+    // Validation of the length comes first: a refused write changes nothing, a sweep included.
+    const asked: unknown = opts === undefined || opts === null ? undefined : opts.forMs;
+    if (mode !== 'normal' && asked !== undefined && !(typeof asked === 'number' && Number.isInteger(asked) && asked >= MODE_MIN_MS && asked <= MODE_MAX_MS)) {
+      throw new RangeError('rooms.setMode: forMs must be a whole number of milliseconds from 60000 to 86400000');
+    }
+    this.sweep(now);
     if (mode === 'normal') {
       const had = this.rooms.delete(roomId);
       if (had) this.changed({ roomId, mode: 'normal', until: null, at: now });
       return normal();
     }
-    const asked: unknown = opts === undefined || opts === null ? undefined : opts.forMs;
-    let forMs: number;
-    if (asked === undefined) forMs = this.defaultModeMs();
-    else if (typeof asked === 'number' && Number.isInteger(asked) && asked >= MODE_MIN_MS && asked <= MODE_MAX_MS) forMs = asked;
-    else throw new RangeError('rooms.setMode: forMs must be a whole number of milliseconds from 60000 to 86400000');
+    const forMs = asked === undefined ? this.defaultModeMs() : (asked as number);
     const entry: Entry = { mode, since: now, until: now + forMs };
     this.rooms.set(roomId, entry);
     this.changed({ roomId, mode, until: entry.until, at: now });
     return { mode, since: entry.since, until: entry.until };
+  }
+
+  /** Drop every mode that has ended, announcing each expiry once (the same event a read raises). Entries are removed before anything is announced. */
+  private sweep(now: number): void {
+    const ended: string[] = [];
+    for (const [roomId, entry] of this.rooms) if (now >= entry.until) ended.push(roomId);
+    for (const roomId of ended) this.rooms.delete(roomId);
+    for (const roomId of ended) this.changed({ roomId, mode: 'normal', until: null, expired: true, at: now });
   }
 
   /** The mode in force, with the expiry applied (an expiry is announced once, then the room reads normal). A copy. */

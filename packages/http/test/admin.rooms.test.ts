@@ -141,7 +141,7 @@ describe('POST /rooms/:room/mode', () => {
 
   it('a room with an awkward id is audited by hash and the id never reaches the trail', async () => {
     const w = await world();
-    const awkward = 'Ranked lobby / EU éè #7';
+    const awkward = 'Ranked lobby / EU \u00e9\u00e8 #7';
     const res = await w.call('POST', `/rooms/${encodeURIComponent(awkward)}/mode`, { body: { mode: 'locked' } });
     expect(res.status).toBe(200);
     expect(w.cw.rooms.mode(awkward).mode).toBe('locked');

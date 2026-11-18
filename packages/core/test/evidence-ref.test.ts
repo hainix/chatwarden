@@ -30,7 +30,7 @@ describe('ReportInput.evidenceRef', () => {
   });
 
   it('a dot, slash, space, emoji, NUL, backslash, percent, newline and non-ASCII letter are dropped with the report still taken', async () => {
-    for (const bad of ['a.b', 'a/b', 'a b', 'a\u{1F600}', 'a\u0000b', 'a\\b', 'a%2Fb', 'a\nb', 'café', '../etc', 'https://x']) {
+    for (const bad of ['a.b', 'a/b', 'a b', 'a\u{1F600}', 'a\u0000b', 'a\\b', 'a%2Fb', 'a\nb', 'caf\u00e9', '../etc', 'https://x']) {
       const w = await roomsWorld();
       const id = await file(w, bad);
       expect(w.store.loadReport(id)?.evidenceRef, JSON.stringify(bad)).toBeNull();

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { RoomModes } from '../src/roomModes.js';
+import type { RoomModeChange } from '../src/roomModes.js';
 import { HOUR, MIN, roomsWorld } from './roomsWorld.js';
 
 // R1: a room's mode (normal, locked, emergency): per process, in memory, expiring, never a sanction. `setMode` validates, `mode` reads with the expiry applied, `close` clears.
@@ -187,5 +189,64 @@ describe('the emergency pace', () => {
     const w = await roomsWorld({ overrides: { rooms: { emergency: { slowModeMs: 12_000 } }, pace: { burst: { lines: 4, windowMs: 8000 } } } });
     w.cw.rooms.setMode('R1', 'emergency');
     expect(w.cw.rooms.pace('R1')).toEqual({ slowModeMs: 12_000, burst: { lines: 4, windowMs: 8000 }, duplicateWindowMs: null });
+  });
+});
+
+describe('pruning on write (a mode set for a room nobody reads is not kept for ever)', () => {
+  const make = () => {
+    const clock = { t: 1_800_000_000_000, now: () => clock.t };
+    const changes: RoomModeChange[] = [];
+    const modes = new RoomModes({ clock, defaultModeMs: () => 30 * MIN, changed: (c) => void changes.push(c) });
+    return { clock, changes, modes };
+  };
+  const expired = (changes: RoomModeChange[]) => changes.filter((c) => c.expired === true).map((c) => c.roomId).sort();
+
+  it('a set sweeps every room whose mode has ended, announcing each expiry once, without any read or list', () => {
+    const { clock, changes, modes } = make();
+    for (let i = 0; i < 5; i += 1) modes.set(`gone-${i}`, 'locked', { forMs: 60_000 });
+    modes.set('stays', 'locked', { forMs: 3 * HOUR });
+    clock.t += HOUR;
+    changes.length = 0;
+    modes.set('new', 'emergency');
+    expect(expired(changes)).toEqual(['gone-0', 'gone-1', 'gone-2', 'gone-3', 'gone-4']);
+    // the new mode and the survivor are untouched
+    expect(modes.get('new').mode).toBe('emergency');
+    expect(modes.get('stays').mode).toBe('locked');
+    // nothing is announced twice
+    changes.length = 0;
+    modes.active();
+    expect(expired(changes)).toEqual([]);
+  });
+
+  it('a set of normal sweeps too, and a mode that has not ended is kept (one millisecond before until)', () => {
+    const { clock, changes, modes } = make();
+    modes.set('edge', 'locked', { forMs: 60_000 });
+    modes.set('old', 'locked', { forMs: 60_000 });
+    clock.t += 59_999;
+    changes.length = 0;
+    modes.set('anything', 'normal');
+    expect(expired(changes)).toEqual([]);
+    clock.t += 1;
+    modes.set('anything', 'normal');
+    expect(expired(changes)).toEqual(['edge', 'old']);
+  });
+
+  it('thousands of rooms posted by a moderator are gone after they end, by the next write', () => {
+    const { clock, changes, modes } = make();
+    for (let i = 0; i < 3000; i += 1) modes.set(`spam-${i}`, 'locked', { forMs: 60_000 });
+    clock.t += 2 * MIN;
+    changes.length = 0;
+    modes.set('real', 'locked');
+    expect(expired(changes)).toHaveLength(3000);
+    expect(modes.active().map((a) => a.roomId)).toEqual(['real']);
+  });
+
+  it('a refused write (bad length) sweeps nothing and changes nothing', () => {
+    const { clock, changes, modes } = make();
+    modes.set('a', 'locked', { forMs: 60_000 });
+    clock.t += HOUR;
+    changes.length = 0;
+    expect(() => modes.set('b', 'locked', { forMs: 5 })).toThrow(RangeError);
+    expect(changes).toEqual([]);
   });
 });
