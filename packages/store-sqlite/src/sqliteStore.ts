@@ -3020,10 +3020,11 @@ export class SqliteStore implements Store, TermStore {
   listTerms(): TermRecord[] {
     return this.db
       .prepare(
-        'SELECT id, term, language, active, note, added_by, added_at, updated_by, updated_at FROM kit_terms ORDER BY rowid',
+        'SELECT id, term, language, active, match_mode, note, added_by, added_at, updated_by, updated_at FROM kit_terms ORDER BY rowid',
       )
       .all()
-      .map((r) => ({ id: String(r.id), term: String(r.term), language: String(r.language), ...common(r) }));
+      // A row with no mode has no key (the shape every earlier row had).
+      .map((r) => ({ id: String(r.id), term: String(r.term), language: String(r.language), ...(r.match_mode === null || r.match_mode === undefined ? {} : { matchMode: String(r.match_mode) as 'word' | 'segment' | 'contains' }), ...common(r) }));
   }
 
   listExceptions(): ExceptionRecord[] {
@@ -3038,14 +3039,14 @@ export class SqliteStore implements Store, TermStore {
   insertTerm(r: TermRecord): void {
     this.db
       .prepare(
-        `INSERT INTO kit_terms (id, term, language, active, note, added_by, added_at, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO kit_terms (id, term, language, active, match_mode, note, added_by, added_at, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(r.id, r.term, r.language, r.active ? 1 : 0, r.note, r.addedBy, r.addedAt, r.updatedBy, r.updatedAt);
+      .run(r.id, r.term, r.language, r.active ? 1 : 0, r.matchMode ?? null, r.note, r.addedBy, r.addedAt, r.updatedBy, r.updatedAt);
   }
 
   updateTerm(id: string, patch: TermPatch): void {
-    this.patchRow('kit_terms', 'term', 'term', id, patch.term, patch);
+    this.patchRow('kit_terms', 'term', 'term', id, patch.term, patch, patch.matchMode);
   }
 
   setTermActive(id: string, active: boolean, by: string, at: number): void {
@@ -3094,12 +3095,18 @@ export class SqliteStore implements Store, TermStore {
     id: string,
     word: string | undefined,
     patch: { language?: string; note?: string | null; updatedBy: string; updatedAt: number },
+    matchMode?: 'word' | 'segment' | 'contains' | null,
   ): void {
     const sets: string[] = [];
     const args: (string | number | null)[] = [];
     if (word !== undefined) {
       sets.push(`${column} = ?`);
       args.push(word);
+    }
+    // Only a term has a mode: `null` clears it, absent leaves it.
+    if (matchMode !== undefined) {
+      sets.push('match_mode = ?');
+      args.push(matchMode);
     }
     if (patch.language !== undefined) {
       sets.push('language = ?');

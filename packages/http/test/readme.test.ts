@@ -185,7 +185,7 @@ describe('packages/http/README.md', () => {
     expect(find('/decide')).toMatch(/\{ verdict, actions, reason\?, evidence\?(, rename\?)? \}/);
     expect(find('/suggest')).toMatch(/\{ level, rule\?, person\? \}/);
     expect(find('/gaps/:groupId/close')).toMatch(/\{ status, ref \}/);
-    expect(find('POST /terms`')).toMatch(/\{ term, language, note\? \}/);
+    expect(find('POST /terms`')).toMatch(/\{ term, language, note\?, matchMode\? \}/);
     expect(find('POST /exceptions`')).toMatch(/\{ phrase, language, note\? \}/);
   });
 

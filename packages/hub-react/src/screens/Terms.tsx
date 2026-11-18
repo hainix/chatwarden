@@ -136,7 +136,7 @@ export function Terms() {
     let reload = true;
     try {
       if (kind === 'term' && next && !confirmed) {
-        const check = await client.checkTerm({ term: row.word, language: row.language });
+        const check = await client.checkTerm({ term: row.word, language: row.language, ...(kind === 'term' && 'matchMode' in row && row.matchMode === 'contains' ? { matchMode: 'contains' as const } : {}) });
         if (check.hits.length > 0) {
           setConfirm({ id: row.id, hits: check.hits, revealed: false });
           // Nothing changed on the server: there is nothing to read again.
@@ -196,6 +196,13 @@ export function Terms() {
               >
                 <td className="cw-term-word">
                   {shown ? row.word : <Masked />}
+                  {/* Only a mode that is not the default is said: a term that matches anywhere in the text. */}
+                  {kind === 'term' && 'matchMode' in row && row.matchMode === 'contains' && (
+                    <>
+                      {' '}
+                      <Tag>{t('hub.terms.match.tag')}</Tag>
+                    </>
+                  )}
                   {row.id === pickedId && kind === 'term' && (
                     <>
                       {' '}
@@ -239,7 +246,7 @@ export function Terms() {
                         if (el === null) editButtons.current.delete(row.id);
                         else editButtons.current.set(row.id, el);
                       }}
-                      onClick={() => open(kind, { id: row.id, word: row.word, language: row.language, note: row.note, community: kind === 'term' && row.addedBy?.startsWith(COMMUNITY_BY) === true })}
+                      onClick={() => open(kind, { id: row.id, word: row.word, language: row.language, note: row.note, ...(kind === 'term' && 'matchMode' in row && row.matchMode === 'contains' ? { matchMode: 'contains' as const } : {}), community: kind === 'term' && row.addedBy?.startsWith(COMMUNITY_BY) === true })}
                     >
                       {t('hub.terms.edit')}
                     </button>

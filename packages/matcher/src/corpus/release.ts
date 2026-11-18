@@ -1,4 +1,5 @@
-import { collapseLikePreset, foldTerm } from '../normalise.js';
+import { collapseLikePreset, foldTerm, normaliseUnspaced } from '../normalise.js';
+import { readUnspacedTerm, scanLetters } from '../unspaced.js';
 import { parseUtcDate } from './dates.js';
 import { CorpusError } from './errors.js';
 import { sha256Hex } from './sha256.js';
@@ -16,6 +17,8 @@ export interface TermRow6 {
   id: string;
   term: string;
   languages: string[];
+  /** How the term is matched: `segment` (the default for a term in a script written without spaces) or `contains` for one of those, `word` for a plain a-z term. Absent: by script. */
+  matchMode?: 'word' | 'segment' | 'contains';
   category: 'slur' | 'abuse' | 'sexual' | 'other';
   target: 'none' | 'ethnicity' | 'religion' | 'gender' | 'sexuality' | 'disability' | 'nationality' | 'other';
   severity: 'rude' | 'hostile' | 'severe';
@@ -104,10 +107,10 @@ export const isObject = (v: unknown): v is Record<string, unknown> => typeof v =
 
 /** An object whose keys are exactly `keys`: no more, no fewer. Each is read once by the caller. */
 /** @internal shared with the eval reader */
-export function exact(v: unknown, keys: readonly string[], fail: () => CorpusError): Record<string, unknown> {
+export function exact(v: unknown, keys: readonly string[], fail: () => CorpusError, optional: readonly string[] = []): Record<string, unknown> {
   if (!isObject(v)) throw fail();
   const own = Object.keys(v);
-  if (own.length !== keys.length || own.some((k) => !keys.includes(k))) throw fail();
+  if (own.some((k) => !keys.includes(k) && !optional.includes(k)) || keys.some((k) => !own.includes(k))) throw fail();
   return v;
 }
 
@@ -232,18 +235,36 @@ const isDataName = (name: string): boolean =>
 
 function parseTerm(raw: unknown): TermRow6 {
   const f = badPack;
-  const r = exact(raw, ['id', 'term', 'languages', 'category', 'target', 'severity', 'status', 'defaultActive', 'collidesWith', 'since', 'approvals', 'positive', 'negative'], f);
+  const r = exact(raw, ['id', 'term', 'languages', 'category', 'target', 'severity', 'status', 'defaultActive', 'collidesWith', 'since', 'approvals', 'positive', 'negative'], f, ['matchMode']);
   if (typeof r.id !== 'string' || !TERM_ID_RE.test(r.id)) throw f();
   const term = text(r.term, f, MAX_TERM_LENGTH);
-  // One word of plain letters once folded, and at least three of them once repeats collapse: what the matcher itself accepts.
-  const folded = foldTerm(term);
-  if (!/^[a-z]+$/.test(folded) || collapseLikePreset(folded).length < 3) throw f();
+  const languages = languageList(r.languages, f, 1, 8);
+  // The mode is optional, and one of the three when it is given (null is not "none" in a signed release: leave the key out).
+  if (r.matchMode !== undefined && (typeof r.matchMode !== 'string' || !['word', 'segment', 'contains'].includes(r.matchMode))) throw f();
+  const matchMode = r.matchMode as 'word' | 'segment' | 'contains' | undefined;
+  if (scanLetters(normaliseUnspaced(term)).unspaced) {
+    // A term in a script written without spaces: what the matcher itself accepts for each language the row lists (so a row that would not build is refused here, not at the game).
+    if (matchMode === 'word') throw f();
+    for (const language of languages) {
+      try {
+        readUnspacedTerm('row', term, language, matchMode);
+      } catch {
+        throw f();
+      }
+    }
+  } else {
+    // One word of plain letters once folded, and at least three of them once repeats collapse: what the matcher itself accepts.
+    const folded = foldTerm(term);
+    if (!/^[a-z]+$/.test(folded) || collapseLikePreset(folded).length < 3) throw f();
+    if (matchMode === 'segment' || matchMode === 'contains') throw f();
+  }
   if (typeof r.defaultActive !== 'boolean') throw f();
   if (typeof r.since !== 'string' || !VERSION_RE.test(r.since)) throw f();
   return {
     id: r.id,
     term,
-    languages: languageList(r.languages, f, 1, 8),
+    languages,
+    ...(matchMode === undefined ? {} : { matchMode }),
     category: oneOf(r.category, CATEGORIES, f),
     target: oneOf(r.target, TARGETS, f),
     severity: oneOf(r.severity, SEVERITIES, f),
@@ -375,7 +396,7 @@ export function parseTermsRelease(files: ReadonlyMap<string, Uint8Array>, expect
     }
     const words = new Set<string>();
     for (const t of terms) {
-      const key = collapseLikePreset(foldTerm(t.term));
+      const key = scanLetters(normaliseUnspaced(t.term)).unspaced ? `u:${normaliseUnspaced(t.term)}` : collapseLikePreset(foldTerm(t.term));
       if (words.has(key)) throw badPack();
       words.add(key);
     }

@@ -546,7 +546,10 @@ export interface CloseGapInput {
  * A term as `GET /terms` lists it: the kit's row with its metadata always present (null when unknown). Derived, so the kit changing a field is a compile error here.
  * @experimental
  */
-export type TermRow = Required<TermListRow>;
+export type TermRow = Required<Omit<TermListRow, 'matchMode'>> & {
+  /** How the term is matched: present only on a row that has a mode (absent: by script). `contains` is the one the list shows. */
+  matchMode?: 'word' | 'segment' | 'contains' | null;
+};
 
 /**
  * An exception as `GET /terms` lists it.
@@ -658,6 +661,8 @@ export interface TermInput {
   term: string;
   language: string;
   note?: string;
+  /** For a term in a script written without spaces: `contains` matches anywhere in the text; absent is whole words (`segment`). */
+  matchMode?: 'word' | 'segment' | 'contains';
 }
 
 /** @experimental */
@@ -671,7 +676,7 @@ export interface ExceptionInput {
  * A change to a row: any of its fields. A `null` note clears it.
  * @experimental
  */
-export type TermPatch = Partial<Omit<TermInput, 'note'>> & { note?: string | null };
+export type TermPatch = Partial<Omit<TermInput, 'note' | 'matchMode'>> & { note?: string | null; matchMode?: 'word' | 'segment' | 'contains' | null };
 /** @experimental */
 export type ExceptionPatch = Partial<Omit<ExceptionInput, 'note'>> & { note?: string | null };
 

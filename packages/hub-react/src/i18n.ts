@@ -765,6 +765,13 @@ export const en = {
   'hub.terms.form.phrase.hint': 'A phrase to let through even when a term matches it. Up to {max} characters.',
   'hub.terms.form.language': 'Language',
   'hub.terms.form.language.hint': 'A language code, such as en or pt-BR.',
+  // A term in a script written without spaces (Chinese, Japanese, Thai, Lao, Khmer, Burmese): shown only after such a word is typed.
+  'hub.terms.match.label': 'Match',
+  'hub.terms.match.segment': 'Whole words (recommended)',
+  'hub.terms.match.segment.hint': 'Matches the word only where it stands as a word of its own, so it is not caught inside a longer word.',
+  'hub.terms.match.contains': 'Anywhere in the text',
+  'hub.terms.match.contains.hint': 'Matches the characters wherever they appear, including inside longer words. It catches more, and can block innocent words.',
+  'hub.terms.match.tag': 'Matches anywhere',
   'hub.terms.form.note': 'Note',
   'hub.terms.form.note.hint': 'Why it is here. Only staff see it.',
   'hub.terms.form.prefilled': 'Filled in from a blocked line. Cut it down to the phrase that should be allowed.',

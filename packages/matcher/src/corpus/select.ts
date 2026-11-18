@@ -85,7 +85,7 @@ const firstSelected = (rowLanguages: readonly string[], selected: readonly strin
 function selectTerm(row: TermRow6, o: Normalised): TermPack['terms'][number] | null {
   const language = firstSelected(row.languages, o.languages);
   if (language === null) return null;
-  const pass = { id: row.id, term: row.term, language, positive: [...row.positive], negative: [...row.negative] };
+  const pass = { id: row.id, term: row.term, language, ...(row.matchMode === undefined ? {} : { matchMode: row.matchMode }), positive: [...row.positive], negative: [...row.negative] };
   // A disputed or withdrawn row is carried so a later sync can switch off a copy a store already has; it is never on.
   if (row.status === 'disputed' || row.status === 'withdrawn') return { ...pass, active: false };
   if (!o.statuses.has(row.status) || !o.categories.has(row.category) || (SEVERITY_RANK[row.severity] as number) < o.minRank) return null;

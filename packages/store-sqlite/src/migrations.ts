@@ -863,6 +863,9 @@ ALTER TABLE kit_reports ADD COLUMN scope TEXT;
 CREATE INDEX kit_reports_by_scope ON kit_reports (scope, status, created_at);
 UPDATE kit_reports SET scope = json_extract(tags_json, '$.scope') WHERE json_extract(tags_json, '$.scope') IS NOT NULL;
 
+-- any-server-rooms-languages: kit_terms.match_mode. How a term is matched: word (a plain a-z term), segment (the default for a term in a script written without spaces) or contains; null means by script.
+ALTER TABLE kit_terms ADD COLUMN match_mode TEXT CHECK (match_mode IS NULL OR match_mode IN ('word', 'segment', 'contains'));
+
 -- any-server-rooms-languages: kit_reports.entity_json. The clan, guild or team a report is about, as { kind, ref, label }; null for a report about a player alone. It goes with its report.
 ALTER TABLE kit_reports ADD COLUMN entity_json TEXT;
 

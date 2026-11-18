@@ -65,7 +65,7 @@ export type { ReporterAccuracySummary, ReportSummary } from './reports.js';
 export { sanctionRoutes } from './sanctions.js';
 export { teamRoutes } from './team.js';
 export { termRoutes } from './terms.js';
-export type { ExceptionListRow, TermListRow, TermMetadata, TermsAdmin, TermsEditor } from './terms.js';
+export type { ExceptionListRow, TermListRow, TermMatchMode, TermMetadata, TermsAdmin, TermsEditor } from './terms.js';
 
 /** What the adopter gives the whole staff API: the auth hook and permissions, plus what the term and policy routes need. */
 export interface AdminRoutesOptions extends AdminOptions, PolicyOptions {

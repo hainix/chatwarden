@@ -331,7 +331,7 @@ export interface HubClient {
   /** `GET /terms`. */
   listTerms(): Promise<TermsList>;
   /** `POST /terms/check`: a dry run of a new term. */
-  checkTerm(input: { term: string; language: string }): Promise<{ hits: string[] }>;
+  checkTerm(input: { term: string; language: string; matchMode?: 'word' | 'segment' | 'contains' }): Promise<{ hits: string[]; matchMode?: 'segment' | 'contains' }>;
   /** `GET /filters/stats?days=` (needs `filters.read`): what the chat filters did over the last 7 or 30 days. @experimental */
   filterStats(days: 7 | 30): Promise<FilterStatsView>;
   /** `POST /filters/test` (needs `filters.read`): the verdict for one line under `candidate` (filter settings not saved) or the settings in force. @experimental */
@@ -484,7 +484,7 @@ export function createHubClient(transport: Transport): HubClient {
     closeGap: (groupId, input) => post<{ ok: true }>(`/gaps/${enc(groupId)}/close`, input),
 
     listTerms: () => get<TermsList>('/terms'),
-    checkTerm: (input) => post<{ hits: string[] }>('/terms/check', input),
+    checkTerm: (input) => post<{ hits: string[]; matchMode?: 'segment' | 'contains' }>('/terms/check', input),
     testText: (text) => post<{ verdict: TextVerdict; termId: string | null }>('/terms/test', { text }),
     filterStats: (days) => get<FilterStatsView>('/filters/stats', q({ days })),
     filterTest: (input) => post<FilterTestView>('/filters/test', input),

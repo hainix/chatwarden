@@ -4,7 +4,8 @@ import {
   type ExceptionRow,
   type TermRow,
 } from './matcher.js';
-import { collapseLikePreset, foldTerm } from './normalise.js';
+import { collapseLikePreset, foldTerm, normaliseUnspaced } from './normalise.js';
+import { scanLetters } from './unspaced.js';
 
 /**
  * A term pack: the starter list an adopter ships, with the lines that prove it works.
@@ -30,7 +31,8 @@ export interface TermPack {
 
 const REQUIRED_KEYS = ['id', 'version', 'terms', 'exceptions', 'negativeCorpus', 'knownLosses'];
 const TOP_KEYS = [...REQUIRED_KEYS, 'positiveCorpus'];
-const TERM_KEYS = ['id', 'term', 'language', 'active', 'positive', 'negative'];
+const TERM_KEYS = ['id', 'term', 'language', 'active', 'matchMode', 'positive', 'negative'];
+const MATCH_MODES = ['word', 'segment', 'contains'];
 const EXCEPTION_KEYS = ['id', 'phrase', 'language', 'active'];
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -79,11 +81,16 @@ export function loadTermPack(json: unknown): TermPack {
     const path = `terms[${i}]`;
     const row = rowBase(raw, path, TERM_KEYS);
     if (!isText(row.term)) throw new Error(`${path}.term must be a non-empty string`);
+    // `null` and an absent key both mean "by script"; anything else must be one of the three modes (whether it fits the term is the build's to say).
+    if (row.matchMode !== undefined && row.matchMode !== null && (typeof row.matchMode !== 'string' || !MATCH_MODES.includes(row.matchMode))) {
+      throw new Error(`${path}.matchMode must be word, segment or contains when present`);
+    }
     return {
       id: row.id,
       term: row.term,
       language: row.language,
       active: row.active,
+      ...(typeof row.matchMode === 'string' ? { matchMode: row.matchMode as 'word' | 'segment' | 'contains' } : {}),
       positive: stringList(row.positive ?? undefined, `${path}.positive`),
       negative: stringList(row.negative ?? undefined, `${path}.negative`),
     };
@@ -116,7 +123,8 @@ export function loadTermPack(json: unknown): TermPack {
 
   const byWord = new Map<string, number>();
   terms.forEach((t, i) => {
-    const key = collapseLikePreset(foldTerm(t.term));
+    // A term in a script written without spaces is compared as the matcher reads it (NFKC, hiragana as katakana, marks kept): folding would strip a Thai tone mark and call two words one.
+    const key = scanLetters(normaliseUnspaced(t.term)).unspaced ? `u:${normaliseUnspaced(t.term)}` : collapseLikePreset(foldTerm(t.term));
     const first = byWord.get(key);
     if (first !== undefined) throw new Error(`terms[${i}] reads as the same word as terms[${first}]`);
     byWord.set(key, i);

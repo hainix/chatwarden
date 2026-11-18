@@ -54,6 +54,7 @@ export type {
   ReporterAccuracySummary,
   ReportSummary,
   TermListRow,
+  TermMatchMode,
   TermMetadata,
   TermsAdmin,
   TermsEditor,
