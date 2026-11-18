@@ -119,6 +119,8 @@ export interface WorkerEnv {
   dailyCalls(): number;
   closed(): boolean;
   prepare(report: ReportRecord): Prepared;
+  /** True for a report the AI does not read: one about play or a name (it reads chat only). Without it every report is read. */
+  skips?(report: ReportRecord): boolean;
   /** The adapter the confirming read goes to (`ai.act.confirmAdapter`, else the same adapter). */
   confirmAdapter(): ModerationAI;
   /** Casebook examples for this case, newest first; empty when there are none, learning is off or something fails. */
@@ -247,6 +249,8 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
   if (env.level() === 0 || env.closed()) return gone;
   const report = env.store.loadReport(reportId);
   if (report === null || report.status !== 'open') return gone;
+  // The AI reads chat only: a report about play or a name is not read (no row, no call, no spend), and the sweeper leaves it alone.
+  if (env.skips?.(report) === true) return confirm ? gone : { park: Number.POSITIVE_INFINITY };
 
   // Cheap refusals first, before anything is written: an unavailable breaker (open, or half-open with its probe out) or a full
   // minute leaves no row behind.

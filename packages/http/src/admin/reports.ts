@@ -371,6 +371,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // server with the AI off answers exactly as before. False in a degraded mode (breaker open, a daily cap reached, a read that ended
       // without an answer).
       const aiExpected = scope !== undefined || cw.ai.level() === 0 ? undefined : cw.ai.expected(id);
+      // The AI reads chat only: with it on, a report about play or a name has no read, and the case says why in one line.
+      const aiSkipped = scope === undefined && cw.ai.chatOnly(id);
       c.audit('report.view', { type: 'report', ref: id });
       // The handles the matcher flags (the report's two, and each excerpt line's): the hub masks them until shown. Absent when none is.
       const flagged = handleFlags(cw);
@@ -420,6 +422,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         ...plain,
         urgent: report.urgent,
         ...(evidence === undefined ? {} : { evidenceKind: evidence }),
+        ...(aiSkipped ? { aiSkipped: 'chat_only' as const } : {}),
         context: contextOf(report),
         handoff: handoffAt === null ? null : { at: handoffAt, by: handoffBy },
         ...workflow,

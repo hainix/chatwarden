@@ -149,3 +149,24 @@ describe('POST /reports/:id/decide takes the kind', () => {
     expect(Object.hasOwn(n as object, 'evidence')).toBe(false);
   });
 });
+
+describe('GET /reports/:id says why the AI did not read it (aiSkipped)', () => {
+  it('chat_only for a play or name report with the AI on; no key for a chat report, and none with the AI off', async () => {
+    const on = await world({ ai: { level: 1 } });
+    for (const [reason, key] of [['afk', true], ['name', true], ['cheating', true], ['harassment', false], ['other', false]] as const) {
+      const f = await fileWith(on, { reason });
+      const body = await reportOf(on, f.id);
+      expect(body.aiSkipped, reason).toBe(key ? 'chat_only' : undefined);
+      expect(Object.hasOwn(body, 'aiSkipped'), reason).toBe(key);
+    }
+    const off = await world();
+    expect(Object.hasOwn(await reportOf(off, (await fileWith(off, { reason: 'afk' })).id), 'aiSkipped')).toBe(false);
+  });
+  it('the AI part of the case body for a skipped report is null and not expected', async () => {
+    const on = await world({ ai: { level: 1 } });
+    const f = await fileWith(on, { reason: 'afk' });
+    const body = (await on.call('GET', `/reports/${f.id}`)).body as { ai: unknown; aiExpected?: boolean };
+    expect(body.ai).toBeNull();
+    expect(body.aiExpected).toBe(false);
+  });
+});

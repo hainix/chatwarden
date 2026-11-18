@@ -99,7 +99,7 @@ export async function playerWorld(opts: WorldOptions = {}) {
   const sanction = async (
     who: Player,
     kind: 'warning' | 'chat' | 'area' | 'ban',
-    o: { rule?: number | 'uncovered'; durationMs?: number | null; lines?: string[]; category?: ReportCategory; reporter?: Player } = {},
+    o: { rule?: number | 'uncovered'; durationMs?: number | null; lines?: string[]; category?: ReportCategory; reporter?: Player; reason?: string; noLines?: boolean } = {},
   ) => {
     const reporter = o.reporter ?? BOB;
     const roomId = room(++rooms);
@@ -111,7 +111,7 @@ export async function playerWorld(opts: WorldOptions = {}) {
     }
     cw.chat.accept(roomId, reporter.seat, 'reporter line the target must never see');
     clock.t += 1000;
-    const res = await cw.reports.submit({ roomId, reporterSeat: reporter.seat, targetSeat: who.seat, category: o.category ?? 'harassment' });
+    const res = await cw.reports.submit({ roomId, reporterSeat: reporter.seat, targetSeat: who.seat, ...(o.reason === undefined ? { category: o.category ?? 'harassment' } : { reason: o.reason }) });
     if (!res.ok) throw new Error(`report refused: ${res.refused}`);
     const report = cw.reports.get(res.reportId);
     if (report === null) throw new Error('report missing');
@@ -130,7 +130,7 @@ export async function playerWorld(opts: WorldOptions = {}) {
           durationMs: kind === 'warning' ? null : o.durationMs === undefined ? DAY : o.durationMs,
           rule: o.rule ?? 1,
           ...((o.rule ?? 1) === 'uncovered' ? { gapNote: 'a private gap note' } : {}),
-          lineIds,
+          lineIds: o.noLines === true ? [] : lineIds,
         },
       ],
     });

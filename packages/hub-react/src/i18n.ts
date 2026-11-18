@@ -235,6 +235,7 @@ export const en = {
   'hub.ai.addStep': 'Add suggested step',
   'hub.ai.title': 'AI read (AI level {level})',
   'hub.ai.note': 'A read, never a decision. A moderator decides.',
+  'hub.ai.chatOnly': 'AI reads chat only. This report is about play or a name, so there is no AI read.',
 
   'hub.case.entity.clan': 'Clan:',
   'hub.case.entity.guild': 'Guild:',

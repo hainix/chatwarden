@@ -5,7 +5,7 @@ import { NOTE_MAX } from './constants.js';
 import { PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
 import type { PlayerText } from './i18n.js';
-import { defaultText, groupReasons, isResourceHref, readReporting } from './reporting.js';
+import { defaultText, groupLabel, groupReasons, isResourceHref, readReporting } from './reporting.js';
 import { errorText, Portal, Root, useUi } from './ui.js';
 import type { DialogHostProps, PlayerUiProps } from './ui.js';
 
@@ -274,7 +274,7 @@ export function ReportDialog(props: ReportDialogProps) {
                 >
                   <option value="">{required ? t('player.report.chooseRequired') : t('player.report.choose')}</option>
                   {named.map((g) => (
-                    <optgroup key={g.name} label={g.name}>
+                    <optgroup key={g.name} label={groupLabel(t, g.name)}>
                       {g.items.map(option)}
                     </optgroup>
                   ))}

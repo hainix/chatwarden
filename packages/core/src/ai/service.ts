@@ -4,7 +4,7 @@ import type { Suggestion } from '../ladder.js';
 import { errorClass, safeWarn } from '../log.js';
 import type { ResolvedProfile } from '../profile.js';
 import { AI_DAILY_CALLS_DEFAULT } from '../profile.js';
-import { suggestedRule } from '../reporting.js';
+import { evidenceOfReason, suggestedRule } from '../reporting.js';
 import type { CommunityRules, RuleRef } from '../rules.js';
 import { CONDUCT_LEVELS } from '../types.js';
 import type { AiActionRow, AiActionState, AiReadRow } from '../types.js';
@@ -269,6 +269,11 @@ export interface AiFacade {
    * without an answer. False otherwise, and on any failure; the page then renders exactly as with the AI off.
    */
   expected(reportId: string): boolean;
+  /**
+   * True when the AI is on (level 1 or 2) and does not read this report because it is about play or a name: the AI reads chat only (0.2.2). The reason comes from the
+   * report's reason as it is now. False for a chat or neutral report, an unknown one, and at level 0. The case page says so in one line.
+   */
+  chatOnly(reportId: string): boolean;
   /**
    * "Read again": the stored read when the input has not changed (no call), else a call is queued and the answer is `'pending'`.
    * `'off'` at level 0 or for a report that is gone or decided, `'budget'` at the daily money or call cap, `'rate'` once `actor` has
@@ -849,7 +854,7 @@ export class AiService implements AiFacade {
       const row = this.store.loadAiRead(reportId);
       const open = o?.open === true && report.status === 'open';
       if (row === null || row.read === null) {
-        if (open) this.enqueue(reportId);
+        if (open && !this.skips(report)) this.enqueue(reportId);
         return null;
       }
       const prepared = this.prepare(report);
@@ -862,12 +867,30 @@ export class AiService implements AiFacade {
     }
   }
 
+  /** A report about play or a name: not read (the AI reads chat only). */
+  private skips(report: ReportRecord): boolean {
+    const kind = evidenceOfReason(this.deps.profile().reporting.reasons, report.reportedReason ?? null);
+    return kind === 'play' || kind === 'name';
+  }
+
+  chatOnly(reportId: string): boolean {
+    try {
+      if (this.level() === 0 || typeof reportId !== 'string' || reportId === '') return false;
+      const report = this.store.loadReport(reportId);
+      return report !== null && this.skips(report);
+    } catch (err) {
+      this.warn('ai.chat_only_failed', err);
+      return false;
+    }
+  }
+
   expected(reportId: string): boolean {
     try {
       if (this.level() === 0 || typeof reportId !== 'string') return false;
       if (this.status().state !== 'ok') return false;
       const report = this.store.loadReport(reportId);
       if (report === null || report.status !== 'open') return false;
+      if (this.skips(report)) return false;
       const own = this.store.loadAiReadFor(reportId, this.prepare(report).hash);
       return !(own !== null && isFinalRow(own));
     } catch (err) {
@@ -881,7 +904,7 @@ export class AiService implements AiFacade {
       const level = this.level();
       if (level === 0 || typeof reportId !== 'string') return Promise.resolve('off');
       const report = this.store.loadReport(reportId);
-      if (report === null || report.status !== 'open') return Promise.resolve('off');
+      if (report === null || report.status !== 'open' || this.skips(report)) return Promise.resolve('off');
       if (!this.allowAsk(actor)) return Promise.resolve('rate');
       const prepared = this.prepare(report);
       const row = this.store.loadAiRead(reportId);
@@ -1363,6 +1386,7 @@ export class AiService implements AiFacade {
       dailyCalls: () => this.dailyCalls(),
       closed: () => this.isClosed,
       prepare: (report) => this.prepare(report),
+      skips: (report) => this.skips(report),
       confirmAdapter: () => this.opts.act?.confirmAdapter ?? this.adapter,
       examplesFor: (report, prepared) => this.examplesFor(report, prepared),
       signalsFor: (report) => this.deps.signals?.(report.targetSubject) ?? [],

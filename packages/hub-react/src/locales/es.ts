@@ -225,6 +225,7 @@ export const es = {
   'hub.ai.addStep': 'Agregar el paso sugerido',
   'hub.ai.title': 'Lectura de la IA (nivel de IA {level})',
   'hub.ai.note': 'Una lectura, nunca una decisi\u00f3n. Decide el equipo de moderaci\u00f3n.',
+  'hub.ai.chatOnly': 'La IA solo lee el chat. Este reporte trata del juego o de un nombre, as\u00ed que no hay lectura de la IA.',
   'hub.case.entity.clan': 'Clan:',
   'hub.case.entity.guild': 'Gremio:',
   'hub.case.entity.team': 'Equipo:',

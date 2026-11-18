@@ -249,6 +249,8 @@ export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
   reportedReasonLabel?: string | null;
   /** What the report is about, from its reason as it is now (0.2.2): `chat`, `play` or `name`. Absent when it is neutral, and from an older server. */
   evidenceKind?: EvidenceKind;
+  /** `chat_only` when the AI is on and does not read this report because it is about play or a name (0.2.2). Absent otherwise, and from an older server. */
+  aiSkipped?: 'chat_only';
   targetHandleFlagged?: boolean;
   reporterHandleFlagged?: boolean;
   /** Present only while the report is held for legal reasons (`legal.hold`): the code and the time, never who. */

@@ -46,12 +46,13 @@ async function panelFor(w: Awaited<ReturnType<typeof playerWorld>>, op: NoticeOp
  * What the moderator's form would send for `kind` on this report: the kind and length chosen, the player's own lines ticked in the REVERSE of the report's order
  * (so the selection path is exercised), read the way the hub reads them (`GET /reports/:id`, then `noticeText` through `previewLines`), never copied out of the notice.
  */
-async function opFor(w: Awaited<ReturnType<typeof playerWorld>>, reportId: string, kind: 'warning' | 'chat' | 'area' | 'ban', length: number | null): Promise<NoticeOp> {
+async function opFor(w: Awaited<ReturnType<typeof playerWorld>>, reportId: string, kind: 'warning' | 'chat' | 'area' | 'ban', length: number | null, rule = 2): Promise<NoticeOp> {
   const client = createHubClient(routerTransport(createRouter(adminRoutes(w.cw, { authorize: () => ({ actor: 'ann@example.test', role: 'senior' as Role }), gameName: 'Test Game' }))));
   const { report } = await client.getReport(reportId);
-  const own = [...(report.ownLineIds[report.targetPerson] ?? [])].reverse();
-  const form = { ...emptyForm(), verdict: 'fair' as const, actions: [{ ...newDraft('a1', report.targetPerson, 2), what: `${kind}:${length}`, lineIds: own }] };
-  const op = decideOp(form, { target: report.targetPerson, reporter: report.reporterPerson!, ...previewLines(report) });
+  // The hub attaches no chat line to a report about play or a name (and the server would refuse one).
+  const own = report.evidenceKind === 'play' || report.evidenceKind === 'name' ? [] : [...(report.ownLineIds[report.targetPerson] ?? [])].reverse();
+  const form = { ...emptyForm(), verdict: 'fair' as const, actions: [{ ...newDraft('a1', report.targetPerson, rule), what: `${kind}:${length}`, lineIds: own }] };
+  const op = decideOp(form, { target: report.targetPerson, reporter: report.reporterPerson!, ...previewLines(report), evidence: report.evidenceKind });
   if (op === null) throw new Error('no op');
   return op;
 }
@@ -67,11 +68,27 @@ describe('the panel reads like the notice the player gets', () => {
   ] as const)('%s', async (_name, kind, length, lines, expectedLines) => {
     const w = await playerWorld();
     const { reportId } = await w.sanction(ALICE, kind, { rule: 2, durationMs: length, lines: [...lines] });
+    await sameWords(w, reportId, kind, length, expectedLines);
+  });
+
+  // The evidence kind is part of the notice: for a report about play or a name the panel and the queue say the same neutral words, and neither shows a line.
+  it.each([
+    ['a warning for AFK (play)', 'afk', 6, 'how you played'],
+    ['a warning about a name', 'name', 7, 'about your name'],
+    ['a warning for something that is neither (the reason other)', 'other', 2, 'breaking a community rule'],
+  ] as const)('%s', async (_name, reason, rule, words) => {
+    const w = await playerWorld();
+    const { reportId } = await w.sanction(ALICE, 'warning', { rule, reason, noLines: reason !== 'other', lines: ['you play like a snerp'] });
+    await sameWords(w, reportId, 'warning', null, reason === 'other' ? ['you play like a snerp'] : [], rule);
+    expect(document.body.textContent).toContain(words);
+  });
+
+  async function sameWords(w: Awaited<ReturnType<typeof playerWorld>>, reportId: string, kind: 'warning' | 'chat' | 'area' | 'ban', length: number | null, expectedLines: readonly string[], rule = 2) {
     const real = w.pending(ALICE).find((n) => n.kind === kind);
     expect(real).toBeDefined();
     // The world ticks one second after a decision; the panel is asked at the moment the decision was made.
     w.clock.t -= 1000;
-    const op = await opFor(w, reportId, kind, length);
+    const op = await opFor(w, reportId, kind, length, rule);
     const { region } = await panelFor(w, op);
     const block = await waitFor(() => {
       const el = region.querySelector('.cw-pv-notice');
@@ -91,7 +108,7 @@ describe('the panel reads like the notice the player gets', () => {
     expect(panelText.facts.find((f) => f[0] === 'Reference')?.[1]).toBe('Made when it is sent');
     expect(queueText.facts.find((f) => f[0] === 'Reference')?.[1]).toMatch(/\S/);
     queue.unmount();
-  });
+  }
 
   // The line a direct chat restriction shows is the line player-react's RestrictedChatLine draws for a moderator's restriction (one shared text, tested to stay one).
   it.each([

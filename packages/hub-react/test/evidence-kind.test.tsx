@@ -187,3 +187,24 @@ describe('the reasons editor (S11)', () => {
     expect(layer.reporting.reasons.find((r) => r.id === 'other')?.evidence).toBeNull();
   });
 });
+
+describe('the AI reads chat only (ruling 2)', () => {
+  it('a case about play says so in one line where the AI read would be; a chat case does not', async () => {
+    const w = await hubWorld({ ai: { level: 1 } });
+    const play = await w.fileRich({ lines: HELLO, reason: 'afk', cite: 1 });
+    await openDetailed(w, play.id);
+    expect(await screen.findByText('AI reads chat only. This report is about play or a name, so there is no AI read.')).toBeInTheDocument();
+  });
+  it('a chat case has no such line, and neither has one with the AI off', async () => {
+    const w = await hubWorld({ ai: { level: 1 } });
+    const chat = await w.fileRich({ lines: HELLO, reason: 'harassment', cite: 1 });
+    await openDetailed(w, chat.id);
+    expect(screen.queryByText(/AI reads chat only/)).toBeNull();
+    const off = await hubWorld();
+    const play = await off.fileRich({ lines: HELLO, reason: 'afk', cite: 1 });
+    const r2 = renderHub(off, { path: `/reports/${play.id}` });
+    await screen.findAllByRole('heading', { level: 2, name: /report against/ });
+    expect(screen.queryByText(/AI reads chat only/)).toBeNull();
+    r2.unmount();
+  });
+});
