@@ -25,7 +25,7 @@ preset's five tiers. The moderator guide, the agent brief and the player code of
 
 ### Goals
 - **Principles, fully editable in the hub.** Owners and seniors can edit each tier's title, description, examples, the levels it covers
-  and its outcome. They can add a tier (up to 12), remove one (at least 1 must remain), and reorder them. Saves are live, versioned and
+  and its outcome. They can add, remove and reorder tiers within the existing invariants (section 5, ruling 1). Saves are live, versioned and
   audited like every policy section. "Reset to the preset" stays available.
 - **Team notes.** A new, ordered list of short staff-only notes: up to 30, each up to 500 characters, with an optional link to a
   Community Rule number. Players never see them.
