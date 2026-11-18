@@ -5,7 +5,7 @@ export { ChatBox } from './ChatBox.js';
 export type { ChatBoxProps, ChatRefusal } from './ChatBox.js';
 export { sseTransport } from './transport.js';
 export type { ChatClosedWhy, ChatConnection, ChatStatus, ChatTransport, ChatTransportEvents, SseTransportOptions } from './transport.js';
-export type { ChatFrame, MuteResult, MuteTarget, SendResult, WireLine, WireMode, WireMuted, WireReadOnly, WireRefusal, WireRestriction } from './wire.js';
+export type { ChatFrame, MuteResult, MuteTarget, SendResult, WireLine, WireMode, WireMuted, WirePhrase, WirePhrases, WireReadOnly, WireRefusal, WireRestriction } from './wire.js';
 /** @experimental The pure parts, for a game's own UI: the reducer behind the box, and the frame reader. */
 export { chatReducer, createChatState, initialChatState } from './state.js';
 export type { ChatAction, ChatState, StateLine } from './state.js';

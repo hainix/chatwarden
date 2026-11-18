@@ -8,16 +8,16 @@ import type { Ui } from '../ui.js';
 import type { SendResult, WireLine, WireRefusal } from './wire.js';
 
 /** How long a refusal stays under the input (a wait stays until it ends). */
-const REFUSAL_MS = 8000;
+export const REFUSAL_MS = 8000;
 /** The reasons with a sentence of their own; any other gets the generic one. */
-const KNOWN = new Set(['length', 'rate', 'gate', 'blocked', 'profanity', 'link', 'personal_info', 'filter', 'slow_mode', 'flood', 'duplicate', 'locked', 'new_account', 'probation']);
+const KNOWN = new Set(['length', 'rate', 'gate', 'blocked', 'profanity', 'link', 'personal_info', 'filter', 'slow_mode', 'flood', 'duplicate', 'locked', 'new_account', 'probation', 'phrases_only', 'phrase_unknown', 'account_too_new']);
 /** The reasons whose sentence holds the wait. */
 const WITH_WAIT = new Set(['slow_mode', 'flood', 'duplicate', 'probation']);
 /** The counter shows in the last this many characters. */
 const COUNT_FROM = 20;
 
 /** A failure to send as an error the components can word: anything that is not already a PlayerError is a dropped connection. */
-const failureOf = (e: unknown): PlayerError => (e instanceof PlayerError ? e : new PlayerError({ status: 0, code: 'network', message: 'Could not reach the server.' }));
+export const failureOf = (e: unknown): PlayerError => (e instanceof PlayerError ? e : new PlayerError({ status: 0, code: 'network', message: 'Could not reach the server.' }));
 
 /** The wait as words: whole seconds up to 120, then minutes, rounded up. */
 export function waitText(ui: Ui, ms: number): string {
@@ -32,7 +32,7 @@ export function waitOf(refusal: WireRefusal): number | null {
 }
 
 /** The one sentence a refusal gets (or none, for an empty line), with the rule and the notice when it carries them. */
-function refusalText(ui: Ui, refusal: WireRefusal, maxLength: number): string {
+export function refusalText(ui: Ui, refusal: WireRefusal, maxLength: number): string {
   if (refusal.reason === 'empty') return '';
   const wait = waitOf(refusal);
   const key = KNOWN.has(refusal.reason) ? refusal.reason : 'unknown';

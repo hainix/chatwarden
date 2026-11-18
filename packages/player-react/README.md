@@ -469,7 +469,7 @@ player components, the chat entry on its own is about 15 KB, and `chat.css` is a
 
 `ChatBox`, `sseTransport`, `chatReducer`, `createChatState`, `initialChatState` and `readFrame` (the pure parts, for a game's own UI),
 `enChat`, and the types `ChatBoxProps`, `ChatRefusal`, `ChatTransport`, `ChatConnection`, `ChatTransportEvents`, `ChatStatus`,
-`ChatClosedWhy`, `SseTransportOptions`, `ChatFrame`, `WireLine`, `WireMode`, `WireMuted`, `WireReadOnly`, `WireRefusal`, `WireRestriction`, `SendResult`,
+`ChatClosedWhy`, `SseTransportOptions`, `ChatFrame`, `WireLine`, `WireMode`, `WireMuted`, `WirePhrase`, `WirePhrases`, `WireReadOnly`, `WireRefusal`, `WireRestriction`, `SendResult`,
 `MuteResult`, `MuteTarget`, `ChatState`, `StateLine` and `ChatAction`. All are `@experimental` until 0.2.
 
 ## Theming

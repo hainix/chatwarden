@@ -10,7 +10,7 @@ import { createRing, HISTORY_LINES_DEFAULT, resolveHistory } from './history.js'
 import type { Ring } from './history.js';
 import { randomHex, randomToken } from './random.js';
 import { CHAT_WIRE_VERSION, refusalOf } from './wire.js';
-import type { ChatFrame, MuteResult, MuteTarget, ReportOutcome, SendResult, WireLine, WireMode, WireMuted, WireReadOnly, WireRefusal, WireRestriction } from './wire.js';
+import type { ChatFrame, MuteResult, MuteTarget, ReportOutcome, SendResult, WireLine, WirePhrases, WireMode, WireMuted, WireReadOnly, WireRefusal, WireRestriction } from './wire.js';
 
 /**
  * The game's description of a player in a room.
@@ -81,6 +81,11 @@ export interface ChatSession {
   canOpen(): boolean;
   /** Check a line with the kit and, if it passes, deliver it to the room. Never throws. */
   send(input: { text: string }): SendResult;
+  /**
+   * Send one phrase of the room's book (a phrase-only room) by id. The kit checks it as it checks a line (`cw.chat.acceptPhrase`) and, if it passes, delivers the phrase's canonical text with `phrase` set. A refusal is the author's
+   * answer only: `gate` for a room that is not phrase-only, `phrase_unknown` for an id the book lacks (typed text in a phrase room is `send`'s `phrases_only`). Never throws.
+   */
+  sendPhrase(input: { phrase: string }): SendResult;
   /** Mute or unmute a player, named by one of their lines or by the token from `muted`. `false`: nothing to do. With `block` (and `on`) it is a block: two-way, lasting. */
   mute(input: MuteTarget & { on: boolean; block?: boolean }): boolean;
   /** `mute`, with the ids of the lines it hid from this player (see `MuteResult`). The routes answer a mute with this. */
@@ -643,10 +648,22 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     }
   }
 
-  function wireLine(line: { id: string; at: number; name: string; text: string }, mine: boolean): WireLine {
+  function wireLine(line: { id: string; at: number; name: string; text: string; phrase?: string }, mine: boolean): WireLine {
     const out: WireLine = { id: line.id, at: line.at, name: line.name, text: line.text };
+    if (line.phrase !== undefined) out.phrase = line.phrase;
     if (mine) out.mine = true;
     return out;
+  }
+
+  /** The room's phrase book as the hello carries it (a copy), or null for a free-text room. A kit with no phrase lookup, or one that throws, makes a free-text room. */
+  function phrasesOf(room: RoomRec): WirePhrases | null {
+    try {
+      const book = cw.phrases.book(room.id);
+      if (book === null || book === undefined) return null;
+      return { book: book.map((p) => (p.group === undefined ? { id: p.id, text: p.text } : { id: p.id, text: p.text, group: p.group })) };
+    } catch {
+      return null;
+    }
   }
 
   function helloFor(room: RoomRec, member: MemberRec): ChatFrame {
@@ -670,6 +687,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       restriction: restrictionOf(room, member),
       lines,
       muted: mutedOf(room, member),
+      phrases: phrasesOf(room),
     };
     // A client drops any frame over 64 KiB, and then never gets a hello at all. A long line limit can make a full ring that big: keep the
     // newest lines that fit, oldest dropped first.
@@ -791,6 +809,41 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       if (member.streams.size === 0) armGrace(room, member);
       return { room, member };
     };
+    /** Ask the kit about a line (`decide`) and, if it was delivered, put it in the ring and on every stream that may see it. Never throws; a refusal is the author's answer only. */
+    const deliver = (decide: (room: RoomRec, member: MemberRec) => unknown): SendResult => {
+      const found = live();
+      if (found === null) return { ok: false, refused: { reason: 'gate' } };
+      const { room, member } = found;
+      let result: unknown;
+      try {
+        result = decide(room, member);
+      } catch (err) {
+        warn('chatwarden.chat_accept_failed', err);
+        return { ok: false, refused: { reason: 'unknown' } };
+      }
+      const verdict = result as { deliver?: { lineId?: unknown; text?: unknown; phrase?: unknown }; refuse?: unknown } | null;
+      const delivered = verdict?.deliver;
+      if (typeof delivered !== 'object' || delivered === null || typeof delivered.text !== 'string') {
+        // A refusal is the author's answer only: nothing is stored, written to a stream or logged.
+        return { ok: false, refused: refusalOf(verdict?.refuse) };
+      }
+      const id = hasText(delivered.lineId) ? delivered.lineId : `x${(room.anonymous += 1)}`;
+      const at = now();
+      const phrase = hasText(delivered.phrase) ? delivered.phrase : undefined;
+      room.ring.append({ id, at, seat: member.seat, name: member.name, text: delivered.text, ...(phrase === undefined ? {} : { phrase }) });
+      const base = { id, at, name: member.name, text: delivered.text, ...(phrase === undefined ? {} : { phrase }) };
+      // One frame object for every stream that is not the author's, so a sink can encode it once. A sink must not change a frame it is given.
+      const shared: ChatFrame = { type: 'line', line: wireLine(base, false) };
+      for (const other of [...room.members.values()]) {
+        if (other.streams.size === 0) continue;
+        const mine = other.seat === member.seat;
+        if (!mine && !visible(room.id, other.seat, member.seat)) continue;
+        if (mine) writeAll(other, () => ({ type: 'line', line: wireLine(base, true) }));
+        else writeAll(other, () => shared);
+      }
+      return { ok: true, line: { ...wireLine(base, true), mine: true } };
+    };
+
     const session: ChatSession = {
       name,
 
@@ -831,37 +884,14 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       send(input): SendResult {
         const text: unknown = typeof input === 'object' && input !== null ? input.text : undefined;
         if (typeof text !== 'string') return { ok: false, refused: { reason: 'empty' } };
-        const found = live();
-        if (found === null) return { ok: false, refused: { reason: 'gate' } };
-        const { room, member } = found;
-        let result: unknown;
-        try {
-          // Staff is the game's word from the join hook, read when the player joined: never anything in the request.
-          result = cw.chat.accept(room.id, member.seat, text, member.staff ? { staff: true } : undefined);
-        } catch (err) {
-          warn('chatwarden.chat_accept_failed', err);
-          return { ok: false, refused: { reason: 'unknown' } };
-        }
-        const verdict = result as { deliver?: { lineId?: unknown; text?: unknown }; refuse?: unknown } | null;
-        const delivered = verdict?.deliver;
-        if (typeof delivered !== 'object' || delivered === null || typeof delivered.text !== 'string') {
-          // A refusal is the author's answer only: nothing is stored, written to a stream or logged.
-          return { ok: false, refused: refusalOf(verdict?.refuse) };
-        }
-        const id = hasText(delivered.lineId) ? delivered.lineId : `x${(room.anonymous += 1)}`;
-        const at = now();
-        room.ring.append({ id, at, seat: member.seat, name: member.name, text: delivered.text });
-        const base = { id, at, name: member.name, text: delivered.text };
-        // One frame object for every stream that is not the author's, so a sink can encode it once. A sink must not change a frame it is given.
-        const shared: ChatFrame = { type: 'line', line: wireLine(base, false) };
-        for (const other of [...room.members.values()]) {
-          if (other.streams.size === 0) continue;
-          const mine = other.seat === member.seat;
-          if (!mine && !visible(room.id, other.seat, member.seat)) continue;
-          if (mine) writeAll(other, () => ({ type: 'line', line: wireLine(base, true) }));
-          else writeAll(other, () => shared);
-        }
-        return { ok: true, line: { ...wireLine(base, true), mine: true } };
+        // Staff is the game's word from the join hook, read when the player joined: never anything in the request.
+        return deliver((room, member) => cw.chat.accept(room.id, member.seat, text, member.staff ? { staff: true } : undefined));
+      },
+
+      sendPhrase(input): SendResult {
+        const phrase: unknown = typeof input === 'object' && input !== null ? input.phrase : undefined;
+        if (typeof phrase !== 'string' || phrase === '') return { ok: false, refused: { reason: 'phrase_unknown' } };
+        return deliver((room, member) => cw.chat.acceptPhrase(room.id, member.seat, phrase, member.staff ? { staff: true } : undefined));
       },
 
       mute(input): boolean {

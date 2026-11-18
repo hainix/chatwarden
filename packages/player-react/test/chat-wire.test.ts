@@ -30,6 +30,7 @@ const hello = (over: Record<string, unknown> = {}): ChatFrame =>
     restriction: null,
     lines: [line()],
     muted: [],
+    phrases: null,
     ...over,
   }) as ChatFrame;
 
@@ -285,7 +286,7 @@ describe('__proto__ and constructor keys in a frame do not pollute', () => {
     const out = readFrame(JSON.parse(text) as unknown);
     if (out?.type !== 'hello') throw new Error('expected a hello');
     expect(polluted()).toBe(false);
-    expect(Object.keys(out).sort()).toEqual(['epoch', 'heartbeatMs', 'lines', 'maxLength', 'mode', 'muted', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
+    expect(Object.keys(out).sort()).toEqual(['epoch', 'heartbeatMs', 'lines', 'maxLength', 'mode', 'muted', 'phrases', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
     expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
     const l = out.lines[0] as WireLine;
     expect(Object.keys(l).sort()).toEqual(['at', 'id', 'name', 'text']);
@@ -375,5 +376,92 @@ describe('blocks on the wire (M4)', () => {
     expectTypeOf<WireMuted['block']>().toEqualTypeOf<true | undefined>();
     expectTypeOf<MuteResult['limit']>().toEqualTypeOf<true | undefined>();
     expectTypeOf<HttpMuteResult['limit']>().toEqualTypeOf<true | undefined>();
+  });
+});
+
+// M5: phrase-only rooms. `WireLine.phrase`, `hello.phrases` (`{ book: [{ id, text, group? }] }` or null) and the refusal reasons `phrases_only`, `phrase_unknown`, `account_too_new`.
+describe('phrases on the wire (M5)', () => {
+  const BOOK = [
+    { id: 'gg', text: 'Good game!' },
+    { id: 'help', text: 'Can you help me?', group: 'Ask' },
+  ];
+
+  it('the two copies agree on the new members', () => {
+    expectTypeOf<WireLine['phrase']>().toEqualTypeOf<HttpLine['phrase']>();
+    expectTypeOf<WireLine['phrase']>().toEqualTypeOf<string | undefined>();
+    type Hello = Extract<ChatFrame, { type: 'hello' }>;
+    type HttpHello = Extract<HttpFrame, { type: 'hello' }>;
+    expectTypeOf<Hello['phrases']>().toEqualTypeOf<HttpHello['phrases']>();
+    expectTypeOf<Hello['phrases']>().toEqualTypeOf<{ book: Array<{ id: string; text: string; group?: string }> } | null>();
+  });
+
+  it('a hello with a book and one with null round-trip through the real encoder', () => {
+    const withBook = roundTrip(hello({ phrases: { book: BOOK } }));
+    expect(withBook).toMatchObject({ type: 'hello', phrases: { book: BOOK } });
+    expect(roundTrip(hello({ phrases: null }))).toMatchObject({ type: 'hello', phrases: null });
+  });
+
+  it('a hello with no phrases key reads as null (an older server), and a malformed one reads as null, never as a book', () => {
+    for (const bad of [undefined, 7, 'gg', [], { book: 'gg' }, { book: {} }, { other: BOOK }]) {
+      const frame = readFrame({ ...(hello() as object), phrases: bad });
+      expect(frame, JSON.stringify(bad)).toMatchObject({ type: 'hello', phrases: null });
+    }
+  });
+
+  it('book items are copied field by field: bad items are dropped, long text and groups are cut, ids must be tokens, unknown fields are left behind', () => {
+    const frame = readFrame({
+      ...(hello() as object),
+      phrases: {
+        book: [
+          { id: 'ok', text: 'fine', group: 'G', extra: 'x' },
+          { id: '', text: 'no id' },
+          { id: 'a b', text: 'bad id' },
+          { id: 'x'.repeat(33), text: 'long id' },
+          { id: 'notext' },
+          { id: 'num', text: 5 },
+          null,
+          'str',
+          { id: 'cut', text: 't'.repeat(300), group: 'g'.repeat(100) },
+          { id: 'g2', text: 'fine', group: 4 },
+        ],
+      },
+    }) as Extract<ChatFrame, { type: 'hello' }>;
+    const book = frame.phrases?.book ?? [];
+    expect(book.map((p) => p.id)).toEqual(['ok', 'cut', 'g2']);
+    expect(book[0]).toEqual({ id: 'ok', text: 'fine', group: 'G' });
+    expect(book[1]!.text).toHaveLength(100);
+    expect(book[1]!.group).toHaveLength(24);
+    expect(Object.hasOwn(book[2]!, 'group')).toBe(false);
+  });
+
+  it('the book is capped at 300 phrases and a prototype-polluting key lands nowhere', () => {
+    const many = Array.from({ length: 400 }, (_, i) => ({ id: `p${i}`, text: `t${i}` }));
+    const frame = readFrame({ ...(hello() as object), phrases: { book: many } }) as Extract<ChatFrame, { type: 'hello' }>;
+    expect(frame.phrases?.book).toHaveLength(300);
+    const polluted = JSON.parse('{"type":"hello","v":2,"epoch":"e","room":"r","you":{"name":"a"},"mode":{"kind":"normal","until":null},"maxLength":200,"summary":"","restriction":null,"lines":[],"muted":[],"phrases":{"book":[{"id":"a","text":"b","__proto__":{"x":1}}]}}') as unknown;
+    const read = readFrame(polluted) as Extract<ChatFrame, { type: 'hello' }>;
+    expect(({} as { x?: number }).x).toBeUndefined();
+    expect(Object.keys(read.phrases?.book[0] ?? {})).toEqual(['id', 'text']);
+  });
+
+  it('a line keeps its phrase id when it is a token, and drops it otherwise', () => {
+    expect(readLine({ id: '1', at: 1, name: 'a', text: 'Good game!', phrase: 'gg' })).toEqual({ id: '1', at: 1, name: 'a', text: 'Good game!', phrase: 'gg' });
+    for (const bad of ['', 'a b', 'x'.repeat(33), 5, null, {}, ['gg']]) {
+      const l = readLine({ id: '1', at: 1, name: 'a', text: 'hi', phrase: bad });
+      expect(l, JSON.stringify(bad)).toEqual({ id: '1', at: 1, name: 'a', text: 'hi' });
+    }
+  });
+
+  it('a line frame and a hello history line carry the phrase through the encoder', () => {
+    const l = line({ phrase: 'gg', text: 'Good game!' });
+    expect(roundTrip({ type: 'line', line: l })).toEqual({ type: 'line', line: l });
+    const h = roundTrip(hello({ lines: [l], phrases: { book: BOOK } })) as Extract<ChatFrame, { type: 'hello' }>;
+    expect(h.lines[0]).toEqual(l);
+  });
+
+  it('readRefusal keeps the three new reasons by name and nothing else', () => {
+    for (const reason of ['phrases_only', 'phrase_unknown', 'account_too_new']) {
+      expect(readRefusal({ reason, text: 'Good game!', seat: 's1' })).toEqual({ reason });
+    }
   });
 });

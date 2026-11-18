@@ -77,6 +77,8 @@ function optionalText(body: Record<string, unknown>, key: string, max: number): 
  * The chat routes over a broadcaster. Mount them with `createRouter` / `toExpress`, under `/chat` for example:
  * - `GET /rooms/:room/stream`: `200 text/event-stream`, an open response of `ChatFrame`s (the first is `hello`). `401`, `403`, `429`.
  * - `POST /rooms/:room/lines { text }`: `200 SendResult` (a refusal is an answer, not an error). `400`, `401`, `403`, `413`, `429`.
+ * - `POST /rooms/:room/phrases { phrase }`: `200 SendResult`, for a phrase-only room (its context's `chat.phrases`): `phrase` is the id of one phrase of the room's book (the `hello` carries the book). The same guards as `lines`; a refusal is an
+ *   answer (`gate` for a room that is not phrase-only, `phrase_unknown` for an id the book lacks). Typed text in a phrase room is refused `phrases_only` on `lines`.
  * - `POST /rooms/:room/mute { lineId | ref, on, block? }`: `200 { ok, hiddenIds, limit? }` (the ids of the lines it hid from this player; see `MuteResult`). `block: true` with `on` makes it a block: a mute that is
  *   also two-way and lasting. `block` must be a boolean when given (400 otherwise); `limit: true` says the player's list is full of blocks.
  * - `POST /rooms/:room/report { lineId, reason?, note? }`: `200 ReportOutcome`.
@@ -266,6 +268,16 @@ export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options
       const entered = await enter(req, params.room as string, who);
       if ('banned' in entered) return ok({ ok: false, refused: entered.banned });
       return ok(entered.send({ text }));
+    }),
+
+    'POST /rooms/:room/phrases': route(async (req, params) => {
+      checkOrigin(req);
+      requireJson(req);
+      const phrase = tokenField(bodyObject(req).phrase);
+      const who = await caller(req, actions);
+      const entered = await enter(req, params.room as string, who);
+      if ('banned' in entered) return ok({ ok: false, refused: entered.banned });
+      return ok(entered.sendPhrase({ phrase }));
     }),
 
     'POST /rooms/:room/mute': route(async (req, params) => {

@@ -23,6 +23,10 @@ export interface ChatConnection {
   /** Send a line. Resolves with the kit's answer (delivered or refused); rejects with a `PlayerError` only when no answer arrived. */
   send(text: string): Promise<SendResult>;
   /**
+   * Send one phrase of the room's book by id (a phrase-only room: the hello carried `phrases`). Optional: a custom transport for a game with no phrase rooms leaves it out, and a box in a phrase room then says it could not send.
+   */
+  sendPhrase?(phrase: string): Promise<SendResult>;
+  /**
    * Mute or unmute. Resolves with `{ ok, hiddenIds }` (the lines the server hid, see `MuteResult`); a custom transport that cannot name
    * them may resolve a plain boolean (`true` when it changed something), and then only the line that was clicked is hidden at once.
    */
@@ -94,6 +98,22 @@ interface Attempt {
   /** The silence allowed once open; set by the hello. */
   stale: number;
   opened: boolean;
+}
+
+/** The answer to a line or a phrase POST as a `SendResult`; a body that is neither is a bad answer. */
+function readSend(body: unknown): SendResult {
+  if (!isObject(body)) throw bad();
+  if (body.ok === true) {
+    const line = readLine(body.line);
+    if (line === null) throw bad();
+    return { ok: true, line };
+  }
+  if (body.ok === false) {
+    const refused = readRefusal(body.refused);
+    if (refused === null) throw bad();
+    return { ok: false, refused };
+  }
+  throw bad();
 }
 
 /** The default transport: the stream with `fetch`, the rest through `fetchTransport`'s calls. `baseUrl` is where `chatRoutes` is mounted. */
@@ -285,21 +305,8 @@ export function createSseTransport(options: SseTransportOptions, internals: SseT
       void run();
 
       return {
-        send: async (text) => {
-          const body = await callRoute(rest, { method: 'POST', path: `${roomPath}/lines`, body: { text } });
-          if (!isObject(body)) throw bad();
-          if (body.ok === true) {
-            const line = readLine(body.line);
-            if (line === null) throw bad();
-            return { ok: true, line };
-          }
-          if (body.ok === false) {
-            const refused = readRefusal(body.refused);
-            if (refused === null) throw bad();
-            return { ok: false, refused };
-          }
-          throw bad();
-        },
+        send: async (text) => readSend(await callRoute(rest, { method: 'POST', path: `${roomPath}/lines`, body: { text } })),
+        sendPhrase: async (phrase) => readSend(await callRoute(rest, { method: 'POST', path: `${roomPath}/phrases`, body: { phrase } })),
         mute: async (target, on, options) => {
           const body = await callRoute(rest, { method: 'POST', path: `${roomPath}/mute`, body: { ...target, on, ...(on && options?.block === true ? { block: true } : {}) } });
           const result = readMuteResult(body);

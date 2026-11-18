@@ -21,6 +21,8 @@ import type { Documents } from './documents.js';
 import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
+import { checkPhraseBooks } from './phrases.js';
+import type { Phrase, PhraseBook } from './phrases.js';
 import { EventBus } from './events.js';
 import type { InsightsDigest, Subscribe } from './events.js';
 import { hashWho, makeHasher } from './hasher.js';
@@ -48,7 +50,7 @@ import type { FilterStats } from './filters/counters.js';
 import { checkLines, createFilterEngine, shiftTestSpans, testLine } from './filters/engine.js';
 import type { FilterCheckResult, FilterTestResult } from './filters/engine.js';
 import { checkPace, mergePace } from './pace.js';
-import { checkScope, Contexts, effectiveOf } from './contexts.js';
+import { checkContextBooks, checkScope, Contexts, effectiveOf } from './contexts.js';
 import type { EffectiveContext } from './contexts.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
@@ -178,6 +180,13 @@ export interface ChatwardenOptions {
    * ready `profanity` filter is given.
    */
   profanityPackage?: { createProfanityFilter(config: ProfanityConfig): ProfanityFilter };
+  /**
+   * Phrase books for phrase-only rooms: `{ junior: [{ id: 'gg', text: 'Good game!' }, { id: 'help', text: 'Can you help me?', group: 'Ask' }] }`. A context with `chat: { phrases: 'junior' }` makes every room tagged with it phrase-only:
+   * `cw.chat.acceptPhrase` sends one, and typed text is refused `phrases_only`. A book id is `^[a-z][a-z0-9_-]{0,31}$` (at most 20 books); a phrase id `^[A-Za-z0-9_-]{1,32}$`, unique in its book (at most 300 phrases); `text` is 1 to 100
+   * characters with no control or bidi character (the game's default language: what evidence, moderators and a client with no translation see); `group` (1 to 24 characters) heads a section in the picker. Checked at start-up,
+   * each phrase through the matcher and the profanity filter: a book that hits throws `PhraseBookError` naming the book and phrase id, never the text. A context that names a book not declared here is a `ProfileError`.
+   */
+  phrases?: Readonly<Record<string, readonly { id: string; text: string; group?: string }[]>>;
   /** Defaults to the system clock. */
   clock?: Clock;
   /** The kill switch, read per call. Drives both sanction enforcement and report intake. Defaults to always on. */
@@ -388,6 +397,13 @@ export interface Chatwarden {
   };
   chat: {
     accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult;
+    /**
+     * Send one phrase from the room's book (a phrase-only room: its context sets `chat.phrases`). The same pipeline as `accept` without the text steps: occupant and gate, restriction, the room's mode, the context's least account age,
+     * pacing and the fixed rate, then deliver; no length check, matcher, filters or profanity (the book is trusted text, checked at start-up). The line is kept as evidence with `raw` equal to the phrase's canonical text, and
+     * `deliver` carries `phrase` (its id) and `text` (the canonical text). In a room that is not phrase-only the answer is `gate`; an id the book lacks is `phrase_unknown` and nothing is spent. `accept` with text in a phrase room is
+     * refused `phrases_only`, also spending nothing. `opts.staff` is as for `accept`. Never throws.
+     */
+    acceptPhrase(roomId: string, seatId: string, phraseId: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult;
     /** Should `viewerSeat` be shown a line `senderSeat` sent (mutes applied)? */
     visibleTo(roomId: string, viewerSeat: string, senderSeat: string): boolean;
     /**
@@ -436,6 +452,15 @@ export interface Chatwarden {
      * (a `cw.rooms.setPace` override on a room is not part of it). Throws `ProfileError` for a name the profile does not declare.
      */
     effective(name: string | null): EffectiveContext;
+  };
+  /**
+   * Phrase books (`createChatwarden({ phrases })`). Read-only lookups for the chat box's hello and a service's handshake: the kit ships no phrases.
+   */
+  phrases: {
+    /** The declared book ids, in declaration order. */
+    names(): string[];
+    /** The phrases of the room's book (its context's `chat.phrases`), or null for a room that is not phrase-only, an unknown room or a context with no book. A frozen list. */
+    book(roomId: string): PhraseBook | null;
   };
   mutes: {
     /**
@@ -1164,6 +1189,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   // and the profanity handling, which are code-only.
   const baseProfile = resolveProfile(opts.profile ?? 'standard', opts.overrides);
   const limits = resolveLimits(opts.limits);
+  // The phrase books: the grammar and sizes first, then every context's `chat.phrases` must name one. Each phrase is also run through the matcher and every profanity filter in force, once those exist (further down).
+  const phraseBooks = checkPhraseBooks(opts.phrases);
+  checkContextBooks(baseProfile.contexts, phraseBooks);
 
   const { everyMs, ...givenRetention } = opts.retention === false ? {} : (opts.retention ?? {});
   /** The policy in force: what was given, with `badFaithMs` following a longer suspension window than its default. */
@@ -1258,8 +1286,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   }
   const contexts = new Contexts({ profile: () => policy.profileNow(), tag: (roomId) => roster.tag(roomId, 'context') });
   const contextRules = new Map<string, RoomChatRules | null>();
+  /** A context's book as the chat path looks it up: by phrase id. Built once. */
+  const bookIndexes = new Map<string, ReadonlyMap<string, Phrase>>();
+  for (const [name, list] of Object.entries(phraseBooks)) bookIndexes.set(name, new Map(list.map((p) => [p.id, p])));
   for (const [name, ctx] of Object.entries(baseProfile.contexts)) {
-    if (ctx.profanity === undefined && (ctx.chat === undefined || ctx.chat.minAccountAgeDays === undefined)) {
+    if (ctx.profanity === undefined && (ctx.chat === undefined || (ctx.chat.minAccountAgeDays === undefined && (ctx.chat.phrases ?? null) === null))) {
       contextRules.set(name, null);
       continue;
     }
@@ -1268,8 +1299,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     // The base filter is reused when the context changes neither the word lists nor the style; a context with its own word lists gets its own filter.
     const filter = eff.profanity.mode === 'allow' ? undefined : sameLists && ctx.profanity?.style === undefined && profanity !== undefined ? profanity : buildProfanityFilter(opts, eff.profanity);
     if (filter === undefined && eff.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
-    contextRules.set(name, { profanityMode: eff.profanity.mode, profanity: filter, minAccountAgeDays: eff.chat.minAccountAgeDays });
+    contextRules.set(name, { profanityMode: eff.profanity.mode, profanity: filter, minAccountAgeDays: eff.chat.minAccountAgeDays, phrases: eff.chat.phrases === null ? null : (bookIndexes.get(eff.chat.phrases) ?? null) });
   }
+  // The game's own phrases cannot hold a slur or a swear word: every phrase goes through the matcher and each profanity filter that could act on a room (the base's, and each context's).
+  const phraseFilters = new Set<ProfanityFilter>();
+  if (profanity !== undefined) phraseFilters.add(profanity);
+  for (const rules of contextRules.values()) if (rules?.profanity !== undefined) phraseFilters.add(rules.profanity);
+  checkPhraseBooks(opts.phrases, { matcher: opts.matcher, filters: [...phraseFilters] });
 
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and
   // decisions all write to and read from it, and `platform.notify` hears of every new notice through it.
@@ -1961,6 +1997,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     chat: {
       accept: (roomId, seatId, text, o) => chat.accept(roomId, seatId, text, o),
+      acceptPhrase: (roomId, seatId, phraseId, o) => chat.acceptPhrase(roomId, seatId, phraseId, o),
       visibleTo: (roomId, viewerSeat, senderSeat) => chat.visibleTo(roomId, viewerSeat, senderSeat),
       restricted: (who, o) => {
         try {
@@ -1978,6 +2015,16 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           restrictedWarn.warn('chatwarden.restricted_failed', { error: err instanceof Error ? err.name : typeof err });
           return { restricted: false, until: null, kind: null };
         }
+      },
+    },
+    phrases: {
+      names: () => Object.keys(phraseBooks),
+      book: (roomId) => {
+        if (typeof roomId !== 'string') return null;
+        const name = contexts.resolveTag(roomId);
+        if (name === null || name === 'unknown') return null;
+        const book = baseProfile.contexts[name]?.chat?.phrases;
+        return typeof book === 'string' ? (phraseBooks[book] ?? null) : null;
       },
     },
     mutes: {

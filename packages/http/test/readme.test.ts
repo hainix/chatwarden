@@ -327,9 +327,9 @@ describe('packages/http/README.md, Chat', () => {
     expect(chat).toContain('chat.close()');
   });
 
-  it('lists the four routes with their answers, and the JSON-only and silent-mute rules', () => {
-    for (const route of ['GET /rooms/:room/stream', 'POST /rooms/:room/lines', 'POST /rooms/:room/mute', 'POST /rooms/:room/report']) expect(chat, route).toContain(`\`${route}\``);
-    expect(chat).toContain('{ ok, hiddenIds }');
+  it('lists the five routes with their answers, and the JSON-only and silent-mute rules', () => {
+    for (const route of ['GET /rooms/:room/stream', 'POST /rooms/:room/lines', 'POST /rooms/:room/mute', 'POST /rooms/:room/phrases', 'POST /rooms/:room/report']) expect(chat, route).toContain(`\`${route}\``);
+    expect(chat).toContain('{ ok, hiddenIds, limit? }');
     expect(chat).toMatch(/must be `application\/json`/);
     expect(chat).toMatch(/A mute is silent/);
     expect(chat).toMatch(/A refused line is never echoed to anyone but its author/);

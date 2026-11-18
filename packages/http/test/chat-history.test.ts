@@ -243,7 +243,7 @@ describe('createRing', () => {
       remove(ids: readonly string[]): number;
       size(): number;
     }>();
-    expectTypeOf<RingLine>().toEqualTypeOf<{ id: string; at: number; seat: string; name: string; text: string }>();
+    expectTypeOf<RingLine>().toEqualTypeOf<{ id: string; at: number; seat: string; name: string; text: string; phrase?: string }>();
   });
 });
 

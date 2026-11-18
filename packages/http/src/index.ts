@@ -107,6 +107,8 @@ export type {
   WireLine,
   WireMode,
   WireMuted,
+  WirePhrase,
+  WirePhrases,
   WireReadOnly,
   WireRefusal,
   WireRestriction,

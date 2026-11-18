@@ -126,6 +126,8 @@ export { ChatService } from './chat.js';
 export type { ChatResult, ChatServiceDeps, RefuseReason, RestrictedAnswer, RoomChatRules } from './chat.js';
 export { CONTEXT_SECTIONS, checkRoomTags, checkScope, isContextName, isScopeLabel, MAX_CONTEXTS, MAX_ROOM_TAGS, MAX_SCOPE_LABELS, overriddenSections, resolveContexts, ROOM_TAG_KEYS, scopeOfTags } from './contexts.js';
 export type { ContextChat, ContextSection, ContextSettings, EffectiveContext, ResolvedContext, ResolvedContexts } from './contexts.js';
+export { checkPhraseBooks, MAX_PHRASE_BOOKS, MAX_PHRASES_PER_BOOK, PHRASE_GROUP_MAX, PHRASE_TEXT_MAX, PhraseBookError } from './phrases.js';
+export type { Phrase, PhraseBook, PhraseBooks } from './phrases.js';
 export {
   REPORT_CATEGORIES,
   REPORT_NOTE_MAX,

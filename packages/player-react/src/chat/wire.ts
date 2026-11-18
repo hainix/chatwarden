@@ -17,6 +17,20 @@ export interface WireLine {
   text: string;
   /** Present and true on the viewer's own lines. */
   mine?: true;
+  /** Version 2: the id of the phrase, when the line was sent from a phrase book (a phrase-only room). `text` is then the canonical text; a viewer with its own words for the id shows those. Absent on a typed line. */
+  phrase?: string;
+}
+
+/** One phrase of a phrase-only room's book: the id to send, the canonical text and an optional group that heads a section in the picker. */
+export interface WirePhrase {
+  id: string;
+  text: string;
+  group?: string;
+}
+
+/** The phrases of a phrase-only room (version 2): the room's list in picker order. */
+export interface WirePhrases {
+  book: WirePhrase[];
 }
 
 /** The restriction on the viewer's own chat, or null. Same meaning as `RestrictedChatLineProps`. */
@@ -37,7 +51,8 @@ export interface WireMuted {
 /**
  * Why a line was not sent, for its author. `reason` is one of: `length`, `rate`, `gate`, `restricted`, `blocked`, `profanity`, `banned`,
  * `empty`, `link`, `personal_info` and `filter`, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`),
- * and, new in version 2, `locked` and `new_account` (the room's mode: they carry `until`, when it ends) and `probation` (a new account's pause: it carries `retryAfterMs`). A reader treats any other string as unknown.
+ * and, new in version 2, `locked` and `new_account` (the room's mode: they carry `until`, when it ends), `probation` (a new account's pause: it carries `retryAfterMs`), `account_too_new` (a room's least account age) and, for phrase-only rooms,
+ * `phrases_only` (typed text in one) and `phrase_unknown` (an id the room's book lacks). A reader treats any other string as unknown.
  * Never carries text, a handle, an id or a moderator's note.
  */
 export interface WireRefusal {
@@ -85,6 +100,8 @@ export type ChatFrame =
       /** Recent lines the viewer may see, oldest first. */
       lines: WireLine[];
       muted: WireMuted[];
+      /** The room's phrase book (version 2) when it is phrase-only: the box then shows a picker instead of the input. `null` for a free-text room. */
+      phrases: WirePhrases | null;
     }
   | { type: 'line'; line: WireLine }
   /** Lines to remove from view (the viewer muted their author). */
@@ -127,6 +144,12 @@ export const DEFAULT_HEARTBEAT_MS = 20_000;
 const MAX_HIDDEN = 1000;
 /** A line id over this is not an id. */
 const MAX_ID = 64;
+/** The most phrases a book may hold (the kit's own limit); a phrase's text and group are cut at the kit's limits too. */
+const MAX_PHRASES = 300;
+const MAX_PHRASE_TEXT = 100;
+const MAX_PHRASE_GROUP = 24;
+/** A phrase id as the kit issues them. */
+const PHRASE_ID = /^[A-Za-z0-9_-]{1,32}$/;
 
 type Bag = Record<string, unknown>;
 
@@ -183,6 +206,27 @@ function mutedOf(raw: unknown): WireMuted[] | undefined {
   return out;
 }
 
+/** The phrase book of a hello, or null: no book, or a value that is not one (a reader never invents a picker). Items are copied field by field; a bad item is dropped. */
+function phrasesOf(raw: unknown): WirePhrases | null {
+  const o = bagOf(raw);
+  const list = o === null ? undefined : own(o, 'book');
+  if (!Array.isArray(list)) return null;
+  const book: WirePhrase[] = [];
+  for (const item of list as unknown[]) {
+    if (book.length >= MAX_PHRASES) break;
+    const p = bagOf(item);
+    if (p === null) continue;
+    const id = own(p, 'id');
+    const text = own(p, 'text');
+    const group = own(p, 'group');
+    if (!isStr(id) || !PHRASE_ID.test(id) || !isStr(text) || text === '') continue;
+    const phrase: WirePhrase = { id, text: cut(text, MAX_PHRASE_TEXT) };
+    if (isStr(group) && group !== '') phrase.group = cut(group, MAX_PHRASE_GROUP);
+    book.push(phrase);
+  }
+  return { book };
+}
+
 /** One line from the wire, or null when it is not a line. The name and text are cut; unknown fields are left behind. */
 export function readLine(raw: unknown): WireLine | null {
   try {
@@ -194,6 +238,8 @@ export function readLine(raw: unknown): WireLine | null {
     const text = own(o, 'text');
     if (!isStr(id) || id === '' || id.length > MAX_ID || !isNum(at) || !isStr(name) || !isStr(text)) return null;
     const line: WireLine = { id, at, name: cut(name, MAX_NAME), text: cut(text, MAX_TEXT) };
+    const phrase = own(o, 'phrase');
+    if (isStr(phrase) && PHRASE_ID.test(phrase)) line.phrase = phrase;
     if (own(o, 'mine') === true) line.mine = true;
     return line;
   } catch {
@@ -271,6 +317,7 @@ function readHello(o: Bag): ChatFrame | null {
     restriction,
     lines: (lines as unknown[]).map(readLine).filter((l): l is WireLine => l !== null),
     muted,
+    phrases: phrasesOf(own(o, 'phrases')),
     ...(isNum(serverNow) && serverNow >= 0 ? { now: serverNow } : {}),
   };
 }

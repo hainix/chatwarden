@@ -1,5 +1,5 @@
 import { createChatwarden } from '@chatwarden/core';
-import type { Chatwarden, ChatResult, ChatwardenOptions, PaceSettings, ProfanityFilter, RawWho, RoomsSettings, SubjectId } from '@chatwarden/core';
+import type { Chatwarden, ChatResult, ChatwardenOptions, ContextSettings, PaceSettings, ProfanityFilter, RawWho, RoomsSettings, SubjectId } from '@chatwarden/core';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { createRoomBroadcaster } from '@chatwarden/http';
 import type { ChatMember, ChatSession, RoomBroadcaster, RoomBroadcasterOptions } from '@chatwarden/http';
@@ -40,6 +40,10 @@ export interface ChatWorldOptions {
   rooms?: RoomsSettings;
   /** The kit's `signals` options (the `accountAgeDays` hook). */
   signals?: ChatwardenOptions['signals'];
+  /** Room contexts (`profile.contexts`), selected by a room's `context` tag. */
+  contexts?: Record<string, ContextSettings>;
+  /** Phrase books for phrase-only rooms. */
+  phrases?: ChatwardenOptions['phrases'];
 }
 
 export async function chatWorld(over: ChatWorldOptions = {}) {
@@ -60,12 +64,14 @@ export async function chatWorld(over: ChatWorldOptions = {}) {
     profanity: filter,
     gate: () => gate.open,
     ...(over.signals === undefined ? {} : { signals: over.signals }),
-    ...(over.profanity === 'refuse' || over.pace !== undefined || over.rooms !== undefined
+    ...(over.phrases === undefined ? {} : { phrases: over.phrases }),
+    ...(over.profanity === 'refuse' || over.pace !== undefined || over.rooms !== undefined || over.contexts !== undefined
       ? {
           overrides: {
             ...(over.profanity === 'refuse' ? { profanity: { mode: 'refuse' as const } } : {}),
             ...(over.pace === undefined ? {} : { pace: over.pace }),
             ...(over.rooms === undefined ? {} : { rooms: over.rooms }),
+            ...(over.contexts === undefined ? {} : { contexts: over.contexts }),
           },
         }
       : {}),
@@ -131,6 +137,8 @@ export interface LocalTransport extends ChatTransport {
   readonly opened: Array<{ room: string; closed: boolean; session: ChatSession | null }>;
   /** Text of every send. */
   readonly sent: string[];
+  /** The id of every phrase sent. */
+  readonly sentPhrases: string[];
   /** Every report call: line id and draft. */
   readonly reports: Array<{ lineId: string; draft: unknown }>;
   /** Every mute call. */
@@ -148,6 +156,7 @@ export function localChatTransport(chat: RoomBroadcaster, who: RawWho, member: C
   const t: LocalTransport = {
     opened: [],
     sent: [],
+    sentPhrases: [],
     reports: [],
     mutes: [],
     options,
@@ -190,6 +199,11 @@ export function localChatTransport(chat: RoomBroadcaster, who: RawWho, member: C
           t.sent.push(text);
           if (t.options.failSend === true) return Promise.reject(new Error('Failed to fetch'));
           return Promise.resolve(structuredClone(session().send({ text })));
+        },
+        sendPhrase: (phrase) => {
+          t.sentPhrases.push(phrase);
+          if (t.options.failSend === true) return Promise.reject(new Error('Failed to fetch'));
+          return Promise.resolve(structuredClone(session().sendPhrase({ phrase })));
         },
         mute: (target, on, opts) => {
           t.mutes.push({ target, on, ...(opts?.block === true ? { block: true as const } : {}) });

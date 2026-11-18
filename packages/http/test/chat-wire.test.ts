@@ -20,6 +20,7 @@ const FRAMES: ChatFrame[] = [
     restriction: null,
     lines: [line],
     muted: [{ ref: 'm_1', name: 'zorbak' }],
+    phrases: null,
   },
   { type: 'line', line: { ...line, mine: true } },
   { type: 'hide', ids: ['3', '4'] },

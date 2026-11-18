@@ -1,5 +1,5 @@
 import type { ChatClosedWhy, ChatStatus } from './status.js';
-import type { ChatFrame, WireLine, WireMode, WireMuted, WireReadOnly, WireRestriction } from './wire.js';
+import type { ChatFrame, WireLine, WireMode, WireMuted, WirePhrase, WireReadOnly, WireRestriction } from './wire.js';
 
 /** Lines kept when nothing else is asked for (the box's `maxLines` default). */
 export const DEFAULT_MAX_LINES = 200;
@@ -45,6 +45,8 @@ export interface ChatState {
   mode: WireMode;
   /** Why the viewer cannot post because of the mode, or null when they can. */
   readOnly: WireReadOnly | null;
+  /** The room's phrase book from `hello` when it is phrase-only (the box shows a picker), else null. */
+  phrases: WirePhrase[] | null;
   /** The ids of lines taken back (this epoch): a line with one of these ids is never held. */
   removedIds: readonly string[];
   /** The last retraction that took a line out of view: a counter (so the same text is a new event) and how many lines it was. */
@@ -81,6 +83,7 @@ export function createChatState(maxLines: number = DEFAULT_MAX_LINES): ChatState
     lines: [],
     mode: { kind: 'normal', until: null },
     readOnly: null,
+    phrases: null,
     removedIds: [],
     retractNote: null,
     muted: [],
@@ -119,7 +122,7 @@ function settle(lines: StateLine[], max: number): StateLine[] {
   return sorted.length > max ? sorted.slice(sorted.length - max) : sorted;
 }
 
-const sameLine = (a: WireLine, b: WireLine): boolean => a.id === b.id && a.at === b.at && a.name === b.name && a.text === b.text && a.mine === b.mine;
+const sameLine = (a: WireLine, b: WireLine): boolean => a.id === b.id && a.at === b.at && a.name === b.name && a.text === b.text && a.phrase === b.phrase && a.mine === b.mine;
 
 /** Lines in by id; a line already held is replaced by the incoming copy, and stays `mine` if it was. */
 function merge(held: StateLine[], incoming: WireLine[], max: number): StateLine[] {
@@ -187,6 +190,7 @@ function onHello(state: ChatState, f: Extract<ChatFrame, { type: 'hello' }>): Ch
     you: { name: f.you.name },
     mode: f.mode,
     readOnly: f.you.readOnly ?? null,
+    phrases: f.phrases === null ? null : f.phrases.book,
     removedIds,
     maxLength: f.maxLength,
     summary: f.summary,

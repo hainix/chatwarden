@@ -15,6 +15,7 @@ import { errorText, Root, useUi } from '../ui.js';
 import type { DialogHostProps, PlayerUiProps, Ui } from '../ui.js';
 import { OptionsButton, OptionsPanel } from './ChatOptions.js';
 import { Composer } from './Composer.js';
+import { PhrasePicker, phraseText } from './PhrasePicker.js';
 import { LineOptions } from './LineOptions.js';
 import { chatReducer, createChatState } from './state.js';
 import type { StateLine } from './state.js';
@@ -136,7 +137,7 @@ const LineView = memo(function LineView({ line, first, you, t, locale, timeZone,
       ) : (
         <span className="cw-chat-sr">{name}: </span>
       )}
-      <span className="cw-chat-text">{line.text}</span>
+      <span className="cw-chat-text">{line.phrase === undefined ? line.text : phraseText(t, line.phrase, line.text)}</span>
       {when !== null && <time hidden dateTime={when.iso} />}
       {!mine && <LineOptions t={t} line={line} open={open} onToggle={onToggle} onReport={onReport} onMute={onMute} onBlock={onBlock} register={register} />}
     </li>
@@ -520,6 +521,23 @@ export function ChatBox(props: ChatBoxProps) {
                     {...(theme === undefined ? {} : { theme })}
                     until={active.until}
                     byModerator={active.byModerator}
+                  />
+                ) : state.phrases !== null ? (
+                  <PhrasePicker
+                    ui={ui}
+                    phrases={state.phrases}
+                    maxLength={state.maxLength}
+                    send={(phrase) => {
+                      const conn = connection.current;
+                      return conn === null || conn.sendPhrase === undefined ? Promise.reject(new Error('closed')) : conn.sendPhrase(phrase);
+                    }}
+                    onDelivered={(line) => {
+                      skew.current = line.at - now.current();
+                      dispatch({ type: 'sent', line });
+                    }}
+                    onRefused={onRefused}
+                    paused={readOnlyByMode !== null && modeText !== ''}
+                    modeLine={modeText === '' ? undefined : modeId}
                   />
                 ) : (
                   <Composer

@@ -23,6 +23,29 @@ export interface WireLine {
   text: string;
   /** Present and true on the viewer's own lines. */
   mine?: true;
+  /**
+   * Version 2: the id of the phrase, when the line was sent from a phrase book (a phrase-only room). `text` is then the phrase's canonical text (the game's default language, and what a client that ignores this field should show);
+   * a client with its own words for the id (`t('phrase.' + id)`) shows those. Absent on a typed line.
+   */
+  phrase?: string;
+}
+
+/**
+ * One phrase of a phrase-only room's book, as `hello.phrases` carries it: the id to send, the canonical text and an optional group that heads a section in the picker.
+ * @experimental
+ */
+export interface WirePhrase {
+  id: string;
+  text: string;
+  group?: string;
+}
+
+/**
+ * The phrases of a phrase-only room (version 2): `{ book }` is the room's list in picker order. The kit ships no phrases and no translations: the game's own catalogue translates by id.
+ * @experimental
+ */
+export interface WirePhrases {
+  book: WirePhrase[];
 }
 
 /**
@@ -55,7 +78,8 @@ export interface WireMuted {
  * Why a line was not sent, for its author. `reason` is one of: `length`, `rate`, `gate`, `restricted`, `blocked`, `profanity`, `banned`,
  * `empty`, `link`, `personal_info` and `filter` (the chat filters, `profile.filters`: a link, personal details, a phrase rule or caps and repeats;
  * with `rule`, the Community Rule the owner chose for it, and never what matched), when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`),
- * and, new in version 2, `locked` and `new_account` (the room's mode, `cw.rooms.setMode`: they carry `until`, when it ends) and `probation` (a new account's pause, `rooms.probation`: it carries `retryAfterMs`). A reader treats any other string as unknown.
+ * and, new in version 2, `locked` and `new_account` (the room's mode, `cw.rooms.setMode`: they carry `until`, when it ends), `probation` (a new account's pause, `rooms.probation`: it carries `retryAfterMs`), `account_too_new` (a context's
+ * least account age, `chat.minAccountAgeDays`) and, for phrase-only rooms, `phrases_only` (typed text in one) and `phrase_unknown` (an id the room's book lacks). A reader treats any other string as unknown.
  * Never carries text, a handle, an id or a moderator's note.
  * @experimental
  */
@@ -111,6 +135,8 @@ export type ChatFrame =
       /** Recent lines the viewer may see, oldest first. */
       lines: WireLine[];
       muted: WireMuted[];
+      /** The room's phrase book (version 2) when it is phrase-only: the chat box then shows a picker instead of the input. `null` for a free-text room. */
+      phrases: WirePhrases | null;
     }
   | { type: 'line'; line: WireLine }
   /** Lines to remove from view (the viewer muted their author, or a player who blocked the viewer: it carries ids only and never says which). */

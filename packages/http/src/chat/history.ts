@@ -20,6 +20,8 @@ export interface RingLine {
   seat: string;
   name: string;
   text: string;
+  /** The phrase's id, for a line sent from a phrase book: history keeps it, so a late joiner shows the line in their own words. */
+  phrase?: string;
 }
 
 /** @experimental */
@@ -39,7 +41,7 @@ export interface Ring {
 
 const isWhole = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n);
 
-const copyOf = (line: RingLine): RingLine => ({ id: line.id, at: line.at, seat: line.seat, name: line.name, text: line.text });
+const copyOf = (line: RingLine): RingLine => ({ id: line.id, at: line.at, seat: line.seat, name: line.name, text: line.text, ...(line.phrase === undefined ? {} : { phrase: line.phrase }) });
 
 /**
  * A ring of at most `lines` lines, none older than `maxAgeMs` (a line is expired when `now() - at > maxAgeMs`, so one exactly

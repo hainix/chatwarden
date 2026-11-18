@@ -4,6 +4,7 @@ import { deepFreeze } from './freeze.js';
 import { checkPace, mergePace } from './pace.js';
 import type { PaceSettings, ResolvedPace } from './pace.js';
 import type { ProfanityConfig } from './profile.js';
+import type { PhraseBooks } from './phrases.js';
 import { ProfileError } from './profileError.js';
 
 // Room contexts: rules per room, declared in code (`profile.contexts`), selected by the room's `context` tag. A context overrides only the
@@ -230,6 +231,17 @@ export function checkRoomTags(tags: unknown): void {
     if (value.length > ROOM_TAG_VALUE_MAX) throw new RangeError(`room tag ${key} must be at most ${ROOM_TAG_VALUE_MAX} characters`);
     if (key === 'context' && !CONTEXT_NAME.test(value)) throw new RangeError('room tag context must be a context name');
     if (key === 'scope' && !SCOPE_LABEL.test(value)) throw new RangeError('room tag scope must be a scope label');
+  }
+}
+
+/**
+ * Every context that makes its rooms phrase-only must name a book the game declared (`createChatwarden({ phrases })`). A game with no books at all and a context that names one is the same fault. Throws ProfileError naming the
+ * setting (`profile.contexts.kids.chat.phrases`); a book no context uses is fine.
+ */
+export function checkContextBooks(contexts: ResolvedContexts, books: PhraseBooks, path = 'profile.contexts'): void {
+  for (const [name, ctx] of Object.entries(contexts)) {
+    const book = ctx.chat?.phrases;
+    if (typeof book === 'string' && !Object.hasOwn(books, book)) fail(`${path}.${name}.chat.phrases`, 'names a phrase book that the game did not declare');
   }
 }
 

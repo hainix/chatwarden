@@ -39,6 +39,7 @@ const hello = (lines: WireLine[]): ChatFrame => ({
   restriction: null,
   lines,
   muted: [],
+  phrases: null,
 });
 
 /** The box over a transport the test writes frames into. */

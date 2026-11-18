@@ -88,6 +88,7 @@ describe('the log', () => {
         restriction: null,
         lines: [{ id: '1', at: 1, name: 'tarvo', text: 'replayed' }],
         muted: [],
+        phrases: null,
       });
     });
     await waitFor(() => expect(log()).toHaveAttribute('aria-live', 'polite'));

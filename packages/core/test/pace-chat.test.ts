@@ -109,7 +109,7 @@ describe('the result type', () => {
     // Type-level only (checked by tsc, never called): `'deliver' in r` still splits the two arms.
     const narrows = (r: ChatResult): void => {
       if ('deliver' in r) {
-        expectTypeOf(r).toEqualTypeOf<{ deliver: { lineId: string; text: string } }>();
+        expectTypeOf(r).toEqualTypeOf<{ deliver: { lineId: string; text: string; phrase?: string } }>();
         expectTypeOf(r.deliver.text).toEqualTypeOf<string>();
       } else {
         expectTypeOf(r.refuse.reason).toEqualTypeOf<RefuseReason>();

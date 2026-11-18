@@ -890,6 +890,7 @@ in a browser.
 | `platform` | `identify(ctx)` returns `{ clientKey?, accountId?, ip? }` for a connection; optional `notify(subject, event)` tells you a player has notices waiting. |
 | `matcher` | Your slur matcher (`LiveTerms` from `@chatwarden/matcher`). Without one, nothing is ever blocked. |
 | `profanity` | A ready profanity filter. What happens to a profane line is the profile's call (`allow`, `star` or `refuse`). |
+| `phrases` | Phrase books for phrase-only rooms: `{ junior: [{ id: 'gg', text: 'Good game!' }, { id: 'help', text: 'Can you help me?', group: 'Ask' }] }`. A context with `chat: { phrases: 'junior' }` makes its rooms phrase-only: `cw.chat.acceptPhrase(room, seat, 'gg')` sends one (the same pipeline as `accept` without the text steps; the line is kept as evidence as its canonical text) and typed text is refused `phrases_only`. At most 20 books of 300 phrases; ids, texts (1 to 100 characters, no control or bidi character) and groups are checked at start-up, and each phrase goes through the matcher and the profanity filter: a hit throws `PhraseBookError` naming the book and the phrase id, never the text. A context naming a book that is not declared is a `ProfileError`. |
 | `profanityPackage` | `{ createProfanityFilter }` from `@chatwarden/profanity`; the kit builds the filter from the profile. Not used when `profanity` is given. |
 | `clock` | `{ now() }`. Defaults to the system clock; tests pass their own. |
 | `enabled` | A kill switch, read on every call. Return false to stop enforcement and report intake. |

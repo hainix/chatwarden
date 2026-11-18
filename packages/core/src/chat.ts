@@ -8,6 +8,7 @@ import { errorClass, safeWarn, ThrottledWarn } from './log.js';
 import type { MuteService } from './mutes.js';
 import type { NoticeService } from './notices.js';
 import type { PaceReason, ResolvedPace } from './pace.js';
+import type { Phrase } from './phrases.js';
 import { createPacer } from './pacing.js';
 import type { PaceKey, Pacer } from './pacing.js';
 import type { Limits } from './limits.js';
@@ -36,6 +37,8 @@ import type {
 // strikes that go with the decision. The order is Moxgate's `handleChat`:
 //   1. trim; empty                       -> 'empty' (the caller stays silent)
 //   2. the seat's occupant, then the gate hook, then the room's context (a tag the profile does not declare -> 'gate', fail closed)
+//   2b. phrase rooms (a context with `chat.phrases`): text -> 'phrases_only'; `acceptPhrase` in any other room -> 'gate', an id the book lacks -> 'phrase_unknown'
+//       (a pause, never a sanction: no strike, not kept, spends nothing). A phrase line then takes steps 3, 4b, 4c, 5, 6, 7 and 11 only: no length check, no matcher, no filters, no profanity (the book is trusted text).
 //   3. active restriction                -> 'restricted' (chat, ban, or the in-memory automatic one)
 //   4. length > 200                      -> 'length'
 //   4b. the room's mode (staff exempt)   -> 'locked' | 'new_account' (a pause for the room, never a sanction: no strike, not kept, spends nothing; before pacing and the matcher)
@@ -89,6 +92,9 @@ interface BlockedLine {
  * stored layer or `cw.rooms.setPace`). They carry `retryAfterMs` and nothing else: a pause, not a sanction, so no rule, notice or end
  * time, and never the line.
  *
+ * `'phrases_only'` and `'phrase_unknown'` belong to phrase-only rooms (a context with `chat.phrases`): typed text there is `phrases_only`, and an id the room's book lacks (or any `acceptPhrase` in a room that is not phrase-only is `'gate'`) is
+ * `phrase_unknown`. Both are pauses: no strike, nothing kept, nothing spent. `'account_too_new'` is a context's least account age.
+ *
  * `'link'`, `'personal_info'` and `'filter'` are chat-filter refusals (`profile.filters`) and only ever appear once a filter rule says `refuse`.
  * They carry the Community Rule the rule cites (`rule`) and nothing else: never the matched part, the rule's id or a counter. `'filter'` is what a
  * phrase rule or a ratio rule (caps, repeats, emoji, mentions) answers. The line was not delivered, not kept and earned no strike. @experimental
@@ -97,10 +103,17 @@ interface BlockedLine {
  * `rooms.emergency.newAccountDays`. Both carry `until`, when the mode ends, and nothing else. They are checked after the person's own restriction and the length, and before pacing, the rate
  * budget and the matcher: a line refused for the mode is never matched, earns no strike, is not kept and spends nothing. @experimental
  */
-export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason | 'link' | 'personal_info' | 'filter' | 'locked' | 'new_account' | 'account_too_new';
+export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason | 'link' | 'personal_info' | 'filter' | 'locked' | 'new_account' | 'account_too_new' | 'phrases_only' | 'phrase_unknown';
 
 export type ChatResult =
-  | { deliver: { lineId: string; text: string } }
+  | {
+      deliver: {
+        lineId: string;
+        text: string;
+        /** The phrase's id, for a line sent with `acceptPhrase`: `text` is then the phrase's canonical text. Absent on a typed line. */
+        phrase?: string;
+      };
+    }
   | {
       refuse: {
         reason: RefuseReason;
@@ -235,6 +248,8 @@ export interface RoomChatRules {
   profanity: ProfanityFilter | undefined;
   /** A player whose account is younger, or whose age is not known, is refused `account_too_new`. `null`: no rule. */
   minAccountAgeDays: number | null;
+  /** The room's phrase book, by phrase id: the room is phrase-only. `null`: free text. */
+  phrases: ReadonlyMap<string, Phrase> | null;
 }
 
 /** What pacing says about a line: a refusal, or the key to commit under; neither when nothing is paced. */
@@ -380,9 +395,22 @@ export class ChatService {
    * and the line is refused with `'gate'`, the one reason that means "you cannot chat right now".
    */
   accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult {
+    return this.decide(roomId, seatId, { text }, opts);
+  }
+
+  /**
+   * Decide one phrase from the room's book (a phrase-only room, `chat.phrases`): the same pipeline as {@link accept} without the text steps (no length check, no matcher, no filters, no profanity: the book is trusted text, checked
+   * when the kit started). The line is kept as evidence with `raw` equal to the phrase's canonical text and delivered as that text with `phrase` set. In a room that is not phrase-only the answer is `gate`; an id the book lacks (or
+   * that is not a string) is `phrase_unknown`, spending nothing. Never throws.
+   */
+  acceptPhrase(roomId: string, seatId: string, phraseId: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult {
+    return this.decide(roomId, seatId, { phrase: phraseId }, opts);
+  }
+
+  private decide(roomId: string, seatId: string, input: { text: unknown } | { phrase: unknown }, opts?: { audience?: string[]; staff?: boolean }): ChatResult {
     let result: ChatResult;
     try {
-      result = this.run(roomId, seatId, text, opts);
+      result = this.run(roomId, seatId, input, opts);
     } catch (err) {
       this.warn('chat.accept_failed', { error: errName(err) });
       result = refuse('gate');
@@ -484,10 +512,13 @@ export class ChatService {
 
   // --- internals -----------------------------------------------------------
 
-  private run(roomId: string, seatId: string, text: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult {
-    if (typeof text !== 'string') return refuse('empty');
-    const trimmed = text.trim();
-    if (trimmed.length === 0) return refuse('empty');
+  private run(roomId: string, seatId: string, input: { text: unknown } | { phrase: unknown }, opts?: { audience?: string[]; staff?: boolean }): ChatResult {
+    let trimmed = '';
+    if ('text' in input) {
+      if (typeof input.text !== 'string') return refuse('empty');
+      trimmed = input.text.trim();
+      if (trimmed.length === 0) return refuse('empty');
+    }
 
     // An unknown seat or an empty one has no speaker to attribute the line to: refuse it as 'gate'.
     const occupant = this.roster.occupant(roomId, seatId);
@@ -497,6 +528,17 @@ export class ChatService {
     // The room's context: a tag the profile does not declare fails shut (a typo in a kids room must not fall back to the relaxed base).
     const rules = this.roomRules(roomId);
     if (rules === 'refuse') return refuse('gate');
+    // Phrase rooms: text is refused, and a phrase is looked up in the room's book (its canonical text is the line). Both are pauses that cost nothing: no strike, nothing kept, no rate or pacing spent.
+    const book = rules === null ? null : rules.phrases;
+    let phrase: Phrase | undefined;
+    if ('text' in input) {
+      if (book !== null) return refuse('phrases_only');
+    } else {
+      if (book === null) return refuse('gate');
+      phrase = typeof input.phrase === 'string' ? book.get(input.phrase) : undefined;
+      if (phrase === undefined) return refuse('phrase_unknown');
+      trimmed = phrase.text;
+    }
 
     const now = this.clock.now();
     const rateKey = memKey(roomId, seatId);
@@ -510,7 +552,7 @@ export class ChatService {
       });
     }
 
-    if (trimmed.length > this.maxLength) return refuse('length');
+    if (phrase === undefined && trimmed.length > this.maxLength) return refuse('length');
 
     // The room's mode: after the person's own restriction (they are told that first) and the length, before everything that costs or records anything. A line refused here is never
     // matched, so it earns no strike and no automatic timeout, is not kept as evidence and spends no pacing or rate budget. Only the facade's option makes a caller staff.
@@ -534,6 +576,12 @@ export class ChatService {
     if (this.pacer !== undefined && paced.key !== null) this.paceCommit(this.pacer, paced.key, trimmed, paced.floor);
 
     const audience = opts?.audience === undefined ? null : [...opts.audience];
+
+    // A phrase is trusted text: kept as evidence with its canonical text and delivered as it is, with no matcher, filter or profanity step.
+    if (phrase !== undefined) {
+      const lineId = this.buffer.append(roomId, { ts: now, seatId, handle, subject, raw: trimmed, delivered: trimmed, blocked: false, audience });
+      return { deliver: { lineId, text: trimmed, phrase: phrase.id } };
+    }
 
     const hit = this.matchTerm(trimmed);
     if (hit !== null) {

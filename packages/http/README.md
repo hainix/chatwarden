@@ -552,7 +552,7 @@ error class only.
 
 ## Chat
 
-`@chatwarden/http/chat` (also exported from the root) is a room broadcaster and four routes: a game with no chat adds moderated chat in
+`@chatwarden/http/chat` (also exported from the root) is a room broadcaster and five routes: a game with no chat adds moderated chat in
 minutes. Every line goes through `cw.chat.accept` and nothing else decides delivery; a refusal is shown to its author only; a bounded
 in-memory history lets a late joiner see the room. The browser side is `<ChatBox>` in `@chatwarden/player-react/chat`. The subpath
 imports no `node:` module, so it can also run in a browser tab (a demo). All its names are `@experimental` until 0.2.
@@ -591,7 +591,7 @@ app.use(
 // On shutdown: chat.close() ends every stream with a `bye`.
 ```
 
-### The four routes
+### The five routes
 
 All paths are relative to the mount point. `:room` is a kit route param (1 to 64 of `A-Z a-z 0-9 _ -`). Every response carries
 `cache-control: no-store`; the stream's is `no-store, no-transform`, which is what keeps a body-rewriting middleware (`compression`) and a
@@ -602,6 +602,7 @@ proxy from holding its first frames back. Errors use the kit's shapes.
 | `GET /rooms/:room/stream` | none | `200 text/event-stream`: a `hello` first, then `line`, `hide`, `state`, `notices`, `mode`, `retract` and `bye` frames, and a `: ping` comment every `heartbeatMs` |
 | `POST /rooms/:room/lines` | `{ text }` | `200 { ok: true, line }` or `200 { ok: false, refused: { reason, until?, byModerator?, rule?, noticeId?, retryAfterMs? } }` (a refusal is an answer). With the chat filters on (0.2.0, `profile.filters`) `reason` can also be `link`, `personal_info` or `filter`, with the `rule` the owner chose and never what matched; a masked line is delivered starred and the author's `line` shows the starred text |
 | `POST /rooms/:room/mute` | `{ lineId, on, block? }` or `{ ref, on, block? }` | `200 { ok, hiddenIds, limit? }`: the ids of the muted player's lines the server hid from the muter. `block: true` (a boolean, else 400) with `on` makes it a block: a mute that is also two-way and never expires. The blocked player's streams get a `hide` frame of the blocker's lines already in the room and later lines are filtered both ways; the blocker's `muted` entry carries `block: true`; the blocked player is told nothing. `limit: true` (with `ok: false`) says the list holds 500 blocks. Unmute (`on: false`) undoes either. |
+| `POST /rooms/:room/phrases` | `{ phrase }` | For a phrase-only room (its context sets `chat.phrases`): `phrase` is the id of one phrase of the room's book, which `hello.phrases` (`{ book: [{ id, text, group? }] }`, `null` for a free-text room) carries. `200 { ok: true, line }` with `line.phrase` set and `line.text` the canonical text, or `200 { ok: false, refused }` (`gate` for a room that is not phrase-only, `phrase_unknown` for an id the book lacks). Typed text in a phrase room is refused `phrases_only` on `lines`. Same guards, limits and 400/401/403/429 as `lines` |
 | `POST /rooms/:room/report` | `{ lineId, reason?, note? }` | `200 { ok: true, remaining }` or `200 { ok: false, refused }`; nothing else, never a report id |
 
 Bodies must be `application/json` (anything else is 400, so a cross-site form cannot make a player speak). A banned player's stream is
@@ -686,7 +687,7 @@ io.on('connection', (socket) => {
 - **Experimental names** (listed so until 0.2): `createRoomBroadcaster`, `chatRoutes`, `encodeFrame`, `HEARTBEAT`, `CHAT_WIRE_VERSION`,
   `refusalOf`, `ROOM_BROADCASTER_DEFAULTS`, and the types `ChatMember`, `ChatSession`, `ChatSink`, `ChatStream`, `RoomBroadcaster`,
   `RoomBroadcasterOptions`, `ChatRoutesOptions`, `ChatFrame`, `WireLine`, `WireRestriction`, `WireMuted`, `WireRefusal`, `SendResult`,
-  `MuteTarget`, `MuteResult`, `ReportOutcome`, and, new in 0.2.0, `WireMode` and `WireReadOnly`.
+  `MuteTarget`, `MuteResult`, `ReportOutcome`, and, new in 0.2.0, `WireMode`, `WirePhrase`, `WirePhrases` and `WireReadOnly`.
 
 ## Webhooks
 

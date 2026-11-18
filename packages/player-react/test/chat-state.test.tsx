@@ -17,6 +17,7 @@ const hello = (over: Partial<Extract<ChatFrame, { type: 'hello' }>> = {}): ChatF
   restriction: null,
   lines: [],
   muted: [],
+  phrases: null,
   ...over,
 });
 const frame = (f: ChatFrame): ChatAction => ({ type: 'frame', frame: f });
