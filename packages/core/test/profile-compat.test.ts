@@ -137,6 +137,15 @@ describe('the profile types', () => {
     expect(g.length).toBe(7);
   });
 
+  it('a profile written before team notes resolves with teamNotes [], and the documents built from it carry none', () => {
+    expect(Object.hasOwn(legacy, 'teamNotes')).toBe(false);
+    expect(defineProfile(legacy).teamNotes).toEqual([]);
+    expect(resolveProfile(legacy).teamNotes).toEqual([]);
+    const policy = { profile: legacy, rules: defineRules(starterRules('standard')) };
+    expect(moderatorGuide(policy, { format: 'text' })).not.toContain('Team notes');
+    expect(agentBrief(policy)).not.toContain('Team notes');
+  });
+
   it('ProfileInput is a deprecated alias of ModerationProfile', () => {
     const input: ProfileInput = legacy;
     const same: ModerationProfile = input;

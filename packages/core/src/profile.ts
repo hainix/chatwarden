@@ -40,6 +40,8 @@ import type { ResolvedSignals, SignalFeeds, SignalSettings } from './signals.js'
 import { resolveContexts } from './contexts.js';
 import type { ContextSettings, ResolvedContexts } from './contexts.js';
 import { ProfileError } from './profileError.js';
+import { resolveTeamNotes } from './teamNotes.js';
+import type { TeamNote } from './teamNotes.js';
 
 /**
  * A moderation profile is a game's written standard: what each conduct level means, what happens on a first
@@ -215,6 +217,12 @@ export interface ModerationProfile extends ModerationProfileBase {
    */
   rooms?: RoomsSettings;
   /**
+   * Team notes: short working guidance for the moderation team, each optionally tied to a Community Rule. Staff only: a note is never
+   * shown to a player (the code of conduct does not carry it), the moderator guide and the agent brief list it, and the AI read gets it as
+   * one screened line each. Default none. See {@link TeamNote}.
+   */
+  teamNotes?: TeamNote[];
+  /**
    * Rules per room, by name: a room tagged `{ context: 'kids' }` at `cw.rooms.seat` runs with that context's chat-time settings
    * (profanity, pace, filters, phrase-only chat, the least account age) over the profile's. Declared in code only: the stored layer
    * never holds it and the hub only lists it. A room tagged with a name that is not declared refuses every line. See {@link ContextSettings}.
@@ -283,6 +291,8 @@ export interface ResolvedProfile extends ModerationProfileBase {
   safety: ResolvedSafety;
   /** The room settings in force, every field filled in. */
   rooms: ResolvedRooms;
+  /** The team notes in force, cleaned (`[]` when none). Staff only. */
+  teamNotes: TeamNote[];
   /** The declared contexts, validated, with the labels filled in (`{}` when none). Code only: a stored layer never changes it. */
   contexts: ResolvedContexts;
 }
@@ -330,13 +340,14 @@ const TOP_KEYS = [
   'desk',
   'safety',
   'rooms',
+  'teamNotes',
   'contexts',
   'levels',
   'guidelines',
 ] as const;
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
-const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms', 'contexts'];
+const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms', 'teamNotes', 'contexts'];
 const AI_KEYS = ['level', 'learn', 'dailyCalls', 'actExcludeRules'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
@@ -635,6 +646,7 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   if (Object.hasOwn(p, 'desk')) resolveDesk(p['desk'] as DeskSettings, 'profile.desk');
   if (Object.hasOwn(p, 'safety')) resolveSafety(p['safety'] as SafetySettings, 'profile.safety');
   if (Object.hasOwn(p, 'rooms')) resolveRooms(p['rooms'] as RoomsSettings, 'profile.rooms');
+  if (Object.hasOwn(p, 'teamNotes')) resolveTeamNotes(p['teamNotes'] as TeamNote[], 'profile.teamNotes');
   if (Object.hasOwn(p, 'contexts')) resolveContexts(p['contexts'] as Record<string, ContextSettings>, 'profile.contexts');
 
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
@@ -756,6 +768,7 @@ function finalize(value: unknown): ResolvedProfile {
     setOwn(copy, 'desk', resolveDesk(copy['desk'] as DeskSettings | undefined, 'profile.desk'));
     setOwn(copy, 'safety', resolveSafety(copy['safety'] as SafetySettings | undefined, 'profile.safety'));
     setOwn(copy, 'rooms', resolveRooms(copy['rooms'] as RoomsSettings | undefined, 'profile.rooms'));
+    setOwn(copy, 'teamNotes', resolveTeamNotes(copy['teamNotes'] as TeamNote[] | undefined, 'profile.teamNotes'));
     setOwn(copy, 'contexts', resolveContexts(copy['contexts'] as Record<string, ContextSettings> | undefined, 'profile.contexts'));
   }
   return deepFreeze(copy as ResolvedProfile);
@@ -780,6 +793,7 @@ export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
     desk: resolveDesk(p.desk),
     safety: resolveSafety(p.safety),
     rooms: resolveRooms(p.rooms),
+    teamNotes: resolveTeamNotes(p.teamNotes),
     contexts: resolveContexts(p.contexts),
   };
 }
@@ -1098,10 +1112,11 @@ export function defineProfile(p: ModerationProfile): ResolvedProfile {
 // The policy layer: what a moderator may edit at runtime
 
 /**
- * The parts of a profile the hub may edit, and the order they are listed in. Everything else (identity, the written
- * levels, the AI context, profanity handling) stays in code: changing profanity means rebuilding the filter.
+ * The parts of a profile the hub may edit, and the order they are listed in. Later releases append (0.2.2 added `teamNotes` and
+ * `aiContext`). Everything else (identity, the written levels, profanity handling) stays in code: changing profanity means rebuilding
+ * the filter.
  */
-export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms'] as const;
+export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms', 'teamNotes', 'aiContext'] as const;
 export type PolicySection = (typeof POLICY_SECTIONS)[number];
 
 /** One ladder cell as the editor sends it: the label may be left out and is then generated ("Restrict chat 6 hours"). */
@@ -1119,10 +1134,21 @@ export interface PolicyLadderRow {
 }
 
 /**
+ * The whole form of the `guidelines` section: the tiers themselves, replacing the profile's list. Each tier is a
+ * {@link GuidelineTier}; the same rules as in code hold (every conduct level covered exactly once, each cover in one tier at most), and
+ * a layer adds length caps ({@link MAX_TIER_TITLE} and the others).
+ */
+export interface PolicyGuidelinesWhole {
+  tiers: GuidelineTier[];
+}
+
+/**
  * The stored edits: a deep-partial of the editable sections. An object section merges key by key onto the profile
  * (`firstOffense`, `repeat`); a list replaces the profile's list whole (`durations`, `ladder` as all 6 rows, `areaRules`,
- * `severeRules`). `guidelines` is positional: entry `i` holds the new `outcome` text of the profile's guideline tier `i`,
- * and `null` leaves that tier as it is. A layer that touches anything else is refused.
+ * `severeRules`, `teamNotes`). `guidelines` has two shapes. The whole form `{ tiers }` replaces the profile's tiers. The positional
+ * form (still read, so layers saved by 0.2.1 keep working) holds at entry `i` the new `outcome` text of the profile's guideline tier
+ * `i`, and `null` leaves that tier as it is. `aiContext` replaces the plain-language standard the AI read is given. A layer that
+ * touches anything else is refused.
  */
 export interface PolicyLayer {
   durations?: number[];
@@ -1132,7 +1158,7 @@ export interface PolicyLayer {
   repeat?: Partial<ModerationProfile['repeat']>;
   areaRules?: number[];
   severeRules?: number[];
-  guidelines?: Array<{ outcome: string } | null>;
+  guidelines?: Array<{ outcome: string } | null> | PolicyGuidelinesWhole;
   /** The reporting settings: `flow` and `thanks` replace the profile's; `reasons` replaces the whole list. Each is optional; a reason needs only `id` and `label`. */
   reporting?: ReportingSettings;
   /** The AI settings: `level` (0 off, 1 read, 2 recommend), `learn` and `dailyCalls` (the owner's ceiling on calls in a UTC day, a whole number from 1 to 100 000). Each is optional and merges onto the profile's. Levels 3 and 4 are refused. */
@@ -1162,10 +1188,27 @@ export interface PolicyLayer {
   safety?: SafetySettings;
   /** The room settings: `defaultModeMs`, `emergency`, `probation` and `unknownAge`. Each is optional and merges onto the profile's. */
   rooms?: RoomsSettings;
+  /** The team notes: the list replaces the profile's whole. Staff only. At most {@link TEAM_NOTES_MAX} notes, see {@link TeamNote}. */
+  teamNotes?: TeamNote[];
+  /** The plain-language standard the AI read is given, replacing the profile's: 1 to {@link MAX_AI_CONTEXT} characters. */
+  aiContext?: string;
 }
 
 /** The longest outcome text a layer may set on a guideline tier. */
 export const MAX_GUIDELINE_OUTCOME = 1000;
+/** The longest tier title a layer may set (whole form), in characters. */
+export const MAX_TIER_TITLE = 80;
+/** The longest tier description a layer may set (whole form), in characters. */
+export const MAX_TIER_DESCRIPTION = 600;
+/** The most examples a layer may give a tier (whole form). */
+export const MAX_TIER_EXAMPLES = 8;
+/** The longest tier example a layer may set (whole form), in characters. */
+export const MAX_TIER_EXAMPLE = 120;
+/** The longest `aiContext` a layer may set, in characters. */
+export const MAX_AI_CONTEXT = 2000;
+
+/** Code points, so an emoji counts once. */
+const codePoints = (s: string): number => Array.from(s).length;
 
 /** The label generated for a ladder cell with none, or null when the cell is not valid (the validator names why). */
 function generatedLabel(kind: unknown, durationMs: unknown): string | null {
@@ -1185,8 +1228,35 @@ function ladderOverride(v: unknown): unknown {
   return v.map((row: unknown) => (isPlain(row) ? { ...row, lowMedium: withLabel(row['lowMedium']), high: withLabel(row['high']) } : row));
 }
 
+/** A string field of a layer tier must be at most `cap` characters; anything that is not a string is left for `validateGuidelines` to name. */
+function tierCap(v: unknown, cap: number, path: string): void {
+  if (typeof v === 'string' && codePoints(v) > cap) fail(path, `must be at most ${cap} characters`);
+}
+
+/** The whole form: `{ tiers }` and nothing else, each tier within the layer caps. The cross-tier rules are `validateGuidelines`'s, run by `finalize`. */
+function wholeGuidelines(v: Record<string, unknown>): unknown {
+  for (const k of Object.keys(v)) if (k !== 'tiers') fail(`profile.guidelines.${k}`, 'is not an editable setting');
+  if (!Object.hasOwn(v, 'tiers')) fail('profile.guidelines.tiers', 'is required');
+  const tiers = v['tiers'];
+  if (!Array.isArray(tiers)) return fail('profile.guidelines', 'must hold a list of tiers');
+  tiers.forEach((t: unknown, i) => {
+    if (!isPlain(t)) return;
+    const tp = `profile.guidelines[${i}]`;
+    tierCap(t['title'], MAX_TIER_TITLE, `${tp}.title`);
+    tierCap(t['description'], MAX_TIER_DESCRIPTION, `${tp}.description`);
+    const examples = t['examples'];
+    if (Array.isArray(examples)) {
+      if (examples.length > MAX_TIER_EXAMPLES) fail(`${tp}.examples`, `must list at most ${MAX_TIER_EXAMPLES} examples`);
+      examples.forEach((e: unknown, j) => tierCap(e, MAX_TIER_EXAMPLE, `${tp}.examples[${j}]`));
+    }
+    tierCap(t['outcome'], MAX_GUIDELINE_OUTCOME, `${tp}.outcome`);
+  });
+  return clone(tiers);
+}
+
 function guidelinesOverride(base: ModerationProfile, v: unknown): unknown {
-  if (!Array.isArray(v)) return fail('profile.guidelines', 'must be a list of outcome texts, one per guideline tier');
+  if (isPlain(v)) return wholeGuidelines(v);
+  if (!Array.isArray(v)) return fail('profile.guidelines', 'must be a list of outcome texts, one per guideline tier, or an object with the tiers');
   if (v.length > base.guidelines.length) fail('profile.guidelines', 'has more entries than the profile has guideline tiers');
   return base.guidelines.map((tier, i) => {
     const entry: unknown = v[i];
@@ -1258,6 +1328,10 @@ function layerToOverrides(base: ModerationProfile, layer: unknown): Record<strin
       setOwn(out, key, mergeFilters(resolveFilters(base.filters, 'profile.filters'), value as FilterSettings, 'profile.filters'));
     } else if (key === 'ladder') setOwn(out, key, ladderOverride(value));
     else if (key === 'guidelines') setOwn(out, key, guidelinesOverride(base, value));
+    else if (key === 'aiContext') {
+      if (typeof value !== 'string' || codePoints(value) > MAX_AI_CONTEXT) fail('profile.aiContext', `must be text of at most ${MAX_AI_CONTEXT} characters`);
+      setOwn(out, key, value);
+    }
     else setOwn(out, key, value);
   }
   return out;

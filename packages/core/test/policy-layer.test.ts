@@ -132,7 +132,7 @@ describe('the layer: what may be edited', () => {
     expect(Object.isFrozen(p.ladder[0])).toBe(true);
   });
 
-  const FORBIDDEN = ['profanity', 'id', 'name', 'summary', 'aiContext', 'aiAutoAct', 'rules', 'levels', 'nonsense', '__proto__'];
+  const FORBIDDEN = ['profanity', 'id', 'name', 'summary', 'aiAutoAct', 'rules', 'levels', 'nonsense', '__proto__'];
   for (const key of FORBIDDEN) {
     it(`refuses a layer that touches ${key}, with the path`, () => {
       const layer = JSON.parse(`{"${key}": {"mode": "allow"}}`) as unknown;

@@ -56,6 +56,7 @@ import type { EffectiveContext } from './contexts.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
 import { checkNameRules } from './names.js';
+import { checkTeamNoteRules } from './teamNotes.js';
 import type { NameCheckResult, NameKind } from './names.js';
 import { resolveLandingOptions } from './appealLink.js';
 import { checkDeliveryOptions, DeliveryService } from './delivery.js';
@@ -931,8 +932,10 @@ export interface Chatwarden {
   readonly profile: ResolvedProfile;
   /**
    * The editable profile. The profile from code is the base; a moderator's edits to the durations offered, the ladder, the first
-   * offences, the repeat rule, the area and severe rules and the guideline outcome texts are stored in your store as a
-   * versioned layer. Needs a store with `loadPolicyLayer` and `savePolicyLayer` (the memory and SQLite stores have them);
+   * offences, the repeat rule, the area and severe rules, the guidelines, the team notes, the AI standard (`aiContext`) and the other
+   * sections of `POLICY_SECTIONS` are stored in your store as a versioned layer. `guidelines` takes the whole form `{ tiers }`, which
+   * replaces the tiers (every conduct level covered once, with length caps), or the older positional list of outcome texts, which is
+   * still read. `teamNotes` is staff-only and each note may cite a Community Rule the registry has (a retired one too). Needs a store with `loadPolicyLayer` and `savePolicyLayer` (the memory and SQLite stores have them);
    * without them `save` and `reset` answer `{ ok: false, error: 'unsupported' }` and everything else works from code.
    */
   policy: {
@@ -1313,6 +1316,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   checkFilterRules(baseProfile.filters, isActiveRule, 'profile.filters');
   // The reserved-name rule likewise (a layer is checked when it is saved).
   checkNameRules(baseProfile.names, isActiveRule, 'profile.names');
+  // A team note may cite any rule of the registry, a retired one too (a layer is checked when it is saved or previewed).
+  const ruleExists = (n: number): boolean => rules.get(n) !== undefined;
+  checkTeamNoteRules(baseProfile.teamNotes, ruleExists, 'profile.teamNotes');
   // The staff workflow keeps a thread per report in the store: a code profile that asks for it over a store that cannot is refused here, plainly.
   if (baseProfile.desk.workflow && !hasWorkflowMethods(store)) {
     throw new Error('desk.workflow needs a store that keeps staff comments and escalation (insertComment, listComments, deleteComment, countComments, setEscalation, countOpenEscalated); this store lacks them');
@@ -1340,7 +1346,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await mutes.load();
   await strikes.load();
   // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
-  const policy = new PolicyService({ store, clock, logger, base: baseProfile, isActiveRule: isActiveRule, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store), workflowKept: hasWorkflowMethods(store), accountAge: typeof opts.signals?.accountAgeDays === 'function' });
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile, isActiveRule: isActiveRule, ruleExists, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store), workflowKept: hasWorkflowMethods(store), accountAge: typeof opts.signals?.accountAgeDays === 'function' });
   policy.load();
 
   // Room contexts: the lookup over the profile in force and the room's tag. The profanity handling of each context is built once, here: it is code-only, so a stored layer never

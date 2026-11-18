@@ -2,6 +2,7 @@ import { isValidAuditActor, AUDIT_REASON_MAX } from './audit.js';
 import { sampleRecords, suggest } from './ladder.js';
 import { checkFilterRules } from './filters.js';
 import { checkNameRules } from './names.js';
+import { checkTeamNoteRules } from './teamNotes.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
 import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
 import { playerReporting } from './reporting.js';
@@ -138,9 +139,12 @@ export class PolicyService {
   private readonly appealsWarn: ThrottledWarn;
   /** Whether a Community Rule number is an active rule of the registry: the filters may cite only those, checked when a layer is saved or previewed. */
   private readonly isActiveRule: (rule: number) => boolean;
+  /** Whether a Community Rule number exists in the registry (a retired rule does): a team note may cite one. Checked when a layer is saved or previewed. */
+  private readonly ruleExists: (rule: number) => boolean;
 
-  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean; workflowKept?: boolean; isActiveRule?: (rule: number) => boolean; accountAge?: boolean }) {
+  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean; workflowKept?: boolean; isActiveRule?: (rule: number) => boolean; ruleExists?: (rule: number) => boolean; accountAge?: boolean }) {
     this.isActiveRule = deps.isActiveRule ?? (() => true);
+    this.ruleExists = deps.ruleExists ?? (() => true);
     this.appealsKept = deps.appealsKept ?? true;
     this.workflowKept = deps.workflowKept ?? true;
     this.appealsWarn = new ThrottledWarn(deps.logger, deps.clock);
@@ -337,6 +341,8 @@ export class PolicyService {
       // A filter may cite only an active Community Rule. Checked here, not when a stored layer is read: a rule switched off later fails the next save, never the chat path.
       checkFilterRules(effective.filters, this.isActiveRule, 'layer.filters');
       checkNameRules(effective.names, this.isActiveRule, 'layer.names');
+      // A note may cite any rule the registry has, a retired one too. Not checked on read: a rule cannot disappear, and the chat path never fails over it.
+      checkTeamNoteRules(effective.teamNotes, this.ruleExists, 'layer.teamNotes');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;
@@ -392,6 +398,7 @@ export class PolicyService {
       checkSignalFeeds(candidate.signals.feeds, candidate.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
       checkFilterRules(candidate.filters, this.isActiveRule, 'layer.filters');
       checkNameRules(candidate.names, this.isActiveRule, 'layer.names');
+      checkTeamNoteRules(candidate.teamNotes, this.ruleExists, 'layer.teamNotes');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;

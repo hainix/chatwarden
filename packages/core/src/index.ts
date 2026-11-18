@@ -404,8 +404,13 @@ export {
   layerSections,
   MAX_DURATION_MS,
   MAX_DURATIONS,
+  MAX_AI_CONTEXT,
   MAX_GUIDELINE_OUTCOME,
   MAX_RULE_LIST,
+  MAX_TIER_DESCRIPTION,
+  MAX_TIER_EXAMPLE,
+  MAX_TIER_EXAMPLES,
+  MAX_TIER_TITLE,
   MAX_WINDOW_DAYS,
   AI_DAILY_CALLS_DEFAULT,
   AI_DAILY_CALLS_MAX,
@@ -415,6 +420,9 @@ export {
   resolveProfile,
   validateProfile,
 } from './profile.js';
+// Team notes: staff-only working guidance, each optionally tied to a Community Rule.
+export { TEAM_NOTE_MAX, TEAM_NOTES_MAX } from './teamNotes.js';
+export type { TeamNote } from './teamNotes.js';
 // Pace settings: slow mode, burst limit and repeat refusal, all off until set.
 export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
 export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
@@ -512,6 +520,7 @@ export type {
   Outcome,
   PolicyCell,
   PolicyLadderRow,
+  PolicyGuidelinesWhole,
   PolicyLayer,
   PolicySection,
   PresetName,
