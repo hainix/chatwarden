@@ -57,6 +57,7 @@ export type {
   BlockedNameRow,
   ConductLevel,
   Source,
+  SetupState,
   Store,
   SubjectId,
   SubjectIdKind,
@@ -423,6 +424,9 @@ export {
 // The moderation principles block of the AI prompt (tiers and team notes, screened and capped) and what it leaves out.
 export { PRINCIPLES_BLOCK_MAX, PRINCIPLES_LINE_MAX, promptPrinciples } from './principles.js';
 export type { PromptExcluded, PromptPrinciples } from './principles.js';
+// The recommended setup: what kind of game this is, and the starting layer for it.
+export { CREATOR_TEAM_NOTE, GAME_KINDS, GAME_PRESET, isGameKind, recommendFor } from './recommend.js';
+export type { GameKind, Recommendation } from './recommend.js';
 // Team notes: staff-only working guidance, each optionally tied to a Community Rule.
 export { TEAM_NOTE_MAX, TEAM_NOTES_MAX } from './teamNotes.js';
 export type { TeamNote } from './teamNotes.js';
@@ -508,6 +512,7 @@ export type {
   PolicyPreview,
   PolicySaveContext,
   PolicySaveResult,
+  PolicySetup,
   PolicyState,
   PreviewOutcome,
   PreviewSample,

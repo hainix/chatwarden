@@ -1137,6 +1137,14 @@ export interface NoticeRow {
  * in-memory indexes instead. Add each new group of methods under the marker
  * below and keep the lifecycle methods above it.
  */
+/**
+ * The first-run setup flag a store may keep (see `Store.getSetupState`): when the owner dismissed the setup panel, or null while it has not been
+ * dismissed. Never holds a person.
+ */
+export interface SetupState {
+  dismissedAt: number | null;
+}
+
 export interface Store {
   /** Latest applied kit schema version (0 when no migration has run). */
   schemaVersion(): number;
@@ -1489,6 +1497,20 @@ export interface Store {
    * inside `transaction`, so an undone transaction undoes it. It does not move the change token.
    */
   savePolicyLayer?(layer: PolicyLayer, expectedVersion: number): number | null;
+
+  // The first-run setup flag (0.2.2): whether the owner dismissed the "set up your moderation" panel. OPTIONAL, like the policy pair: a store without
+  // both methods still works, and the dismissal is then kept for this process only (`cw.policy.setup().persists` is false). SYNCHRONOUS on purpose.
+
+  /**
+   * The stored setup state, or null when none was ever saved or it cannot be read (a damaged value reads as never saved; it never throws).
+   * Returns a copy.
+   */
+  getSetupState?(): SetupState | null;
+
+  /**
+   * Replace the stored setup state. Runs inside `transaction`, so an undone transaction undoes it. It does not move the change token.
+   */
+  saveSetupState?(state: SetupState): void;
 
   // AI reads and the casebook (AI levels 1 and 2, design section 5). OPTIONAL: a store without them works as before, and
   // `createChatwarden({ ai })` leaves the AI inert with one (and logs it once). SYNCHRONOUS on purpose (like claims); they run inside `transaction`.

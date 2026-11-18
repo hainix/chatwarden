@@ -50,6 +50,7 @@ import type {
   OpenReportQuery,
   PolicyLayer,
   ReasonRow,
+  SetupState,
   ReportActivity,
   ReportCategory,
   ReportEntity,
@@ -346,6 +347,28 @@ function toSanctionRow(r: Record<string, unknown>): SanctionRow {
     // Only a query that selects revoked_at gets the property; the other loads keep the plain row shape.
     ...(r.revoked_at === undefined ? {} : { revokedAt: r.revoked_at === null ? null : Number(r.revoked_at) }),
   };
+}
+
+/** The `kit_meta` key of the first-run setup flag (0.2.2): one row, JSON `{ "dismissedAt": number | null }`. No table, no migration. */
+export const SETUP_STATE_KEY = 'setup_state';
+/** The setup flag's row by key. Binds: the key. */
+export const SETUP_LOAD_SQL = 'SELECT value FROM kit_meta WHERE key = ?';
+/** Replace the setup flag's row. Binds: the key, the JSON. */
+export const SETUP_SAVE_SQL = 'INSERT OR REPLACE INTO kit_meta (key, value) VALUES (?, ?)';
+
+/** The setup flag from its stored text; anything that is not `{ dismissedAt: finite number | null }` reads as never saved. Never throws. */
+function parseSetupState(value: unknown): SetupState | null {
+  if (typeof value !== 'string') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const at = (parsed as { dismissedAt?: unknown }).dismissedAt;
+  if (at === null || (typeof at === 'number' && Number.isFinite(at))) return { dismissedAt: at };
+  return null;
 }
 
 const NOTICE_COLUMNS = 'id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at';
@@ -2108,6 +2131,22 @@ export class SqliteStore implements Store, TermStore {
               .prepare('UPDATE kit_policy_layer SET layer_json = ?, version = version + 1 WHERE id = 1 AND version = ? RETURNING version')
               .get(json, expectedVersion);
       return won === undefined ? null : Number(won.version);
+    });
+  }
+
+  // The first-run setup flag (0.2.2). SYNCHRONOUS on purpose. One `kit_meta` row; no row is "never saved".
+
+  getSetupState(): SetupState | null {
+    return this.transaction(() => {
+      const r = this.db.prepare(SETUP_LOAD_SQL).get(SETUP_STATE_KEY);
+      return r === undefined ? null : parseSetupState(r.value);
+    });
+  }
+
+  saveSetupState(state: SetupState): void {
+    const json = JSON.stringify({ dismissedAt: state.dismissedAt });
+    this.transaction(() => {
+      this.db.prepare(SETUP_SAVE_SQL).run(SETUP_STATE_KEY, json);
     });
   }
 

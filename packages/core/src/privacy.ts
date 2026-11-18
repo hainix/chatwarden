@@ -243,7 +243,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
  * Tables that hold no person, with the reason. A new `kit_` table must be in a rule's `tables` or here; the completeness test fails otherwise.
  */
 export const NO_PERSON_TABLES: Readonly<Record<string, string>> = {
-  kit_meta: 'Counters and the schema version; no person.',
+  kit_meta: 'Counters, the schema version and the first-run setup flag; no person.',
   kit_terms: 'The own word list of the adopter.',
   kit_term_exceptions: 'The own word exceptions of the adopter.',
   kit_policy_layer: 'The settings of the adopter.',

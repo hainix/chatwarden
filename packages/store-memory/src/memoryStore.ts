@@ -15,6 +15,7 @@ import type {
   NoticeRow,
   OpenReportQuery,
   PolicyLayer,
+  SetupState,
   ReasonRow,
   ReportActivity,
   ReportListQuery,
@@ -138,6 +139,8 @@ export class MemoryStore implements Store {
   protected reasons: ReasonRow[] = [];
   /** The stored policy layer and its version, or null when none was ever saved. */
   protected policy: { layer: PolicyLayer; version: number } | null = null;
+  /** The first-run setup flag, or null when none was ever saved. */
+  protected setup: SetupState | null = null;
   /** AI reads in insertion order (one row per report and input hash). */
   protected aiReads: AiReadRow[] = [];
   /** The AI spend ledger: one entry per attempt (a call started), booked at the time it was reserved. */
@@ -495,6 +498,20 @@ export class MemoryStore implements Store {
       this.policy = prior;
     });
     return current + 1;
+  }
+
+  // The first-run setup flag (synchronous, see the Store interface). Not a queue change: it does not move the token.
+
+  getSetupState(): SetupState | null {
+    return this.setup === null ? null : { dismissedAt: this.setup.dismissedAt };
+  }
+
+  saveSetupState(state: SetupState): void {
+    const prior = this.setup;
+    this.setup = { dismissedAt: state.dismissedAt };
+    this.undoWith(() => {
+      this.setup = prior;
+    });
   }
 
   // Staff audit trail (synchronous, see the Store interface).

@@ -42,6 +42,8 @@ import type { CaseMarkResult } from './caseWorkflow.js';
 import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
+import type { PolicySetup } from './policy.js';
+import type { GameKind } from './recommend.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkFilterRules, mergeFilters, resolveFilters } from './filters.js';
 import type { FilterSettings } from './filters.js';
@@ -958,6 +960,20 @@ export interface Chatwarden {
     reset(section?: PolicySection, o?: { version?: number }): PolicySaveResult;
     /** Look at the store now, instead of waiting for the 10 second interval. */
     refresh(): void;
+    /**
+     * Whether to show the first-run setup panel: `{ show, dismissedAt, persists }`. `show` is true only for a store that can save settings, with nothing
+     * ever saved (a reset counts as saved) and a usable stored layer, and not dismissed; a layer saved by another process hides it within the refresh interval.
+     * `persists` says whether the dismissal survives a restart (the store keeps the setup flag). Never throws.
+     */
+    setup(): PolicySetup;
+    /** Dismiss the setup panel (the first dismissal is kept). Written to the store when it keeps the flag, for this process only otherwise. Answers `setup()`. Never throws. */
+    dismissSetup(): PolicySetup;
+    /**
+     * Save the recommended starting point for a kind of game (`competitive`, `social`, `kids` or `creator`, see `recommendFor`) as one layer: the principles
+     * (guidelines), first-offence table, repeat rule, ladder and AI standard replaced, other sections kept, and for `creator` one team note added. Checked and
+     * answered like `save` (`conflict`, `invalid` with a path, `unsupported`); an unknown game is `invalid` at path `game`.
+     */
+    applyRecommendation(game: GameKind, ctx: PolicySaveContext): PolicySaveResult;
   };
   /** The limits in force, defaults filled in. Deep-frozen. */
   limits: Limits;
@@ -2369,6 +2385,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       preview: (layer, rule) => policy.preview(layer, rule),
       reset: (section, o) => policy.reset(section, o),
       refresh: () => policy.refresh(),
+      setup: () => policy.setup(),
+      dismissSetup: () => policy.dismissSetup(),
+      applyRecommendation: (game, ctx) => policy.applyRecommendation(game, ctx),
     },
     limits,
     get summary() {

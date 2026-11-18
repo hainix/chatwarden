@@ -27,6 +27,8 @@ import {
   FILTER_HITS_PURGE_SQL,
   INSIGHT_ROWS_SQL,
   NOTICE_BY_ID_SQL,
+  SETUP_LOAD_SQL,
+  SETUP_SAVE_SQL,
   OVERTURN_FILTER_COUNTS_SQL,
   OVERTURN_INSERT_SQL,
   OVERTURN_PURGE_SQL,
@@ -363,6 +365,19 @@ describe('the notice lookup (loadNotice, 0.2.1) binds exactly one value', () => 
     const db = new DatabaseSync(':memory:');
     const store = openStore({ db });
     expect(store.loadNotice?.('nothing')).toBeNull();
+  });
+});
+
+describe('the setup state (kit_meta row, 0.2.2) binds exactly as many values as it has placeholders', () => {
+  it('the load takes the key (1) and the save the key and the value (2), plain ? only, and both run', () => {
+    expect(placeholders(SETUP_LOAD_SQL)).toBe(1);
+    expect(placeholders(SETUP_SAVE_SQL)).toBe(2);
+    expect(SETUP_LOAD_SQL + SETUP_SAVE_SQL).not.toMatch(/\?\d/);
+    expect(SETUP_LOAD_SQL + SETUP_SAVE_SQL).not.toMatch(/\s[:@$][a-z]\w*/i);
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    store.saveSetupState?.({ dismissedAt: 3 });
+    expect(store.getSetupState?.()).toEqual({ dismissedAt: 3 });
   });
 });
 
