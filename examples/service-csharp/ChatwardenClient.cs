@@ -55,10 +55,11 @@ public sealed class ChatwardenClient : IDisposable
         return reason is not null && Array.IndexOf(KnownReasons, reason) >= 0 ? reason : "unknown";
     }
 
-    private async Task<Reply> Send(HttpMethod method, string path, object? body = null, bool idempotent = false)
+    private async Task<Reply> Send(HttpMethod method, string path, object? body = null, bool idempotent = false, string? idempotencyKey = null)
     {
         var payload = body is null ? null : JsonSerializer.Serialize(body);
-        var idempotencyKey = idempotent ? Guid.NewGuid().ToString("N") : null;
+        // A caller that retries a call itself passes the key of the first attempt, so the service replays the answer; otherwise each call makes its own.
+        var requestKey = idempotent ? (idempotencyKey ?? Guid.NewGuid().ToString("N")) : null;
         var wait = TimeSpan.FromMilliseconds(100);
         var waitedForRateLimit = false;
         for (var attempt = 0; ; attempt++)
@@ -67,7 +68,7 @@ public sealed class ChatwardenClient : IDisposable
             {
                 using var request = new HttpRequestMessage(method, path.TrimStart('/'));
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-                if (idempotencyKey is not null) request.Headers.Add("Idempotency-Key", idempotencyKey);
+                if (requestKey is not null) request.Headers.Add("Idempotency-Key", requestKey);
                 if (payload is not null) request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
                 using var response = await http.SendAsync(request);
                 var text = await response.Content.ReadAsStringAsync();
@@ -107,12 +108,12 @@ public sealed class ChatwardenClient : IDisposable
     public Task<Reply> CloseRoom(string room) => Send(HttpMethod.Delete, $"/v1/rooms/{E(room)}");
 
     /// <summary>Check a line a player typed. Broadcast line.text to every seat except those in hiddenFor, or tell the author the refusal.</summary>
-    public Task<Reply> CheckLine(string room, string seat, string text) =>
-        Send(HttpMethod.Post, $"/v1/rooms/{E(room)}/seats/{E(seat)}/lines", new { text }, idempotent: true);
+    public Task<Reply> CheckLine(string room, string seat, string text, string? idempotencyKey = null) =>
+        Send(HttpMethod.Post, $"/v1/rooms/{E(room)}/seats/{E(seat)}/lines", new { text }, idempotent: true, idempotencyKey: idempotencyKey);
 
     /// <summary>Report another player. No report id comes back.</summary>
-    public Task<Reply> Report(string room, string seat, string target, string? lineId = null, string? reason = null) =>
-        Send(HttpMethod.Post, $"/v1/rooms/{E(room)}/seats/{E(seat)}/reports", Body(("target", target), ("lineId", lineId), ("reason", reason)), idempotent: true);
+    public Task<Reply> Report(string room, string seat, string target, string? lineId = null, string? reason = null, string? idempotencyKey = null) =>
+        Send(HttpMethod.Post, $"/v1/rooms/{E(room)}/seats/{E(seat)}/reports", Body(("target", target), ("lineId", lineId), ("reason", reason)), idempotent: true, idempotencyKey: idempotencyKey);
 
     public Task<Reply> PendingNotices(object who) => Send(HttpMethod.Post, "/v1/notices/pending", new { who });
 

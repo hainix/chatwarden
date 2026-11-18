@@ -90,6 +90,24 @@ describe('seat, check and unseat', () => {
 });
 
 describe('the check refuses as the kit does', () => {
+  it('a REFUSED line retried with the same Idempotency-Key replays the stored refusal with the replay header and the kit is asked once (as an accepted line is)', async () => {
+    const w = await serviceWorld();
+    await w.seat(ROOM, 'p1', 'plenk');
+    const body = { text: `you ${BLOCKED}` };
+    const first = await w.call('POST', `/rooms/${ROOM}/seats/p1/lines`, { body, idempotencyKey: 'slur-1' });
+    const second = await w.call('POST', `/rooms/${ROOM}/seats/p1/lines`, { body, idempotencyKey: 'slur-1' });
+    expect(bodyOf(first)).toMatchObject({ ok: false, refused: { reason: 'blocked' } });
+    expect(first.headers?.['idempotent-replay']).toBeUndefined();
+    expect(second.status).toBe(200);
+    expect(second.headers?.['idempotent-replay']).toBe('true');
+    expect(second.body).toEqual(first.body);
+    expect(w.real.blocked.list({ days: 1 })).toHaveLength(1);
+    // another key is a new call: judged again, no replay header
+    const third = await w.call('POST', `/rooms/${ROOM}/seats/p1/lines`, { body, idempotencyKey: 'slur-2' });
+    expect(third.headers?.['idempotent-replay']).toBeUndefined();
+    expect(w.real.blocked.list({ days: 1 })).toHaveLength(2);
+  });
+
   it('a slur is refused blocked with the rule and no term, earns a strike, and an automatic timeout lands after the kit threshold exactly as cw.chat.accept; the refusal body holds only the documented fields', async () => {
     const w = await serviceWorld();
     await w.seat(ROOM, 'p1', 'plenk');

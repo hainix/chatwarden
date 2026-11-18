@@ -8,7 +8,7 @@ cd examples/service-csharp
 BASE=http://127.0.0.1:8787 KEY=<a service key> dotnet run
 ```
 
-What the client does for you: it sends the service key as the bearer, an `Idempotency-Key` on a line and a report (so a retry is judged once), waits for `Retry-After` on a 429,
+What the client does for you: it sends the service key as the bearer, an `Idempotency-Key` on a line and a report (so a retry is judged once; pass `idempotencyKey` to `CheckLine` or `Report` to retry a call yourself with the first attempt's key), waits for `Retry-After` on a 429,
 retries a network error or a 5xx a few times with a growing wait, and never retries another 4xx. A refusal is an answer (status 200, `ok: false`); a refusal reason it does not
 know is `"unknown"`, because the API only ever adds reasons. Keep the service key in your server's environment, never in a client build.
 

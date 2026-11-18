@@ -61,6 +61,18 @@ describe('what the C# client promises', () => {
     expect(client).toMatch(/"unknown"/);
   });
 
+  it('a retry reuses the same Idempotency-Key: CheckLine and Report take an optional key, and the demo retries the refused line with the same one', () => {
+    expect(client).toMatch(/CheckLine\(string room, string seat, string text, string\? idempotencyKey = null\)/);
+    expect(client).toMatch(/Report\(string room, string seat, string target, string\? lineId = null, string\? reason = null, string\? idempotencyKey = null\)/);
+    // Send uses a key it was given before it makes a fresh one
+    expect(client).toMatch(/idempotencyKey \?\? Guid\.NewGuid\(\)/);
+    const refused = program.match(/Step\("slur refused", await client\.CheckLine\(room, "alice", "[^"]+", (\w+)\)\)/);
+    const retried = program.match(/Step\("slur retried", await client\.CheckLine\(room, "alice", "[^"]+", (\w+)\)\)/);
+    expect(refused, 'the refused line passes a key').not.toBeNull();
+    expect(retried, 'the retry passes a key').not.toBeNull();
+    expect(retried?.[1]).toBe(refused?.[1]);
+  });
+
   it('is about 200 lines over HttpClient and System.Text.Json, with no other dependency', () => {
     const lines = client.split('\n').length;
     expect(lines).toBeGreaterThan(80);

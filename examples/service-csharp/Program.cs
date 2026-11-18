@@ -63,8 +63,10 @@ try
     var clean = await client.CheckLine(room, "alice", "good luck, have fun");
     Step("clean line", clean);
     var lineId = clean.Ok ? clean.Json().RootElement.GetProperty("line").GetProperty("id").GetString() : null;
-    Step("slur refused", await client.CheckLine(room, "alice", "you zorbak"));
-    Step("slur retried", await client.CheckLine(room, "alice", "you zorbak"));
+    // The retry carries the key of the first attempt, so the service answers it from what it stored (the idempotent-replay header) instead of judging the line again.
+    var slurKey = Guid.NewGuid().ToString("N");
+    Step("slur refused", await client.CheckLine(room, "alice", "you zorbak", slurKey));
+    Step("slur retried", await client.CheckLine(room, "alice", "you zorbak", slurKey));
     Step("report", await client.Report(room, "bob", "alice", lineId, "harassment"));
     Step("pending notices", await client.PendingNotices(alice));
     Step("ack unknown notice", await client.Ack("not-a-notice", alice));
