@@ -1,4 +1,4 @@
-export const VERSION = '0.1.14';
+export const VERSION = '0.2.0';
 
 export { openStore, type OpenOptions } from './open.js';
 export { MIGRATIONS, type Migration } from './migrations.js';
