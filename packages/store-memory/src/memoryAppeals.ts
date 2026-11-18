@@ -430,6 +430,12 @@ class MemoryAppeals extends MemoryStore {
     }
   }
 
+  /** Add the ids of `wanted` that an appeal or an overturn record names (the identity age-out). */
+  privacyNamedByAppeals(wanted: ReadonlySet<string>, into: Set<string>): void {
+    for (const row of this.ap?.rows.values() ?? []) if (wanted.has(row.subject)) into.add(row.subject);
+    for (const rec of this.ap?.overturns.values() ?? []) if (wanted.has(rec.subject)) into.add(rec.subject);
+  }
+
   /** The appeals of the set, newest first (time, then id, descending): the export's appeals. */
   privacyExportAppeals(set: ReadonlySet<string>): Array<AppealRow & { overturnedAt: number | null }> {
     return [...(this.ap?.rows.values() ?? [])]

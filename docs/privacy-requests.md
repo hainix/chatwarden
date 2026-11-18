@@ -64,6 +64,17 @@ What stays:
 The receipt (`{ id, at, mode, removed, kept }`) holds counts and words only: no subject, no line, no account, and no reason for a hold (`kept.heldReports` is only a count). You can send it to the requester. It is kept on the audit clock (a year by
 default). If the audit row of the erase could not be written, the receipt says `auditFailed: true`; the erase stands.
 
+## 3a. Identities age out (0.2.2)
+
+The kit keeps an identity row for every player it has met: the account id as your game gave it, a keyed hash of the client key and a keyed hash of the address (the subject and identifier rows). Until 0.2.1 nothing removed them. From 0.2.2 `purge()` deletes them once **both** are true:
+
+- the person (the subject and every account and key merged into it) was last seen longer ago than `retention.subjectsMs`: 400 days by default, the longest of the other clocks, and never less than 90 days. "Last seen" is the newest time any of their identifiers was seen (the kit writes it at most once an hour while they play). A subject with no identifier row counts from the day it was made.
+- **nothing else names them**: no sanction row of any age (an in-force or recent ban, a warning, a note), no notice, no report they filed, were reported in or wrote a line in (a report held for legal reasons keeps them until the hold is released and the report ages out), no stored decision, no strike, no mute or block in either direction, no kept name, no appeal, no overturn row, no signal about or by them, no "do not automate" mark, no claim, no Discord thread, no staff audit row and no pacer state. The check reads the same registry (`PRIVACY_REGISTRY`, each rule's `subjectColumns` and `subjectJsonColumns`) as the export and the erase, and a test fails when a new table that can name a person is not in it, so a table added later is covered without a change to the age-out.
+
+It runs after every other table in the same pass, so a person whose last record aged out in that pass goes in that pass. `PurgeResult.idleSubjects` counts the subject rows deleted (their identifier rows go with them). Another process learns of it the way it learns of an erase (the same counter, within 30 seconds), and this process forgets them at once: a key or account that returns after that makes a new, unlinked person, as after an erase. A person who plays again before the window ends is kept, because the next hourly write moves their last-seen time. Nothing is written to the audit trail and no receipt is made: there is no request, only retention.
+
+The window is a mechanism, not a legal conclusion: set `retention.subjectsMs` to what your own privacy statement says (`cw.privacy.statement()` reports it live for the `subjects` and `identifiers` categories). `retention: false` turns the whole purge off, this too. A custom store that does not implement the optional `purgeIdleSubjects` never ages identities out.
+
 ## 4. When several processes share a database
 
 Another process still has the person in memory. Every erase moves a counter in the database; each process reads it at most every 30 seconds, on its next lookup, and forgets people the database

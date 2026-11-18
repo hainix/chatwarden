@@ -46,6 +46,7 @@ export type PrivacyClock =
   | 'signalsMs'
   | 'appealsMs'
   | 'blockedNamesMs'
+  | 'subjectsMs'
   | null;
 
 /**
@@ -69,11 +70,25 @@ export interface PrivacyRule {
    */
   welfareClock?: 'welfareReportsMs';
   /**
+   * One plain sentence that qualifies the clock, for the statement: used where a clock alone would overstate what is deleted (an identity row goes only when no other record
+   * names the person). Optional.
+   */
+  retentionNote?: string;
+  /**
    * The columns that hold a person INSIDE a JSON value (an id, a handle, a line, a sanction group), as `table.column`. A table can be claimed above and still hide a
    * person in such a column (a decision's result names every player it sanctioned), so the completeness test lists every `_json` column of the database and fails
    * for one that is neither here nor in {@link NO_PERSON_JSON_COLUMNS}; the erase rewrites each one named here.
    */
   jsonColumns: readonly string[];
+  /**
+   * The plain columns that hold a subject id (a person), as `table.column`: what the identity age-out reads. A person with a value of their own id in any of them has a
+   * record and keeps their subject and identifier rows. Optional on the type (0.2.2 added it to a published shape); every rule here sets it, `[]` for a category that holds
+   * none (the index itself, or rows that hang off a report or a sanction group, which name the person through those). The completeness tests fail for a column of a
+   * `kit_` table that looks like a person and is in neither this list nor {@link NO_SUBJECT_COLUMNS}.
+   */
+  subjectColumns?: readonly string[];
+  /** The JSON columns that carry a subject id among their values, as `table.column`: scanned by the identity age-out. Optional on the type; every rule here sets it. */
+  subjectJsonColumns?: readonly string[];
 }
 
 /**
@@ -87,8 +102,12 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     export: 'The time the person was first seen and how many accounts and browsers the kit has merged into one person.',
     eraseSafety: 'Kept only while a sanction is in force on the person; deleted otherwise.',
     eraseNone: 'Deleted.',
-    retention: null,
+    retention: 'subjectsMs',
+    retentionNote:
+      "A person's rows are deleted once they were last seen longer ago than this clock and no other record names them (a sanction of any age, a report, a mute or block, a legal hold, an appeal, a strike, a signal, a staff audit row, ...); a person who plays again before then is kept. The window is a setting (retention.subjectsMs, at least 90 days).",
     jsonColumns: [],
+    subjectColumns: [],
+    subjectJsonColumns: [],
   },
   {
     category: 'identifiers',
@@ -96,8 +115,12 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     export: 'The account ids as the game gave them, and counts with first and last seen of keys and addresses. A hash never leaves the store.',
     eraseSafety: 'Kept (hashes and account ids) only while a sanction is in force on the person, so a ban still applies at the door; deleted otherwise.',
     eraseNone: 'Deleted.',
-    retention: null,
+    retention: 'subjectsMs',
+    retentionNote:
+      "A person's rows are deleted once they were last seen longer ago than this clock and no other record names them (a sanction of any age, a report, a mute or block, a legal hold, an appeal, a strike, a signal, a staff audit row, ...); a person who plays again before then is kept. The window is a setting (retention.subjectsMs, at least 90 days).",
     jsonColumns: [],
+    subjectColumns: [],
+    subjectJsonColumns: [],
   },
   {
     category: 'sanctions',
@@ -107,6 +130,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted, a sanction in force included: a ban the person is under stops applying. The stored answer of a webhook that applied it is blanked.',
     retention: 'sanctionAfterEndMs',
     jsonColumns: ['kit_webhook_keys.result_json'],
+    subjectColumns: ['kit_sanctions.target_value'],
+    subjectJsonColumns: [],
   },
   {
     category: 'notices',
@@ -116,6 +141,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted.',
     retention: 'noticesMs',
     jsonColumns: ['kit_notices.excerpt_json'],
+    subjectColumns: ['kit_notices.subject_id'],
+    subjectJsonColumns: [],
   },
   {
     category: 'reports_filed',
@@ -126,6 +153,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     retention: 'reportsMs',
     welfareClock: 'welfareReportsMs',
     jsonColumns: [],
+    subjectColumns: ['kit_reports.reporter_subject'],
+    subjectJsonColumns: [],
   },
   {
     category: 'reports_about',
@@ -136,6 +165,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     retention: 'reportsMs',
     welfareClock: 'welfareReportsMs',
     jsonColumns: ['kit_decisions.result_json'],
+    subjectColumns: ['kit_reports.target_subject'],
+    subjectJsonColumns: ['kit_decisions.result_json'],
   },
   {
     category: 'report_lines',
@@ -146,6 +177,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     retention: 'reportsMs',
     welfareClock: 'welfareReportsMs',
     jsonColumns: ['kit_reports.people_json', 'kit_reports.excerpt_json'],
+    subjectColumns: [],
+    subjectJsonColumns: ['kit_reports.people_json'],
   },
   {
     category: 'strikes',
@@ -155,6 +188,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted.',
     retention: 'strikesMs',
     jsonColumns: [],
+    subjectColumns: ['kit_strikes.subject_id'],
+    subjectJsonColumns: [],
   },
   {
     category: 'mutes',
@@ -164,6 +199,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted, in both directions.',
     retention: null,
     jsonColumns: [],
+    subjectColumns: ['kit_mutes.viewer_id', 'kit_mutes.target_id'],
+    subjectJsonColumns: [],
   },
   {
     category: 'blocked_names',
@@ -173,6 +210,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted.',
     retention: 'blockedNamesMs',
     jsonColumns: [],
+    subjectColumns: ['kit_blocked_names.subject_id'],
+    subjectJsonColumns: [],
   },
   {
     category: 'appeals',
@@ -182,6 +221,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted, except an appeal on a sanction group held for legal reasons; the overturn record of the person goes with them.',
     retention: 'appealsMs',
     jsonColumns: [],
+    subjectColumns: ['kit_appeals.subject_id', 'kit_overturns.subject_id'],
+    subjectJsonColumns: [],
   },
   {
     category: 'signals',
@@ -191,6 +232,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted, the rows about the person and the rows the person caused.',
     retention: 'signalsMs',
     jsonColumns: [],
+    subjectColumns: ['kit_signals.subject_id', 'kit_signals.by_subject'],
+    subjectJsonColumns: [],
   },
   {
     category: 'ai',
@@ -200,6 +243,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted with the reports they belong to, and the reads of a report the person filed; the mark is deleted.',
     retention: 'aiOutcomesMs',
     jsonColumns: ['kit_ai_outcomes.example_json'],
+    subjectColumns: ['kit_ai_noauto.subject_id'],
+    subjectJsonColumns: [],
   },
   {
     category: 'workflow',
@@ -209,6 +254,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted: a claim on the case, the Discord thread map entry, the staff comments on a deleted report, the links to deleted reports and the EOS link of a deleted sanction. The text of a staff comment on a report that stays, where the person is the reporter or wrote a line, is replaced by a marker. An EOS report link is only a hash of the report and stays until it ages out.',
     retention: null,
     jsonColumns: [],
+    subjectColumns: ['kit_claims.person', 'kit_discord_threads.subject'],
+    subjectJsonColumns: [],
   },
   {
     category: 'audit',
@@ -218,6 +265,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Kept (ids and codes only). The reference to the person is replaced by the receipt id.',
     retention: 'auditMs',
     jsonColumns: [],
+    subjectColumns: ['kit_audit.subject_ref'],
+    subjectJsonColumns: [],
   },
   {
     category: 'holds',
@@ -227,6 +276,8 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Kept whole: a hold the kit does not weigh.',
     retention: null,
     jsonColumns: [],
+    subjectColumns: [],
+    subjectJsonColumns: [],
   },
   {
     category: 'pace',
@@ -236,8 +287,41 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
     eraseNone: 'Deleted.',
     retention: null,
     jsonColumns: [],
+    subjectColumns: ['kit_pace.who'],
+    subjectJsonColumns: [],
   },
 ];
+
+/**
+ * Every column the registry names as holding a subject id, de-duplicated and in registry order: `plain` (read by `col IN (ids)`) and `json` (scanned for the ids among their
+ * values). The identity age-out keeps a person with a value of their own in any of them. A store reads this list instead of keeping its own, so a new person-keyed table that
+ * a rule lists is covered by the age-out with no change to it (and the contract suite fails until a record in it is proven to keep the person).
+ */
+export function registrySubjectColumns(): { plain: string[]; json: string[] } {
+  const plain = new Set<string>();
+  const json = new Set<string>();
+  for (const rule of PRIVACY_REGISTRY) {
+    for (const c of rule.subjectColumns ?? []) plain.add(c);
+    for (const c of rule.subjectJsonColumns ?? []) json.add(c);
+  }
+  return { plain: [...plain], json: [...json] };
+}
+
+/**
+ * Columns whose name says they may hold a person, and that the identity age-out does not read, with the reason. The counterpart of a rule's `subjectColumns`: the SQLite
+ * completeness test lists every column of every `kit_` table whose name contains `subject`, `person`, `who`, `viewer`, `reporter` or `target` and fails for one that is in
+ * neither.
+ */
+export const NO_SUBJECT_COLUMNS: Readonly<Record<string, string>> = {
+  'kit_subject_ids.subject_id': 'The identity index itself: the rows the age-out deletes, so they cannot be what keeps the person.',
+  'kit_audit.subject_type': 'The kind of thing an audit row is about (person, report, ...), never an id.',
+  'kit_sanctions.target_type': 'Whether a sanction row targets a subject or an address, never an id.',
+  'kit_reports.reporter_seat': 'The seat the reporter had in the room (p1, p2): not an id. The reporter is `reporter_subject`, which is read.',
+  'kit_reports.reporter_handle': 'The name the reporter showed in the room: not an id. The reporter is `reporter_subject`, which is read.',
+  'kit_reports.target_seat': 'The seat of the player reported: not an id. The player is `target_subject`, which is read.',
+  'kit_reports.target_handle': 'The name the player reported showed in the room: not an id. The player is `target_subject`, which is read.',
+  'kit_erasures.pending_subject': 'The receipt of an erase that kept a remainder: it is kept only while a sanction in force names the person, which keeps them, and the retention pass finishes erases before it ages anyone out.',
+};
 
 /**
  * Tables that hold no person, with the reason. A new `kit_` table must be in a rule's `tables` or here; the completeness test fails otherwise.

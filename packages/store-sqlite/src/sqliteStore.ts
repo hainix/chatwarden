@@ -107,6 +107,7 @@ import {
   finishErasure as finishErasureSql,
   insertErasure as insertErasureSql,
   loadPendingErasures as loadPendingErasuresSql,
+  purgeIdleSubjects as purgeIdleSubjectsSql,
   purgeStrayRows as purgeStrayRowsSql,
 } from './privacy.js';
 
@@ -2236,6 +2237,10 @@ export class SqliteStore implements Store, TermStore {
 
   purgeStrayRows(before: number, only?: readonly SubjectId[]): number {
     return purgeStrayRowsSql(this.db, (fn) => this.transaction(fn), before, only);
+  }
+
+  purgeIdleSubjects(before: number): number {
+    return purgeIdleSubjectsSql(this.db, (fn) => this.transaction(fn), before);
   }
 
   insertErasure(row: ErasureRow): void {

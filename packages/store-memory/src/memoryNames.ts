@@ -81,6 +81,11 @@ class MemoryNames extends MemoryStore {
     return n;
   }
 
+  /** Add the ids of `wanted` that a kept name belongs to (the identity age-out). */
+  privacyNamedByNames(wanted: ReadonlySet<string>, into: Set<string>): void {
+    for (const r of this.blocked ?? []) if (r.subject !== null && wanted.has(r.subject)) into.add(r.subject);
+  }
+
   /** The kept names of the set, newest first (time, then write order, descending): the export's names. */
   privacyExportBlockedNames(set: ReadonlySet<string>): BlockedNameRow[] {
     return (this.blocked ?? [])

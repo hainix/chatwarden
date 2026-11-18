@@ -28,6 +28,8 @@ export interface PrivacyStatement {
      * category. Read live.
      */
     retentionWelfareMs: number | null;
+    /** One sentence that qualifies the clock (the identity rows go only when no other record names the person), or null when the clock says it all. */
+    retentionNote: string | null;
   }>;
   /** Fixed words: the statement is a mechanism, not a legal conclusion. */
   disclaimer: string;
@@ -184,6 +186,7 @@ export function createPrivacy(deps: PrivacyDeps): PrivacyService {
           eraseNone: r.eraseNone,
           retentionMs: clockOf(r.retention),
           retentionWelfareMs: welfareOf(r),
+          retentionNote: r.retentionNote ?? null,
         })),
         disclaimer: PRIVACY_DISCLAIMER,
       };

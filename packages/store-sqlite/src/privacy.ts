@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { ERASED_LINE, EXPORT_SECTION_MAX, erasedReporter } from '@chatwarden/core';
+import { ERASED_LINE, EXPORT_SECTION_MAX, erasedReporter, registrySubjectColumns } from '@chatwarden/core';
 import type { ErasePlan, ErasureCounts, ErasureRemoved, ErasureRow, PrivacyCategory, ReportExcerptLine, SubjectExport } from '@chatwarden/core';
 
 // The privacy half of the SQLite store (0.2.0, design section 5): export, erase and the receipts. Every statement uses plain `?` placeholders and binds
@@ -440,6 +440,111 @@ export function purgeStrayRows(db: DatabaseSync, transaction: <T>(fn: () => T) =
       for (const sql of Object.values(STRAY_BEFORE_SQL)) n += Number(db.prepare(sql).run(before).changes);
     }
     return n;
+  });
+}
+
+/**
+ * The identity age-out (0.2.2, W6). A person is a subject and everything merged into it; it is idle when the newest `last_seen` over its identifier rows (its `created_at`
+ * when it has none) is before the cutoff, for EVERY subject of the person. The people that are idle are then checked against every column the privacy registry lists
+ * (`registrySubjectColumns`), one statement per column; whoever has a value in any of them has a record and stays. The rest lose their identifier and subject rows, whole
+ * people at a time (a merged subject points at its parent, so a person's rows go in one statement). Moves the erasure epoch when anything went.
+ */
+export const IDLE_CANDIDATES_SQL = `SELECT s.id AS id FROM kit_subjects s
+  LEFT JOIN (SELECT subject_id, MAX(last_seen) AS seen FROM kit_subject_ids GROUP BY subject_id) i ON i.subject_id = s.id
+  WHERE COALESCE(i.seen, s.created_at) < ?`;
+/** Every subject and what it was merged into, to group the subjects into people. */
+export const SUBJECT_LINKS_SQL = 'SELECT id, merged_into FROM kit_subjects';
+
+const COLUMN_NAME = /^(kit_[a-z_]+)\.([a-z_]+)$/;
+function tableAndColumn(qualified: string): [string, string] {
+  const m = COLUMN_NAME.exec(qualified);
+  if (m === null) throw new Error(`not a registry column: ${qualified}`);
+  return [m[1]!, m[2]!];
+}
+/** The ids of a list that appear in a plain column (one per row found). Binds: the list. The names come from the registry and are checked against a fixed pattern. */
+export function idleReferencedSql(qualified: string): string {
+  const [table, column] = tableAndColumn(qualified);
+  return `SELECT DISTINCT ${column} AS id FROM ${table} WHERE ${column} IN ${IN_ARG}`;
+}
+/** Every value of a JSON column that has one: scanned in code for the ids among its strings. Binds nothing. */
+export function idleJsonRowsSql(qualified: string): string {
+  const [table, column] = tableAndColumn(qualified);
+  return `SELECT ${column} AS v FROM ${table} WHERE ${column} IS NOT NULL`;
+}
+
+/** How many subject ids one statement carries as its one JSON list. */
+const IDLE_CHUNK = 2000;
+
+function addStrings(value: unknown, wanted: ReadonlySet<string>, into: Set<string>): void {
+  if (typeof value === 'string') {
+    if (wanted.has(value)) into.add(value);
+  } else if (Array.isArray(value)) {
+    for (const v of value) addStrings(v, wanted, into);
+  } else if (typeof value === 'object' && value !== null) {
+    for (const v of Object.values(value)) addStrings(v, wanted, into);
+  }
+}
+
+export function purgeIdleSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) => T, before: number): number {
+  return transaction(() => {
+    const idle = new Set(db.prepare(IDLE_CANDIDATES_SQL).all(before).map((r) => String(r.id)));
+    if (idle.size === 0) return 0;
+    // Group every subject into its person: follow `merged_into` to the root (a cycle or a link to a missing row ends the walk).
+    const parent = new Map<string, string | null>();
+    for (const r of db.prepare(SUBJECT_LINKS_SQL).all()) parent.set(String(r.id), r.merged_into === null ? null : String(r.merged_into));
+    const rootOf = (id: string): string => {
+      const seen = new Set<string>();
+      let at = id;
+      for (;;) {
+        seen.add(at);
+        const up = parent.get(at);
+        if (up === null || up === undefined || seen.has(up) || !parent.has(up)) return at;
+        at = up;
+      }
+    };
+    const people = new Map<string, string[]>();
+    for (const id of parent.keys()) {
+      const root = rootOf(id);
+      const mine = people.get(root);
+      if (mine === undefined) people.set(root, [id]);
+      else mine.push(id);
+    }
+    const candidates = [...people.values()].filter((members) => members.every((m) => idle.has(m)));
+    if (candidates.length === 0) return 0;
+
+    // What names them: a value of their own in any column the registry lists.
+    const members = candidates.flat();
+    const wanted = new Set(members);
+    const named = new Set<string>();
+    const { plain, json } = registrySubjectColumns();
+    for (let i = 0; i < members.length; i += IDLE_CHUNK) {
+      const list = j(members.slice(i, i + IDLE_CHUNK));
+      for (const column of plain) for (const r of db.prepare(idleReferencedSql(column)).all(list)) named.add(String(r.id));
+    }
+    for (const column of json) {
+      for (const r of db.prepare(idleJsonRowsSql(column)).all()) {
+        const text = String(r.v);
+        try {
+          addStrings(JSON.parse(text), wanted, named);
+        } catch {
+          // A value that cannot be read names nobody for certain: any id that appears in the text counts as named, as the erase treats an unreadable answer.
+          for (const id of wanted) if (text.includes(id)) named.add(id);
+        }
+      }
+    }
+    const doomed = candidates.filter((people_) => !people_.some((m) => named.has(m)));
+    if (doomed.length === 0) return 0;
+
+    let deleted = 0;
+    for (let i = 0; i < doomed.length; ) {
+      const chunk: string[] = [];
+      while (i < doomed.length && (chunk.length === 0 || chunk.length + doomed[i]!.length <= IDLE_CHUNK)) chunk.push(...doomed[i++]!);
+      const list = j(chunk);
+      db.prepare(IDENTIFIERS_DELETE_SQL).run(list);
+      deleted += num(db.prepare(SUBJECTS_DELETE_SQL).run(list).changes);
+    }
+    if (deleted > 0) db.prepare(EPOCH_BUMP_SQL).run(EPOCH_KEY);
+    return deleted;
   });
 }
 

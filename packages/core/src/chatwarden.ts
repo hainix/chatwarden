@@ -250,6 +250,7 @@ export interface ChatwardenOptions {
    * `sanctionAfterEndMs` and `noticesMs` at least 90 days (the ladder and "My record" reach back that far),
    * `auditMs` at least 90 days (default 365), `appealsMs` at least 90 days (default 365), `badFaithMs` at least
    * `limits.reports.suspendWindowMs`. `appealStatementsMs` (default 90 days) and `blockedNamesMs` (default 30 days) may be 0. Every field
+   * `subjectsMs` (default 400 days, at least 90) is how long a person with no record anywhere keeps their identity rows (account id, key and address hashes) after they were last seen. Every field
    * must be a finite number (Infinity and NaN are refused). Not enforced, but `strikesMs` should be at least
    * `limits.strikes.windowMs`, or strikes are deleted before the window that counts them closes. When you leave
    * `badFaithMs` out it follows a longer suspension window.
@@ -1742,7 +1743,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     const result = await purge(store, clock.now(), policyNow, { sweepStrays: !subjects.hasUnsaved() });
     // The sweep is visible: a count and nothing else (no id, no line), so an integration that writes rows for people it never saved shows up in the log.
     if (result.strayRows > 0) safeWarn(logger, 'chatwarden.stray_rows_swept', { count: result.strayRows });
-    if (result.erasuresFinished > 0 || result.strayRows > 0) await subjects.refresh();
+    // The identity age-out took people out of the store: the index forgets them now (and the other processes on the epoch), as for a finished erase.
+    if (result.erasuresFinished > 0 || result.strayRows > 0 || result.idleSubjects > 0) await subjects.refresh();
     return result;
   };
 

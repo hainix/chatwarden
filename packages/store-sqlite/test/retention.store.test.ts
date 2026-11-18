@@ -72,7 +72,7 @@ describe('purge against SQLite', () => {
     store.insertStrike(strike('edge', NOW - 30 * DAY));
     store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 180 * DAY - 1, block: false });
     store.upsertMute({ viewer: 'v', target: 'edge', createdAt: NOW - 180 * DAY, block: false });
-    expect(await purge(store, NOW)).toEqual({ reports: 1, sanctions: 0, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 1, sanctions: 0, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, idleSubjects: 0, erasuresFinished: 0, strayRows: 0 });
     expect(db.prepare('SELECT id FROM kit_reports').all().map((r) => r.id)).toEqual(['edge']);
     expect(db.prepare('SELECT id FROM kit_strikes').all().map((r) => r.id)).toEqual(['edge']);
     expect(db.prepare('SELECT target_id FROM kit_mutes').all().map((r) => r.target_id)).toEqual(['edge']);
@@ -106,7 +106,7 @@ describe('purge against SQLite', () => {
     expect(e.db.prepare('SELECT target_type FROM kit_sanctions').all().map((r) => r.target_type)).toEqual(['subject']);
   });
 
-  it('never touches subjects or terms (the audit trail goes by auditMs, 365 days by default)', async () => {
+  it('never touches terms, and subjects only on their own clock (subjectsMs; the audit trail goes by auditMs, 365 days by default)', async () => {
     const e = env();
     e.subjects.resolve({ clientKey: 'k1', accountId: 'a1', ipHash: 'iph' });
     await e.subjects.flush();
@@ -121,7 +121,7 @@ describe('purge against SQLite', () => {
     e.store.insertReport(report('old', NOW - 1000 * DAY));
     const before = ['kit_subjects', 'kit_subject_ids', 'kit_terms'].map((t) => count(e.db, t));
     expect(count(e.db, 'kit_audit')).toBe(1);
-    await purge(e.store, NOW + 1000 * DAY, { reportsMs: 0, strikesMs: 0, sanctionAfterEndMs: 0 });
+    await purge(e.store, NOW + 1000 * DAY, { reportsMs: 0, strikesMs: 0, sanctionAfterEndMs: 0, subjectsMs: 5000 * DAY });
     expect(['kit_subjects', 'kit_subject_ids', 'kit_terms'].map((t) => count(e.db, t))).toEqual(before);
     expect(before.every((n) => n > 0)).toBe(true);
     expect(count(e.db, 'kit_audit')).toBe(0);

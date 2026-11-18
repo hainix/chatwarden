@@ -87,6 +87,10 @@ describe('one prepared statement per category, with the indexes the lookups need
       'DECISIONS_NAMING_SQL',
       'WEBHOOK_KEYS_BLANK_SQL',
       'EOS_LINKS_DELETE_SQL',
+      // The identity age-out reads the whole identity index, once per retention pass (every few hours): it asks which subjects were last seen before a time, and how
+      // they are merged. The checks of what names them are by person, through the lookup indexes.
+      'IDLE_CANDIDATES_SQL',
+      'SUBJECT_LINKS_SQL',
     ]);
     for (const [k, detail] of plans()) {
       if (scans.has(k)) continue;

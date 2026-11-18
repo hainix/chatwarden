@@ -305,11 +305,13 @@ export {
   EXPORT_SECTION_MAX,
   NO_PERSON_JSON_COLUMNS,
   NO_PERSON_TABLES,
+  NO_SUBJECT_COLUMNS,
   PRIVACY_CATEGORIES,
   PRIVACY_REGISTRY,
   erasedReporter,
   isNonPersonReporter,
   isRestrictingKind,
+  registrySubjectColumns,
 } from './privacy.js';
 export type {
   EraseMode,

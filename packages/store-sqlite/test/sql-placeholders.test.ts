@@ -59,6 +59,7 @@ import {
   aiReadTakeArgs,
   aiGateRowsArgs,
 } from '../src/sqliteStore.js';
+import { registrySubjectColumns } from '@chatwarden/core';
 import type { AiActionRow, StoredReport } from '@chatwarden/core';
 import { IDENTIFIER_UPSERT_SQL } from '../src/sqliteStore.js';
 import * as PRIV from '../src/privacy.js';
@@ -392,6 +393,9 @@ describe('the privacy statements bind exactly as many values as they have placeh
     ...Object.entries(PRIV.STRAY_ONLY_SQL).map(([k, v]) => [`STRAY_ONLY_SQL.${k}`, v] as [string, string]),
     ['AI_ACTION_PURGE_SQL', AI_ACTION_PURGE_SQL],
     ['AI_ACTION_NOTES_SQL', AI_ACTION_NOTES_SQL],
+    // the age-out reads every column the registry names, one statement each (built from the registry, so a new column is spied on too)
+    ...registrySubjectColumns().plain.map((c) => [`idleReferencedSql(${c})`, PRIV.idleReferencedSql(c)] as [string, string]),
+    ...registrySubjectColumns().json.map((c) => [`idleJsonRowsSql(${c})`, PRIV.idleJsonRowsSql(c)] as [string, string]),
   ]);
   const EXPECTED: Record<string, number> = {
     ERASE_CLOSURE_SQL: 1,
@@ -440,6 +444,10 @@ describe('the privacy statements bind exactly as many values as they have placeh
     AI_ACTION_PURGE_SQL: 1,
     AI_ACTION_NOTES_SQL: 1,
     IDENTIFIER_UPSERT_SQL: 6,
+    IDLE_CANDIDATES_SQL: 1,
+    SUBJECT_LINKS_SQL: 0,
+    'idleReferencedSql(kit_notices.subject_id)': 1,
+    'idleJsonRowsSql(kit_reports.people_json)': 0,
   };
 
   it('every statement uses plain ? placeholders (no numbered, named or spliced values)', () => {
@@ -451,7 +459,19 @@ describe('the privacy statements bind exactly as many values as they have placeh
   });
 
   it('the counts of the statements that are not one-list-one-value are pinned', () => {
-    for (const [k, n] of Object.entries(EXPECTED)) expect(placeholders(texts.get(k) ?? ''), k).toBe(n);
+    for (const [k, n] of Object.entries(EXPECTED)) {
+      expect(texts.has(k), `${k} exists`).toBe(true);
+      expect(placeholders(texts.get(k) ?? ''), k).toBe(n);
+    }
+  });
+
+  it('every statement the age-out builds from the registry binds one list (plain columns) or nothing (JSON columns)', () => {
+    const { plain, json } = registrySubjectColumns();
+    expect(plain.length).toBeGreaterThan(15);
+    for (const c of plain) expect(placeholders(PRIV.idleReferencedSql(c)), c).toBe(1);
+    for (const c of json) expect(placeholders(PRIV.idleJsonRowsSql(c)), c).toBe(0);
+    expect(() => PRIV.idleReferencedSql('kit_notices.subject_id; DROP TABLE kit_notices')).toThrow();
+    expect(() => PRIV.idleJsonRowsSql('notices.x')).toThrow();
   });
 
   it('a whole erase, finish and export bind exactly as many values as each statement has placeholders (a spy on every prepared privacy statement)', async () => {
@@ -490,6 +510,13 @@ describe('the privacy statements bind exactly as many values as they have placeh
     store.erasureEpoch();
     store.purgeStrayRows(5);
     store.purgeStrayRows(0, ['s_gone']);
+    // the age-out: one person with no record to take, the rest of the world to leave
+    await store.saveSubject({ id: 's_idle', createdAt: 1, mergedInto: null });
+    await store.saveIdentifier({ subjectId: 's_idle', kind: 'key', value: 'k-idle', firstSeen: 1, lastSeen: 2 });
+    expect(store.purgeIdleSubjects?.(1_700_000_000_000)).toBe(1);
+    for (const k of ['IDLE_CANDIDATES_SQL', 'SUBJECT_LINKS_SQL', 'idleReferencedSql(kit_notices.subject_id)', 'idleJsonRowsSql(kit_reports.people_json)']) {
+      expect(seen.has(texts.get(k) ?? ''), k).toBe(true);
+    }
     expect(seen.size).toBeGreaterThan(20);
     expect(seen.has(IDENTIFIER_UPSERT_SQL)).toBe(true);
     // the statements of the fix round ran too: the decision rewrite, the webhook blank, the EOS links and the finish with a hold in the way

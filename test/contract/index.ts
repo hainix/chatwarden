@@ -11,6 +11,7 @@ import { auditContract } from './audit.contract.js';
 import { deskContract } from './desk.contract.js';
 import { discordThreadsContract } from './discordThreads.contract.js';
 import { filtersContract } from './filters.contract.js';
+import { idleContract } from './idle.contract.js';
 import { legalContract } from './legal.contract.js';
 import { linksContract } from './links.contract.js';
 import { mutesContract } from './mutes.contract.js';
@@ -43,6 +44,7 @@ export {
   deskContract,
   discordThreadsContract,
   filtersContract,
+  idleContract,
   legalContract,
   linksContract,
   mutesContract,
@@ -99,6 +101,7 @@ export const CONTRACT_AREAS = [
   'desk',
   'scope',
   'pace',
+  'identity age-out',
 ] as const;
 
 /**
@@ -136,4 +139,5 @@ export function storeContract(name: string, make: () => Store, dump?: (s: Store)
   deskContract(name, make);
   scopeContract(name, make);
   paceContract(name, make);
+  idleContract(name, make);
 }

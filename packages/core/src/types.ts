@@ -2094,7 +2094,18 @@ export interface Store {
    */
   purgeStrayRows(before: number, only?: readonly SubjectId[]): number;
 
-  /** A counter that moves on every erase (and the finish of one) and on nothing else; persists with the store and is shared by every process on the database. Starts at 0. */
+  /**
+   * OPTIONAL (0.2.2, the identity age-out: `retention.subjectsMs`). Delete the subject and identifier rows (account id, key hash, address hash) of every person who was last
+   * seen before `before` and has no record anywhere. A person is a subject and every subject merged into it; "last seen" is the newest `lastSeen` over their identifier rows
+   * (a subject with none counts from its `createdAt`); the cutoff is strict, so a person last seen exactly at `before` stays. "No record" means that no id of the person
+   * appears in any column `registrySubjectColumns()` lists (a sanction row of any age, a notice, a report as reporter, target or line writer, a decision, a strike, a mute
+   * or block either way, a kept name, an appeal, an overturn, a signal either way, a "do not automate" mark, a claim, a Discord thread, an audit row, pacer state): derive the
+   * check from that list so a table added to the registry is covered, and a report a legal hold keeps keeps the people it names. Returns how many SUBJECT rows went. One
+   * transaction. When it deleted anything it moves the erasure epoch, so another process forgets those people. A store without it never ages identities out.
+   */
+  purgeIdleSubjects?(before: number): number;
+
+  /** A counter that moves on every erase (and the finish of one, and an identity age-out that deleted someone) and on nothing else; persists with the store and is shared by every process on the database. Starts at 0. */
   erasureEpoch(): number;
 
   // Legal hold (0.2.0). REQUIRED. `cw.legal` is the only caller. A hold protects one report and what hangs on it (see {@link HeldSet}): while it is open, EVERY purge
