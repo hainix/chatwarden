@@ -73,7 +73,7 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
 
   // What this screen sends is its own sections plus whatever another screen saved (a save replaces the whole layer).
   const built = useMemo(() => {
-    const r = layerOf(draft, state.base, state.effective);
+    const r = layerOf(draft, state.base, state.effective, state.layer);
     return r.ok ? { ...r, layer: { ...otherSections(state.layer), ...r.layer } } : r;
   }, [draft, state]);
   const dirty = useMemo(() => dirtySections(draft, state.effective), [draft, state]);

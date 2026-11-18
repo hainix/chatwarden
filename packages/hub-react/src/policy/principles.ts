@@ -1,4 +1,4 @@
-import { MAX_GUIDELINE_OUTCOME, MAX_TIER_DESCRIPTION, MAX_TIER_EXAMPLE, MAX_TIER_EXAMPLES, MAX_TIER_TITLE, TEAM_NOTE_MAX, TEAM_NOTES_MAX } from '@chatwarden/core';
+import { looksLikeInjection, MAX_GUIDELINE_OUTCOME, MAX_TIER_DESCRIPTION, MAX_TIER_EXAMPLE, MAX_TIER_EXAMPLES, MAX_TIER_TITLE, TEAM_NOTE_MAX, TEAM_NOTES_MAX } from '@chatwarden/core';
 import type { GuidelineCover, GuidelineTier, TeamNote } from '@chatwarden/core';
 import type { Problem } from '../decision.js';
 import { charsOf } from './reporting.js';
@@ -61,18 +61,18 @@ export function notesOf(notes: readonly NoteDraft[]): TeamNote[] {
 }
 
 /**
- * Take the chosen covers out of the principle(s) that own them and put them in a new, blank principle placed right after the first of those. Refused when none is chosen, when a chosen cover
- * is in no principle, or when it would leave a principle with nothing (`empty_source`: a principle needs at least one level).
+ * Take the chosen covers out of the principle(s) that own them and put them in a new, blank principle placed right after the first of those (a level no principle holds, from a 0.2.1
+ * profile in code, is simply added: with only such levels the new principle goes last). Refused when none is chosen, when a chosen name is not a level, or when it would leave a
+ * principle with nothing (`empty_source`: a principle needs at least one level).
  */
 export function addTier(tiers: readonly TierDraft[], covers: readonly GuidelineCover[]): TierEdit {
   const chosen = inOrder(covers.filter(isCover));
   if (covers.length === 0) return { ok: false, reason: 'none_chosen' };
   if (chosen.length !== new Set(covers).size) return { ok: false, reason: 'unknown_cover' };
-  const owners = chosen.map((c) => tiers.findIndex((t) => t.covers.includes(c)));
-  if (owners.some((i) => i < 0)) return { ok: false, reason: 'unknown_cover' };
+  const owners = chosen.map((c) => tiers.findIndex((t) => t.covers.includes(c))).filter((i) => i >= 0);
   const next = tiers.map((t) => ({ ...copyTier(t), covers: t.covers.filter((c) => !chosen.includes(c)) }));
   if (next.some((t) => t.covers.length === 0)) return { ok: false, reason: 'empty_source' };
-  const after = Math.min(...owners);
+  const after = owners.length === 0 ? next.length - 1 : Math.min(...owners);
   next.splice(after + 1, 0, { title: '', description: '', examples: '', covers: chosen, outcome: '' });
   return { ok: true, tiers: next };
 }
@@ -88,17 +88,35 @@ export function removeTier(tiers: readonly TierDraft[], index: number): TierEdit
   return { ok: true, tiers: next };
 }
 
-/** Move a cover to the principle at `to`. Moving it to where it already is changes nothing; moving the last cover out of a principle is refused (`empty_source`). */
+/**
+ * Move a cover to the principle at `to`. Moving it to where it already is changes nothing; moving the last cover out of a principle is refused (`empty_source`). A level no principle holds
+ * (a 0.2.1 profile in code may leave `repeated` and `after_warning` out) is added to the principle at `to`.
+ */
 export function moveCover(tiers: readonly TierDraft[], cover: GuidelineCover, to: number): TierEdit {
-  const from = tiers.findIndex((t) => t.covers.includes(cover));
-  if (!isCover(cover) || from < 0) return { ok: false, reason: 'unknown_cover' };
+  if (!isCover(cover)) return { ok: false, reason: 'unknown_cover' };
   if (!Number.isInteger(to) || to < 0 || to >= tiers.length) return { ok: false, reason: 'no_such_tier' };
+  const from = tiers.findIndex((t) => t.covers.includes(cover));
   const next = tiers.map(copyTier);
+  if (from < 0) {
+    next[to] = { ...next[to]!, covers: inOrder([...next[to]!.covers, cover]) };
+    return { ok: true, tiers: next };
+  }
   if (from === to) return { ok: true, tiers: next };
   if (next[from]!.covers.length < 2) return { ok: false, reason: 'empty_source' };
   next[from] = { ...next[from]!, covers: next[from]!.covers.filter((c) => c !== cover) };
   next[to] = { ...next[to]!, covers: inOrder([...next[to]!.covers, cover]) };
   return { ok: true, tiers: next };
+}
+
+/**
+ * The first field of a principle that reads like an instruction to the AI (its name, its description, then its examples), or null when none does. The kit says which principle is
+ * flagged; this is the same screen, run over the saved text, so the warning can sit under the field it is about.
+ */
+export function flaggedField(tier: Pick<TierDraft, 'title' | 'description' | 'examples'>): 'title' | 'description' | 'examples' | null {
+  if (looksLikeInjection(tier.title)) return 'title';
+  if (looksLikeInjection(tier.description)) return 'description';
+  if (linesOf(tier.examples).some(looksLikeInjection)) return 'examples';
+  return null;
 }
 
 const EMPTY: Problem = { key: 'hub.settings.principle.error.empty' };

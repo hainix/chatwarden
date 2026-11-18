@@ -161,8 +161,12 @@ export function dirtySections(draft: PolicyDraft, effective: ProfileLike): Polic
   return SECTION_ORDER.filter((s) => sectionKey(draft, s) !== sectionKey(saved, s));
 }
 
-/** What the draft refuses before anything is sent, by field key (see {@link fieldKeyOf}). */
-export function problemsOf(draft: PolicyDraft): Record<string, Problem> {
+/**
+ * What the draft refuses before anything is sent, by field key (see {@link fieldKeyOf}). With the profile in force (`saved`) the principles and the team notes are judged only when
+ * they were changed: a profile in code that the kit accepts but the editor would refuse (a 0.2.1 profile with four levels, or long text) never blocks a save of another section.
+ * Without it every section is judged.
+ */
+export function problemsOf(draft: PolicyDraft, saved?: ProfileLike): Record<string, Problem> {
   const out: Record<string, Problem> = {};
   const checkLength = (key: string, kind: string, l: LengthDraft): void => {
     if (!timed(kind)) return;
@@ -177,7 +181,9 @@ export function problemsOf(draft: PolicyDraft): Record<string, Problem> {
   if (!/^\d+$/.test(days) || Number(days) < 1 || Number(days) > MAX_WINDOW_DAYS) out['repeat-windowDays'] = { key: 'hub.settings.repeat.error.days', params: { max: MAX_WINDOW_DAYS } };
   if (!/^\d+$/.test(draft.repeat.notes.trim()) || Number(draft.repeat.notes.trim()) < 1) out['repeat-notes'] = { key: 'hub.settings.repeat.error.notes' };
   checkLength('repeat-length', draft.repeat.outcome.kind, draft.repeat.outcome.length);
-  Object.assign(out, tierProblems(draft.guidelines), noteProblems(draft.teamNotes));
+  const changed = (section: PolicySection): boolean => saved === undefined || sectionKey(draft, section) !== sectionKey(draftOf(saved), section);
+  if (changed('guidelines')) Object.assign(out, tierProblems(draft.guidelines));
+  if (changed('teamNotes')) Object.assign(out, noteProblems(draft.teamNotes));
   return out;
 }
 
@@ -196,10 +202,11 @@ export type LayerResult = { ok: true; layer: PolicyLayer } | { ok: false; proble
 /**
  * The layer a draft sends: only the sections that differ from the profile in code (`base`), because a save replaces the whole layer
  * and a section left out goes back to the base. A ladder cell the draft left as it is in force keeps its label; an edited one gets the
- * kit's generated label. A draft with problems has no layer.
+ * kit's generated label. A draft with problems has no layer. The principles and the team notes are judged, and rewritten as the whole form, only when they were edited: with the
+ * layer as it is stored (`saved`) an unedited section goes back exactly as stored (a layer saved by a 0.2.1 hub keeps its positional guidelines).
  */
-export function layerOf(draft: PolicyDraft, base: ProfileLike, effective: ProfileLike): LayerResult {
-  const problems = problemsOf(draft);
+export function layerOf(draft: PolicyDraft, base: ProfileLike, effective: ProfileLike, saved?: PolicyLayer): LayerResult {
+  const problems = problemsOf(draft, effective);
   if (Object.keys(problems).length > 0) return { ok: false, problems };
   const from = draftOf(base);
   const same = (s: PolicySection): boolean => sectionKey(draft, s) === sectionKey(from, s);
@@ -232,9 +239,14 @@ export function layerOf(draft: PolicyDraft, base: ProfileLike, effective: Profil
   }
   if (!same('areaRules')) layer.areaRules = [...draft.areaRules];
   if (!same('severeRules')) layer.severeRules = [...draft.severeRules];
-  // The whole form, never the positional list: a layer another version saved is simply what is in force, and this replaces it.
-  if (!same('guidelines')) layer.guidelines = { tiers: tiersOf(draft.guidelines) };
-  if (!same('teamNotes')) layer.teamNotes = notesOf(draft.teamNotes);
+  // The whole form, never the positional list: a layer another version saved is simply what is in force, and an edit replaces it. A section that was not edited goes back as stored.
+  const edited = (s: PolicySection): boolean => sectionKey(draft, s) !== sectionKey(draftOf(effective), s);
+  if (saved !== undefined && !edited('guidelines')) {
+    if (saved.guidelines !== undefined) layer.guidelines = saved.guidelines;
+  } else if (!same('guidelines')) layer.guidelines = { tiers: tiersOf(draft.guidelines) };
+  if (saved !== undefined && !edited('teamNotes')) {
+    if (saved.teamNotes !== undefined) layer.teamNotes = saved.teamNotes;
+  } else if (!same('teamNotes')) layer.teamNotes = notesOf(draft.teamNotes);
   return { ok: true, layer };
 }
 

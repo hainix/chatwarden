@@ -70,12 +70,11 @@ describe('addTier', () => {
     expect(addTier(before, ['hostile', 'repeated'])).toEqual({ ok: false, reason: 'empty_source' });
     expect(before).toEqual(copy);
   });
-  it('refuses none chosen and an unknown cover; nothing changes in each case', () => {
+  it('refuses none chosen and a name that is not a level; nothing changes in each case', () => {
     const before = tiersOfPreset('standard');
     const copy = structuredClone(before);
     expect(addTier(before, [])).toEqual({ ok: false, reason: 'none_chosen' });
     expect(addTier(before, ['nonsense' as GuidelineCover])).toEqual({ ok: false, reason: 'unknown_cover' });
-    expect(addTier(before.filter((t) => !t.covers.includes('repeated')), ['repeated'])).toEqual({ ok: false, reason: 'unknown_cover' });
     expect(before).toEqual(copy);
   });
   it('with covers from two tiers keeps both sources non-empty and puts the new tier after the first source', () => {

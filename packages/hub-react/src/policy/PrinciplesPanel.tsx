@@ -7,7 +7,7 @@ import type { Problem } from '../decision.js';
 import type { PromptExcluded } from '../types.js';
 import { Panel } from '../ui.js';
 import type { PanelProps } from './panels.js';
-import { ALL_COVERS, addTier, moveCover, removeTier, tiersOf } from './principles.js';
+import { ALL_COVERS, addTier, flaggedField, moveCover, removeTier, tiersOf } from './principles.js';
 import type { TierDraft, TierEdit } from './principles.js';
 import { charsOf } from './reporting.js';
 
@@ -91,8 +91,11 @@ export function PrinciplesPanel({ draft, set, problems, reset, editable, exclude
     setPicked([]);
     setSaid(null);
   };
-  // The levels that can be split off: those whose principle holds two or more.
-  const splittable = ALL_COVERS.filter((c) => (tiers.find((x) => x.covers.includes(c))?.covers.length ?? 0) > 1);
+  // The levels that can be split off: those whose principle holds two or more, and those no principle holds (a profile in code from 0.2.1 may leave some out).
+  const owner = (c: GuidelineCover): TierDraft | undefined => tiers.find((x) => x.covers.includes(c));
+  const splittable = ALL_COVERS.filter((c) => owner(c) === undefined || (owner(c)?.covers.length ?? 0) > 1);
+  // What the door opens: the structure of each principle and the add form.
+  const controls = [...tiers.map((_, i) => `${base}-${i}-structure`), `${base}-add`].join(' ');
 
   const counter = (id: string, count: number, max: number, key: 'hub.settings.principle.count' | 'hub.settings.principle.examples.count' = 'hub.settings.principle.count'): ReactNode => (
     <p id={id} className="cw-hint cw-counter">
@@ -106,7 +109,7 @@ export function PrinciplesPanel({ draft, set, problems, reset, editable, exclude
         <p className="cw-hint">{t('hub.settings.guidelines.hint')}</p>
         {editable && (
           <>
-            <button type="button" className="cw-btn cw-section-toggle" data-field="guide-covers" aria-expanded={open} onClick={closeDoor}>
+            <button type="button" className="cw-btn cw-section-toggle" data-field="guide-covers" aria-expanded={open} aria-controls={controls} onClick={closeDoor}>
               {t('hub.settings.principle.door')}
             </button>
             <FieldError id={`${base}-covers-err`} problem={problems['guide-covers']} />
@@ -119,23 +122,29 @@ export function PrinciplesPanel({ draft, set, problems, reset, editable, exclude
             'aria-describedby': ids(f(`${field}-count`), problem(field) !== undefined && f(`${field}-err`), ...also),
             ...(problem(field) === undefined ? {} : { 'aria-invalid': true }),
           });
-          const flagged = excluded?.tiers.includes(i) === true;
+          // The kit names the principle; the field is found in the same text, so the warning sits under it (the description when the kit and the screen disagree).
+          const flaggedAt = excluded?.tiers.includes(i) === true ? (flaggedField(tier) ?? 'description') : null;
           const lines = tiersOf([tier])[0]!.examples.length;
           return (
             <fieldset key={i} className="cw-principle">
               <legend>{t('hub.settings.principle.legend', { n: i + 1 })}</legend>
               <div className="cw-field">
                 <label htmlFor={f('title')}>{t('hub.settings.principle.name', { n: i + 1 })}</label>
-                <input id={f('title')} type="text" data-field={`guide-${i}-title`} value={tier.title} {...mark('title')} onChange={(e) => change(i, { title: e.target.value })} />
+                <input id={f('title')} type="text" data-field={`guide-${i}-title`} value={tier.title} {...mark('title', flaggedAt === 'title' && f('ai'))} onChange={(e) => change(i, { title: e.target.value })} />
                 {counter(f('title-count'), charsOf(tier.title.trim()), MAX_TIER_TITLE)}
                 <FieldError id={f('title-err')} problem={problem('title')} />
+                {flaggedAt === 'title' && (
+                  <p id={f('ai')} className="cw-field-warn">
+                    {t('hub.settings.principle.excluded.name')}
+                  </p>
+                )}
               </div>
               <div className="cw-field">
                 <label htmlFor={f('description')}>{t('hub.settings.principle.about', { n: i + 1 })}</label>
-                <textarea id={f('description')} data-field={`guide-${i}-description`} rows={3} value={tier.description} {...mark('description', flagged && f('ai'))} onChange={(e) => change(i, { description: e.target.value })} />
+                <textarea id={f('description')} data-field={`guide-${i}-description`} rows={3} value={tier.description} {...mark('description', flaggedAt === 'description' && f('ai'))} onChange={(e) => change(i, { description: e.target.value })} />
                 {counter(f('description-count'), charsOf(tier.description.trim()), MAX_TIER_DESCRIPTION)}
                 <FieldError id={f('description-err')} problem={problem('description')} />
-                {flagged && (
+                {flaggedAt === 'description' && (
                   <p id={f('ai')} className="cw-field-warn">
                     {t('hub.settings.principle.excluded')}
                   </p>
@@ -143,9 +152,14 @@ export function PrinciplesPanel({ draft, set, problems, reset, editable, exclude
               </div>
               <div className="cw-field">
                 <label htmlFor={f('examples')}>{t('hub.settings.principle.examples', { n: i + 1 })}</label>
-                <textarea id={f('examples')} data-field={`guide-${i}-examples`} rows={3} value={tier.examples} {...mark('examples')} onChange={(e) => change(i, { examples: e.target.value })} />
+                <textarea id={f('examples')} data-field={`guide-${i}-examples`} rows={3} value={tier.examples} {...mark('examples', flaggedAt === 'examples' && f('ai'))} onChange={(e) => change(i, { examples: e.target.value })} />
                 {counter(f('examples-count'), lines, MAX_TIER_EXAMPLES, 'hub.settings.principle.examples.count')}
                 <FieldError id={f('examples-err')} problem={problem('examples')} />
+                {flaggedAt === 'examples' && (
+                  <p id={f('ai')} className="cw-field-warn">
+                    {t('hub.settings.principle.excluded')}
+                  </p>
+                )}
               </div>
               <div className="cw-field">
                 <label htmlFor={f('outcome')}>{t('hub.settings.guideline.label', { title: nameOf(i) })}</label>
@@ -154,22 +168,28 @@ export function PrinciplesPanel({ draft, set, problems, reset, editable, exclude
                 <FieldError id={f('outcome-err')} problem={problem('outcome')} />
               </div>
               {editable && open && (
-                <div className="cw-principle-structure">
+                <div id={`${base}-${i}-structure`} className="cw-principle-structure">
                   <fieldset className="cw-picks">
                     <legend>{t('hub.settings.principle.levels', { n: i + 1 })}</legend>
                     <ul className="cw-picklist">
                       {ALL_COVERS.map((c) => {
                         const on = tier.covers.includes(c);
+                        const only = on && tier.covers.length < 2;
                         return (
                           <li key={c}>
                             <label className="cw-tick">
-                              <input type="checkbox" checked={on} disabled={on && tier.covers.length < 2} onChange={(e) => toggleCover(i, c, e.target.checked)} />
+                              <input type="checkbox" checked={on} disabled={only} aria-describedby={only ? f('last') : undefined} onChange={(e) => toggleCover(i, c, e.target.checked)} />
                               <span>{t(`hub.settings.cover.${c}`)}</span>
                             </label>
                           </li>
                         );
                       })}
                     </ul>
+                    {tier.covers.length < 2 && (
+                      <p id={f('last')} className="cw-hint">
+                        {t('hub.settings.principle.last')}
+                      </p>
+                    )}
                   </fieldset>
                   <button type="button" className="cw-btn" aria-disabled={tiers.length < 2} aria-label={t('hub.settings.principle.remove.for', { name: nameOf(i) })} onClick={() => remove(i)}>
                     {t('hub.settings.principle.remove')}
@@ -180,7 +200,7 @@ export function PrinciplesPanel({ draft, set, problems, reset, editable, exclude
           );
         })}
         {editable && open && (
-          <div className="cw-principle-add">
+          <div id={`${base}-add`} className="cw-principle-add">
             <button type="button" className="cw-btn" aria-expanded={adding} onClick={() => (setAdding(!adding), setPicked([]), setSaid(null))}>
               {t('hub.settings.principle.add')}
             </button>
@@ -195,7 +215,11 @@ export function PrinciplesPanel({ draft, set, problems, reset, editable, exclude
                       <li key={c}>
                         <label className="cw-tick">
                           <input type="checkbox" checked={picked.includes(c)} onChange={(e) => setPicked(e.target.checked ? [...picked, c] : picked.filter((x) => x !== c))} />
-                          <span>{t('hub.settings.principle.pick.item', { cover: t(`hub.settings.cover.${c}`), name: nameOf(tiers.findIndex((x) => x.covers.includes(c))) })}</span>
+                          <span>
+                            {owner(c) === undefined
+                              ? t('hub.settings.principle.pick.uncovered', { cover: t(`hub.settings.cover.${c}`) })
+                              : t('hub.settings.principle.pick.item', { cover: t(`hub.settings.cover.${c}`), name: nameOf(tiers.findIndex((x) => x.covers.includes(c))) })}
+                          </span>
                         </label>
                       </li>
                     ))}

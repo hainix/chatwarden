@@ -55,7 +55,7 @@ export function NotesPanel({ draft, set, problems, reset, rules, editable, exclu
         {notes.length === 0 ? (
           <p className="cw-hint">{t('hub.settings.notes.none')}</p>
         ) : (
-          <ul className="cw-notes-list" role="list">
+          <ul className="cw-notes-list">
             {notes.map((note, i) => {
               const f = (part: string): string => `${base}-${i}-${part}`;
               const text = problems[`note-${i}-text`];
@@ -121,7 +121,9 @@ export function NotesPanel({ draft, set, problems, reset, rules, editable, exclu
             {t('hub.settings.notes.add')}
           </button>
         )}
-        {full && <p className="cw-hint">{t('hub.settings.notes.full', { max: TEAM_NOTES_MAX })}</p>}
+        <p role="status" className={full ? 'cw-hint' : 'cw-sr'}>
+          {full ? t('hub.settings.notes.full', { max: TEAM_NOTES_MAX }) : ''}
+        </p>
         <FieldError id={`${base}-count-err`} problem={problems['notes-count']} />
       </div>
     </Panel>
