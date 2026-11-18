@@ -1,11 +1,10 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { limitChoices, presets } from '../src/decision.js';
 import type { Choice } from '../src/decision.js';
 import { menuOf } from '../src/policy/lengths.js';
 import { renderHub } from './render.js';
 import { DAY, HOUR, hubWorld } from './world.js';
-import type { WorldOptions } from './world.js';
 import { appealsHub } from './appealsWorld.js';
 
 // M-2: a scoped caller's hub offers only what the server would accept: the kinds and lengths of the caller's limits (GET /me carries them), no IP, no rename.
@@ -50,55 +49,23 @@ describe('limitChoices and menuOf narrow what a form offers', () => {
   });
 });
 
-async function person(o: WorldOptions) {
-  const w = await hubWorld(o);
-  const f = await w.fileRich({ target: 'Mallory', tags: { scope: A } });
-  const r = renderHub(w, { path: `/people/${f.person}` });
-  await screen.findByRole('region', { name: 'Timeline' });
-  await waitFor(() => expect(screen.queryByText('Loading', { exact: false })).not.toBeInTheDocument());
-  await r.user.click(screen.getByRole('button', { name: 'Sanction' }));
-  await screen.findByRole('region', { name: 'Sanction Mallory' });
-  return { w, f, ...r };
-}
 const what = (): HTMLSelectElement => screen.getByLabelText('What happens');
 const optionNames = (select: HTMLSelectElement): string[] => within(select).getAllByRole('option').map((o) => o.textContent ?? '');
 const ipBox = (): HTMLElement | null => screen.queryByRole('checkbox', { name: /IP address/ });
 
 describe('the Person page of a scoped caller', () => {
-  it('renders (the scoped history carries no reporter record, so there is no reporter panel) and still offers the Sanction button', async () => {
+  it('renders (the scoped history carries no reporter record, so there is no reporter panel) and offers no Sanction button (they act from a case)', async () => {
     const w = await hubWorld({ role: 'senior', scope: [A] });
     const f = await w.fileRich({ target: 'Mallory', tags: { scope: A } });
     renderHub(w, { path: `/people/${f.person}` });
     expect(await screen.findByRole('region', { name: 'Timeline' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'As a reporter' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Sanction' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sanction' })).toBeNull();
   });
 });
 
-describe('the Sanction form of a scoped caller', () => {
-  it('offers a warning and a chat restriction, no area or ban, no request for a new name, and no IP box', async () => {
-    const { user } = await person({ role: 'senior', scope: [A] });
-    const names = optionNames(what());
-    expect(names).toContain('Warning');
-    expect(names).toContain('Chat restriction');
-    expect(names.join('|')).not.toMatch(/Area|Ban/);
-    expect(names.join('|')).not.toMatch(/new name/i);
-    await user.selectOptions(what(), 'chat');
-    expect(ipBox()).toBeNull();
-    const lengths = optionNames(screen.getByLabelText('How long') as HTMLSelectElement);
-    expect(lengths.join('|')).not.toMatch(/Permanent|Custom/i);
-    expect(lengths.join('|')).not.toMatch(/30 days|90 days|year/i);
-  });
-
-  it('follows the limits the kit was given: a wider set offers area and longer lengths, still never the IP', async () => {
-    const { user } = await person({ role: 'senior', scope: [A], scopedLimits: { kinds: ['warning', 'chat', 'area'], maxDurationMs: 30 * DAY } });
-    const names = optionNames(what());
-    expect(names.join('|')).toMatch(/Area/);
-    expect(names.join('|')).not.toMatch(/Ban/);
-    await user.selectOptions(what(), 'area');
-    expect(ipBox()).toBeNull();
-  });
-
+// The Person page offers a scoped caller no Sanction form (C11 task 0), so the form's own trimming is checked where a scoped caller does act: the decision bar (scoped-decide.test.tsx). The control stays.
+describe('the Sanction form', () => {
   it('control: the same form for an unscoped senior still offers every kind, the IP box and a permanent length', async () => {
     const w = await hubWorld({ role: 'senior' });
     const f = await w.file({ target: 'Mallory' });

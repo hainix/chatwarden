@@ -50,6 +50,7 @@ const SPECS: Spec[] = [
   { name: 'GET /blocked', method: 'GET', path: () => '/blocked', lock: { 'blocked.read': 'owner' }, min: 'moderator' },
   { name: 'POST /terms/test', method: 'POST', path: () => '/terms/test', body: { text: 'a harmless line' }, lock: { 'terms.read': 'owner' }, min: 'moderator' },
   { name: 'GET /policy', method: 'GET', path: () => '/policy', lock: { 'policy.read': 'owner' }, min: 'moderator' },
+  { name: 'GET /policy/rules', method: 'GET', path: () => '/policy/rules', lock: { 'policy.read': 'owner' }, min: 'moderator' },
   { name: 'GET /policy/profile', method: 'GET', path: () => '/policy/profile', lock: { 'policy.read': 'owner' }, min: 'moderator' },
   { name: 'PUT /policy/profile', method: 'PUT', path: () => '/policy/profile', body: { layer: { customDuration: true }, version: 0, reason: 'tune' }, lock: { 'policy.write': 'owner' }, min: 'owner' },
   { name: 'POST /policy/profile/preview', method: 'POST', path: () => '/policy/profile/preview', body: { layer: {} }, lock: { 'policy.read': 'owner' }, min: 'moderator' },
@@ -118,6 +119,8 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
     expect(Object.keys(routes).map((k) => k.replace('~ref', '').replace('~room', '')).sort()).toEqual(
       [
         'GET /me',
+        // 0.2.0: the room contexts (admin.contexts.test.ts has its checks).
+        'GET /policy/contexts',
         // The appeal routes (their own checks are in admin.appeals.test.ts: they need a world with appeals on).
         'GET /appeals',
         'GET /appeals/stats',

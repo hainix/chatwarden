@@ -17,6 +17,7 @@ const SCOPE_AWARE_ROUTES = [
   'GET /changes',
   'GET /me',
   'GET /people/:ref/history',
+  'GET /policy/rules',
   'GET /reasons',
   'GET /reports',
   'GET /reports/:id',

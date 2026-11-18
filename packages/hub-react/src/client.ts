@@ -25,6 +25,7 @@ import type {
   BlockedName,
   CloseGapInput,
   CommunityApplied,
+  CommunityRule,
   CommunityStatus,
   DecideInput,
   DecideResult,
@@ -401,6 +402,11 @@ export interface HubClient {
   listBlockedNames(options?: { days?: BlockedDays }): Promise<{ items: BlockedName[] }>;
   /** `GET /policy`: the profile, rules and generated documents. */
   policy(options?: { format?: PolicyFormat; omit?: readonly GuideSection[] }): Promise<PolicyDocs>;
+  /**
+   * `GET /policy/rules` (0.2.0): the Community Rules alone, for a scoped moderator, who cannot read `GET /policy` and needs the list to act on a case. A caller with no scope may use it too (it needs `policy.read` for them).
+   * Read-only; no profile and no documents.
+   */
+  rules(): Promise<{ rules: CommunityRule[] }>;
   /** `GET /audit` (senior). */
   listAudit(query?: ListAuditQuery): Promise<Page<AuditItem>>;
 
@@ -524,6 +530,7 @@ export function createHubClient(transport: Transport): HubClient {
     listBlocked: (options = {}) => get<{ items: BlockedLine[] }>('/blocked', q({ days: options.days })),
     listBlockedNames: (options = {}) => get<{ items: BlockedName[] }>('/blocked', q({ days: options.days, source: 'name' })),
     policy: (options = {}) => get<PolicyDocs>('/policy', q({ format: options.format, omit: options.omit === undefined || options.omit.length === 0 ? undefined : options.omit.join(',') })),
+    rules: () => get<{ rules: CommunityRule[] }>('/policy/rules'),
     policyProfile: () => get<PolicyState>('/policy/profile'),
     savePolicyProfile: (input) => call<PolicySaved>({ method: 'PUT', path: '/policy/profile', body: input }),
     previewPolicyProfile: (input) => post<{ samples: PolicySamples }>('/policy/profile/preview', input),

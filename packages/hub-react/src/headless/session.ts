@@ -1,5 +1,5 @@
 import type { HubClient } from '../client.js';
-import type { BlockedLine, PolicyDocs, PolicyState, Reason, ReporterRecord } from '../types.js';
+import type { BlockedLine, CommunityRule, PolicyDocs, PolicyState, Reason, ReporterRecord } from '../types.js';
 
 // What a moderator working through the queue would otherwise read again for every case. `GET /policy` builds three documents and
 // is audited (`policy.view`), the saved reasons and the blocked lines change rarely, and a reporter's track record is the same
@@ -33,6 +33,11 @@ export interface Session {
    * both from the data). Read once; kept until the hub closes.
    */
   policy(): Promise<PolicyDocs>;
+  /**
+   * The Community Rules alone (`GET /policy/rules`), for a scoped moderator, who cannot read the policy but must name a rule to act. Read once; kept until the hub closes (and forgotten with `invalidatePolicy`).
+   * @experimental
+   */
+  rules(): Promise<CommunityRule[]>;
   /** Forget the kept policy: the steps and ladder were saved or reset, so the next ask (a decision bar, a sanction form) reads the new profile. */
   invalidatePolicy(): void;
   /**
@@ -80,6 +85,7 @@ function memo<T>(load: () => Promise<T>, ttl: number | null, now: () => number):
 export function createSession(client: HubClient, now: () => number): Session {
   const reporters = new Map<string, Kept<ReporterRecord>>();
   const policy = memo(() => client.policy({ format: 'markdown', omit: ['rules', 'ladder'] }), null, now);
+  const rules = memo(async () => (await client.rules()).rules, null, now);
   const safety = memo(async () => (await client.policyProfile()).effective.safety, SESSION_TTL_MS, now);
   const reasons = memo(async () => (await client.listReasons()).reasons.filter((r) => r.active), SESSION_TTL_MS, now).get;
   const blocked = memo(async () => (await client.listBlocked({ days: 7 })).items, SESSION_TTL_MS, now).get;
@@ -96,8 +102,10 @@ export function createSession(client: HubClient, now: () => number): Session {
       },
     },
     policy: policy.get,
+    rules: rules.get,
     invalidatePolicy: () => {
       policy.forget();
+      rules.forget();
       safety.forget();
     },
     safety: safety.get,

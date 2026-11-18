@@ -45,7 +45,7 @@ export function timelineOf(history: Pick<PersonHistory, 'reports' | 'sanctions'>
  * once more, never on a timer.
  */
 export function Person({ person }: { person: string }) {
-  const { client, t, can } = useHub();
+  const { client, t, can, me } = useHub();
   const history = useHubData(`person:${person}`, () => client.personHistory(person));
   const [form, setForm] = useState<Form>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
@@ -65,7 +65,8 @@ export function Person({ person }: { person: string }) {
   const flagged = data?.handleFlagged === true;
   // Hidden while the server flags the handle: in the title, in the forms and in every label. The title's own Show reveals it.
   const name = groupName(t, { handle, person, handleFlagged: flagged });
-  const canApply = can('sanctions.apply');
+  // A scoped moderator acts from a case: the case carries the report id a scoped sanction needs, and this form sends none (the server answers 404). So no Sanction or Note button for them.
+  const canApply = can('sanctions.apply') && me.scope === undefined;
   const wrote = (): void => {
     refocus.current = true;
     history.reload();
