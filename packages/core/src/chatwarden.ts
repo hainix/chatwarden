@@ -50,6 +50,7 @@ import type { FilterStats } from './filters/counters.js';
 import { checkLines, createFilterEngine, shiftTestSpans, testLine } from './filters/engine.js';
 import type { FilterCheckResult, FilterTestResult } from './filters/engine.js';
 import { checkPace, mergePace } from './pace.js';
+import { assertPaceStore, createSharedPacer } from './pacingShared.js';
 import { checkContextBooks, checkScope, Contexts, effectiveOf } from './contexts.js';
 import type { EffectiveContext } from './contexts.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
@@ -188,6 +189,13 @@ export interface ChatwardenOptions {
    * each phrase through the matcher and the profanity filter: a book that hits throws `PhraseBookError` naming the book and phrase id, never the text. A context that names a book not declared here is a `ProfileError`.
    */
   phrases?: Readonly<Record<string, readonly { id: string; text: string; group?: string }[]>>;
+  /**
+   * Keep the pacer's state (slow mode, the burst limit and repeat refusal) in the store instead of the process, so several processes on one store judge one player's lines together.
+   * A deployment property, not a moderation setting: it is not in the profile or the hub. The store must have `paceLoad`, `paceUpdate`, `paceDropRoom` and `paceSweep` (the memory and SQLite
+   * stores do); `createChatwarden` throws a plain message naming the missing one otherwise. Costs one indexed read per line in a room where a check is on and one write per accepted line; a
+   * room with every check off touches the store not at all. `cw.rooms.setPace` overrides stay per process. Default false: the in-memory pacer, exactly as before. @experimental
+   */
+  sharedPacing?: boolean;
   /** Defaults to the system clock. */
   clock?: Clock;
   /** The kill switch, read per call. Drives both sanction enforcement and report intake. Defaults to always on. */
@@ -1199,6 +1207,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   // and the profanity handling, which are code-only.
   const baseProfile = resolveProfile(opts.profile ?? 'standard', opts.overrides);
   const limits = resolveLimits(opts.limits);
+  if (opts.sharedPacing !== undefined && typeof opts.sharedPacing !== 'boolean') throw new TypeError('createChatwarden: sharedPacing must be true or false');
+  if (opts.sharedPacing === true) assertPaceStore(store);
   // The phrase books: the grammar and sizes first, then every context's `chat.phrases` must name one. Each phrase is also run through the matcher and every profanity filter in force, once those exist (further down).
   const phraseBooks = checkPhraseBooks(opts.phrases);
   checkContextBooks(baseProfile.contexts, phraseBooks);
@@ -1469,6 +1479,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     pace: {
       settings: paceOf,
       floorMax: () => (policy.profileNow().rooms.probation.enabled ? policy.profileNow().rooms.probation.slowModeMs : 0),
+      ...(opts.sharedPacing === true ? { pacer: createSharedPacer({ clock, settings: paceOf, store, ...(logger === undefined ? {} : { logger }) }) } : {}),
       canonical: (subject) => subjects.canonical(subject),
       // A flood trip records the built-in kind, deferred so the verdict is returned first. `flood` never throws and logs its own
       // refusals; a room id the signal rules do not accept is left out (the trip is then a day source, not dropped).

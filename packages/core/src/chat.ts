@@ -194,6 +194,8 @@ export interface ChatServiceDeps {
     settings: (roomId: string) => ResolvedPace;
     /** The longest probation floor in force (0 when probation is off), so the pacer keeps a probationer's state that long. */
     floorMax?: () => number;
+    /** The pacer to use (the shared pacer, with its state in the store). Without one the in-memory pacer is built. */
+    pacer?: Pacer;
     canonical: (subject: SubjectId) => SubjectId;
     onFlood?: (info: { roomId: string; subject: SubjectId }) => void;
   };
@@ -379,7 +381,7 @@ export class ChatService {
     this.rooms = deps.rooms;
     this.contexts = deps.contexts;
     this.filterWarn = new ThrottledWarn(deps.logger, deps.clock);
-    this.pacer = deps.pace === undefined ? undefined : createPacer({ clock: deps.clock, settings: deps.pace.settings, ...(deps.pace.floorMax === undefined ? {} : { floorMax: deps.pace.floorMax }) });
+    this.pacer = deps.pace === undefined ? undefined : (deps.pace.pacer ?? createPacer({ clock: deps.clock, settings: deps.pace.settings, ...(deps.pace.floorMax === undefined ? {} : { floorMax: deps.pace.floorMax }) }));
     this.notices = deps.notices;
     this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
     this.maxLength = deps.limits?.maxLength ?? MAX_LEN;

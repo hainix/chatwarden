@@ -1,5 +1,8 @@
 import { utcDay } from './chatCounter.js';
 import { MUTE_TTL_MS } from './mutes.js';
+
+/** The shared pacer's rows are swept after this long untouched: the longest window any pacing check can have. */
+const PACE_ROW_MAX_AGE_MS = 3_600_000;
 import { ProfileError } from './profile.js';
 import { WEBHOOK_KEY_TTL_MS } from './types.js';
 import type { Store } from './types.js';
@@ -214,6 +217,8 @@ export interface PurgeResult {
   welfareReports: number;
   /** Daily line-count rows deleted (`retention.chatCountsMs`). 0 for a store without the method. */
   chatCounts: number;
+  /** The shared pacer's rows not touched for an hour, deleted (operational state; no setting). 0 for a store without the pace methods. */
+  pace: number;
   /** Erasures that kept a remainder (a sanction in force) and were finished by this pass: the person's subject and identifier rows were deleted. */
   erasuresFinished: number;
   /** Strike, signal, notice and kept-name rows dropped because their subject has no subject row and they were older than ten minutes. */
@@ -343,6 +348,8 @@ export async function purge(
       welfareReports,
       // Daily line counts (Insights), keyed by UTC day like the filter counters: a day goes once it ended before the day the cutoff falls in.
       chatCounts: store.purgeChatCounts?.(utcDay(now - p.chatCountsMs)) ?? 0,
+      // The shared pacer's state: rows nobody touched for an hour (the longest window any check can have). No setting.
+      pace: store.paceSweep?.(now - PACE_ROW_MAX_AGE_MS) ?? 0,
     };
     // Last: the finish of an erase that kept a remainder (a sanction in force) needs the sanction rows above to be gone, and the sweep of stray rows (a row whose person was
     // erased, written by a process that had not yet heard) needs the persons' rows to be gone first. A stray younger than ten minutes is kept: a subject row can trail its first
