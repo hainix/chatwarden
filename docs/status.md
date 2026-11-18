@@ -138,6 +138,26 @@ Design: [design/2026-11-17-urgent-desk-and-rooms.md](design/2026-11-17-urgent-de
 - **Not done here:** a real-browser pass at desktop and 360 px, light and dark, for the chip, the strip, the careful view and the Rooms panel (the tests hold the structure, the wrapping rules and axe),
   and everything under "Urgent lane, desk and rooms (0.2.0), parked" in [plans/follow-ups.md](plans/follow-ups.md).
 
+## Many rooms, many players and unspaced scripts (0.2.0 theme; built on branch `release-0.2.0`; not released)
+
+Design: [design/2026-11-17-any-server-rooms-languages.md](design/2026-11-17-any-server-rooms-languages.md); plan: [plans/2026-11-17-any-server-rooms-languages.md](plans/2026-11-17-any-server-rooms-languages.md); adopter guides:
+[recipes/kids-rooms.md](recipes/kids-rooms.md) and [recipes/creator-channels.md](recipes/creator-channels.md). Part of the 0.2.0 release; the release prep does the changelog, the peer floors and the version. This entry covers
+tasks M1 to M7, L1 and L2; the service (S1 to S6) and the Spanish and Portuguese catalogues (L3, L4) are later tasks of the same plan and add to it.
+
+- **Contexts.** Rules per room, declared in code (`profile.contexts`) and chosen by a room's `context` tag: profanity handling, pace, filters and `chat.phrases`, a minimum account age, and nothing else. A tag
+  the profile does not declare refuses every line `gate`. The hub shows the label on a case and a read-only "Room contexts" list in Settings, Advanced (contexts are never edited in the hub).
+- **Staff scope.** A second reserved tag, `scope`, stamped on the report; the staff hook may return `scope: string[]` and then every route is default-deny: scope-aware routes filter in the store query, an
+  out-of-scope id is 404, the rest of the staff API is 403, and a scoped sanction is a warning or a chat restriction for at most 7 days tied to an in-scope report (`scopedLimits`). The owner cannot be scoped.
+- **Block.** A mute that is also two-way and never expires (`cw.blocks`, one row per pair in `kit_mutes`); the game asks `between` with raw ids and cannot list who blocked whom. The chat box offers it behind the line's one control.
+- **Phrase-only chat.** Phrase books are code-declared trusted text (`phrases`), screened at start through the matcher and every profanity filter; `cw.chat.acceptPhrase` and `POST /rooms/:room/phrases` send one,
+  typed text is refused `phrases_only`, and the chat box shows a phrase picker (catalogue `phrase.<id>` for other languages). The kit ships no phrase text.
+- **Reserved names and entities.** `names.reserved` and `names.reservedAllow` compare skeletons over whole words of a name (`name_reserved`, a third name reason); a name, a report and a rename can be about an
+  entity (a clan, guild, team, deck, pet or item): `ReportInput.entity`, `kind` on `POST /names/check`, an entity row on the case, and a rename that writes no notice. The `impersonation` reason ships switched off.
+- **Terms without spaces.** Matching for Chinese, Japanese, Thai, Lao, Khmer and Burmese: NFKC (not NFKD), kana folded, segmenter-aligned `segment` by default and `contains` by choice (`matchMode`), stored on the
+  term (`kit_terms.match_mode`), in the staff routes, the hub's "Match" choice and the corpus loader. A missing `Intl.Segmenter` is a build error.
+- **Store and migration 26.** The same shared migration: this theme's blocks add `kit_reports.scope`, `kit_reports.entity_json`, `kit_mutes.block` and `kit_terms.match_mode`. A store missing an optional method answers 501 `not_supported`.
+- **Not done here:** everything under "Rooms, many players and unspaced scripts (0.2.0), parked" in [plans/follow-ups.md](plans/follow-ups.md).
+
 ## Next
 - **K3c: AI levels 1-2** (read and recommend), **done**: merged as 0.1.7 (PR #26; tag and publish are the owner's). The AI reads a report after the
   player's ack, shows a strip in the hub and, at level 2, pre-fills a mild decision the moderator accepts or edits; it never writes a sanction. Off by

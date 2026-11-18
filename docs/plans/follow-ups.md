@@ -341,3 +341,21 @@ Found building the names-and-preview theme, 2026-11. Design: [design/2026-11-17-
 - A replay of a decision with `rename` answers `already` (not the first call's `asked`) once the rename was asked at or after the decision, whether or not the player has renamed since.
 - `PolicyDocs.notices` and `FlaggedReport.excerpt[].noticeText` are typed optional in hub-react and read as "thanked" and "no masked text" when absent; the release prep may make them required.
 - A real-browser check of the panel, the rename row and the appeal choice at desktop and 360 px, light and dark.
+
+
+## Rooms, many players and unspaced scripts (0.2.0), parked
+
+Found building contexts, scope, block, phrases, reserved names and unspaced matching (design: `docs/design/2026-11-17-any-server-rooms-languages.md`, section 15 and what the build turned up).
+
+- **Block counts and a staff view of blocks.** Nothing counts how often a person is blocked and no staff screen lists blocks (a block is private to the pair; the game may ask `between` only). If it is wanted it needs a signal and its own design.
+- **Per-context ladders and reasons.** A context overrides only the chat-time sections; the ladder, durations, reporting reasons, appeals and names stay one policy. A kids ladder would need a layer-by-context matrix in the store and the hub.
+- **Editing contexts in the hub.** They are declared in code and the hub lists them read-only. An editor would need the stored layer to carry a context, a precedence story in the preview and a way to review a change.
+- **Creator features beyond scope.** Follower-only chat, a creator's own term list and a creator-facing page are not built; a scope only limits which reports a moderator sees and which sanctions they may apply.
+- **A scope on the other routes.** Terms, appeals, the audit trail and the AI are 403 for a scoped moderator until a route opts in with a design for what a scoped read of it means.
+- **Phrases.** A book is the same for everyone in a room: no per-player phrase list, no phrase with a blank to fill, no ordering by use, and no check that a viewer's `phrase.<id>` translation says what the original says (the game owns its catalogue).
+- **Age.** The kit has an account age signal and no age. A game that wants a kids context chosen by a verified age builds that in its own seat code; an age check inside the kit is not planned.
+- **Reserved names are Latin only.** A skeleton keeps `a-z` and `0-9`, so a protected name written in another script has an empty skeleton and is ignored (it is never a key that matches every name). Protecting a name in Cyrillic, Greek, Arabic or an unspaced script needs its own comparison.
+- **Entities have no first-party screen.** The kit records that a clan or guild was named in a report and emits `rename.required` with its `kind` and `ref`; the game's own UI asks the owner. Entity reports are not wired into the Discord, Coop and EOS paths, and the hub has no list of entities or filter by one.
+- **Unspaced terms.** `contains` and `segment` are the only modes; there is no stemming, no script conversion (traditional and simplified Han, kana and romaji are different words) and no spaced non-Latin script (Arabic, Cyrillic, Hebrew). How `Intl.Segmenter` cuts a Thai or Khmer run depends on the ICU data of the Node build, so a boundary can differ between builds; the dry run in the hub is the check.
+- **Match for exceptions.** An exception phrase has no mode; the choice is on terms only. The loader accepts a `matchMode` on a corpus term, but the published community list has no unspaced terms yet.
+- **A real-browser check** of the phrase picker (one layout test runs in a real browser; it does not cover every locale, theme or width), the entity row, the Match choice and the Room contexts list, light and dark.

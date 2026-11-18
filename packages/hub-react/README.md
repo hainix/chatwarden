@@ -352,6 +352,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - the privacy and legal-hold wire types `PrivacyExportView`, `PrivacyStatementView`, `ErasePreviewView`, `ErasureReceiptView`, `EvidenceBundleView`, `HoldCodeView` and `HoldView`, and the client methods `HubClient.privacyFind`, `HubClient.privacyExport`, `HubClient.privacyErase`, `HubClient.privacyStatement`, `HubClient.holdReport` and `HubClient.releaseHold`
 - the urgent lane and the desk (0.2.0): the types `ReportMarkResult`, `ReportComment`, `ReportEscalation`, `InsightsView`, `RoomRow` and `PersonLinksView`, the client methods `HubClient.insights`, `HubClient.rooms`, `HubClient.setRoomMode`, `HubClient.retractLine`, `HubClient.personLinks`, `HubClient.setUrgent`, `HubClient.handoff`, `HubClient.addComment`, `HubClient.removeComment`, `HubClient.escalate` and `HubClient.clearEscalation`, and the fields `ListReportsQuery.urgent`, `Changes.urgent`, `Changes.asked`, `ReportSummary.urgent`, `ReportSummary.handoffAt`, `ReportSummary.escalatedTo`, `QueueGroup.urgent`, `QueueGroup.asked`, `QueueFilter.asked`, `StaffReport.evidence`, `StaffReport.surge`, `PolicyLayer.desk`, `PolicyLayer.safety`, `PolicyLayer.rooms` and `Session.safety`
+- the rooms types and client method (0.2.0): `ContextRow` and `HubClient.contexts` (`GET /policy/contexts`), the read-only list of room contexts
 - every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
   includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh`, `HubControllerOptions.host`, `HubClient.dismissOpen`, `HubClient.aiGates`, `HubClient.aiActing`, `HubClient.aiActingStep`, `HubClient.aiActions`, `HubClient.setAutomation`, `HubClient.reportBundle` (the owner's signed evidence bundle of a report, `GET /reports/:id/bundle`),
   `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss`, `ReporterRecord.accuracy`, the signal and pace fields `PersonHistory.signals`, `PersonHistory.automation`, `PolicyLayer.filters`, `PolicyLayer.appeals`, `PolicyLayer.names`, `PolicyLayer.pace`, `PolicyLayer.signals`, `ReportSummary.boosted` and `Suggestion.signals`, the AI methods `HubClient.readAgain`, `HubClient.aiStatus` and `HubClient.filterCheck`, `HubClient.filterStats`, `HubClient.filterTest`, `HubClient.dontTeach`, and the appeals and names fields and methods `Changes.appeals`, `PersonHistory.appeals`, `PersonHistory.renames`, `HubClient.appeals`, `HubClient.appeal`, `HubClient.decideAppeal`, `HubClient.appealStats`, `HubClient.rename` and `HubClient.listBlockedNames`, and the rename fields `DecideInput.rename`, `DecideResult.rename` and `DecisionForm.rename` (0.2.0). The names are the same declarations the main entry re-exports (`createHubClient`,
@@ -751,7 +752,7 @@ needed, so the hub's first load does not carry them. `HubClient` has `community`
 | `listGaps()` | `GET /gaps` |
 | `closeGap(groupId, { status, ref? })` | `POST /gaps/:groupId/close` |
 | `listTerms()` | `GET /terms` |
-| `checkTerm({ term, language })` | `POST /terms/check` |
+| `checkTerm({ term, language, matchMode? })` | `POST /terms/check` |
 | `testText(text)` | `POST /terms/test` |
 | `addTerm(input)`, `updateTerm(id, patch)`, `setTermActive(id, active)` | `POST /terms`, `PATCH /terms/:id`, `POST /terms/:id/active` |
 | `addException(input)`, `updateException(id, patch)`, `setExceptionActive(id, active)` | `POST /exceptions`, `PATCH /exceptions/:id`, `POST /exceptions/:id/active` |
@@ -877,6 +878,17 @@ else sits behind a door that already existed.
   offer a break at 10, 25 or 50. It is stored in `localStorage` in a `try/catch`, sent nowhere, and unreadable by the owner. It is care, not protection: the server still sends the same body.
   It is off by default in every mode and for urgent cases.
 - **Client methods:** `setUrgent`, `handoff`, `addComment`, `removeComment`, `escalate`, `clearEscalation`, `insights`, `rooms`, `setRoomMode`, `retractLine` and `personLinks`.
+
+## Rooms, names for entities and terms without spaces (0.2.0)
+
+All of this is `@experimental` until the release settles it, and each part sits behind a door that already existed: nothing new is always visible.
+
+- **The context chip.** A case from a room that carried a `context` tag shows one quiet line, "Room type: Kids rooms" (the label the profile gave the context, or its name), when the caller may read the policy and at least one context is declared. A report from a room with no context shows nothing.
+- **Room contexts.** Settings, Advanced, **Room contexts** is a read-only, lazy list of the contexts the profile declares, each with the sections it sets (`profanity`, `pace`, `chat`, `filters`, names only, never a value) and the line that contexts are declared in code, not here (`client.contexts()`, `GET /policy/contexts`). A scoped moderator is offered neither the chip nor the list: the server answers 403 and `can[]` hides them.
+- **Staff scope.** A scoped moderator (the `authorize` hook returned `scope`) sees the queue, the case, the person's history, sanctions, the reasons and `GET /me` of their rooms only, and the hub hides every screen the server would refuse. See `docs/recipes/creator-channels.md`.
+- **The entity row.** A report about a clan, guild, team, deck, pet or item shows "Clan: {label}" (`EntityRow`, with `entityWord` for the kind; any other word of the game's reads "Entity:") under the person it is filed against. The label is a name a player chose, so it is masked like a handle while the server flags it (`entityLabelFlagged`), with the same Show control. In the sanction form, "Ask for a new name" offers "What to rename": the player's own name, or one of the open entities that report names (at most five, from the person's history; `POST /people/:ref/rename` with `entity`). An entity rename writes no notice and the game tells the owner.
+- **Protected names.** Settings, Advanced, Names gains "Protected names" and "Allowed exceptions" (one name per line, at most 200 each); the owner edits, everyone else reads. A name that reads as a protected one, ignoring look-alike letters, digits and punctuation, is refused `name_reserved`.
+- **Match.** Add or edit a term in Chinese, Japanese, Thai, Lao, Khmer or Burmese and a "Match" choice appears, only once such a word is typed: "Whole words (recommended)" or "Anywhere in the text", each with a line on what it catches (`matchMode`: `segment` or `contains`; a plain a-z term has no choice). A term that matches anywhere carries the tag "Matches anywhere" in the list, and the dry run (`checkTerm({ term, language, matchMode })`) reads it the same way, so the lines it would have blocked are the ones the saved term blocks.
 
 ## Theming
 

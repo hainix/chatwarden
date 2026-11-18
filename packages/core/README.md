@@ -588,6 +588,13 @@ cw.names.renamed(who);
   store without it cannot release a rename, `renamesEnabled()` is `false` and `requireRename` answers `off`. The SQLite store has all of them; the in-memory store
   has `withdrawNotice` built in and the blocked-name methods through `withMemoryNames(store)`.
 
+### Reserved names and entity reports
+
+- **Reserved names.** `names.reserved` (under `overrides`) lists names the game protects (`admin`, `moderator`, `game master`, the first name a staff member plays under): at most 200 entries of 2 to 32 characters. A name that reads as one of them is refused with the third reason `name_reserved`, after `name_not_allowed` and `name_profane`, and it cites `names.reservedRule` (an active Community Rule; default 2). It is compared by `skeleton` over the whole words of the name (`Mod_Anna`, `M0derator` and `game master` match `moderator` and `game master`; `xXmodXx` does not), so a look-alike letter, a digit for a letter and a separator do not hide it. `names.reservedAllow` lists the exact names that pass although they read as a reserved one (a real player who is called like staff; at most 200, compared whole by skeleton). Both are empty until the owner says so, and they are checked on names only, never on chat. The answer never says which entry matched. `NameSettings` and `ResolvedNames` gain the three keys, `NameReason` gains `name_reserved`, and `checkNameRules` is the validation the profile uses.
+- **A name for an entity.** `cw.names.check(text, { kind: 'entity' })` is the same check for the name of a clan, guild, team, deck, pet or item (`NameKind` is `'player'` or `'entity'`; the default is `'player'`). A blocked entity name is kept as evidence only when the caller passes `who`.
+- **A report about an entity.** `ReportInput.entity` is `{ kind, ref, label }`: `kind` a word of the game's (`^[a-z][a-z_]{0,23}$`), `ref` its opaque id (1 to 64 of `A-Za-z0-9_:-`) and `label` its name (1 to 64 characters). The report is still filed against the owner's seat, so the person is the case; the entity is stored beside it (`StoredReport.entity`, `ReportRecord.entity`, in the privacy registry as `kit_reports.entity_json`) and shown to staff. A malformed entity is refused `entity_invalid` before anything is spent. No event, log line or webhook carries it. The reporting reason `impersonation` (CR 2) ships switched off: the owner turns it on in Settings, Reporting, and it then appears in the report dialog.
+- **A rename for an entity.** `cw.names.requireRename({ ..., entity: { kind, ref } })` asks for a new name for something the player owns. It is an entity rename: the kit writes no notice and sets no pending flag, so it never answers `pending` and may repeat; it emits `rename.required` with the `entity` (a `kind` and a `ref`, never the label), and the game tells the owner in its own UI. Audited like any rename.
+
 ### The words of a notice: `@chatwarden/core/notice-copy`
 
 The text a player reads in a notice lives in one small module, so the game's notice card and a hub's preview of it cannot word a notice differently.
@@ -652,6 +659,25 @@ const cw = await createChatwarden({
 ```
 
 A context overrides only the chat-time sections (`CONTEXT_SECTIONS`: `profanity`, `pace`, `chat`, `filters`); the ladder, durations, reporting, appeals, signals and names stay the game's one policy. The precedence for a room is the profile in code, the stored layer, the context, then `cw.rooms.setPace`. A tag the profile does not declare refuses every line `gate` and logs one `chatwarden.context_unknown` per room, so a typo in a kids room fails shut. `chat.minAccountAgeDays` refuses a younger account, a guest or an age the game cannot tell with `account_too_new`. `cw.contexts.names()`, `of(roomId)` and `effective(name | null)` read it. The room tags `context` and `scope` are validated at `seat` (`checkRoomTags`, `RangeError`): at most 8 tags, a key that starts with a letter, a value of at most 64 characters, and a room's `context` and `scope` cannot change while it is open. Names: `ContextSettings`, `ResolvedContexts`, `EffectiveContext`, `CONTEXT_SECTIONS`, `ROOM_TAG_KEYS`, `checkRoomTags`, `resolveContexts`, `RefuseReason` gains `account_too_new`.
+
+### Phrase-only rooms
+
+A room for young players can allow only things the game wrote. Declare the books in code, point a context at one, and tag the room:
+
+```ts
+const cw = await createChatwarden({
+  // ...
+  phrases: { junior: [{ id: 'gg', text: 'Good game!' }, { id: 'help', text: 'Can you help me?', group: 'Ask' }] },
+  overrides: { contexts: { kids: { label: 'Kids rooms', chat: { phrases: 'junior' } } } },
+});
+cw.rooms.seat('room-1', 'seat-1', who, 'Mia', { context: 'kids' });
+cw.chat.acceptPhrase('room-1', 'seat-1', 'gg'); // { deliver: { lineId, text: 'Good game!', phrase: 'gg' } }
+```
+
+- **What it does.** `cw.chat.acceptPhrase(room, seat, id)` runs the accept pipeline without the text steps: the occupant and the gate, a restriction, the room's mode, the context's `minAccountAgeDays`, pace and the fixed rate, then deliver. There is no length check, matcher, filter or profanity step, because a book is trusted text. The line is kept as evidence with `raw` equal to the phrase's text, and `deliver.phrase` carries the id. Typed text in a phrase room (`cw.chat.accept`) is refused `phrases_only` and spends nothing. An id the book lacks is `phrase_unknown`; a room that is not phrase-only answers `gate`. Both are new `RefuseReason` values, so a `switch` that ends in `assertNever` must handle them.
+- **What it checks at start.** A book id is `^[a-z][a-z0-9_-]{0,31}$` (at most `MAX_PHRASE_BOOKS`, 20); a phrase id is `^[A-Za-z0-9_-]{1,32}$` and unique in its book; a book holds at most `MAX_PHRASES_PER_BOOK` (300) phrases of at most `PHRASE_TEXT_MAX` (100) characters, with an optional `group` of at most `PHRASE_GROUP_MAX` (24); no control or bidirectional character; an unknown key is refused. Every phrase is also run through the matcher and every profanity filter in force, and a hit (or a screen that throws) stops the start with a `PhraseBookError` that names the book and the phrase id, never the text. A context that names a book you did not declare stops the start too. `checkPhraseBooks(input, screens?)` is the same check, exported for a service or a test.
+- **Reading the books.** `cw.phrases.names()` lists the declared books and `cw.phrases.book(roomId)` returns the room's phrases (or `null` for a room that is not phrase-only). The kit ships no phrase text: the words and their translations are the game's own (`@chatwarden/player-react` shows a viewer's `phrase.<id>` catalogue entry in place of the text).
+- **Over HTTP.** `POST /rooms/:room/phrases` in `@chatwarden/http` calls it, and `hello.phrases` carries the book to the chat box. See the recipe `docs/recipes/kids-rooms.md`.
 
 ### Staff scope
 

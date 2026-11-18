@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { compileSnippets } from './snippetCompile.js';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
 import { badWords } from './no-corpus-data.mjs';
@@ -423,79 +423,7 @@ declare const bot: import('@chatwarden/http/discord').DiscordBot;
   const standalone = (code: string): boolean => code.startsWith('import ');
 
   function compile(extra: Array<{ file: string; code: string }> = []): Map<string, string[]> {
-    const dir = join(root, 'scripts', '__snippets__').replaceAll('\\', '/');
-    const cfg = ts.readConfigFile(join(root, 'tsconfig.base.json'), ts.sys.readFile);
-    const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, root);
-    // The workspace packages resolve to their TypeScript source (the same map vitest.config.ts uses), so this check needs no
-    // prior `tsc -b` and never reads a stale `dist`. Exact keys, so a subpath such as `/express` is not taken by the bare name.
-    const src = (rel: string): string[] => [`packages/${rel}`];
-    const options: ts.CompilerOptions = {
-      ...parsed.options,
-      pathsBasePath: root,
-      paths: {
-        '@chatwarden/core': src('core/src/index.ts'),
-        '@chatwarden/store-sqlite': src('store-sqlite/src/index.ts'),
-        '@chatwarden/store-memory': src('store-memory/src/index.ts'),
-        '@chatwarden/store-memory/testing': src('store-memory/src/testing/index.ts'),
-        '@chatwarden/matcher': src('matcher/src/index.ts'),
-        '@chatwarden/matcher/corpus': src('matcher/src/corpus/index.ts'),
-        '@chatwarden/matcher/corpus/node': src('matcher/src/corpus/node/index.ts'),
-        '@chatwarden/matcher/fixtures': src('matcher/src/fixtures/index.ts'),
-        '@chatwarden/matcher/test-fixtures': src('matcher/src/fixtures/testFixtures.ts'),
-        '@chatwarden/profanity': src('profanity/src/index.ts'),
-        '@chatwarden/discord': src('discord/src/index.ts'),
-        '@chatwarden/http': src('http/src/index.ts'),
-        '@chatwarden/http/admin': src('http/src/admin-entry.ts'),
-        '@chatwarden/http/chat': src('http/src/chat/index.ts'),
-        '@chatwarden/http/discord': src('http/src/discord/index.ts'),
-        '@chatwarden/http/coop': src('http/src/coop/index.ts'),
-        '@chatwarden/http/eos': src('http/src/eos/index.ts'),
-        '@chatwarden/hub-element': src('hub-element/src/index.ts'),
-        '@chatwarden/hub-element/standalone': src('hub-element/src/standalone.ts'),
-        '@chatwarden/hub-react': src('hub-react/src/index.ts'),
-        '@chatwarden/hub-react/headless': src('hub-react/src/headless/index.ts'),
-        '@chatwarden/player-react': src('player-react/src/index.ts'),
-        '@chatwarden/player-react/chat': src('player-react/src/chat/index.ts'),
-        '@chatwarden/http/express': src('http/src/express.ts'),
-        '@chatwarden/http/fetch': src('http/src/fetch.ts'),
-        '@chatwarden/http/cli': src('http/src/cli/index.ts'),
-      },
-      noEmit: true,
-      composite: false,
-      incremental: false,
-      declaration: false,
-      declarationMap: false,
-      sourceMap: false,
-    };
-    const virtual = new Map<string, string>();
-    const stubs = `${dir}/stubs.d.ts`;
-    virtual.set(stubs, STUBS);
-    const names: string[] = [stubs];
-    for (const s of [...snippets.filter((x) => standalone(x.code)), ...extra]) {
-      const path = `${dir}/${s.file}`;
-      virtual.set(path, `${s.code}\nexport {};\n`);
-      names.push(path);
-    }
-    const host = ts.createCompilerHost(options);
-    const realFile = host.fileExists.bind(host);
-    const realRead = host.readFile.bind(host);
-    const realSource = host.getSourceFile.bind(host);
-    const norm = (f: string): string => f.replaceAll('\\', '/');
-    host.fileExists = (f) => virtual.has(norm(f)) || realFile(f);
-    host.readFile = (f) => virtual.get(norm(f)) ?? realRead(f);
-    host.getSourceFile = (f, lang, onError, shouldCreate) => {
-      const text = virtual.get(norm(f));
-      return text === undefined ? realSource(f, lang, onError, shouldCreate) : ts.createSourceFile(f, text, lang, true);
-    };
-    const program = ts.createProgram({ rootNames: names, options, host });
-    const byFile = new Map<string, string[]>();
-    for (const d of ts.getPreEmitDiagnostics(program)) {
-      const file = d.file === undefined ? undefined : norm(d.file.fileName);
-      if (file === undefined || !file.includes('/__snippets__/')) continue;
-      const name = file.split('/').at(-1) as string;
-      byFile.set(name, [...(byFile.get(name) ?? []), ts.flattenDiagnosticMessageText(d.messageText, '\n')]);
-    }
-    return byFile;
+    return compileSnippets([...snippets.filter((x) => standalone(x.code)), ...extra], STUBS);
   }
 
   it('finds the snippets it is meant to check, in every package README', () => {
@@ -1378,5 +1306,57 @@ describe('the AI gate dashboard and do-not-automate docs (0.1.13)', () => {
     for (const needle of ['Migration 24 adds five columns', '`kit_ai_outcomes`', '`ai_rule`', '`decided_by`', '`kit_ai_noauto`', '`human`, `holdback`, `review` or `service`', 'a 0.1.12 or older store refuses a database at version 24', 'back up the file before upgrading']) {
       expect(sqlite, needle).toContain(needle);
     }
+  });
+});
+
+// Rooms, many players and languages (0.2.0): what each README says about the room contexts, phrase-only rooms, block, staff scope, reserved names and the entity reports.
+describe('the rooms sections (0.2.0)', () => {
+  const core = flat(readme('core'));
+  const http = flat(readme('http'));
+  const player = flat(readme('player-react'));
+  const hub = flat(readme('hub-react'));
+  const matcher = flat(readme('matcher'));
+  const sqlite = flat(readme('store-sqlite'));
+  const has = (doc: string, needles: string[]): void => {
+    for (const needle of needles) expect(doc, needle).toContain(needle);
+  };
+
+  it('the readme checks pass for the changed packages: core says contexts, phrases, block, scope, reserved names, entity reports, the refusal reasons and the tag grammar', () => {
+    has(core, ['## Room contexts', '### Phrase-only rooms', '### Staff scope', '### Block', '### Reserved names and entity reports']);
+    // contexts and the tag grammar
+    has(core, ['`CONTEXT_SECTIONS`', '`ROOM_TAG_KEYS`', '`checkRoomTags`', '`chatwarden.context_unknown`', '`account_too_new`']);
+    // phrases
+    has(core, ['`cw.chat.acceptPhrase(room, seat, id)`', '`phrases_only`', '`phrase_unknown`', '`cw.phrases.names()`', '`cw.phrases.book(roomId)`', '`checkPhraseBooks(input, screens?)`', '`PhraseBookError`', '`MAX_PHRASES_PER_BOOK`', 'ships no phrase text']);
+    // reserved names and entity reports
+    has(core, ['`names.reserved`', '`names.reservedAllow`', '`names.reservedRule`', '`name_reserved`', '`NameKind`', '`ReportInput.entity`', '`entity_invalid`', '`impersonation`', '`rename.required`']);
+    expect(core).toMatch(/refused `phrases_only`/);
+    expect(core).toMatch(/an entity rename.* no notice/i);
+  });
+
+  it('the readme checks pass for the changed packages: http says scope on authorize, scopedLimits, wire version 2, the kind on names, the phrases and mute routes and the entity on a case', () => {
+    has(http, ['`scope?: string[]`', 'scopedLimits: { kinds, maxDurationMs }', 'Wire version 2', '`POST /rooms/:room/phrases`', '`POST /rooms/:room/mute`', '`GET /policy/contexts`']);
+    has(http, ['`POST /names/check { name, kind? }`', '`name_reserved`', '`POST /people/:ref/rename` | `{ reason, rule, takeOver?, entity? }`', '`entities`', '`entityLabelFlagged`', '`phrases_only`', '`phrase_unknown`']);
+    expect(http).toMatch(/`kind` is `player` \(the default\) or `entity`/);
+  });
+
+  it('the readme checks pass for the changed packages: player-react says Block, the phrase picker, the phrase catalogue keys and the name words', () => {
+    has(player, ['phrase picker', '`phrase.<id>`', '`player.chat.phrases`', '`player.chat.refused.phrases_only`', '`player.chat.refused.phrase_unknown`', '`ChatTransport.sendPhrase(id)`', '`player.name.reserved`', '`player.report.refused.entity_invalid`']);
+    has(player, ['Block']);
+    expect(player).toMatch(/in place of the phrase's text/);
+  });
+
+  it('the readme checks pass for the changed packages: hub-react says the context chip, the contexts list, the entity row, the reserved names and Match', () => {
+    has(hub, ['## Rooms, names for entities and terms without spaces (0.2.0)', '**Room contexts**', 'context chip', '`EntityRow`', '`entityLabelFlagged`', '"Protected names"', '"Match"', '"Anywhere in the text"', '`matchMode`']);
+    expect(hub).toMatch(/a scoped moderator is offered neither/i);
+  });
+
+  it('the readme checks pass for the changed packages: matcher says skeleton, matchReserved and what a reserved name does and does not compare', () => {
+    has(matcher, ['### Reserved names', '`skeleton(text)`', '`matchReserved(name, entries, allow)`']);
+    expect(matcher).toMatch(/whole words/i);
+    expect(matcher).toMatch(/never the chat/i);
+  });
+
+  it('the readme checks pass for the changed packages: store-sqlite names the rooms and languages columns of migration 26', () => {
+    has(sqlite, ['Migration 26', '`kit_reports.scope`', '`kit_reports.entity_json`', '`kit_terms.match_mode`', '`kit_mutes.block`']);
   });
 });

@@ -216,6 +216,14 @@ options of the share client are `endpoint`, `sign`, `publicKey`, `fetch`, `clock
 A release is a signed zip with `terms.json`, `exceptions.json`, `positive.json`, `negative.<lang>.json` and a manifest. See the
 [design note](https://github.com/hainix/chatwarden/blob/main/docs/design/2026-11-12-k7-term-corpus.md) for the formats.
 
+### Reserved names
+
+New in 0.2.0. A game can protect names (`admin`, `moderator`, `game master`) so a player cannot take one, or something that only looks like one. `@chatwarden/core` calls this through `names.reserved`; the two functions are exported for a game that checks names itself.
+
+- **`skeleton(text)`** reduces a name to the letters and digits it looks like: invisible characters and combining marks are removed (NFKD), the same look-alike and leet folding the matcher applies to chat is applied (`M0d3rat0r` reads as `moderator`, and full-width letters read as plain ones), and everything that is not `a-z` or `0-9` is dropped. Two names that look the same have the same skeleton.
+- **`matchReserved(name, entries, allow)`** answers whether a name is one of the protected `entries`. A name matches when its whole skeleton is an entry's, or when any run of consecutive words of the name is: a space, an underscore, a camel-case hump, a digit run and a punctuation mark are word breaks, so `Mod_Anna`, `ModAnna`, `M0d_Anna` and `Moderator` match the entries `mod` and `moderator` while `xXmodXx`, `Sodmin` and `Moderately` do not. It compares whole words, like chat matching, not a substring. A name whose whole skeleton is one of `allow` never matches (a real player who is called like staff). It never throws (anything that is not text is no match), reads at most 256 characters of a name, and an entry with no letter or digit is ignored rather than matching every name. The compiled list is cached per array, so pass the same array each time.
+- **What it is for.** Names only, never the chat: the chat matcher and its terms are unchanged, and a name is not checked against the term list by this function. `LiveTerms` and the matcher `buildMatcher` returns expose it as `matchReserved(name, entries, allow)` so the core's `Matcher` can ask without a second import.
+
 ## Terms in scripts written without spaces (0.2.0)
 
 A term in Chinese, Japanese, Thai, Lao, Khmer or Burmese has no spaces to read whole words by, so these scripts have their own path (`@chatwarden/matcher` reads Han, Hiragana, Katakana, Thai, Lao, Khmer and Myanmar; any other script, Cyrillic, Arabic and Hangul included, is a `MatcherBuildError` "not supported yet", naming the row and never the term). A Latin term is exactly what it was.
