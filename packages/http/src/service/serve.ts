@@ -16,6 +16,7 @@ import { toFetch } from '../fetch.js';
 import { healthRoutes } from '../health.js';
 import { parseKeys } from './auth.js';
 import { nodeHandler, peerAddress } from './node.js';
+import { projectImporter } from './projectResolve.js';
 import { SERVICE_OPENAPI } from './openapi.js';
 import { serviceRoutes } from './index.js';
 import { hubHandler, hubScriptPath, MIN_TOKEN_LENGTH, tokenStaff } from './serveStaff.js';
@@ -162,7 +163,7 @@ async function loadAuthModule(importer: (name: string) => Promise<unknown>, spec
  * file, the terms file, then the store and the kit, then listen. Any failure before listening is a `ServeError` and nothing is left open.
  */
 export async function startService(config: ServeConfig, deps: ServeDeps = {}): Promise<RunningService> {
-  const importer = deps.importer ?? ((name: string) => import(/* @vite-ignore */ name) as Promise<unknown>);
+  const importer = deps.importer ?? projectImporter();
   const read = deps.readFile ?? ((path: string) => readFile(path, 'utf8'));
   const log = deps.log ?? ((line: string) => void process.stderr.write(`${line}\n`));
   const logger: Logger = { warn: (event, detail) => log(JSON.stringify({ event, ...detail })) };
@@ -174,14 +175,14 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
     try {
       return (await importer(name)) as T;
     } catch {
-      throw new ServeError(`${name} is not installed: run npm install ${name}`);
+      throw new ServeError(`${name} is not installed: run npm install ${name} in the folder you run chatwarden serve from.`);
     }
   };
   const core = await load<typeof import('@chatwarden/core')>('@chatwarden/core');
   const sqlite = await load<typeof import('@chatwarden/store-sqlite')>('@chatwarden/store-sqlite');
   const matcher = await load<typeof import('@chatwarden/matcher')>('@chatwarden/matcher');
   const profanity = await load<typeof import('@chatwarden/profanity')>('@chatwarden/profanity');
-  if (config.hub === 'element' && !hubPresent()) throw new ServeError('@chatwarden/hub-element is not installed: run npm install @chatwarden/hub-element, or start with --hub none.');
+  if (config.hub === 'element' && !hubPresent()) throw new ServeError('@chatwarden/hub-element is not installed: run npm install @chatwarden/hub-element in the folder you run chatwarden serve from, or start with --hub none.');
 
   // 2. the secret, the keys, the admin token
   if (config.secret === undefined || config.secret.length < 32) throw new ServeError(`CHATWARDEN_SECRET must be set to at least 32 characters (make one with: ${MAKE_ONE}).`);

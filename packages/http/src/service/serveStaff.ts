@@ -10,6 +10,7 @@ import type { NamesRateLimit } from '../limiter.js';
 import type { KitRequest } from '../types.js';
 import { FailureThrottle } from './auth.js';
 import { peerAddress } from './node.js';
+import { resolvePathFromProject } from './projectResolve.js';
 
 /** The staff token is at least this long, or it protects nothing. */
 export const MIN_TOKEN_LENGTH = 24;
@@ -129,8 +130,10 @@ const signInPage = (notice: string): string => `<!doctype html>
 
 const pageHeaders = (csp: string): Record<string, string> => ({ 'cache-control': 'no-store', 'content-security-policy': csp, 'x-content-type-options': 'nosniff', 'content-type': 'text/html; charset=utf-8' });
 
-/** Where the hub element's script is in the installed package, or null when the package (or its built script) is not there. */
-export function hubScriptPath(): string | null {
+/** Where the hub element's script is: in the project this runs in first, then next to this package; null when the package (or its built script) is not there. */
+export function hubScriptPath(cwd: string = process.cwd()): string | null {
+  const fromProject = resolvePathFromProject('@chatwarden/hub-element/standalone', cwd);
+  if (fromProject !== undefined) return fromProject;
   try {
     return createRequire(import.meta.url).resolve('@chatwarden/hub-element/standalone');
   } catch {
