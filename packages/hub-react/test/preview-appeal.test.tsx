@@ -60,7 +60,7 @@ describe('the choice', () => {
   it.each([
     ['Keep the decision', 'uphold'],
     ['Remove it', 'revoke'],
-  ] as const)('%s sends the body 0.1.9 sent (outcome, reason)', async (name, outcome) => {
+  ] as const)('%s sends the body 0.1.9 sent (outcome, reason) and the first fixed reason', async (name, outcome) => {
     const w = await appealsHub(SENIOR);
     const a = await w.appeal();
     const { user, decision } = await open(w, a.appealId);
@@ -68,7 +68,7 @@ describe('the choice', () => {
     await user.click(radio(decision, name));
     await user.click(within(decision).getByRole('button', { name: 'Send decision' }));
     await waitFor(() => expect(decides(w)).toHaveLength(1));
-    expect(decides(w)[0]?.body).toEqual({ outcome, reason: 'The chat log is clear.' });
+    expect(decides(w)[0]?.body).toEqual({ outcome, reason: 'The chat log is clear.', reasonCode: outcome === 'uphold' ? 'rule_applies' : 'mistake' });
   });
 
   it('Make it lighter sends the outcome, the kind and the length of the picker, and the reason', async () => {
@@ -80,7 +80,7 @@ describe('the choice', () => {
     await user.selectOptions(within(decision).getByLabelText('How long'), '1h');
     await user.click(within(decision).getByRole('button', { name: 'Send decision' }));
     await waitFor(() => expect(decides(w)).toHaveLength(1));
-    expect(decides(w)[0]?.body).toEqual({ outcome: 'reduce', reason: 'Too long for a first offence.', to: { kind: 'chat', durationMs: HOUR } });
+    expect(decides(w)[0]?.body).toEqual({ outcome: 'reduce', reason: 'Too long for a first offence.', reasonCode: 'first_offence', to: { kind: 'chat', durationMs: HOUR } });
   });
 });
 

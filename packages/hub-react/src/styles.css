@@ -1818,6 +1818,23 @@
   flex-wrap: wrap;
   gap: var(--cw-space-2, var(--cwd-space-2));
 }
+.cw-hub .cw-appeal-reasoncode,
+.cw-hub .cw-appeal-cause {
+  min-width: 0;
+}
+.cw-hub .cw-appeal-cause summary {
+  cursor: pointer;
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-appeal-cause-body {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin-block-start: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-appeal-cause p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 .cw-hub .cw-appeal-pick {
   display: grid;
   gap: var(--cw-space-3, var(--cwd-space-3));
@@ -2894,6 +2911,12 @@
 .cw-hub .cw-term-count {
   text-align: right;
   min-width: 3rem;
+}
+.cw-hub .cw-term-flag {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  justify-items: end;
+  margin-block-start: var(--cw-space-1, var(--cwd-space-1));
 }
 .cw-hub .cw-terms-table tr[aria-current='true'] {
   background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
@@ -4117,6 +4140,9 @@
 }
 .cw-hub .cw-fhits .cw-table-wrap {
   overflow-x: auto;
+}
+.cw-hub .cw-fhits-overturned {
+  display: block;
 }
 /* Privacy requests (the Settings panel, the erase dialog's counts and the statement table). */
 .cw-hub .cw-privacy-counts {

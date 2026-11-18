@@ -3,8 +3,8 @@ import { useId, useMemo, useRef, useState } from 'react';
 import { useHub } from '../context.js';
 import { byId, rootOf } from '../dom.js';
 import { useHubData } from '../hooks.js';
-import { ruleLabel } from '../labels.js';
-import { appealsDirty, appealsDraftOf, appealsFieldKey, appealsLayer, appealsProblems, BAND_TEXT, bandOf } from '../policy/appeals.js';
+import { lengthPhrase, ruleLabel } from '../labels.js';
+import { appealsDirty, appealsDraftOf, appealsFieldKey, appealsLayer, appealsProblems, BAND_TEXT, bandOf, LINK_DAYS } from '../policy/appeals.js';
 import type { AppealsDraft } from '../policy/appeals.js';
 import type { Problems } from '../policy/panels.js';
 import { ResetConfirm } from '../policy/ResetConfirm.js';
@@ -18,8 +18,9 @@ import { useToasts } from '../toasts.js';
 import type { AppealStats, PolicyLayer, PolicyState } from '../types.js';
 import { ErrorBlock, Loading, Notice, Panel, Scroll } from '../ui.js';
 
-// Settings > Advanced > "Appeals": on or off, how many a player may file a week, whether the person who made a decision may decide its appeal, the statement
-// limit (read only), and "Mistakes by rule" behind a disclosure. A local draft saved through the same policy machinery as the other panels (a reason, a conflict
+// Settings > Advanced > "Appeals": on or off, how many a player may file a week, whether the person who made a decision may decide its appeal, how long an appeal
+// link works, the support contact and whether the person is emailed the outcome (the landing address, its origins and the game's own words are set in code, so
+// there is no control for them), the statement limit (read only), and "Mistakes by rule" behind a disclosure. A local draft saved through the same policy machinery as the other panels (a reason, a conflict
 // offers a reload, a per-section reset); only the owner edits. Appeals are off until the owner turns them on. The false-positive picture is here, behind the
 // advanced door, and never on a queue or a card: a band is a few words, never a colour and never a number outside the table.
 
@@ -33,7 +34,7 @@ const withoutAppeals = (layer: PolicyLayer): PolicyLayer => {
 
 /** The panel. `state` and `policy` come from the Advanced screen, which reads the policy once for all its panels. */
 export function AppealSettings({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
-  const { t, can } = useHub();
+  const { t, can, locale } = useHub();
   const toasts = useToasts();
   const root = useRef<HTMLDivElement>(null);
   const base = useId();
@@ -54,7 +55,7 @@ export function AppealSettings({ state, policy }: { state: PolicyState; policy: 
 
   const local = useMemo(() => appealsProblems(draft), [draft]);
   const problems: Problems = { ...local, ...serverProblems };
-  const layer = useMemo((): PolicyLayer | null => (Object.keys(local).length > 0 ? null : { ...withoutAppeals(state.layer), appeals: appealsLayer(draft, state.effective.appeals) }), [draft, local, state.layer, state.effective.appeals]);
+  const layer = useMemo((): PolicyLayer | null => (Object.keys(local).length > 0 ? null : { ...withoutAppeals(state.layer), appeals: appealsLayer(draft, state.effective.appeals, state.layer.appeals) }), [draft, local, state.layer, state.effective.appeals]);
   const isDirty = useMemo(() => appealsDirty(draft, state.effective.appeals), [draft, state.effective.appeals]);
 
   const save = useSaveFlow({
@@ -64,7 +65,7 @@ export function AppealSettings({ state, policy }: { state: PolicyState; policy: 
     editable,
     pending,
     fieldOf: appealsFieldKey,
-    onBlocked: () => focusField(root.current, 'perWeek'),
+    onBlocked: () => focusField(root.current, Object.hasOwn(local, 'perWeek') ? 'perWeek' : (Object.keys(local)[0] ?? 'perWeek')),
     onSaved: () => {
       setServerProblems({});
       toasts.push({ text: t('hub.settings.appeals.saved') });
@@ -106,6 +107,13 @@ export function AppealSettings({ state, policy }: { state: PolicyState; policy: 
   const limit = problems['perWeek'];
   // The server refuses the switch for a store that cannot keep appeals: the same words as any refused field.
   const onRefused = problems['enabled'];
+  const linkProblem = problems['link'];
+  const contactProblem = problems['contact'];
+  const emailsProblem = problems['emails'];
+  // The days the select offers, in order, plus the stored length when it is not one of them (a profile may hold any length the kit accepts): it stays selectable as it is.
+  const offered = LINK_DAYS.map((d) => ({ ms: d * 86_400_000, label: t('hub.settings.appeals.link.days', { count: d }) }));
+  const storedMs = Number(draft.linkMs);
+  const linkOptions = offered.some((o) => o.ms === storedMs) || !Number.isFinite(storedMs) ? offered : [...offered, { ms: storedMs, label: t('hub.settings.appeals.link.custom', { length: lengthPhrase(t, locale, storedMs) }) }].sort((a, b) => a.ms - b.ms);
 
   return (
     <div ref={root} className="cw-settings cw-appeal-settings">
@@ -187,7 +195,80 @@ export function AppealSettings({ state, policy }: { state: PolicyState; policy: 
                 </span>
               </label>
             </div>
+            <div className="cw-pace-row">
+              <div className="cw-field">
+                <label htmlFor={`${base}-link`}>{t('hub.settings.appeals.link.label')}</label>
+                <p id={`${base}-link-hint`} className="cw-hint">
+                  {t('hub.settings.appeals.link.hint')}
+                </p>
+                <select
+                  id={`${base}-link`}
+                  data-field="link"
+                  value={draft.linkMs}
+                  onChange={(e) => set({ linkMs: e.target.value })}
+                  aria-describedby={linkProblem === undefined ? `${base}-link-hint` : `${base}-link-hint ${base}-link-err`}
+                  {...(linkProblem === undefined ? {} : { 'aria-invalid': true as const })}
+                >
+                  {linkOptions.map((o) => (
+                    <option key={o.ms} value={String(o.ms)}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                {linkProblem !== undefined && (
+                  <p id={`${base}-link-err`} className="cw-field-error">
+                    {t(linkProblem.key, linkProblem.params)}
+                  </p>
+                )}
+              </div>
+              <div className="cw-field">
+                <label htmlFor={`${base}-contact`}>{t('hub.settings.appeals.contact.label')}</label>
+                <p id={`${base}-contact-hint`} className="cw-hint">
+                  {t('hub.settings.appeals.contact.hint')}
+                </p>
+                <input
+                  id={`${base}-contact`}
+                  type="text"
+                  autoComplete="off"
+                  data-field="contact"
+                  value={draft.contact}
+                  onChange={(e) => set({ contact: e.target.value })}
+                  aria-describedby={contactProblem === undefined ? `${base}-contact-hint` : `${base}-contact-hint ${base}-contact-err`}
+                  {...(contactProblem === undefined ? {} : { 'aria-invalid': true as const })}
+                />
+                {contactProblem !== undefined && (
+                  <p id={`${base}-contact-err`} className="cw-field-error">
+                    {t(contactProblem.key, contactProblem.params)}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="cw-pace-row">
+              <label className="cw-choice cw-flowopt">
+                <input
+                  type="checkbox"
+                  checked={draft.emails}
+                  aria-labelledby={`${base}-emails-t`}
+                  aria-describedby={emailsProblem === undefined ? `${base}-emails-hint` : `${base}-emails-hint ${base}-emails-err`}
+                  data-field="emails"
+                  onChange={(e) => set({ emails: e.target.checked })}
+                  {...(emailsProblem === undefined ? {} : { 'aria-invalid': true as const })}
+                />
+                <span>
+                  <strong id={`${base}-emails-t`}>{t('hub.settings.appeals.emails.label')}</strong>
+                  <span id={`${base}-emails-hint`} className="cw-hint cw-flowopt-line">
+                    {t('hub.settings.appeals.emails.hint')}
+                  </span>
+                  {emailsProblem !== undefined && (
+                    <span id={`${base}-emails-err`} className="cw-field-error cw-flowopt-line">
+                      {t(emailsProblem.key, emailsProblem.params)}
+                    </span>
+                  )}
+                </span>
+              </label>
+            </div>
           </fieldset>
+          <p className="cw-hint">{t('hub.settings.appeals.where')}</p>
           <p className="cw-hint">{t('hub.settings.appeals.statement', { max: APPEAL_STATEMENT_MAX })}</p>
           {editable && <SaveBar policy={policy} save={save} isDirty={isDirty} dirtyCount={1} refusedField={refusedField} idBase={base} label={t('hub.settings.appeals.save.form')} onDiscard={discard} onReload={reload} />}
           {can('appeals.read') && <Mistakes on={state.effective.appeals?.enabled === true} />}
