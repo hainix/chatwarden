@@ -36,6 +36,8 @@ export interface ServeConfig {
   termsFile?: string;
   hub: 'element' | 'none';
   sharedPacing: boolean;
+  /** Send the staff cookie without `Secure` (plain-http local use). Default false: the cookie is Secure whatever NODE_ENV says. */
+  insecureStaffCookie: boolean;
   processes: number;
   /** The environment, as given: checked by `startService`, in order. */
   secret?: string;
@@ -82,6 +84,12 @@ export function resolveServeConfig(flags: ServeFlags, env: Env): ServeConfig {
     if (raw !== undefined && raw !== '1' && raw !== '0') throw new ServeError('CHATWARDEN_SHARED_PACING must be 1 or 0.');
     sharedPacing = raw === '1';
   }
+  let insecureStaffCookie = flags.insecureStaffCookie === true;
+  if (flags.insecureStaffCookie === undefined) {
+    const raw = present(env.CHATWARDEN_INSECURE_STAFF_COOKIE);
+    if (raw !== undefined && raw !== '1' && raw !== '0') throw new ServeError('CHATWARDEN_INSECURE_STAFF_COOKIE must be 1 or 0.');
+    insecureStaffCookie = raw === '1';
+  }
   const rawProcesses = present(env.CHATWARDEN_PROCESSES);
   let processes = 1;
   if (rawProcesses !== undefined) {
@@ -95,6 +103,7 @@ export function resolveServeConfig(flags: ServeFlags, env: Env): ServeConfig {
     db: db.value,
     hub: hub.value,
     sharedPacing,
+    insecureStaffCookie,
     processes,
     ...optional('profileFile', profileFile),
     ...optional('termsFile', termsFile),
@@ -238,7 +247,7 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
     }
 
     // The staff side: a module beats the token; with neither, every staff route is 401 and the hub page is not served.
-    const staff = config.adminToken === undefined ? undefined : tokenStaff(config.adminToken, secret, process.env.NODE_ENV === 'production');
+    const staff = config.adminToken === undefined ? undefined : tokenStaff(config.adminToken, secret, !config.insecureStaffCookie);
     const authorize: Authenticate = staffModule ?? staff?.authorize ?? (() => null);
     const staffOpen = staffModule !== undefined || staff !== undefined;
     const hub = config.hub === 'element' && staffOpen ? hubHandler({ authorize, ...(staff === undefined || staffModule !== undefined ? {} : { staff }), script: finder }) : undefined;

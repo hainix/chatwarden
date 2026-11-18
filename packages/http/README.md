@@ -1421,16 +1421,16 @@ Keys come from `CHATWARDEN_SERVICE_KEYS` (comma separated, one to five) or the `
 
 ```
 chatwarden serve [--port 8787] [--host 127.0.0.1] [--db ./chatwarden.db] [--profile-file profile.json]
-                 [--terms-file terms.json] [--hub element|none] [--shared-pacing] [--print-openapi]
+                 [--terms-file terms.json] [--hub element|none] [--shared-pacing] [--insecure-staff-cookie] [--print-openapi]
 ```
 
-Every flag has an environment twin (`CHATWARDEN_PORT`, `CHATWARDEN_HOST`, `CHATWARDEN_DB`, `CHATWARDEN_PROFILE_FILE`, `CHATWARDEN_TERMS_FILE`, `CHATWARDEN_HUB`, `CHATWARDEN_SHARED_PACING` as `1` or `0`); a flag beats the variable, which beats the default. The secrets are environment only:
+Every flag has an environment twin (`CHATWARDEN_PORT`, `CHATWARDEN_HOST`, `CHATWARDEN_DB`, `CHATWARDEN_PROFILE_FILE`, `CHATWARDEN_TERMS_FILE`, `CHATWARDEN_HUB`, `CHATWARDEN_SHARED_PACING` and `CHATWARDEN_INSECURE_STAFF_COOKIE` as `1` or `0`); a flag beats the variable, which beats the default. The secrets are environment only:
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `CHATWARDEN_SECRET` | yes | The kit's hashing secret, 32 or more characters. No default in service mode: a missing one is exit 2. Changing it makes every returning player a new person. |
 | `CHATWARDEN_SERVICE_KEYS` | yes | The service keys above. |
-| `CHATWARDEN_ADMIN_TOKEN` | no | The staff sign-in (the init starter's shared token: header `x-admin-token` or the cookie the sign-in form sets; role `owner`, actor `admin`), 24 or more characters and not equal to a service key. Unset: every staff route is 401 and the hub page is not served. |
+| `CHATWARDEN_ADMIN_TOKEN` | no | The staff sign-in (the init starter's shared token: header `x-admin-token` or the cookie the sign-in form sets; role `owner`, actor `admin`), 24 or more characters and not equal to a service key. Unset: every staff route is 401 and the hub page is not served. A wrong token (header or form) counts against its address: past 20 a minute a further wrong one is refused 429 `rate_limited` at once, and a right token always passes, so make the token long and random (`openssl rand -base64 32`). The sign-in cookie is `HttpOnly`, `SameSite=Strict` and `Secure` whatever `NODE_ENV` says (the hub is reached through a TLS proxy); Chrome and Firefox accept it on `http://127.0.0.1` too, and for any other plain-http local use set `--insecure-staff-cookie` (`CHATWARDEN_INSECURE_STAFF_COOKIE=1`), which only drops `Secure`. |
 | `CHATWARDEN_AUTH_MODULE` | no | A path to an ES module whose default export is `{ authorize(req) }`, your own staff auth (as `adminRoutes` takes it). Beats the token. The only place `serve` runs your code. |
 | `CHATWARDEN_PROCESSES` | no | How many service processes you run (default 1). Above 1 without `--shared-pacing` the handshake warns `pacing_per_process`. |
 

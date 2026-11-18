@@ -4,13 +4,20 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import type { Authenticate } from '../auth.js';
+import { HttpError } from '../errors.js';
+import { checkLimit } from '../limiter.js';
+import type { NamesRateLimit } from '../limiter.js';
 import type { KitRequest } from '../types.js';
+import { FailureThrottle } from './auth.js';
+import { peerAddress } from './node.js';
 
 /** The staff token is at least this long, or it protects nothing. */
 export const MIN_TOKEN_LENGTH = 24;
 /** The cookie the sign-in form sets. It holds an HMAC of the token, never the token. */
 export const STAFF_COOKIE = 'chatwarden_staff';
 const FORM_MAX = 2048;
+/** Wrong staff tokens an address may present in a minute before further wrong ones are refused at once. A right token always passes. */
+const STAFF_FAILURES: NamesRateLimit = { max: 20, windowMs: 60_000 };
 
 /** Equal text without leaking where it differs: both sides are hashed to the same length first. */
 function sameText(given: unknown, expected: string): boolean {
@@ -34,22 +41,47 @@ function cookieValue(cookies: string | undefined, name: string): string | undefi
 
 export interface TokenStaff {
   authorize: Authenticate;
-  /** The Set-Cookie value when the token is right, else null. */
-  signIn(given: unknown): string | null;
+  /** The Set-Cookie value when the token is right; else `ok: false` with the wait in ms when this address is over its failure limit (0 when it is just wrong). */
+  signIn(given: unknown, address?: string): { ok: true; cookie: string } | { ok: false; waitMs: number };
+  /** How many addresses the failure throttle holds (for tests). */
+  throttled(): number;
 }
 
-/** The starter's shared-token staff sign-in: the header `x-admin-token`, or the cookie `signIn` sets. A wrong header is not rescued by a cookie. */
-export function tokenStaff(token: string, secret: string, secure: boolean): TokenStaff {
+export interface TokenStaffOptions {
+  now?: () => number;
+  /** Wrong tokens per window per address before further wrong ones are refused (default 20 a minute). */
+  failureLimit?: NamesRateLimit;
+}
+
+/**
+ * The shared-token staff sign-in: the header `x-admin-token`, or the cookie `signIn` sets (`Secure` unless `secure` is false). A wrong header is not rescued by a cookie. Wrong tokens (header or form) are
+ * counted per address; past the limit a further WRONG one is refused `rate_limited` at once, and a right token always passes, so one stale client behind a shared address cannot lock staff out. A request
+ * with no token, or only a cookie, is not a failure.
+ */
+export function tokenStaff(token: string, secret: string, secure: boolean, options: TokenStaffOptions = {}): TokenStaff {
+  const now = options.now ?? Date.now;
+  const throttle = new FailureThrottle(checkLimit(options.failureLimit, STAFF_FAILURES, 'staff sign-in failure limit'));
   const cookieFor = (): string => createHmac('sha256', secret).update(token).digest('hex');
   return {
+    throttled: () => throttle.size(),
     authorize(req) {
       const given = req.headers['x-admin-token'];
-      if (given !== undefined) return sameText(given, token) ? { actor: 'admin', role: 'owner' } : null;
+      if (given !== undefined) {
+        if (sameText(given, token)) return { actor: 'admin', role: 'owner' };
+        const address = req.remoteAddress ?? '';
+        const wait = throttle.blockedFor(address, now());
+        if (wait > 0) throw new HttpError('rate_limited', { 'retry-after': String(Math.max(1, Math.ceil(wait / 1000))) });
+        throttle.record(address, now());
+        return null;
+      }
       return sameText(cookieValue(req.headers.cookie, STAFF_COOKIE), cookieFor()) ? { actor: 'admin', role: 'owner' } : null;
     },
-    signIn(given) {
-      if (!sameText(given, token)) return null;
-      return `${STAFF_COOKIE}=${cookieFor()}; HttpOnly; SameSite=Strict; Path=/${secure ? '; Secure' : ''}`;
+    signIn(given, address = '') {
+      if (sameText(given, token)) return { ok: true, cookie: `${STAFF_COOKIE}=${cookieFor()}; HttpOnly; SameSite=Strict; Path=/${secure ? '; Secure' : ''}` };
+      const wait = throttle.blockedFor(address, now());
+      if (wait > 0) return { ok: false, waitMs: wait };
+      throttle.record(address, now());
+      return { ok: false, waitMs: 0 };
     },
   };
 }
@@ -126,11 +158,21 @@ async function readForm(request: Request): Promise<string | null> {
  */
 export function hubHandler(options: { authorize: Authenticate; staff?: TokenStaff; script: () => string | null }): (request: Request) => Promise<Response | null> {
   const page = (status: number, csp: string, body: string): Response => new Response(body, { status, headers: pageHeaders(csp) });
+  const throttledPage = (retryAfter: string | undefined): Response =>
+    new Response(signInPage('Too many wrong tries from this address. Wait a little and try again.'), { status: 429, headers: { ...pageHeaders(SIGN_IN_CSP), 'retry-after': retryAfter ?? '60' } });
   return async (request) => {
     const path = new URL(request.url).pathname;
     if (path !== '/mod' && !path.startsWith('/mod/')) return null;
-    const kit: KitRequest = { method: request.method, path, query: {}, headers: headersOf(request), body: undefined };
-    const signedIn = (await options.authorize(kit)) !== null;
+    const address = peerAddress(request);
+    const kit: KitRequest = { method: request.method, path, query: {}, headers: headersOf(request), body: undefined, ...(address === undefined ? {} : { remoteAddress: address }) };
+    let signedIn: boolean;
+    try {
+      signedIn = (await options.authorize(kit)) !== null;
+    } catch (err) {
+      // Too many wrong tokens from this address (the staff throttle): a page that says so. Anything else is not ours to hide.
+      if (!(err instanceof HttpError) || err.code !== 'rate_limited') throw err;
+      return throttledPage(err.headers?.['retry-after']);
+    }
     if (path === '/mod' && request.method === 'GET') return signedIn ? page(200, HUB_CSP, hubPage) : page(401, SIGN_IN_CSP, signInPage(''));
     if (path === '/mod/hub-element.js' && request.method === 'GET') {
       const plain = { 'cache-control': 'no-store', 'content-type': 'text/plain; charset=utf-8' };
@@ -145,9 +187,9 @@ export function hubHandler(options: { authorize: Authenticate; staff?: TokenStaf
     }
     if (path === '/mod/login' && request.method === 'POST' && options.staff !== undefined) {
       const form = (request.headers.get('content-type') ?? '').startsWith('application/x-www-form-urlencoded') ? await readForm(request) : null;
-      const cookie = options.staff.signIn(form === null ? undefined : new URLSearchParams(form).get('token'));
-      if (cookie === null) return page(401, SIGN_IN_CSP, signInPage('That token was not accepted.'));
-      return new Response(null, { status: 303, headers: { location: '/mod', 'set-cookie': cookie, 'cache-control': 'no-store' } });
+      const answer = options.staff.signIn(form === null ? undefined : new URLSearchParams(form).get('token'), address);
+      if (!answer.ok) return answer.waitMs > 0 ? throttledPage(String(Math.max(1, Math.ceil(answer.waitMs / 1000)))) : page(401, SIGN_IN_CSP, signInPage('That token was not accepted.'));
+      return new Response(null, { status: 303, headers: { location: '/mod', 'set-cookie': answer.cookie, 'cache-control': 'no-store' } });
     }
     return Response.json({ error: 'not_found' }, { status: 404, headers: { 'cache-control': 'no-store' } });
   };

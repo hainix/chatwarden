@@ -97,6 +97,7 @@ export const SERVE_OPTIONS: readonly ServeOptionSpec[] = [
   { name: 'terms-file', key: 'termsFile', type: 'string', env: 'CHATWARDEN_TERMS_FILE', help: 'Your term pack, a JSON file (else the test words)' },
   { name: 'hub', key: 'hub', type: 'string', values: ['element', 'none'], env: 'CHATWARDEN_HUB', default: 'element', help: 'Serve the moderator hub page' },
   { name: 'shared-pacing', key: 'sharedPacing', type: 'boolean', env: 'CHATWARDEN_SHARED_PACING', help: 'Keep the pacer state in the database' },
+  { name: 'insecure-staff-cookie', key: 'insecureStaffCookie', type: 'boolean', env: 'CHATWARDEN_INSECURE_STAFF_COOKIE', help: 'Staff cookie without Secure (local http only)' },
   { name: 'print-openapi', key: 'printOpenapi', type: 'boolean', help: 'Print the API description as JSON and exit' },
 ];
 
@@ -109,6 +110,7 @@ export interface ServeFlags {
   termsFile?: string;
   hub?: 'element' | 'none';
   sharedPacing?: boolean;
+  insecureStaffCookie?: boolean;
   printOpenapi: boolean;
 }
 

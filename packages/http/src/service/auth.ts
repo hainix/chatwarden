@@ -25,8 +25,8 @@ export function parseKeys(keys: unknown): string[] {
   return [...(keys as string[])];
 }
 
-/** Failures by address, in a bounded table: a fixed window from the first failure. Insertion order is window-start order, so the oldest is swept from the front. */
-class FailureThrottle {
+/** Failures by address (also the staff sign-in's), in a bounded table: a fixed window from the first failure. Insertion order is window-start order, so the oldest is swept from the front. */
+export class FailureThrottle {
   private readonly windows = new Map<string, { start: number; count: number }>();
   private readonly limit: NamesRateLimit;
   constructor(limit: NamesRateLimit) {
