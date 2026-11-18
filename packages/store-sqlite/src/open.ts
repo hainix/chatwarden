@@ -19,6 +19,43 @@ const VERSION_KEY = 'schema_version';
  */
 const BUSY_TIMEOUT_MS = 5000;
 
+/** How long to wait between two tries at switching to WAL while another connection holds the file. */
+const WAL_RETRY_STEP_MS = 50;
+
+/** SQLITE_BUSY: the code when the driver gives one, else the words SQLite uses ("database is locked"). */
+function isBusy(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const { errcode, message } = err as { errcode?: unknown; message?: unknown };
+  return errcode === 5 || (typeof message === 'string' && /database is locked|database is busy/i.test(message));
+}
+
+/** A pause that does not spin: `openStore` is synchronous, so this blocks the thread for `ms`. */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Put the connection's file in WAL mode. The mode persists in the file, so it is read first and the switch is skipped when the file is
+ * already WAL: after the first open no later open needs the lock. The switch itself can answer SQLITE_BUSY without going through the busy
+ * handler (two connections opening a fresh file at the same moment), so a busy answer is retried every 50 ms, for as long as the busy
+ * timeout; each retry reads the mode again, because the connection that won the race has made it WAL. Any other error is thrown at once.
+ */
+export function enableWal(db: DatabaseSync): void {
+  const limit = Number(db.prepare('PRAGMA busy_timeout').get()?.timeout ?? 0);
+  const started = Date.now();
+  for (;;) {
+    try {
+      const mode = String(db.prepare('PRAGMA journal_mode').get()?.journal_mode ?? '');
+      if (mode.toLowerCase() === 'wal') return;
+      db.exec('PRAGMA journal_mode = WAL');
+      return;
+    } catch (err) {
+      if (!isBusy(err) || Date.now() - started >= limit) throw err;
+      pause(WAL_RETRY_STEP_MS);
+    }
+  }
+}
+
 function checkMigrations(migrations: readonly Migration[]): void {
   let prev = 0;
   for (const m of migrations) {
@@ -85,7 +122,7 @@ export function openStore(opts: OpenOptions): SqliteStore {
     // The busy timeout first: switching to WAL takes locks, and two connections opening one file at the same moment (two processes, or two threads) would otherwise
     // fail the second with "database is locked" at open.
     if (Number(db.prepare('PRAGMA busy_timeout').get()?.timeout ?? 0) === 0) db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
-    if (ownsDb) db.exec('PRAGMA journal_mode = WAL');
+    if (ownsDb) enableWal(db);
 
     db.exec('CREATE TABLE IF NOT EXISTS kit_meta (key TEXT PRIMARY KEY, value TEXT)');
     const latest = migrations.at(-1)?.version ?? 0;
