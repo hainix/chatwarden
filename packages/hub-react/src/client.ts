@@ -42,6 +42,9 @@ import type {
   ListAppealsQuery,
   ListAuditQuery,
   InsightsView,
+  PersonLinksView,
+  RoomMode,
+  RoomRow,
   ListReportsQuery,
   ListSanctionsQuery,
   Me,
@@ -209,6 +212,23 @@ export interface HubClient {
    * @experimental
    */
   insights(days?: 7 | 30 | 90): Promise<InsightsView>;
+  /**
+   * `GET /rooms` (needs `rooms.read`): the rooms this server process knows (seated players, or a mode set), up to 500, the most seated first. No seat id and no handle.
+   * @experimental
+   */
+  rooms(): Promise<{ rooms: RoomRow[] }>;
+  /**
+   * `POST /rooms/:room/mode` (needs `rooms.manage`): put the room in `normal` (at once), `locked` or `emergency` (each ends by itself after `forMs`, 60 000 to 86 400 000, else the profile's default).
+   * Rejects with `invalid_mode`, `invalid_value` or `invalid_request` (400). A mode is never a sanction. @experimental
+   */
+  setRoomMode(room: string, mode: RoomMode, forMs?: number): Promise<{ mode: RoomMode; since: number | null; until: number | null }>;
+  /**
+   * `POST /rooms/:room/lines/:line/retract` (needs `rooms.manage`): take a delivered line back for everyone, keeping it as evidence; `allFromAuthor` takes back every delivered line of its author still in the
+   * evidence buffer too. Answers how many were taken back; 404 `not_found` for a line that is too old or gone. Not a sanction. @experimental
+   */
+  retractLine(room: string, line: string, options?: { allFromAuthor?: boolean }): Promise<{ count: number }>;
+  /** `GET /people/:ref/links` (needs `history.read`, audited): how many accounts and devices the kit has linked to the person, as counts only. @experimental */
+  personLinks(ref: string): Promise<PersonLinksView>;
   /**
    * `POST /reports/dismiss-open` (needs `reports.decide.bulk`): dismiss every open report about one person, or from one reporter, as "nothing
    * wrong here" (the kit's standard reason; a sweep never takes one). Retrying is safe: a closed report counts as `replayed`.
@@ -421,6 +441,10 @@ export function createHubClient(transport: Transport): HubClient {
     escalate: (id, input) => post<ReportMarkResult>(`/reports/${enc(id)}/escalate`, { to: input.to, ...(input.note === undefined ? {} : { note: input.note }) }),
     clearEscalation: (id) => call<ReportMarkResult>({ method: 'DELETE', path: `/reports/${enc(id)}/escalate` }),
     insights: (days) => get<InsightsView>('/insights', q({ days })),
+    rooms: () => get<{ rooms: RoomRow[] }>('/rooms'),
+    setRoomMode: (room, mode, forMs) => post(`/rooms/${enc(room)}/mode`, { mode, ...(forMs === undefined ? {} : { forMs }) }),
+    retractLine: (room, line, options = {}) => post<{ count: number }>(`/rooms/${enc(room)}/lines/${enc(line)}/retract`, options.allFromAuthor === true ? { allFromAuthor: true } : undefined),
+    personLinks: (ref) => get<PersonLinksView>(`/people/${enc(ref)}/links`),
     dismissOpen: (input, options = {}) => post<DismissOpenResult>('/reports/dismiss-open', input, options),
     readAgain: (id) => post<AiReadAgainResult>(`/reports/${enc(id)}/ai/read`, undefined),
     aiStatus: () => get<AiStatusView>('/ai/status'),

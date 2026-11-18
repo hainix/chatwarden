@@ -8,7 +8,8 @@ import type { HubWorld, WorldOptions } from './world.js';
 // a look by <name>, <time>" on the case with "Looked at"; one word on the queue row and one option in the filters; one line on Overview.
 // All of it behind `desk.workflow`; with it off the pages are what they were.
 
-const ON: WorldOptions = { overrides: { desk: { workflow: true, insights: true } } };
+// Room control is its own theme's menu items: it is kept out of the way here so these tests read the second look's.
+const ON: WorldOptions = { overrides: { desk: { workflow: true, insights: true } }, permissions: { 'rooms.manage': 'owner' } };
 const menuButton = (): HTMLElement => screen.getByRole('button', { name: 'More actions on this case' });
 const pane = (): HTMLElement => screen.getByRole('region', { name: 'Open cases' });
 const rows = (): HTMLElement[] => within(pane()).getAllByRole('listitem');
@@ -21,7 +22,7 @@ async function openCase(w: HubWorld, id: string, extra: Parameters<typeof render
 
 describe('with workflow off none of it renders', () => {
   it('the case menu offers only Mark as urgent, the tabs are the three it had, the row, the filters and Overview carry nothing', async () => {
-    const w = await hubWorld({ role: 'senior' });
+    const w = await hubWorld({ role: 'senior', permissions: { 'rooms.manage': 'owner' } });
     const f = await w.file({ target: 'Mallory', reason: 'spam' });
     const { user } = await openCase(w, f.id);
     await user.click(menuButton());

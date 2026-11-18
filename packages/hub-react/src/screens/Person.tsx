@@ -6,6 +6,7 @@ import { useHubData } from '../hooks.js';
 import { categoryLabel, groupName, kindLabel } from '../labels.js';
 import { LazyPersonAutomation, LazyPersonPrivacy, LazySignalLines } from '../lazyParts.js';
 import { LocalReveal, NameToggle, NameValue } from '../names.js';
+import { PersonMenu } from '../person/PersonMenu.js';
 import { Revoke } from '../person/Revoke.js';
 import { SanctionForm } from '../person/SanctionForm.js';
 import type { AppealSummary, SanctionGroupView, PersonHistory } from '../types.js';
@@ -88,6 +89,7 @@ export function Person({ person }: { person: string }) {
             {handle !== null && <PersonChip person={person} />}
             <NameToggle flagged={flagged} place="head" />
           </div>
+          <PersonMenu person={person} />
           {canApply && (
             <div className="cw-bar-actions">
               <button ref={sanctionButton} type="button" className="cw-btn cw-btn--primary" aria-expanded={form === 'sanction'} onClick={() => toggle('sanction')}>

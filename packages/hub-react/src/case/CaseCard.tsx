@@ -31,6 +31,8 @@ import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { Line } from './Transcript.js';
 import { AskedLine } from './AskedLine.js';
 import { BreakNote } from './BreakNote.js';
+import { EvidenceRow } from './EvidenceRow.js';
+import { SurgeLine } from './SurgeLine.js';
 import { HiddenExcerpt } from './HiddenExcerpt.js';
 import { CaseMenu } from './CaseMenu.js';
 import { UrgentStrip } from './UrgentStrip.js';
@@ -446,6 +448,8 @@ export function CaseCard() {
           <UrgentStrip />
           <AskedLine />
           <BreakNote />
+          <SurgeLine />
+          <EvidenceRow />
           <CommentsDisclosure />
           <ReporterWarning report={report} people={people} />
           <AiReadSlot read={c.aiRead} />

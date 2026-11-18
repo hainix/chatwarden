@@ -16,7 +16,7 @@ async function openCase(w: Awaited<ReturnType<typeof hubWorld>>, id: string, ext
 
 describe('CaseMenu', () => {
   it('renders nothing when the caller has no item: no button, no wrapper', async () => {
-    const w = await hubWorld({ permissions: { 'reports.urgent': 'owner' } });
+    const w = await hubWorld({ permissions: { 'reports.urgent': 'owner', 'rooms.manage': 'owner' } });
     const f = await w.file({ target: 'Calm', reason: 'spam' });
     const { container } = await openCase(w, f.id);
     expect(screen.queryByRole('button', { name: 'More actions on this case' })).toBeNull();
@@ -32,7 +32,7 @@ describe('CaseMenu', () => {
   });
 
   it('is a disclosure: collapsed by default, aria-expanded toggles, the items are in a labelled group', async () => {
-    const w = await hubWorld();
+    const w = await hubWorld({ permissions: { 'rooms.manage': 'owner' } });
     const f = await w.file({ target: 'Calm', reason: 'spam' });
     const { user } = await openCase(w, f.id);
     const button = menuButton();

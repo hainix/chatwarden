@@ -26,6 +26,8 @@ import type {
   GapRow,
   GuideSection,
   InsightsResult,
+  PersonLinks,
+  RoomMode,
   PolicyLayer,
   PolicyPreview,
   PolicyLimits,
@@ -85,6 +87,17 @@ export type PolicyState = Omit<KitPolicyState, 'limits'> & { limits?: PolicyLimi
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 /** `GET /insights`: the team's numbers over 7, 30 or 90 days: counts and times only, no person and no staff member. @experimental */
 export type InsightsView = InsightsResult;
+/** One room `GET /rooms` lists: its id, the game's tags, how many players are seated and its mode now (`until`: when a mode other than normal ends). No seat id, no handle. @experimental */
+export interface RoomRow {
+  roomId: string;
+  tags: Record<string, string>;
+  seated: number;
+  mode: RoomMode;
+  until: number | null;
+}
+/** `GET /people/:ref/links`: counts only, never an id, a key or an address. @experimental */
+export type PersonLinksView = PersonLinks;
+export type { RoomMode };
 export type { Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role };
 
 /**

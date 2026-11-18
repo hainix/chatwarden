@@ -6,6 +6,7 @@ import { onPage } from '../dom.js';
 import { errorText } from '../labels.js';
 import { useFeatures } from '../features.js';
 import { AskForm } from './AskedLine.js';
+import { RoomModeForm } from './RoomActions.js';
 import { useCase } from './CaseContext.js';
 import { useUrgentActions } from './useUrgent.js';
 
@@ -49,6 +50,13 @@ export function useCaseMenuItems(): CaseMenuItem[] {
     const escalate = t('hub.desk.menu.escalate');
     items.push({ id: 'ask', label: ask, panel: (done) => <AskForm to="senior" label={ask} done={done} /> });
     items.push({ id: 'escalate', label: escalate, panel: (done) => <AskForm to="owner" label={escalate} done={done} /> });
+  }
+  // Room control (design 9): for the room the report is in, for a role that may manage rooms. A mode ends by itself and is never a sanction.
+  if (can('rooms.manage') && report.roomId !== '') {
+    const lock = t('hub.rooms.menu.lock');
+    const emergency = t('hub.rooms.menu.emergency');
+    items.push({ id: 'lock', label: lock, panel: (done) => <RoomModeForm room={report.roomId} mode="locked" done={done} /> });
+    items.push({ id: 'emergency', label: emergency, panel: (done) => <RoomModeForm room={report.roomId} mode="emergency" done={done} /> });
   }
   return items;
 }

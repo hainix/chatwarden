@@ -4429,3 +4429,83 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+
+/* Rooms (0.2.0): the panel's list, a case's surge and evidence lines, a line's own menu, and the Person page's menu. Words and plain tokens: no colour of their own. */
+.cw-hub .cw-rooms-list {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-room {
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-room p {
+  margin: 0;
+}
+.cw-hub .cw-room-modes {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-room-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-room-confirm {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+}
+.cw-hub .cw-surge,
+.cw-hub .cw-evidence {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-surge p,
+.cw-hub .cw-evidence {
+  margin: 0;
+}
+.cw-hub .cw-line-menu {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-line-menu-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-person-menu {
+  display: contents;
+  min-width: 0;
+}
+.cw-hub .cw-person-menu-panel {
+  display: grid;
+  flex-basis: 100%;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-person-links p {
+  margin: 0;
+}

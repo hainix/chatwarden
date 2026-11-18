@@ -106,6 +106,10 @@ export interface ExcerptLine {
   person: string | null;
   /** The line the report was about. */
   reported: boolean;
+  /** The line was taken back for everyone (the text stays as evidence). */
+  retracted: boolean;
+  /** The server says a moderator may still take it back (delivered, in the room's evidence buffer, not yet taken back). */
+  removable: boolean;
 }
 
 export function excerptLines(report: FlaggedReport): ExcerptLine[] {
@@ -120,6 +124,8 @@ export function excerptLines(report: FlaggedReport): ExcerptLine[] {
     audience: l.audience === null ? null : [...l.audience],
     person: writerOf(report, l.p),
     reported: report.lineId !== null && l.lineId === report.lineId,
+    retracted: l.retracted === true,
+    removable: l.removable === true,
   }));
 }
 

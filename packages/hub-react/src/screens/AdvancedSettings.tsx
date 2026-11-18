@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { toHubError } from '../client.js';
 import { useHub } from '../context.js';
-import { LazyAppealSettings, LazyDeskSettings, LazyFilterSettings, LazyNameSettings, LazyPaceSettings, LazyPrivacySettings, LazySafetySettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
+import { LazyAppealSettings, LazyDeskSettings, LazyFilterSettings, LazyNameSettings, LazyRoomsSettings, LazyPaceSettings, LazyPrivacySettings, LazySafetySettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
 import { usePolicy } from '../policyHooks.js';
 import { ErrorBlock, Fetched } from '../ui.js';
 import { YourView } from './YourView.js';
@@ -11,7 +11,7 @@ import { YourView } from './YourView.js';
 
 /** The Advanced screen: its panels, one after the other. */
 export function AdvancedSettingsScreen() {
-  const { t, me } = useHub();
+  const { t, me, can } = useHub();
   const policy = usePolicy();
   // A panel's own code could not be fetched (offline, a deploy replaced the file): the panels are the whole page, so say so, with Try again.
   const [failed, setFailed] = useState(false);
@@ -45,6 +45,8 @@ export function AdvancedSettingsScreen() {
               <LazyFilterSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               <LazySafetySettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               <LazyDeskSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
+              {/* The rooms this server knows, for a role that may read them: a lock or emergency mode per room. */}
+              {can('rooms.read') && <LazyRoomsSettings onFailed={() => setFailed(true)} />}
               {/* The owner's door to a person's data (privacy requests): nobody else is offered it. */}
               {me.role === 'owner' && <LazyPrivacySettings onFailed={() => setFailed(true)} />}
             </>

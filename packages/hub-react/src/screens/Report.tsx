@@ -3,6 +3,8 @@ import type { KeyboardEvent } from 'react';
 import { AiReadSlot } from '../case/AiRead.js';
 import { AskedLine } from '../case/AskedLine.js';
 import { BreakNote } from '../case/BreakNote.js';
+import { EvidenceRow } from '../case/EvidenceRow.js';
+import { SurgeLine } from '../case/SurgeLine.js';
 import { HiddenExcerpt } from '../case/HiddenExcerpt.js';
 import { CaseMenu } from '../case/CaseMenu.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
@@ -64,6 +66,7 @@ function Header({ detail }: { detail: ReportDetail }) {
       <UrgentStrip />
       <AskedLine />
       <BreakNote />
+      <SurgeLine />
       {showHold && <LazyCaseHold reportId={report.id} hold={held} canHold={can('legal.hold')} canRelease={me.role === 'owner'} onChanged={read.reload} />}
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
         <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>
@@ -77,6 +80,7 @@ function Header({ detail }: { detail: ReportDetail }) {
           {t('hub.report.back')}
         </Link>
       </div>
+      <EvidenceRow />
     </header>
   );
 }
