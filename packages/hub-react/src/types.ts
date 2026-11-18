@@ -351,8 +351,8 @@ export interface DecideInput {
   actions: DecisionAction[];
   evidence?: string;
   /**
-   * What the decision is about, the moderator's own word over the report's (0.2.2): `chat` accepts the chat lines a report about play or a name refuses; `null` is neutral.
-   * Not the bad-faith `evidence` note above. An older server answers 400.
+   * What the decision is about, the moderator's own word over the report's (0.2.2): `chat` says the lines shown are chat; `null` is neutral. Not the bad-faith `evidence` note above.
+   * A 0.2.1 server ignores the key (the notice then reads as the report's own kind), so a newer hub on an older server loses only this override.
    */
   evidenceKind?: EvidenceKind | null;
   /** A senior or owner moving another moderator's live claim to themselves (audited by the server). */

@@ -140,8 +140,8 @@ export interface DecisionForm {
    */
   rename: { rule: string } | null;
   /**
-   * The moderator's own word on what the decision is about, over the report's (0.2.2): set by "Add a line" on a report about play or a name, so the lines they
-   * add are accepted. Absent unless they chose it; sent as `evidenceKind`. Not the bad-faith `evidence` note above.
+   * The moderator's own word on what the decision is about, over the report's (0.2.2): set by "Add a line" on a report about play or a name, so the lines they add are shown as
+   * chat. Absent unless they chose it. A UI flag until a line is chosen: it is sent (as `evidenceKind`) only when an action carries a line. Not the bad-faith `evidence` note above.
    */
   evidenceKind?: EvidenceKind;
 }
@@ -195,7 +195,8 @@ export function toInput(form: DecisionForm, evidence?: EvidenceKind): DecideInpu
     const uncovered = d.rule === 'uncovered';
     const action: DecisionAction = { subject: d.person, kind: choice.kind, durationMs: choice.durationMs, rule: uncovered ? 'uncovered' : Number(d.rule) };
     if (uncovered) action.gapNote = d.gapNote.trim();
-    // What the server will read this action as: the moderator's own word, else the report's kind, else the rule's (CR 5 and 6 play, CR 7 name). It refuses a chat line for play and name.
+    // What the server will read this action as: the moderator's own word, else the report's kind, else the rule's (CR 5 and 6 play, CR 7 name). A 0.2.2 server takes a line anyway, but a
+    // report about play or a name attaches none unless the moderator asks (a hub of 0.2.1 sent its default lines and that is what the server now tolerates).
     const kind = form.evidenceKind ?? evidence ?? (uncovered ? undefined : evidenceOfRule(Number(d.rule)));
     if (choice.kind !== 'note' && d.lineIds.length > 0 && kind !== 'play' && kind !== 'name') action.lineIds = [...d.lineIds];
     return action;
@@ -204,7 +205,8 @@ export function toInput(form: DecisionForm, evidence?: EvidenceKind): DecideInpu
   const input: DecideInput = { verdict: serverVerdict(form), actions };
   if (reason !== '' || !isPlainDismissal(form)) input.reason = reason;
   if (form.verdict === 'bad_faith') input.evidence = form.evidence.trim();
-  if (form.evidenceKind !== undefined) input.evidenceKind = form.evidenceKind;
+  // "Chat" is the moderator's word only when a line goes with it: "Add a line" alone, with none chosen, leaves the report's own kind (and a warning for play does not read as chat).
+  if (form.evidenceKind !== undefined && (form.evidenceKind !== 'chat' || actions.some((a) => a.lineIds !== undefined && a.lineIds.length > 0))) input.evidenceKind = form.evidenceKind;
   if (form.rename !== null) input.rename = { rule: Number(form.rename.rule) };
   return input;
 }

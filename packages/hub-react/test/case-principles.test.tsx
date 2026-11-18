@@ -197,3 +197,32 @@ describe('who gets it, and when', () => {
     expect(document.querySelector('.cw-case-principles')).toBeNull();
   });
 });
+
+describe('review R2 M2: a report about play or a name opens at the level the ladder reads', () => {
+  const HELLO = [{ who: 'target' as const, text: 'Hello' }];
+  it('an AFK report shows the rude principle, not the hostile one', async () => {
+    const w = await world();
+    const f = await w.fileRich({ lines: HELLO, reason: 'afk', cite: 1 });
+    const { user } = await open(w, f.id);
+    await screen.findByRole('button', { name: TITLE }, WAIT);
+    await user.click(disclosure());
+    expect(within(body()).getByText(tierOf('rude').title)).toBeInTheDocument();
+    expect(within(body()).queryByText(tierOf('hostile').title)).toBeNull();
+  });
+  it('a name report shows the rude principle too', async () => {
+    const w = await world();
+    const f = await w.fileRich({ lines: HELLO, reason: 'name', cite: 7 });
+    const { user } = await open(w, f.id);
+    await screen.findByRole('button', { name: TITLE }, WAIT);
+    await user.click(disclosure());
+    expect(within(body()).getByText(tierOf('rude').title)).toBeInTheDocument();
+  });
+  it('a chat report is as it was: the hostile principle', async () => {
+    const w = await world();
+    const f = await w.fileRich({ lines: HELLO, reason: 'harassment', cite: 2 });
+    const { user } = await open(w, f.id);
+    await screen.findByRole('button', { name: TITLE }, WAIT);
+    await user.click(disclosure());
+    expect(within(body()).getByText(tierOf('hostile').title)).toBeInTheDocument();
+  });
+});

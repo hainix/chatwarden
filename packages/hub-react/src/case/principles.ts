@@ -1,4 +1,4 @@
-import type { GuidelineTier } from '@chatwarden/core';
+import type { EvidenceKind, GuidelineTier } from '@chatwarden/core';
 import type { ConductLevel, TeamNote } from '../types.js';
 
 // What the case's "Principles for this case" disclosure shows, decided here without a page: which principle matches the report's conduct level, which team notes belong to the case's
@@ -20,7 +20,10 @@ export function notesForRule(notes: readonly TeamNote[], rule: number | 'uncover
   return notes.filter((n) => n.rule === rule);
 }
 
-/** The level a case is read at: the one the moderator picked, else the AI read's, else `hostile` (the ladder's own default). */
-export function caseLevel(picked: ConductLevel | null, aiSeverity: ConductLevel | undefined): ConductLevel {
-  return picked ?? aiSeverity ?? 'hostile';
+/**
+ * The level a case is read at: the one the moderator picked, else the AI read's, else the ladder's own default: `hostile` for chat, and `rude` for a report about play or a name (the
+ * ladder reads a null level as rude there: a first AFK is not hostile conduct).
+ */
+export function caseLevel(picked: ConductLevel | null, aiSeverity: ConductLevel | undefined, evidence?: EvidenceKind): ConductLevel {
+  return picked ?? aiSeverity ?? (evidence === 'play' || evidence === 'name' ? 'rude' : 'hostile');
 }

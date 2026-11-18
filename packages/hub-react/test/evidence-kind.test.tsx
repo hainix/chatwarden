@@ -88,6 +88,40 @@ describe('the Moxgate repro: an AFK report in the full editor', () => {
   });
 });
 
+describe('review R2 I2: "Add a line" alone does not turn the decision into a chat one', () => {
+  it('Add a line, no line ticked: the body has no evidenceKind and no lineIds, and the player gets a notice about play', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich({ lines: HELLO, reason: 'afk', cite: 1 });
+    const { user } = await openDetailed(w, f.id);
+    await user.click(within(panel()).getByRole('button', { name: 'Change' }));
+    const action = within(panel()).getByRole('group', { name: 'Action 1' });
+    await user.click(within(action).getByRole('button', { name: 'Add a line' }));
+    expect(within(action).getByRole('group', { name: 'Show the player these lines' })).toBeInTheDocument();
+    await decideFair(user);
+    const body = (decides(w)[0]?.body) as { evidenceKind?: string; actions: Array<Record<string, unknown>> };
+    expect(body).not.toHaveProperty('evidenceKind');
+    expect(body.actions[0]).not.toHaveProperty('lineIds');
+    const [n] = w.cw.notices.pending({ clientKey: 'key-target-Mallory' });
+    expect(n).toMatchObject({ kind: 'warning', evidence: 'play', excerpt: [] });
+  });
+  it('Add a line, tick one, then untick it: the same as none', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich({ lines: HELLO, reason: 'afk', cite: 1 });
+    const { user } = await openDetailed(w, f.id);
+    await user.click(within(panel()).getByRole('button', { name: 'Change' }));
+    const action = within(panel()).getByRole('group', { name: 'Action 1' });
+    await user.click(within(action).getByRole('button', { name: 'Add a line' }));
+    const box = within(within(action).getByRole('group', { name: 'Show the player these lines' })).getAllByRole('checkbox')[0] as HTMLElement;
+    await user.click(box);
+    await user.click(box);
+    await decideFair(user);
+    const body = (decides(w)[0]?.body) as { evidenceKind?: string; actions: Array<Record<string, unknown>> };
+    expect(body).not.toHaveProperty('evidenceKind');
+    expect(body.actions[0]).not.toHaveProperty('lineIds');
+    expect(w.cw.notices.pending({ clientKey: 'key-target-Mallory' })[0]).toMatchObject({ evidence: 'play' });
+  });
+});
+
 describe('the Simple card (S5, C1)', () => {
   const open = async (w: HubWorld, id: string) => {
     const r = renderHub(w, { path: `/reports/${id}`, mode: 'simple', stay: true });

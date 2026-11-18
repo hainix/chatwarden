@@ -6,7 +6,7 @@ import { useCase } from './CaseContext.js';
 import { caseLevel, notesForRule, tierForLevel } from './principles.js';
 
 // "Principles for this case": in the Detailed case pane, under the facts row, one collapsed disclosure showing the principle that matches the case's conduct level (the moderator's pick, else the
-// AI read's, else hostile) in the team's own words, and the team notes tied to the case's Community Rule. Plain text, never markup. Only for a role that may read the policy; the policy is
+// AI read's, else the ladder's default: hostile for chat, rude for play and names) in the team's own words, and the team notes tied to the case's Community Rule. Plain text, never markup. Only for a role that may read the policy; the policy is
 // the one the session already keeps. A failed read shows nothing: the case never waits on it.
 
 export function CasePrinciples({ rule }: { rule: number | 'uncovered' }) {
@@ -18,7 +18,7 @@ export function CasePrinciples({ rule }: { rule: number | 'uncovered' }) {
   const read = useHubData<PolicyDocs | null>(allowed ? 'case:principles' : 'case:principles:idle', () => (allowed ? session.policy() : Promise.resolve(null)));
   const docs = read.data;
   if (!allowed || docs == null) return null;
-  const level = caseLevel(draft.level, aiRead?.severity);
+  const level = caseLevel(draft.level, aiRead?.severity, draft.evidence);
   const tier = tierForLevel(docs.profile.guidelines, level);
   const notes = notesForRule(docs.profile.teamNotes ?? [], rule, docs.rules);
   return (

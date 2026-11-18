@@ -49,7 +49,9 @@ export function decideOp(form: DecisionForm, o: { target: string; reporter: stri
   const rename = !dismissal && form.rename !== null && /^[1-9]\d*$/.test(form.rename.rule) ? { rule: Number(form.rename.rule) } : null;
   // What the notice is about, as the server will word it: the moderator's own word, else the report's, else the rule's (CR 5 and 6 play, CR 7 name).
   const first = actions[0]?.rule;
-  const evidenceKind = form.evidenceKind ?? o.evidence ?? (typeof first === 'number' ? evidenceOfRule(first) : undefined);
+  // The moderator's "chat" counts only when a line goes with it (the request carries it only then, see `toInput`).
+  const own = form.evidenceKind === 'chat' && !actions.some((a) => a.lines.length > 0) ? undefined : form.evidenceKind;
+  const evidenceKind = own ?? o.evidence ?? (typeof first === 'number' ? evidenceOfRule(first) : undefined);
   return { op: 'decide', verdict: serverVerdict(form), target: o.target, reporter: o.reporter, actions, rename, ...(evidenceKind === undefined ? {} : { evidenceKind }) };
 }
 

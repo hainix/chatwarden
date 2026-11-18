@@ -65,6 +65,17 @@ describe('caseLevel', () => {
     expect(caseLevel(null, undefined)).toBe('hostile');
     expect(caseLevel('banter', undefined)).toBe('banter');
   });
+  it('a report about play or a name with nothing picked reads rude, as the ladder does (review R2 M2)', () => {
+    expect(caseLevel(null, undefined, 'play')).toBe('rude');
+    expect(caseLevel(null, undefined, 'name')).toBe('rude');
+    expect(caseLevel(null, undefined, 'chat')).toBe('hostile');
+    expect(caseLevel(null, undefined, undefined)).toBe('hostile');
+  });
+  it('what the moderator picked, or the AI read, still wins over the kind', () => {
+    expect(caseLevel('severe', undefined, 'play')).toBe('severe');
+    expect(caseLevel('banter', undefined, 'name')).toBe('banter');
+    expect(caseLevel(null, 'hostile', 'play')).toBe('hostile');
+  });
 });
 
 describe('ladderSummary', () => {

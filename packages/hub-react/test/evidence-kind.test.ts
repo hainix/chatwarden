@@ -7,6 +7,7 @@ import type { DecisionForm, Draft, ValidationContext } from '../src/decision.js'
 import { en } from '../src/i18n.js';
 import { es } from '../src/locales/es.js';
 import { pt } from '../src/locales/pt.js';
+import { decideOp } from '../src/preview/ops.js';
 import { reportingDirty, reportingDraftOf, reportingLayer } from '../src/policy/reporting.js';
 
 // Evidence kind in the hub model (0.2.2, audit P3, S2, S3, P5, C2): no chat line is attached unless the evidence is chat, the decision body drops lines a
@@ -180,5 +181,67 @@ describe('the reasons editor carries the kind (S11)', () => {
     expect(byId['hate']?.evidence).toBeNull();
     expect(byId['name']?.evidence).toBe('name');
     expect(byId['other']?.evidence).toBeNull();
+  });
+});
+
+describe('review R2 I2: "chat" is the decision\u2019s word only when a line goes with it', () => {
+  const base = (lineIds: string[], what = 'warning:null'): DecisionForm => ({
+    ...emptyForm(),
+    verdict: 'fair',
+    reason: 'because',
+    evidenceKind: 'chat',
+    actions: [{ ...newDraft('a1', T, 6), what, lineIds }],
+  });
+  const o = { target: T, reporter: 'R', lineOf: (id: string) => ({ text: `line ${id}`, day: '2027-01-15' }), order: ['t1', 't2'] };
+  it('Add a line and none chosen: no evidenceKind is sent', () => {
+    const input = toInput(base([]), 'play');
+    expect(input).not.toHaveProperty('evidenceKind');
+    expect(input.actions[0]).not.toHaveProperty('lineIds');
+  });
+  it('Add a line and one chosen: chat and the line are sent', () => {
+    const input = toInput(base(['t1']), 'play');
+    expect(input.evidenceKind).toBe('chat');
+    expect(input.actions[0]?.lineIds).toEqual(['t1']);
+  });
+  it('a line only on a note does not count (a note carries none)', () => {
+    expect(toInput(base(['t1'], 'note:null'), 'play')).not.toHaveProperty('evidenceKind');
+  });
+  it('two actions, a line on the second: chat is sent', () => {
+    const f = base([]);
+    f.actions = [...f.actions, { ...newDraft('a2', T, 6), what: 'warning:null', lineIds: ['t2'] }];
+    expect(toInput(f, 'play').evidenceKind).toBe('chat');
+  });
+  it('the preview follows: no kind with no line, chat with one', () => {
+    expect(decideOp(base([]), { ...o, evidence: 'play' })).toMatchObject({ evidenceKind: 'play' });
+    expect(decideOp(base(['t1']), { ...o, evidence: 'play' })).toMatchObject({ evidenceKind: 'chat' });
+    expect(decideOp(base([]), o)).toMatchObject({ evidenceKind: 'play' });
+  });
+  it('a chat report is as it was: no override, the lines go', () => {
+    const f: DecisionForm = { ...base(['t1']) };
+    delete f.evidenceKind;
+    const input = toInput(f, 'chat');
+    expect(input).not.toHaveProperty('evidenceKind');
+    expect(input.actions[0]?.lineIds).toEqual(['t1']);
+  });
+});
+
+describe('review R2 M5: the level hint for a report about play gives examples of each level', () => {
+  const play = en['hub.decide.suggest.level.hint.play'];
+  it('english names a gameplay example for each level', () => {
+    expect(play).toMatch(/slow turn|short pause/);
+    expect(play).toMatch(/leaving a match once/);
+    expect(play).toMatch(/stalling|leaving match after match/);
+    expect(play).toMatch(/cheat|exploit/);
+  });
+  it.each([
+    ['es', es],
+    ['pt', pt],
+  ] as const)('%s has the same key with the longer text, not the old short one', (_name, cat) => {
+    const text = (cat as Record<string, string>)['hub.decide.suggest.level.hint.play'] ?? '';
+    expect(text.length).toBeGreaterThan(play.length * 0.7);
+    expect(text).not.toBe(play);
+  });
+  it('every example is a play example, not a chat insult', () => {
+    expect(play).not.toMatch(/insult|slur/i);
   });
 });
