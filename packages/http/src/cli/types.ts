@@ -8,6 +8,8 @@ export type ChatChoice = 'none' | 'box';
 export type ChatTransportChoice = 'sse' | 'socketio';
 export type HubChoice = 'element' | 'react' | 'none';
 export type ProfileChoice = 'relaxed' | 'standard' | 'strict';
+/** The kind of game: it picks the standard and, for a creator community, a team note (`init --game`). */
+export type GameChoice = 'competitive' | 'social' | 'kids' | 'creator';
 export type Lang = 'ts' | 'js';
 export type OnConflict = 'skip' | 'overwrite' | 'new';
 export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
@@ -21,6 +23,8 @@ export interface Answers {
   hub: HubChoice;
   discord: boolean;
   profile: ProfileChoice;
+  /** The kind of game, when one was given or answered; absent otherwise. */
+  game?: GameChoice;
   /** The URL prefix everything lives under, e.g. `/chatwarden`. */
   base: string;
   /** The folder the files are written to, relative to the project root, with `/` separators on every platform. */
@@ -33,6 +37,8 @@ export interface ServiceAnswers {
   service: true;
   store: Store;
   profile: ProfileChoice;
+  /** The kind of game, when one was given; absent otherwise. */
+  game?: GameChoice;
   dir: string;
 }
 

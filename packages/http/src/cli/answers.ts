@@ -1,7 +1,7 @@
 // From a parsed command line and what detection found to the resolved answers (design 5.1), and which questions a terminal run asks.
 import { OPTIONS, show } from './args.js';
 import type { Parsed } from './args.js';
-import type { Answers, Detected, Framework, HubChoice } from './types.js';
+import type { Answers, Detected, Framework, GameChoice, HubChoice, ProfileChoice } from './types.js';
 
 export type { Answers } from './types.js';
 
@@ -20,6 +20,15 @@ function detectedFramework(detected: Detected): Framework {
   if (detected.frameworks.includes('fastify')) return 'fastify';
   return 'express';
 }
+
+/**
+ * The standard each kind of game starts from. A copy of the core's `GAME_PRESET`: the CLI imports nothing from `@chatwarden/core` (a template is text), and a test
+ * (cli-game.test.ts) fails when the two differ.
+ */
+export const GAME_PRESETS: Readonly<Record<GameChoice, ProfileChoice>> = { competitive: 'relaxed', social: 'standard', kids: 'strict', creator: 'standard' };
+
+/** The team note a creator community starts with. A copy of the core's `CREATOR_TEAM_NOTE`, pinned by the same test. */
+export const CREATOR_TEAM_NOTE = 'Protect the creator and their guests from targeted abuse';
 
 const BASE_PATTERN = /^\/[A-Za-z0-9_/-]*$/;
 
@@ -89,14 +98,16 @@ export function resolveAnswers(parsed: Parsed, detected: Detected): Answers | Fa
     chatTransport: parsed.chatTransport ?? (chat === 'box' && detected.socketio ? 'socketio' : 'sse'),
     hub,
     discord: parsed.discord ?? false,
-    profile: parsed.profile ?? (defaultOf('profile') as Answers['profile']),
+    // --profile wins; else the standard the kind of game starts from; else the default.
+    profile: parsed.profile ?? (parsed.game === undefined ? (defaultOf('profile') as Answers['profile']) : GAME_PRESETS[parsed.game]),
+    ...(parsed.game === undefined ? {} : { game: parsed.game }),
     base,
     dir,
     lang: parsed.lang ?? (detected.ts ? 'ts' : 'js'),
   };
 }
 
-export type QuestionName = 'framework' | 'store' | 'chat' | 'chatTransport' | 'hub' | 'discord' | 'profile';
+export type QuestionName = 'game' | 'framework' | 'store' | 'chat' | 'chatTransport' | 'hub' | 'discord' | 'profile';
 
 /**
  * Whether a terminal run asks this question, given the answers known so far (flags, then earlier replies). A question is skipped when its
@@ -108,6 +119,9 @@ export function isAsked(name: QuestionName, given: Partial<Answers>, detected: D
   switch (name) {
     case 'framework':
       return !(detected.frameworks.length === 1 || detected.frameworks.includes('next'));
+    // The kind of game stands in for "Which standard?": once it is given or answered, the standard follows from it.
+    case 'profile':
+      return given.game === undefined;
     case 'chat':
     case 'hub':
       return given.framework !== 'none';

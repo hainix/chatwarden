@@ -1,12 +1,15 @@
 // `init --service` (design 3.5): the Docker recipe of the service API, as a self-contained folder: a Dockerfile, a compose file, the environment example, the profile file, a short README and
 // a .dockerignore. A recipe, not an image: nothing is built or pushed here, and no secret is written (the three variables are read from the environment when it runs). The same templates write
 // examples/service/ in the repository, and a test fails when the two differ.
-import type { FileSpec, ProfileChoice, Store, Versions } from '../types.js';
+import { CREATOR_TEAM_NOTE } from '../answers.js';
+import type { FileSpec, GameChoice, ProfileChoice, Store, Versions } from '../types.js';
 
 /** What the service folder depends on: where the data lives, which standard, and the folder. */
 export interface ServiceFileAnswers {
   store: Store;
   profile: ProfileChoice;
+  /** The kind of game, when one was given: a creator community starts with its team note. */
+  game?: GameChoice;
   dir: string;
 }
 
@@ -95,7 +98,8 @@ function readme(answers: ServiceFileAnswers): string {
 }
 
 function profileFile(answers: ServiceFileAnswers): string {
-  return `${JSON.stringify({ preset: answers.profile, contexts: {}, names: { reserved: [] } }, null, 2)}\n`;
+  const notes = answers.game === 'creator' ? { teamNotes: [{ text: CREATOR_TEAM_NOTE }] } : {};
+  return `${JSON.stringify({ preset: answers.profile, ...notes, contexts: {}, names: { reserved: [] } }, null, 2)}\n`;
 }
 
 /** The six files of the service folder for these answers. Paths are under `answers.dir`. */

@@ -1,5 +1,6 @@
 // `kit.ts`: the one place the moderation engine is configured (design 6.2). It opens the store, builds the matcher, calls
 // `createChatwarden`, and wires the room broadcaster and the Discord feed when they were asked for.
+import { CREATOR_TEAM_NOTE } from '../answers.js';
 import { SECRET_COMMAND } from '../plan.js';
 import type { FileSpec } from '../types.js';
 import { imp, impNs, impType, t } from './frag.js';
@@ -102,7 +103,8 @@ ${box ? `  // The broadcaster needs the engine and the engine's notify hook need
     secret,
     matcher: terms,
     profile: '${answers.profile}',
-    profanityPackage: { createProfanityFilter },
+${answers.game === 'creator' ? `    overrides: { teamNotes: [{ text: '${CREATOR_TEAM_NOTE}' }] },
+` : ''}    profanityPackage: { createProfanityFilter },
     // identify is used only to seat a connection; the routes read who is calling from the identify hook.
     platform: { identify: () => ({}), notify: ${box ? '(subject) => live.chat?.noticePending(subject)' : '() => {}'} },
   });

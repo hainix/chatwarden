@@ -34,7 +34,7 @@ export interface RunOptions {
 }
 
 /** The questions, in the order they are put (design 5.1). */
-const QUESTIONS: readonly QuestionName[] = ['framework', 'store', 'chat', 'chatTransport', 'hub', 'discord', 'profile'];
+const QUESTIONS: readonly QuestionName[] = ['game', 'framework', 'store', 'chat', 'chatTransport', 'hub', 'discord', 'profile'];
 
 /** The answers a person already gave: the flags, then the replies so far. */
 function givenOf(parsed: Parsed): Partial<Answers> {
@@ -52,7 +52,7 @@ function questionFor(name: QuestionName, number: number, current: Answers): Ques
   const option = optionFor(name);
   const text = option?.question ?? name;
   if (name === 'discord') return { number, text, choices: ['y', 'n'], default: current.discord ? 'y' : 'n', yesNo: true };
-  return { number, text, choices: option?.values ?? [], default: String(current[name]) };
+  return { number, text, choices: option?.values ?? [], default: name === 'game' ? (current.game ?? 'social') : String(current[name]) };
 }
 
 /** Put the questions a terminal run asks, in order, and fold each reply into `parsed`. Returns an error sentence when a reply makes the answers illegal. */

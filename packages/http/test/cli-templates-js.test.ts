@@ -115,3 +115,20 @@ describe('the JS rendering', () => {
     for (const file of esm.filter(isJs)) expect(file.content, file.path).not.toMatch(/from '\.\/[^']+\.mjs'/);
   });
 });
+
+describe('the creator kit in JavaScript (0.2.2)', () => {
+  it('is the TypeScript creator kit with the types removed: the same program once both are compiled, and it passes node --check', () => {
+    const compile = (file: FileSpec): string =>
+      ts
+        .transpileModule(file.content, { fileName: file.path, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, allowJs: true, removeComments: true, jsx: ts.JsxEmit.Preserve } })
+        .outputText.replace(/\n\s*\n/g, '\n');
+    const tsKit = renderAll(answersOf({ game: 'creator' }), VERSIONS).find((f) => /kit\.ts$/.test(f.path))!;
+    const jsKit = renderAll(answersOf({ game: 'creator', lang: 'js' }), VERSIONS).find((f) => /kit\.js$/.test(f.path))!;
+    expect(jsKit.content).toContain("overrides: { teamNotes: [{ text: 'Protect the creator and their guests from targeted abuse' }] },");
+    expect(compile(jsKit)).toBe(compile(tsKit));
+    expect(syntaxProblems(jsKit, JS_OPTIONS)).toEqual([]);
+    // a CommonJS project gets .mjs and still carries the line
+    const mjs = renderAll(answersOf({ game: 'creator', lang: 'js' }), VERSIONS, { moduleType: 'commonjs' }).find((f) => /kit\.mjs$/.test(f.path))!;
+    expect(mjs.content).toContain('overrides: { teamNotes:');
+  });
+});

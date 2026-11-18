@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { contentProblems } from '../src/cli/plan.js';
 import { serviceFiles } from '../src/cli/templates/service.js';
+import type { GameChoice, ProfileChoice, Store } from '../src/cli/types.js';
 import { VERSION } from '../src/version.js';
 
 // S5: the files `init --service` writes, for each preset, equal the committed goldens under examples/service/cases (UPDATE_GOLDEN=1 rewrites on purpose), and the Dockerfile and compose file
@@ -15,11 +16,13 @@ const CASES = [
   { name: 'standard', profile: 'standard', store: 'sqlite' },
   { name: 'strict', profile: 'strict', store: 'sqlite' },
   { name: 'standard-memory', profile: 'standard', store: 'memory' },
+  { name: 'creator', profile: 'standard', store: 'sqlite', game: 'creator' },
 ] as const;
 const update = process.env.UPDATE_GOLDEN === '1';
 const DIR = 'chatwarden-service';
 
-const render = (c: (typeof CASES)[number]) => serviceFiles({ store: c.store, profile: c.profile, dir: DIR }, { chatwarden: VERSION }).map((f) => ({ path: f.path.slice(`${DIR}/`.length), content: f.content }));
+const render = (c: { profile: ProfileChoice; store: Store; game?: GameChoice }) =>
+  serviceFiles({ store: c.store, profile: c.profile, dir: DIR, ...(c.game === undefined ? {} : { game: c.game }) }, { chatwarden: VERSION }).map((f) => ({ path: f.path.slice(`${DIR}/`.length), content: f.content }));
 const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)).map((p) => `${e.name}/${p}`) : [e.name])).sort();
 
 describe('golden', () => {
@@ -57,6 +60,30 @@ describe('the files are the same for every preset except profile.json', () => {
         else expect(other!.find((f) => f.path === file.path)?.content, file.path).toBe(file.content);
       }
     }
+  });
+});
+
+describe('the creator case', () => {
+  it('creator differs from standard only in profile.json, and there it adds the team note after the preset', () => {
+    const standard = render(CASES[1]);
+    const creator = render(CASES[4]);
+    expect(creator.map((f) => f.path)).toEqual(standard.map((f) => f.path));
+    for (const file of standard) {
+      const other = creator.find((f) => f.path === file.path)!;
+      if (file.path === 'profile.json') expect(other.content).not.toBe(file.content);
+      else expect(other.content, file.path).toBe(file.content);
+    }
+    expect(JSON.parse(creator.find((f) => f.path === 'profile.json')!.content)).toEqual({
+      preset: 'standard',
+      teamNotes: [{ text: 'Protect the creator and their guests from targeted abuse' }],
+      contexts: {},
+      names: { reserved: [] },
+    });
+    expect(Object.keys(JSON.parse(creator.find((f) => f.path === 'profile.json')!.content) as object)).toEqual(['preset', 'teamNotes', 'contexts', 'names']);
+  });
+
+  it('every other case writes the profile.json it always did (no team notes)', () => {
+    for (const c of CASES.filter((x) => x.name !== 'creator')) expect(JSON.parse(render(c).find((f) => f.path === 'profile.json')!.content), c.name).toEqual({ preset: c.profile, contexts: {}, names: { reserved: [] } });
   });
 });
 

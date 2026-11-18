@@ -1,7 +1,7 @@
 // The one table of flags and the parser over it. `chatwarden --help` is generated from OPTIONS, so a flag, its values and its help text
 // have exactly one home; a test fails when the parser and the table disagree.
 import { parseArgs } from 'node:util';
-import type { ChatChoice, ChatTransportChoice, Framework, HubChoice, Lang, OnConflict, ProfileChoice, Store } from './types.js';
+import type { ChatChoice, ChatTransportChoice, Framework, GameChoice, HubChoice, Lang, OnConflict, ProfileChoice, Store } from './types.js';
 
 export interface OptionSpec {
   /** The long flag, without the dashes: `chat-transport` for `--chat-transport`. */
@@ -32,6 +32,7 @@ export const OPTIONS: readonly OptionSpec[] = [
   { name: 'chat-transport', key: 'chatTransport', type: 'string', values: ['sse', 'socketio'], defaultNote: 'socketio if installed', help: 'How the chat box reaches the server', question: 'Reach the chat box over?' },
   { name: 'hub', key: 'hub', type: 'string', values: ['element', 'react', 'none'], defaultNote: 'react for next', help: 'How moderators open the hub', question: 'How will moderators open the hub?' },
   { name: 'discord', key: 'discord', type: 'boolean', negatable: true, default: 'no', help: 'Post reports to a Discord forum', question: 'Post reports to a Discord forum?' },
+  { name: 'game', key: 'game', type: 'string', values: ['competitive', 'social', 'kids', 'creator'], help: 'Kind of game; picks the standard and its notes', question: 'What kind of game is this? (competitive: trash talk expected; social: casual, mixed ages; kids: kids or teens; creator: creator and streaming communities)' },
   { name: 'profile', key: 'profile', type: 'string', values: ['relaxed', 'standard', 'strict'], default: 'standard', help: 'How strict the standard is', question: 'Which standard?' },
   { name: 'base', key: 'base', type: 'string', default: '/chatwarden', help: 'URL prefix everything lives under' },
   { name: 'dir', key: 'dir', type: 'string', defaultNote: 'detected', help: 'Folder to write into, inside the project' },
@@ -62,6 +63,7 @@ export interface Parsed {
   hub?: HubChoice;
   /** `--discord` true, `--no-discord` false, neither absent. */
   discord?: boolean;
+  game?: GameChoice;
   profile?: ProfileChoice;
   base?: string;
   dir?: string;

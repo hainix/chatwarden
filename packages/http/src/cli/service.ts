@@ -2,7 +2,7 @@
 // every other init: new files only, a file that exists and differs is skipped unless told otherwise, no secret, no network, safe to run twice.
 import { applyPlan, exitCodeOf } from './apply.js';
 import type { Parsed } from './args.js';
-import { normaliseDir } from './answers.js';
+import { GAME_PRESETS, normaliseDir } from './answers.js';
 import type { CliEnv } from './env.js';
 import { buildServicePlan } from './plan.js';
 import { emitReport } from './report.js';
@@ -34,7 +34,7 @@ export async function runServiceInit(parsed: Parsed, env: CliEnv, version: strin
   }
   const dir = normaliseDir(parsed.dir ?? DEFAULT_SERVICE_DIR);
   if (typeof dir !== 'string') return usage(dir.error);
-  const answers: ServiceAnswers = { service: true, store: parsed.store ?? 'sqlite', profile: parsed.profile ?? 'standard', dir };
+  const answers: ServiceAnswers = { service: true, store: parsed.store ?? 'sqlite', profile: parsed.profile ?? (parsed.game === undefined ? 'standard' : GAME_PRESETS[parsed.game]), ...(parsed.game === undefined ? {} : { game: parsed.game }), dir };
   const plan = buildServicePlan(answers, { chatwarden: version });
   const result = await applyPlan(env, plan, { onConflict: parsed.onConflict, dryRun: parsed.dryRun });
   emitReport(env, plan, result, { json: parsed.json, version });

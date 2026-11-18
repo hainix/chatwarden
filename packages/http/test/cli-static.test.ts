@@ -100,7 +100,7 @@ describe('the CLI is offline', () => {
       const world = createWorld({
         files: { 'package.json': JSON.stringify({ type: 'module', dependencies: { express: '^5.1.0' } }), 'tsconfig.json': '{}' },
         isTTY: true,
-        stdin: 'memory\nbox\nelement\ny\nstrict\n',
+        stdin: 'kids\nmemory\nbox\nelement\ny\n',
       });
       expect(await runCli(['init'], world.env)).toBe(0);
       expect(world.has('chatwarden/kit.ts')).toBe(true);

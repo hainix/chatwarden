@@ -179,3 +179,43 @@ describe('usage errors', () => {
     expect(world.err()).toMatch(/package\.json/);
   });
 });
+
+describe('--game with --service (0.2.2)', () => {
+  const profileOf = (world: Awaited<ReturnType<typeof run>>['world']) => JSON.parse(world.read(`${DIR}/profile.json`) as string) as Record<string, unknown>;
+
+  it('--game is allowed, and picks the preset: competitive relaxed, social standard, kids strict, creator standard', async () => {
+    for (const [game, preset] of [['competitive', 'relaxed'], ['social', 'standard'], ['kids', 'strict'], ['creator', 'standard']] as const) {
+      const { world, code } = await run(['--yes', '--game', game]);
+      expect(code, game).toBe(0);
+      expect(profileOf(world).preset, game).toBe(preset);
+    }
+  });
+
+  it('--game creator adds the team note to profile.json, in the order preset, teamNotes, contexts, names; the others add none', async () => {
+    const creator = await run(['--yes', '--game', 'creator']);
+    expect(profileOf(creator.world)).toEqual({ preset: 'standard', teamNotes: [{ text: 'Protect the creator and their guests from targeted abuse' }], contexts: {}, names: { reserved: [] } });
+    expect(Object.keys(profileOf(creator.world))).toEqual(['preset', 'teamNotes', 'contexts', 'names']);
+    for (const game of ['competitive', 'social', 'kids'] as const) {
+      const { world } = await run(['--yes', '--game', game]);
+      expect(Object.keys(profileOf(world)), game).toEqual(['preset', 'contexts', 'names']);
+    }
+  });
+
+  it('--profile beats the game for the preset, and the creator note stays', async () => {
+    const { world } = await run(['--yes', '--game', 'creator', '--profile', 'relaxed']);
+    expect(profileOf(world)).toMatchObject({ preset: 'relaxed', teamNotes: [{ text: expect.any(String) }] });
+  });
+
+  it('the JSON answers carry the game only when one was given', async () => {
+    const withGame = JSON.parse((await run(['--json', '--game', 'kids'])).world.out()) as { answers: Record<string, unknown> };
+    expect(withGame.answers).toEqual({ service: true, store: 'sqlite', profile: 'strict', dir: DIR, game: 'kids' });
+    const without = JSON.parse((await run(['--json'])).world.out()) as { answers: Record<string, unknown> };
+    expect(Object.hasOwn(without.answers, 'game')).toBe(false);
+  });
+
+  it('the files other than profile.json are the same with and without a game', async () => {
+    const plain = await run(['--yes']);
+    const creator = await run(['--yes', '--game', 'creator']);
+    for (const f of FILES.filter((x) => !x.endsWith('profile.json'))) expect(creator.world.read(f), f).toBe(plain.world.read(f));
+  });
+});
