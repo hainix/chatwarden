@@ -2,7 +2,7 @@
 // the table and `SERVICE_OPENAPI` are both built from those descriptions, so they cannot disagree. A route's handler is a thin adapter: validate, call the kit, copy the answer by name.
 // Browser-safe: nothing here imports `node:`.
 import { errorClass, safeWarn } from '@chatwarden/core';
-import type { Chatwarden, DoorKind, RawWho } from '@chatwarden/core';
+import type { Chatwarden, ChatResult, DoorKind, NameKind, RawWho, ReportEntity } from '@chatwarden/core';
 import { ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import type { KitResponse } from '../types.js';
@@ -142,9 +142,23 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     request: obj({ text: { type: 'string' } }, ['text']),
     requestExample: { text: 'hello everyone' },
     answer: {
-      oneOf: [obj({ ok: okTrue, line: obj({ id: str(1, 128), text: { type: 'string' } }, ['id', 'text']), hiddenFor: { type: 'array', items: str(1, 128) } }, ['ok', 'line', 'hiddenFor']), REFUSED_LINE],
+      oneOf: [obj({ ok: okTrue, line: obj({ id: str(1, 128), text: { type: 'string' }, phrase: str(1, 32) }, ['id', 'text']), hiddenFor: { type: 'array', items: str(1, 128) } }, ['ok', 'line', 'hiddenFor']), REFUSED_LINE],
     },
     examples: [{ ok: true, line: { id: 'l1', text: 'hello everyone' }, hiddenFor: [] }, { ok: false, refused: { reason: 'blocked', rule: 1 } }],
+    idempotent: true,
+  },
+  {
+    name: 'phrases',
+    method: 'POST',
+    path: '/rooms/:room~room/seats/:seat~room/phrases',
+    openapiPath: '/rooms/{room}/seats/{seat}/phrases',
+    summary: 'Send one phrase of a phrase-only room book, by its id. The answer is the same as for a line, with the phrase id on `line`. Text in a phrase room is refused phrases_only; an id the book lacks is phrase_unknown. Honours Idempotency-Key.',
+    request: obj({ phraseId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,32}$' } }, ['phraseId']),
+    requestExample: { phraseId: 'gg' },
+    answer: {
+      oneOf: [obj({ ok: okTrue, line: obj({ id: str(1, 128), text: { type: 'string' }, phrase: str(1, 32) }, ['id', 'text']), hiddenFor: { type: 'array', items: str(1, 128) } }, ['ok', 'line', 'hiddenFor']), REFUSED_LINE],
+    },
+    examples: [{ ok: true, line: { id: 'l2', text: 'Good game!', phrase: 'gg' }, hiddenFor: [] }, { ok: false, refused: { reason: 'phrase_unknown' } }],
     idempotent: true,
   },
   {
@@ -161,9 +175,11 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     method: 'PUT',
     path: '/rooms/:room~room/seats/:seat~room/mutes/:target~room',
     openapiPath: '/rooms/{room}/seats/{seat}/mutes/{target}',
-    summary: 'This seat mutes the target seat. Muting oneself or an empty seat does nothing and answers ok.',
-    answer: obj({ ok: okTrue }, ['ok']),
-    examples: [{ ok: true }],
+    summary: 'This seat mutes (or, with kind block, blocks) the target seat. Muting oneself or an empty seat does nothing and answers ok. A block is two-way and lasting: neither seat is sent the lines of the other.',
+    request: obj({ kind: { enum: ['mute', 'block'] } }),
+    requestExample: { kind: 'block' },
+    answer: { oneOf: [obj({ ok: okTrue }, ['ok']), obj({ ok: { const: false }, limit: okTrue }, ['ok', 'limit'])] },
+    examples: [{ ok: true }, { ok: false, limit: true }],
   },
   {
     name: 'mutes_delete',
@@ -180,8 +196,8 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/rooms/:room~room/seats/:seat~room/reports',
     openapiPath: '/rooms/{room}/seats/{seat}/reports',
     summary: 'This seat reports another. The kit snapshots the chat it saw. No report id comes back. Honours Idempotency-Key.',
-    request: obj({ target: ID, lineId: str(1, 64), reason: str(1, 64), note: str(1, 500) }, ['target']),
-    requestExample: { target: 'b', reason: 'harassment' },
+    request: obj({ target: ID, lineId: str(1, 64), reason: str(1, 64), note: str(1, 500), entity: obj({ kind: str(1, 24), ref: str(1, 64), label: str(1, 64) }, ['kind', 'ref', 'label']) }, ['target']),
+    requestExample: { target: 'b', reason: 'name', entity: { kind: 'clan', ref: 'clan-42', label: 'Example Clan' } },
     answer: {
       oneOf: [
         obj({ ok: okTrue, remaining: { type: 'integer', minimum: 0 }, detailUntil: { type: 'number' } }, ['ok', 'remaining']),
@@ -241,10 +257,21 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/names/check',
     openapiPath: '/names/check',
     summary: 'May a player use this name? The check a game runs when a name is chosen.',
-    request: obj({ name: str(1, 64), who: WHO }, ['name']),
+    request: obj({ name: str(1, 64), kind: { enum: ['player', 'entity'] }, who: WHO }, ['name']),
     requestExample: { name: 'Plenk the Brave' },
     answer: { oneOf: [obj({ ok: okTrue }, ['ok']), obj({ ok: { const: false }, reason: str(1, 64), rule: { type: 'integer', minimum: 1 } }, ['ok', 'reason', 'rule'])] },
     examples: [{ ok: true }, { ok: false, reason: 'name_not_allowed', rule: 7 }],
+  },
+  {
+    name: 'blocks_between',
+    method: 'POST',
+    path: '/blocks/between',
+    openapiPath: '/blocks/between',
+    summary: 'Has the first person blocked, or been blocked by, each of the others? Persons are found, never created: an unknown person is false. For matchmaking. At most 50 others.',
+    request: obj({ who: WHO, others: { type: 'array', items: WHO, minItems: 1, maxItems: 50 } }, ['who', 'others']),
+    requestExample: { who: SEATED_WHO, others: [{ clientKey: 'raw-client-key-0002' }] },
+    answer: obj({ blocked: { type: 'array', items: { type: 'boolean' } } }, ['blocked']),
+    examples: [{ blocked: [true, false] }],
   },
   {
     name: 'doors_check',
@@ -272,6 +299,8 @@ const TEXT_MAX = 2000;
 const TOKEN_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const DOOR_KINDS: readonly string[] = ['join', 'create', 'public', 'matchmaking'];
 const NAME_MAX = 64;
+const MAX_OTHERS = 50;
+const PHRASE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 
 /** The body as an object with only the allowed keys and all the required ones. No body is `{}` when nothing is required. Anything else is 400 `invalid_request`. */
 function bodyOf(body: unknown, allowed: readonly string[], required: readonly string[] = []): Record<string, unknown> {
@@ -365,6 +394,23 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
     return out;
   };
 
+  /** The answer for a kit verdict on a line or a phrase: the line to send, and the seats that must NOT be sent it (they muted or blocked the sender, or the sender blocked them). Or the author's refusal. */
+  const delivered = (roomId: string, seatId: string, result: ChatResult): KitResponse => {
+    if (!('deliver' in result)) return ok({ ok: false, refused: lineRefusal(result.refuse) });
+    const hiddenFor = roster.seats(roomId).filter((viewer) => {
+      if (viewer === seatId) return false;
+      try {
+        return !cw.chat.visibleTo(roomId, viewer, seatId);
+      } catch (err) {
+        // A mute is a promise to the muter: what cannot be checked is hidden.
+        safeWarn(options.logger, 'chatwarden.service_visibility_failed', { error: errorClass(err) });
+        return true;
+      }
+    });
+    const { lineId, text, phrase } = result.deliver;
+    return ok({ ok: true, line: { id: lineId, text, ...(typeof phrase === 'string' && phrase !== '' ? { phrase } : {}) }, hiddenFor });
+  };
+
   const handlers: Record<string, ServiceHandler> = {
     handshake: ({ req }) => {
       const given = options.capabilities ?? {};
@@ -375,7 +421,7 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
         mode: 'service',
         processes: options.processes ?? 'single',
         capabilities: {
-          phrases: given.phrases ?? true,
+          phrases: given.phrases ?? cw.phrases.names().length > 0,
           blocks: given.blocks ?? true,
           contexts: given.contexts === undefined ? [...cw.contexts.names()] : [...given.contexts],
           sharedPacing: given.sharedPacing ?? false,
@@ -426,19 +472,15 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
       const seatId = seat(c);
       // Far too long to be a line: say so without asking the kit (which would say the same).
       if (b.text.length > TEXT_MAX) return ok({ ok: false, refused: { reason: 'length' } });
-      const result = cw.chat.accept(roomId, seatId, b.text);
-      if (!('deliver' in result)) return ok({ ok: false, refused: lineRefusal(result.refuse) });
-      const hiddenFor = roster.seats(roomId).filter((viewer) => {
-        if (viewer === seatId) return false;
-        try {
-          return !cw.chat.visibleTo(roomId, viewer, seatId);
-        } catch (err) {
-          // A mute is a promise to the muter: what cannot be checked is hidden.
-          safeWarn(options.logger, 'chatwarden.service_visibility_failed', { error: errorClass(err) });
-          return true;
-        }
-      });
-      return ok({ ok: true, line: { id: result.deliver.lineId, text: result.deliver.text }, hiddenFor });
+      return delivered(roomId, seatId, cw.chat.accept(roomId, seatId, b.text));
+    },
+
+    phrases: (c) => {
+      const b = bodyOf(c.body, ['phraseId'], ['phraseId']);
+      if (typeof b.phraseId !== 'string' || !PHRASE_ID_RE.test(b.phraseId)) throw new ValidationError();
+      const roomId = room(c);
+      const seatId = seat(c);
+      return delivered(roomId, seatId, cw.chat.acceptPhrase(roomId, seatId, b.phraseId));
     },
 
     mutes_list: (c) => {
@@ -450,12 +492,14 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
     },
 
     mutes_put: (c) => {
-      bodyOf(c.body, []);
+      const b = bodyOf(c.body, ['kind']);
+      if (Object.hasOwn(b, 'kind') && b.kind !== 'mute' && b.kind !== 'block') throw new ValidationError();
       const roomId = room(c);
       const seatId = seat(c);
       const target = validId(c.params.target);
-      cw.mutes.set(roomId, seatId, target, true);
-      return ok({ ok: true });
+      const outcome = b.kind === 'block' ? cw.blocks.set(roomId, seatId, target, true) : cw.mutes.set(roomId, seatId, target, true);
+      // The seat's list holds as many blocks as is allowed: nothing was written. Muting oneself or an empty seat is `none`: ok, and nothing.
+      return ok(outcome === 'limit' ? { ok: false, limit: true } : { ok: true });
     },
 
     mutes_delete: (c) => {
@@ -467,8 +511,14 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
     },
 
     reports: async (c) => {
-      const b = bodyOf(c.body, ['target', 'lineId', 'reason', 'note'], ['target']);
+      const b = bodyOf(c.body, ['target', 'lineId', 'reason', 'note', 'entity'], ['target']);
       const target = validId(b.target);
+      let entity: ReportEntity | undefined;
+      if (b.entity !== undefined && b.entity !== null) {
+        // The shape is the kit's to judge (`entity_invalid`, before anything is spent); only a non-object is turned away here.
+        if (typeof b.entity !== 'object' || Array.isArray(b.entity)) throw new ValidationError();
+        entity = b.entity as ReportEntity;
+      }
       const lineId = optionalText(b, 'lineId', 64);
       if (lineId !== undefined && !TOKEN_RE.test(lineId)) throw new ValidationError();
       const reason = optionalText(b, 'reason', 64);
@@ -480,7 +530,9 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
         ...(lineId === undefined ? {} : { lineId }),
         ...(reason === undefined ? {} : { reason }),
         ...(note === undefined ? {} : { note }),
+        ...(entity === undefined ? {} : { entity }),
       });
+      if (!res.ok && res.refused === 'entity_invalid') throw new ValidationError();
       if (res.ok) return ok({ ok: true, remaining: res.remaining, ...(res.detailUntil === undefined ? {} : { detailUntil: res.detailUntil }) });
       return ok({ ok: false, refused: res.refused, ...(res.remaining === undefined ? {} : { remaining: res.remaining }) });
     },
@@ -510,11 +562,20 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
     },
 
     names_check: (c) => {
-      const b = bodyOf(c.body, ['name', 'who'], ['name']);
+      const b = bodyOf(c.body, ['name', 'kind', 'who'], ['name']);
       const name = text(b.name, 1, NAME_MAX);
+      if (Object.hasOwn(b, 'kind') && b.kind !== 'player' && b.kind !== 'entity') throw new ValidationError();
       const who: ServiceWho | undefined = b.who === undefined ? undefined : parseWho(b.who);
-      const r = cw.names.check(name, who === undefined ? {} : { who: who as RawWho });
+      const r = cw.names.check(name, { ...(who === undefined ? {} : { who: who as RawWho }), ...(b.kind === undefined ? {} : { kind: b.kind as NameKind }) });
       return ok(r.ok ? { ok: true } : { ok: false, reason: r.reason, rule: r.rule });
+    },
+
+    blocks_between: (c) => {
+      const b = bodyOf(c.body, ['who', 'others'], ['who', 'others']);
+      const who = parseWho(b.who, { identity: true });
+      if (!Array.isArray(b.others) || b.others.length < 1 || b.others.length > MAX_OTHERS) throw new ValidationError();
+      const others = (b.others as unknown[]).map((o) => parseWho(o, { identity: true }));
+      return ok({ blocked: cw.blocks.anyBetween(who as RawWho, others as RawWho[]) });
     },
 
     doors_check: (c) => {

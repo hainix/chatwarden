@@ -23,7 +23,7 @@ describe('handshake', () => {
       kit: VERSION,
       mode: 'service',
       processes: 'single',
-      capabilities: { phrases: true, blocks: true, contexts: [], sharedPacing: false, matchModes: ['word', 'segment', 'contains'] },
+      capabilities: { phrases: false, blocks: true, contexts: [], sharedPacing: false, matchModes: ['word', 'segment', 'contains'] },
       warnings: [],
     });
     expect(SERVICE_API_VERSION).toBe(1);

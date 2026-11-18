@@ -89,6 +89,8 @@ export interface WorldOptions {
   signals?: ChatwardenOptions['signals'];
   /** Room contexts (`profile.contexts`), selected by a room's `context` tag. */
   contexts?: Record<string, ContextSettings>;
+  /** The `names` settings in force from the start (reserved names, the rule they cite). */
+  names?: NonNullable<ChatwardenOptions['overrides']>['names'];
   /** Phrase books for phrase-only rooms (`createChatwarden({ phrases })`). */
   phrases?: ChatwardenOptions['phrases'];
   /** Do not build the broadcaster (a test builds its own). */
@@ -120,10 +122,11 @@ export async function chatWorld(over: WorldOptions = {}) {
     profanity: filter,
     ...(over.signals === undefined ? {} : { signals: over.signals }),
     ...(over.phrases === undefined ? {} : { phrases: over.phrases }),
-    ...(over.profanity === 'refuse' || over.pace !== undefined || over.filters !== undefined || over.rooms !== undefined || over.contexts !== undefined
+    ...(over.profanity === 'refuse' || over.pace !== undefined || over.filters !== undefined || over.rooms !== undefined || over.contexts !== undefined || over.names !== undefined
       ? {
           overrides: {
             ...(over.rooms === undefined ? {} : { rooms: over.rooms }),
+            ...(over.names === undefined ? {} : { names: over.names }),
             ...(over.profanity === 'refuse' ? { profanity: { mode: 'refuse' as const } } : {}),
             ...(over.pace === undefined ? {} : { pace: over.pace }),
             ...(over.filters === undefined ? {} : { filters: over.filters }),
