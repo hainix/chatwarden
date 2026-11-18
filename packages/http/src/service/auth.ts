@@ -1,4 +1,4 @@
-// Service keys (design 3.2): `Authorization: Bearer <key>`, compared by digest against every configured key, with a throttle on failures by address. Browser-safe.
+// Service keys (design 3.2): `Authorization: Bearer <key>`, compared by digest against every configured key, with a throttle on failures by address that only turns an invalid token away early: a valid key always passes. Browser-safe.
 import { HttpError } from '../errors.js';
 import { checkLimit, MAX_LIMITER_KEYS } from '../limiter.js';
 import type { NamesRateLimit } from '../limiter.js';
@@ -108,8 +108,6 @@ export function createKeyAuth(options: KeyAuthOptions): KeyAuth {
     throttled: () => throttle.size(),
     async authenticate(req) {
       const address = req.remoteAddress ?? '';
-      const blocked = throttle.blockedFor(address, now());
-      if (blocked > 0) throw tooMany(blocked);
       const header = req.headers.authorization;
       let token = header === undefined ? '' : (BEARER_RE.exec(header)?.[1] ?? '');
       if (token.length > TOKEN_MAX) token = '';
@@ -119,6 +117,9 @@ export function createKeyAuth(options: KeyAuthOptions): KeyAuth {
       // Every digest is compared, whether or not an earlier one matched, so the time says nothing about which key it was.
       for (let i = 0; i < held.length; i++) if (compare(presented, held[i] as Uint8Array) && match === -1 && token !== '') match = i;
       if (match === -1) {
+        // A valid key always passes (a stale-key server behind a shared address must not lock out the fleet); the throttle only turns an INVALID token away early.
+        const blocked = throttle.blockedFor(address, now());
+        if (blocked > 0) throw tooMany(blocked);
         throttle.record(address, now());
         throw unauthorized();
       }
@@ -135,11 +136,11 @@ export function createHookAuth(hook: Authenticate, options: { now?: () => number
     throttled: () => throttle.size(),
     async authenticate(req) {
       const address = req.remoteAddress ?? '';
-      const blocked = throttle.blockedFor(address, now());
-      if (blocked > 0) throw tooMany(blocked);
       const authz = await hook(req);
       const actor = (authz as { actor?: unknown } | null)?.actor;
       if (typeof actor !== 'string' || actor === '') {
+        const blocked = throttle.blockedFor(address, now());
+        if (blocked > 0) throw tooMany(blocked);
         throttle.record(address, now());
         throw unauthorized();
       }

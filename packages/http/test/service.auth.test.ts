@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createKeyAuth, parseKeys } from '../src/service/auth.js';
+import { createHookAuth, createKeyAuth, parseKeys } from '../src/service/auth.js';
 import { createServiceWrapper } from '../src/service/wrap.js';
 import type { ServiceWrapperOptions } from '../src/service/wrap.js';
 import type { KitRequest } from '../src/types.js';
@@ -164,15 +164,99 @@ describe('rotation', () => {
 describe('failures', () => {
   const bad = (call: ReturnType<typeof table>['call'], remoteAddress?: string) => call('GET', '/ping', { key: KEY_B, ...(remoteAddress === undefined ? {} : { remoteAddress }) });
 
-  it('the 21st failure in a minute from one address is 429 even with the correct key; a different address is unaffected', async () => {
+  it('past 20 failures in a minute an invalid token from that address is 429, a correct key still passes, a different address is unaffected', async () => {
     const { call } = table();
     for (let i = 0; i < 20; i++) expect((await bad(call, '198.51.100.1')).status).toBe(401);
-    const blocked = await call('GET', '/ping', { key: KEY_A, remoteAddress: '198.51.100.1' });
+    const blocked = await bad(call, '198.51.100.1');
     expect(blocked.status).toBe(429);
     expect(errorCode(blocked)).toBe('rate_limited');
     expect(Number(blocked.headers?.['retry-after'])).toBeGreaterThanOrEqual(1);
+    // I-1: a valid key always passes, however many failures the peer has had
+    for (let i = 0; i < 5; i++) expect((await call('GET', '/ping', { key: KEY_A, remoteAddress: '198.51.100.1' })).status).toBe(200);
     expect((await call('GET', '/ping', { key: KEY_A, remoteAddress: '198.51.100.2' })).status).toBe(200);
     expect((await bad(call, '198.51.100.1')).status).toBe(429);
+  });
+
+  it('a correct key passes after N failures from the same peer, for N well past the limit', async () => {
+    const { call } = table();
+    for (const n of [20, 21, 50, 200]) {
+      const peer = `198.51.100.${100 + (n % 100)}`;
+      for (let i = 0; i < n; i++) await bad(call, peer);
+      expect((await call('GET', '/ping', { key: KEY_A, remoteAddress: peer })).status, String(n)).toBe(200);
+    }
+  });
+
+  it('every kind of invalid token is still throttled: wrong key, missing header, wrong scheme, empty bearer, an over-long token', async () => {
+    const { call } = table({ authFailureLimit: { max: 3, windowMs: 60_000 } });
+    const peer = '198.51.100.30';
+    for (let i = 0; i < 3; i++) expect((await bad(call, peer)).status).toBe(401);
+    for (const attempt of [
+      call('GET', '/ping', { key: KEY_B, remoteAddress: peer }),
+      call('GET', '/ping', { key: null, remoteAddress: peer }),
+      call('GET', '/ping', { authorization: `Basic ${KEY_A}`, remoteAddress: peer }),
+      call('GET', '/ping', { authorization: 'Bearer ', remoteAddress: peer }),
+      call('GET', '/ping', { authorization: `Bearer ${'z'.repeat(2000)}`, remoteAddress: peer }),
+    ]) expect((await attempt).status).toBe(429);
+  });
+
+  it('a correct key between throttled invalid calls from the same peer stays 200 and is not counted', async () => {
+    const { call } = table({ authFailureLimit: { max: 2, windowMs: 1000 } });
+    const peer = '198.51.100.31';
+    await bad(call, peer);
+    await bad(call, peer);
+    for (let i = 0; i < 10; i++) {
+      expect((await bad(call, peer)).status).toBe(429);
+      expect((await call('GET', '/ping', { key: KEY_A, remoteAddress: peer })).status).toBe(200);
+    }
+  });
+
+  it('a rotated-out key retrying in a loop behind one proxy address does not lock out the good key of another server on that address', async () => {
+    const { call } = table();
+    for (let i = 0; i < 100; i++) await bad(call, '172.17.0.1');
+    expect((await call('GET', '/ping', { key: KEY_A, remoteAddress: '172.17.0.1' })).status).toBe(200);
+  });
+
+  it('the hook form: a valid caller passes over a throttled peer, an invalid one is 429', async () => {
+    const auth = createHookAuth(async (req) => (req.headers['x-user'] === 'ok' ? { actor: 'game', role: 'owner' as const } : null), { failureLimit: { max: 2, windowMs: 60_000 } });
+    const req = (user: string): KitRequest => ({ method: 'GET', path: '/', query: {}, headers: { 'x-user': user }, body: undefined, remoteAddress: '192.0.2.50' });
+    await auth.authenticate(req('no')).catch(() => undefined);
+    await auth.authenticate(req('no')).catch(() => undefined);
+    await expect(auth.authenticate(req('no'))).rejects.toMatchObject({ code: 'rate_limited' });
+    await expect(auth.authenticate(req('ok'))).resolves.toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it('the answer to a throttled invalid token never echoes the presented token or a configured key', async () => {
+    const { call } = table({ authFailureLimit: { max: 1, windowMs: 60_000 } });
+    await bad(call, '198.51.100.32');
+    const res = await bad(call, '198.51.100.32');
+    expect(res.status).toBe(429);
+    const text = JSON.stringify(res);
+    expect(text).not.toContain(KEY_A);
+    expect(text).not.toContain(KEY_B);
+  });
+
+  it('the constant-time compare still runs for every key on every request, passing, failing or throttled', async () => {
+    let calls = 0;
+    const auth = createKeyAuth({
+      keys: [KEY_A, KEY_B, KEY_C],
+      failureLimit: { max: 1, windowMs: 60_000 },
+      compare: (a, b) => {
+        calls++;
+        return a.length === b.length && a.every((v, i) => v === b[i]);
+      },
+    });
+    const req = (key: string): KitRequest => ({ method: 'GET', path: '/', query: {}, headers: { authorization: `Bearer ${key}` }, body: undefined, remoteAddress: '192.0.2.60' });
+    await auth.authenticate(req(KEY_A));
+    expect(calls).toBe(3);
+    calls = 0;
+    await auth.authenticate(req('x'.repeat(40))).catch(() => undefined);
+    expect(calls).toBe(3);
+    calls = 0;
+    await expect(auth.authenticate(req('y'.repeat(40)))).rejects.toMatchObject({ code: 'rate_limited' });
+    expect(calls).toBe(3);
+    calls = 0;
+    await auth.authenticate(req(KEY_B));
+    expect(calls).toBe(3);
   });
 
   it('19 failures leave the correct key working, and a correct call does not count as a failure', async () => {
@@ -184,7 +268,8 @@ describe('failures', () => {
   it('with no remoteAddress one shared bucket applies', async () => {
     const { call } = table();
     for (let i = 0; i < 20; i++) await bad(call);
-    expect((await call('GET', '/ping', { key: KEY_A })).status).toBe(429);
+    expect((await bad(call)).status).toBe(429);
+    expect((await call('GET', '/ping', { key: KEY_A })).status).toBe(200);
     // an address the adapter did give is its own bucket
     expect((await call('GET', '/ping', { key: KEY_A, remoteAddress: '203.0.113.9' })).status).toBe(200);
   });
@@ -192,18 +277,18 @@ describe('failures', () => {
   it('the window resets', async () => {
     const { call, clock } = table();
     for (let i = 0; i < 20; i++) await bad(call, '198.51.100.4');
-    expect((await call('GET', '/ping', { remoteAddress: '198.51.100.4' })).status).toBe(429);
+    expect((await bad(call, '198.51.100.4')).status).toBe(429);
     clock.t += 59_000;
-    expect((await call('GET', '/ping', { remoteAddress: '198.51.100.4' })).status).toBe(429);
+    expect((await bad(call, '198.51.100.4')).status).toBe(429);
     clock.t += 1_001;
-    expect((await call('GET', '/ping', { remoteAddress: '198.51.100.4' })).status).toBe(200);
+    expect((await bad(call, '198.51.100.4')).status).toBe(401);
   });
 
   it('a custom failure limit is validated like checkLimit and applied', async () => {
     const { call } = table({ authFailureLimit: { max: 2, windowMs: 1000 } });
     await bad(call, '198.51.100.5');
     await bad(call, '198.51.100.5');
-    expect((await call('GET', '/ping', { remoteAddress: '198.51.100.5' })).status).toBe(429);
+    expect((await bad(call, '198.51.100.5')).status).toBe(429);
     for (const limit of [{ max: 0, windowMs: 1000 }, { max: 1.5, windowMs: 1000 }, { max: 1, windowMs: 0 }, null, 5]) {
       expect(() => table({ authFailureLimit: limit as never }), JSON.stringify(limit)).toThrow(RangeError);
     }
