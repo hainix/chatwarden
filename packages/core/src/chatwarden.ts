@@ -11,7 +11,7 @@ import type { ReportSurge } from './surge.js';
 import { RoomModes } from './roomModes.js';
 import type { RoomModeState } from './roomModes.js';
 import type { RoomMode } from './roomSettings.js';
-import { checkInsightsDays, computeInsights, INSIGHTS_ROW_CAP } from './insights.js';
+import { checkInsightsDays, computeInsights, INSIGHTS_READ_DAYS, INSIGHTS_ROW_CAP } from './insights.js';
 import type { InsightsDays, InsightsResult } from './insights.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
@@ -1629,11 +1629,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     chatCounter.flush();
     const now = clock.now();
     const from = now - window * 86_400_000;
-    const rows = store.insightRows?.(now - 90 * 86_400_000, INSIGHTS_ROW_CAP) ?? [];
+    const rows = store.insightRows?.(now - INSIGHTS_READ_DAYS * 86_400_000, INSIGHTS_ROW_CAP) ?? [];
+    // The oldest open report in the whole store (oldest first): one that the 90 day read or the row cap left out still sets the longest wait, and makes the result partial.
+    const oldestOpenAt = store.listOpenReports({ limit: 1 })[0]?.createdAt ?? null;
     const counts = store.chatCounts?.(utcDay(from), utcDay(now)) ?? [];
-    const rules = store.countSanctionsByRule?.(from) ?? [];
+    // `null`, not `[]`, when the store cannot count them: the page says "not available", not "none".
+    const rules = store.countSanctionsByRule?.(from) ?? null;
     const labels = new Map(policy.profileNow().reporting.reasons.map((r) => [r.id, r.label] as const));
-    return computeInsights(rows, counts, rules, now, window, (id) => labels.get(id));
+    return computeInsights(rows, counts, rules, now, window, (id) => labels.get(id), { oldestOpenAt });
   };
   const digestOf = (days: number): InsightsDigest | null => {
     const r = readInsights(days);

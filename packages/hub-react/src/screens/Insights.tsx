@@ -109,7 +109,9 @@ function View({ data }: { data: InsightsView }) {
           [t('hub.insights.outcome.badFaith'), n(data.byOutcome.badFaith)],
         ]}
       />
-      {data.byRule.length === 0 ? (
+      {data.byRule === null ? (
+        <p className="cw-hint">{t('hub.insights.byRule.unavailable')}</p>
+      ) : data.byRule.length === 0 ? (
         <p className="cw-hint">{t('hub.insights.byRule.empty')}</p>
       ) : (
         <Table caption={t('hub.insights.byRule')} head={[t('hub.insights.col.rule'), t('hub.insights.col.sanctions')]} rows={data.byRule.map((r): [string, ReactNode] => [ruleLabel(t, r.rule), n(r.count)])} />

@@ -6,6 +6,7 @@ import {
   computeInsights,
   INSIGHTS_MIN_DECIDED,
   INSIGHTS_MIN_URGENT,
+  INSIGHTS_READ_DAYS,
   INSIGHTS_ROW_CAP,
   percentileOf,
 } from '../src/insights.js';
@@ -211,6 +212,72 @@ describe('the cap and the window', () => {
   });
 });
 
+describe('open reports outside the rows the read took (partial)', () => {
+  const calcOpen = (rows: InsightRow[], oldestOpenAt: number | null | undefined, days = 7) =>
+    computeInsights(rows, [], [], NOW, days, undefined, oldestOpenAt === undefined ? undefined : { oldestOpenAt });
+  const many = (n: number, from = NOW - D): InsightRow[] => Array.from({ length: n }, (_, i) => row({ createdAt: from - i, status: 'actioned', actionedAt: from - i + 1 }));
+
+  it('the read reaches back 90 days', () => {
+    expect(INSIGHTS_READ_DAYS).toBe(90);
+  });
+
+  it('an open report older than the 90 day read makes it partial and the longest wait is its age', () => {
+    const r = calcOpen([row({ createdAt: NOW - 2 * D })], NOW - 120 * D);
+    expect(r.partial).toBe(true);
+    expect(r.wait.longestOpenMs).toBe(120 * D);
+    // the count and the bands cannot hold what the read did not take: the flag says so
+    expect(r.reports.open).toBe(1);
+  });
+
+  it('partial for a 7, 30 and a 90 day window alike', () => {
+    for (const days of [7, 30, 90]) expect(calcOpen([], NOW - 91 * D, days).partial, String(days)).toBe(true);
+  });
+
+  it('an open report inside the read (found in the rows) is not partial, whatever the window', () => {
+    const rows = [row({ createdAt: NOW - 60 * D })];
+    for (const days of [7, 30, 90]) {
+      const r = calcOpen(rows, NOW - 60 * D, days);
+      expect(r.partial, String(days)).toBe(false);
+      expect(r.wait.longestOpenMs, String(days)).toBe(60 * D);
+    }
+  });
+
+  it('an exact edge: filed exactly 90 days ago is inside the read', () => {
+    expect(calcOpen([row({ createdAt: NOW - 90 * D })], NOW - 90 * D).partial).toBe(false);
+    expect(calcOpen([], NOW - 90 * D - 1).partial).toBe(true);
+  });
+
+  it('nothing open (null) or not asked (undefined) leaves partial as it was', () => {
+    expect(calcOpen([row({ createdAt: NOW - D, status: 'actioned', actionedAt: NOW })], null).partial).toBe(false);
+    expect(calcOpen([], undefined).partial).toBe(false);
+  });
+
+  it('a read that hit the cap and cut the oldest open report is partial even for a 7 day window', () => {
+    const rows = many(INSIGHTS_ROW_CAP, NOW - D);
+    const oldestRead = NOW - D - (INSIGHTS_ROW_CAP - 1);
+    const cut = calcOpen(rows, oldestRead - 5 * D);
+    expect(cut.partial).toBe(true);
+    expect(cut.wait.longestOpenMs).toBe(NOW - (oldestRead - 5 * D));
+  });
+
+  it('a read that hit the cap but still holds the oldest open report is not partial for a window it covers', () => {
+    const rows = [...many(INSIGHTS_ROW_CAP - 1, NOW - 8 * D), row({ createdAt: NOW - 8 * D - INSIGHTS_ROW_CAP })];
+    expect(calcOpen(rows, NOW - 8 * D - INSIGHTS_ROW_CAP, 7).partial).toBe(false);
+  });
+
+  it('the cap rule that already existed still holds (hit inside the window = partial)', () => {
+    expect(calcOpen(many(INSIGHTS_ROW_CAP), null).partial).toBe(true);
+  });
+});
+
+describe('byRule says when it cannot know', () => {
+  it('null when the store cannot count sanctions by rule; [] when it can and there were none', () => {
+    expect(computeInsights([], [], null, NOW, 7).byRule).toBeNull();
+    expect(computeInsights([], [], [], NOW, 7).byRule).toEqual([]);
+    expect(computeInsights([], [], [{ rule: '2', count: 1 }], NOW, 7).byRule).toEqual([{ rule: 2, count: 1 }]);
+  });
+});
+
 describe('the report rate', () => {
   const counts = (over: Partial<ChatDayRow>[]): ChatDayRow[] => over.map((o, i) => ({ day: day(NOW - (over.length - 1 - i) * D), delivered: 0, refused: 0, ...o }));
 
@@ -315,5 +382,26 @@ describe('cw.insights over a store', () => {
     await w.cw.sanctions.apply({ kind: 'warning', subject: t.target, includeIp: false, durationMs: null, reason: 'r', actor: 'mod_ann', source: 'moderator', automated: false, gapNote: 'a gap' });
     const r = w.cw.insights.read(7);
     expect(r?.byRule).toEqual([{ rule: 2, count: 1 }, { rule: 'uncovered', count: 1 }]);
+  });
+  it('an open report older than the 90 day read still shows as the longest wait, and the window says partial', async () => {
+    const w = await world(on);
+    await w.file({ reason: 'harassment' });
+    w.clock.t += 100 * D;
+    const r = w.cw.insights.read(7);
+    expect(r?.partial).toBe(true);
+    expect(r?.wait.longestOpenMs).toBe(100 * D);
+    // control: the same report 10 days later is inside the read and nothing is partial
+    const w2 = await world(on);
+    await w2.file({ reason: 'harassment' });
+    w2.clock.t += 10 * D;
+    const ok = w2.cw.insights.read(7);
+    expect([ok?.partial, ok?.wait.longestOpenMs, ok?.reports.open]).toEqual([false, 10 * D, 1]);
+  });
+
+  it('by rule is null over a store that cannot count sanctions by rule, and a list over one that can', async () => {
+    const plain = await world(on, new MemoryStore());
+    expect(plain.cw.insights.read(7)?.byRule).toBeNull();
+    const wrapped = await world(on, withMemoryAppeals(new MemoryStore()));
+    expect(wrapped.cw.insights.read(7)?.byRule).toEqual([]);
   });
 });

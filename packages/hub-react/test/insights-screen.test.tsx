@@ -121,6 +121,28 @@ describe('the page', () => {
     again.unmount();
   });
 
+  it('says "not available" (not "none") when the store cannot count sanctions by rule, and "none" when it can and there were none', async () => {
+    const w = await hubWorld({ ...ON });
+    serve(w, { ...FIXTURE, byRule: null });
+    const first = await open(w);
+    expect(screen.getByText('Sanctions by rule are not available with this store.')).toBeInTheDocument();
+    expect(screen.queryByText('No sanctions in this window.')).toBeNull();
+    expect(screen.queryByRole('table', { name: 'Sanctions by Community Rule' })).toBeNull();
+    first.unmount();
+    serve(w, { ...FIXTURE, byRule: [] });
+    const again = await open(w);
+    expect(screen.getByText('No sanctions in this window.')).toBeInTheDocument();
+    expect(screen.queryByText(/not available with this store/)).toBeNull();
+    again.unmount();
+  });
+
+  it('the partial line says what is left out and that the longest wait still counts it', async () => {
+    const w = await hubWorld({ ...ON });
+    serve(w, { ...FIXTURE, partial: true });
+    await open(w);
+    expect(screen.getByText(/partial count/i).textContent).toMatch(/longest wait/i);
+  });
+
   it('an empty window is zeros and dashes, never NaN or a blank', async () => {
     const w = await hubWorld({ ...ON });
     serve(w, {

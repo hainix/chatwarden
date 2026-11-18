@@ -248,7 +248,7 @@ export { evidenceLink } from './reporting.js';
 export { SURGE_MAX_REPORTERS, SURGE_MAX_REPORTS, surgeOf } from './surge.js';
 export type { ReportSurge } from './surge.js';
 export type { ReportEvidence } from './staffReports.js';
-export { computeInsights, INSIGHTS_DAYS, INSIGHTS_MIN_DECIDED, INSIGHTS_MIN_URGENT, INSIGHTS_ROW_CAP } from './insights.js';
+export { computeInsights, INSIGHTS_DAYS, INSIGHTS_MIN_DECIDED, INSIGHTS_MIN_URGENT, INSIGHTS_READ_DAYS, INSIGHTS_ROW_CAP } from './insights.js';
 export type { InsightsBacklog, InsightsDays, InsightsResult } from './insights.js';
 export { COMMENT_MAX, CommentService, hasWorkflowMethods } from './commentService.js';
 export { StoreCapabilityError, URGENT_STORE_METHODS, hasUrgentMethods, missingUrgentMethods } from './storeCapability.js';

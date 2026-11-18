@@ -24,6 +24,21 @@ describe('GET /insights', () => {
     expect((await d.call('GET', '/insights', { role: 'moderator' })).status).toBe(200);
   });
 
+  it('byRule is null over a store that cannot count sanctions by rule, and a list over one that can', async () => {
+    const lacking = await world({ ...on, editStore: (store) => Object.defineProperty(store, 'countSanctionsByRule', { value: undefined, configurable: true }) });
+    expect((await lacking.call('GET', '/insights')).body).toMatchObject({ byRule: null });
+    const full = await world(on);
+    expect((await full.call('GET', '/insights')).body).toMatchObject({ byRule: [] });
+  });
+
+  it('an open report older than the 90 day read makes the window partial and still sets the longest wait', async () => {
+    const w = await world(on);
+    await w.file('harassment');
+    w.clock.t += 100 * 86_400_000;
+    const body = (await w.call('GET', '/insights', { query: { days: '7' } })).body as { partial: boolean; wait: { longestOpenMs: number } };
+    expect([body.partial, body.wait.longestOpenMs]).toEqual([true, 100 * 86_400_000]);
+  });
+
   it('answers the shape of the spec, 30 days by default, no-store JSON', async () => {
     const w = await world(on);
     await w.file('harassment');

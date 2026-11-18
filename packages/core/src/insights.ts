@@ -11,6 +11,8 @@ export const INSIGHTS_MIN_DECIDED = 5;
 export const INSIGHTS_MIN_URGENT = 3;
 /** The most report rows one read takes. A window that hits it is `partial`. @experimental */
 export const INSIGHTS_ROW_CAP = 20_000;
+/** How far back one read takes report rows, whatever the window: an open report older than this is not in the rows (the read says so with `partial`). @experimental */
+export const INSIGHTS_READ_DAYS = 90;
 /** The windows a read may ask for, in days. @experimental */
 export const INSIGHTS_DAYS = [7, 30, 90] as const;
 
@@ -24,7 +26,9 @@ const DAY_MS = 24 * HOUR_MS;
  * `decision` is the team's time from filing to a decision; `medianMs` and `p90Ms` are `null` below {@link INSIGHTS_MIN_DECIDED} decided reports. `wait` is the open reports'
  * age now: the longest, and how many fall in each band. `byReason` is the reason the reporter gave (`none` for no reason), highest first; `byRule` the sanctions written in the window by
  * Community Rule number, `'uncovered'` last. `chat` is the daily line counter for the window, `null` when nothing was counted in it; `reportsPer1000` is reports filed per 1 000 delivered
- * lines, `null` when no line was delivered or counting began inside the window. `partial` is true when the read hit its row cap.
+ * lines, `null` when no line was delivered or counting began inside the window. `partial` is true when the read hit its row cap inside the window, or when an open report is older than the
+ * rows it took (older than {@link INSIGHTS_READ_DAYS}, or cut by the cap): the longest wait is still exact, but the open count and the bands leave that report out. `byRule` is `null` when the
+ * store cannot count sanctions by rule (the page says "not available", not "none").
  * @experimental
  */
 export interface InsightsResult {
@@ -37,7 +41,7 @@ export interface InsightsResult {
   wait: { longestOpenMs: number; backlog: InsightsBacklog };
   byReason: Array<{ reason: string; label: string; count: number }>;
   byOutcome: { actioned: number; dismissed: number; badFaith: number };
-  byRule: Array<{ rule: number | 'uncovered'; count: number }>;
+  byRule: Array<{ rule: number | 'uncovered'; count: number }> | null;
   chat: { delivered: number; refused: number; reportsPer1000: number | null } | null;
   partial: boolean;
 }
@@ -93,16 +97,18 @@ function ruleSlot(rule: string | null): number | 'uncovered' {
 /**
  * Compute one window. `rows` are the reports the store returned (newest first, at most {@link INSIGHTS_ROW_CAP}; older rows than the window are allowed and only feed the open-report
  * wait), `counts` the daily line counts of the window, `sanctionsByRule` the sanctions written in it, `now` the clock and `days` the window (7, 30 or 90). `labelOf` gives a reason id its
- * label (an unknown id is its own label). Nothing in the result names a person, a handle, text or a staff member: the function copies only what it counts. `RangeError` for any other `days`.
+ * label (an unknown id is its own label). `sanctionsByRule` is `null` for a store that cannot count them. `extra.oldestOpenAt` is when the oldest open report in the whole store was filed (`null`
+ * when none is open, left out when the caller does not know): an open report older than the rows handed in makes the result `partial` and sets the longest wait. Nothing in the result names a person, a handle, text or a staff member: the function copies only what it counts. `RangeError` for any other `days`.
  * @experimental
  */
 export function computeInsights(
   rows: readonly InsightRow[],
   counts: readonly ChatDayRow[],
-  sanctionsByRule: ReadonlyArray<{ rule: string | null; count: number }>,
+  sanctionsByRule: ReadonlyArray<{ rule: string | null; count: number }> | null,
   now: number,
   days: number,
   labelOf?: (reason: string) => string | undefined,
+  extra: { oldestOpenAt?: number | null } = {},
 ): InsightsResult {
   const window = checkInsightsDays(days);
   const from = now - window * DAY_MS;
@@ -143,13 +149,21 @@ export function computeInsights(
     .sort((a, b) => b.count - a.count || (a.reason < b.reason ? -1 : a.reason > b.reason ? 1 : 0));
 
   const rules = new Map<number | 'uncovered', number>();
-  for (const s of sanctionsByRule) {
+  for (const s of sanctionsByRule ?? []) {
     const slot = ruleSlot(s.rule);
     rules.set(slot, (rules.get(slot) ?? 0) + s.count);
   }
-  const byRule = [...rules.entries()]
-    .map(([rule, count]) => ({ rule, count }))
-    .sort((a, b) => (a.rule === 'uncovered' ? 1 : b.rule === 'uncovered' ? -1 : a.rule - b.rule));
+  const byRule =
+    sanctionsByRule === null
+      ? null
+      : [...rules.entries()].map(([rule, count]) => ({ rule, count })).sort((a, b) => (a.rule === 'uncovered' ? 1 : b.rule === 'uncovered' ? -1 : a.rule - b.rule));
+
+  // Where the rows reach: the cap cut everything older than the oldest row it returned; below the cap the read took everything back to its fixed lookback. An open report filed before
+  // that point is not in `rows`: its age still sets the longest wait, and the result says it is partial.
+  const capped = rows.length >= INSIGHTS_ROW_CAP;
+  const reachedBack = capped ? oldest : now - INSIGHTS_READ_DAYS * DAY_MS;
+  const openOutside = typeof extra.oldestOpenAt === 'number' && extra.oldestOpenAt < reachedBack;
+  const longestOpen = Math.max(open.reduce((m, age) => (age > m ? age : m), 0), openOutside ? Math.max(0, now - (extra.oldestOpenAt as number)) : 0);
 
   // The line counter: only the days of the window. Counting that began inside the window cannot be compared with its reports, so the rate is withheld.
   const firstDay = dayOf(from);
@@ -171,12 +185,12 @@ export function computeInsights(
     reports: { filed, decided, open: open.length },
     decision: { decided, medianMs: enough ? percentileOf(decisionMs, 0.5) : null, p90Ms: enough ? percentileOf(decisionMs, 0.9) : null },
     urgent: { filed: urgentFiled, decided: urgentMs.length, medianMs: urgentMs.length >= INSIGHTS_MIN_URGENT ? percentileOf(urgentMs, 0.5) : null },
-    wait: { longestOpenMs: open.reduce((m, age) => (age > m ? age : m), 0), backlog: backlogOf(open) },
+    wait: { longestOpenMs: longestOpen, backlog: backlogOf(open) },
     byReason,
     byOutcome: outcome,
     byRule,
     chat,
-    // The cap cut the window only when the oldest row it returned is still inside it.
-    partial: rows.length >= INSIGHTS_ROW_CAP && oldest >= from,
+    // The cap cut the window only when the oldest row it returned is still inside it; and an open report outside the rows leaves the open count and the bands short.
+    partial: (capped && oldest >= from) || openOutside,
   };
 }
