@@ -326,9 +326,12 @@ export class MemoryStore implements Store {
   listSubjectSanctions(q: SanctionListQuery): SanctionRow[] {
     const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
     const wanted = q.subjects === undefined ? null : new Set(q.subjects);
+    // A scope keeps only the rows made from a report whose own scope is one of these (a row with no report, or a report with no scope, never matches).
+    const scoped = q.scope === undefined ? null : new Set(this.reports.filter((x) => inScope(x, q.scope)).map((x) => x.id));
     return this.sanctions
       .filter((r) => {
         if (r.targetType !== 'subject') return false;
+        if (scoped !== null && !(r.reportId !== undefined && r.reportId !== null && scoped.has(r.reportId))) return false;
         if (wanted !== null && !wanted.has(r.value)) return false;
         if (q.groupId !== undefined && r.groupId !== q.groupId) return false;
         if (q.source !== undefined && r.source !== q.source) return false;
@@ -701,6 +704,7 @@ export class MemoryStore implements Store {
       detailAt: null,
       urgent: row.urgent === true,
       evidenceRef: row.evidenceRef ?? null,
+      scope: row.scope ?? null,
       handoffAt: null,
       handoffBy: null,
       escalatedTo: null,
@@ -722,6 +726,11 @@ export class MemoryStore implements Store {
   loadReport(id: string): ReportRecord | null {
     const r = this.reports.find((x) => x.id === id);
     return r === undefined ? null : structuredClone(r);
+  }
+
+  loadReportInScope(id: string, scope: readonly string[]): ReportRecord | null {
+    const r = this.reports.find((x) => x.id === id);
+    return r === undefined || !inScope(r, scope) ? null : structuredClone(r);
   }
 
   countOriginReports(origin: ReportOrigin, since: number): number {
@@ -760,11 +769,11 @@ export class MemoryStore implements Store {
     return gone.length;
   }
 
-  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[] {
     const n = Math.min(200, Math.max(1, Math.floor(limit)));
     const wanted = new Set(subjects);
     return this.reports
-      .filter((r) => wanted.has(r.targetSubject))
+      .filter((r) => wanted.has(r.targetSubject) && inScope(r, scope))
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, n)
       .map((r) => structuredClone(r));
@@ -778,6 +787,7 @@ export class MemoryStore implements Store {
         if (q.category !== undefined && r.category !== q.category) return false;
         if (q.reason !== undefined && (r.reportedReason ?? null) !== q.reason) return false;
         if (q.urgent === true && !r.urgent) return false;
+        if (!inScope(r, q.scope)) return false;
         if (q.after === undefined) return true;
         if (r.createdAt !== q.after) return r.createdAt > q.after;
         return q.afterId !== undefined && compare(r.id, q.afterId) > 0;
@@ -787,11 +797,11 @@ export class MemoryStore implements Store {
       .map((r) => structuredClone(r));
   }
 
-  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[] {
     const n = Math.min(201, Math.max(1, Math.floor(limit)));
     const wanted = new Set(subjects);
     return this.reports
-      .filter((r) => r.status === 'open' && wanted.has(r.targetSubject))
+      .filter((r) => r.status === 'open' && wanted.has(r.targetSubject) && inScope(r, scope))
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, n)
       .map((r) => structuredClone(r));
@@ -841,6 +851,7 @@ export class MemoryStore implements Store {
         if (q.status !== undefined && r.status !== q.status) return false;
         if (q.reason !== undefined && r.reportedReason !== q.reason) return false;
         if (q.urgent === true && !r.urgent) return false;
+        if (!inScope(r, q.scope)) return false;
         if (q.before === undefined) return true;
         if (r.createdAt !== q.before) return r.createdAt < q.before;
         return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
@@ -1059,8 +1070,8 @@ export class MemoryStore implements Store {
     return true;
   }
 
-  countOpenUrgent(): number {
-    return this.reports.filter((r) => r.status === 'open' && r.urgent).length;
+  countOpenUrgent(scope?: readonly string[]): number {
+    return this.reports.filter((r) => r.status === 'open' && r.urgent && inScope(r, scope)).length;
   }
 
   countOpenEscalated(): Record<'senior' | 'owner', number> {
@@ -1948,4 +1959,10 @@ export function compare(a: string, b: string): number {
 /** A new, empty {@link MemoryStore}. */
 export function createMemoryStore(): MemoryStore {
   return new MemoryStore();
+}
+
+/** Is this report in one of these staff scopes? No scope given is every report; an empty list is none; a report with no scope is never in one. */
+function inScope(report: { scope?: string | null }, scope: readonly string[] | undefined): boolean {
+  if (scope === undefined) return true;
+  return typeof report.scope === 'string' && scope.includes(report.scope);
 }

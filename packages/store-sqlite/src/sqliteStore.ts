@@ -163,15 +163,15 @@ function detailFromJson(json: unknown): { detail?: AuditDetail } {
  */
 export const REPORT_INSERT_SQL = `INSERT INTO kit_reports
    (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
-    target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status, origin, origin_key, urgent, evidence_ref)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status, origin, origin_key, urgent, evidence_ref, scope)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
  ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING
  ON CONFLICT (target_subject, room_id) WHERE origin = 'filter' AND status = 'open' DO NOTHING`;
 /** The values `REPORT_INSERT_SQL` binds, one for each `?`, in order. */
 export const reportInsertArgs = (r: StoredReport): Array<string | number | null> => [
   r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle, r.targetSubject, r.targetSeat, r.targetHandle,
   r.category, r.reportedReason ?? null, r.note, r.lineId, JSON.stringify(r.excerpt), JSON.stringify(r.people), r.status, r.origin ?? null, r.originKey ?? null,
-  r.urgent === true ? 1 : 0, r.evidenceRef ?? null,
+  r.urgent === true ? 1 : 0, r.evidenceRef ?? null, r.scope ?? null,
 ];
 /** Set an open report's urgent flag when it differs. Binds: the new value, the id, the new value. */
 export const REPORT_URGENT_SET_SQL = "UPDATE kit_reports SET urgent = ? WHERE id = ? AND status = 'open' AND urgent <> ?";
@@ -249,6 +249,7 @@ function reportFromRow(r: Record<string, unknown>): ReportRecord {
     originKey: r.origin_key === null || r.origin_key === undefined ? null : String(r.origin_key),
     urgent: Number(r.urgent) === 1,
     evidenceRef: r.evidence_ref === null || r.evidence_ref === undefined ? null : String(r.evidence_ref),
+    scope: r.scope === null || r.scope === undefined ? null : String(r.scope),
     handoffAt: r.handoff_at === null || r.handoff_at === undefined ? null : Number(r.handoff_at),
     handoffBy: r.handoff_by === null || r.handoff_by === undefined ? null : String(r.handoff_by),
     escalatedTo: r.escalated_to === 'senior' || r.escalated_to === 'owner' ? r.escalated_to : null,
@@ -914,8 +915,14 @@ export class SqliteStore implements Store, TermStore {
   listSubjectSanctions(q: SanctionListQuery): SanctionRow[] {
     const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
     if (q.subjects !== undefined && q.subjects.length === 0) return [];
+    if (q.scope !== undefined && q.scope.length === 0) return [];
     const where: string[] = ["target_type = 'subject'"];
     const args: Array<string | number> = [];
+    // The rows made from a report in one of these scopes (kit_sanctions_by_report, then kit_reports_by_scope); a row with no report never matches.
+    if (q.scope !== undefined) {
+      where.push(`report_id IN (SELECT id FROM kit_reports WHERE scope IN (${q.scope.map(() => '?').join(', ')}))`);
+      args.push(...q.scope);
+    }
     if (q.subjects !== undefined) {
       where.push(`target_value IN (${q.subjects.map(() => '?').join(', ')})`);
       args.push(...q.subjects);
@@ -2354,12 +2361,22 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
-  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
-    if (subjects.length === 0) return [];
+  loadReportInScope(id: string, scope: readonly string[]): ReportRecord | null {
+    if (scope.length === 0) return null;
+    const sql = `SELECT * FROM kit_reports WHERE id = ? AND scope IN (${scope.map(() => '?').join(', ')})`;
+    return this.transaction(() => {
+      const r = this.db.prepare(sql).get(id, ...scope);
+      return r === undefined ? null : reportFromRow(r);
+    });
+  }
+
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[] {
+    if (subjects.length === 0 || (scope !== undefined && scope.length === 0)) return [];
     const n = Math.min(200, Math.max(1, Math.floor(limit)));
     const marks = subjects.map(() => '?').join(', ');
-    const sql = `SELECT * FROM kit_reports WHERE target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
-    return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+    const scoped = scope === undefined ? '' : ` AND scope IN (${scope.map(() => '?').join(', ')})`;
+    const sql = `SELECT * FROM kit_reports WHERE target_subject IN (${marks})${scoped} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...subjects, ...(scope ?? []), n).map(reportFromRow));
   }
 
   listOpenReports(q: OpenReportQuery): ReportRecord[] {
@@ -2377,6 +2394,12 @@ export class SqliteStore implements Store, TermStore {
     }
     // Served by the partial index kit_reports_urgent_open (`urgent = 1 AND status = 'open'`, ordered by created_at, id).
     if (q.urgent === true) where.push('urgent = 1');
+    // A staff scope is part of the query (kit_reports_by_scope), so the keyset paging below stays right; an empty list matches nothing.
+    if (q.scope !== undefined) {
+      if (q.scope.length === 0) return [];
+      where.push(`scope IN (${q.scope.map(() => '?').join(', ')})`);
+      args.push(...q.scope);
+    }
     if (q.after !== undefined) {
       if (q.afterId === undefined) {
         where.push('created_at > ?');
@@ -2387,17 +2410,20 @@ export class SqliteStore implements Store, TermStore {
       }
     }
     // The urgent scan reads the partial index, so it stays one index range however many reports are open.
-    const index = q.urgent === true ? ' INDEXED BY kit_reports_urgent_open' : '';
+    // A scoped scan reads kit_reports_by_scope (scope, status, created_at): named, because without statistics the planner prefers the by-status index and filters every open report by scope.
+    // Any migration that drops or renames this index MUST change this SQL.
+    const index = q.scope !== undefined ? ' INDEXED BY kit_reports_by_scope' : q.urgent === true ? ' INDEXED BY kit_reports_urgent_open' : '';
     const sql = `SELECT * FROM kit_reports${index} WHERE ${where.join(' AND ')} ORDER BY created_at, id LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
   }
 
-  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
-    if (subjects.length === 0) return [];
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[] {
+    if (subjects.length === 0 || (scope !== undefined && scope.length === 0)) return [];
     const n = Math.min(201, Math.max(1, Math.floor(limit)));
     const marks = subjects.map(() => '?').join(', ');
-    const sql = `SELECT * FROM kit_reports WHERE status = 'open' AND target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
-    return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+    const scoped = scope === undefined ? '' : ` AND scope IN (${scope.map(() => '?').join(', ')})`;
+    const sql = `SELECT * FROM kit_reports WHERE status = 'open' AND target_subject IN (${marks})${scoped} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...subjects, ...(scope ?? []), n).map(reportFromRow));
   }
 
   listOpenReportsByReporter(reporters: readonly SubjectId[], limit: number): ReportRecord[] {
@@ -2474,6 +2500,11 @@ export class SqliteStore implements Store, TermStore {
       }
     }
     if (q.urgent === true) where.push('urgent = 1');
+    if (q.scope !== undefined) {
+      if (q.scope.length === 0) return [];
+      where.push(`scope IN (${q.scope.map(() => '?').join(', ')})`);
+      args.push(...q.scope);
+    }
     if (q.before !== undefined) {
       if (q.beforeId === undefined) {
         where.push('created_at < ?');
@@ -2485,7 +2516,8 @@ export class SqliteStore implements Store, TermStore {
         args.push(q.before, q.before, q.beforeId);
       }
     }
-    const sql = `SELECT * FROM kit_reports${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    const via = q.scope === undefined ? '' : ' INDEXED BY kit_reports_by_scope';
+    const sql = `SELECT * FROM kit_reports${via}${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY created_at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
   }
 
@@ -2742,8 +2774,12 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
-  countOpenUrgent(): number {
-    return this.transaction(() => Number(this.db.prepare(URGENT_COUNT_SQL).get()?.n ?? 0));
+  countOpenUrgent(scope?: readonly string[]): number {
+    if (scope === undefined) return this.transaction(() => Number(this.db.prepare(URGENT_COUNT_SQL).get()?.n ?? 0));
+    if (scope.length === 0) return 0;
+    // The scoped count reads the urgent partial index too and keeps the scope in the statement; the labels are bound, never part of the text.
+    const sql = `SELECT COUNT(*) AS n FROM kit_reports INDEXED BY kit_reports_urgent_open WHERE urgent = 1 AND status = 'open' AND scope IN (${scope.map(() => '?').join(', ')})`;
+    return this.transaction(() => Number(this.db.prepare(sql).get(...scope)?.n ?? 0));
   }
 
   countOpenEscalated(): Record<'senior' | 'owner', number> {

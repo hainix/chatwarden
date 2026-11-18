@@ -123,7 +123,7 @@ export { slidingWindow } from './rateLimit.js';
 export type { SlidingWindow } from './rateLimit.js';
 export { ChatService } from './chat.js';
 export type { ChatResult, ChatServiceDeps, RefuseReason, RestrictedAnswer, RoomChatRules } from './chat.js';
-export { CONTEXT_SECTIONS, checkRoomTags, isContextName, isScopeLabel, MAX_CONTEXTS, MAX_ROOM_TAGS, MAX_SCOPE_LABELS, resolveContexts, ROOM_TAG_KEYS } from './contexts.js';
+export { CONTEXT_SECTIONS, checkRoomTags, checkScope, isContextName, isScopeLabel, MAX_CONTEXTS, MAX_ROOM_TAGS, MAX_SCOPE_LABELS, resolveContexts, ROOM_TAG_KEYS, scopeOfTags } from './contexts.js';
 export type { ContextChat, ContextSection, ContextSettings, EffectiveContext, ResolvedContext, ResolvedContexts } from './contexts.js';
 export {
   REPORT_CATEGORIES,
@@ -219,6 +219,7 @@ export type {
   SanctionGroupView,
   SanctionListInput,
   SanctionPage,
+  ScopedHistory,
 } from './staffViews.js';
 export {
   AUDIT_ACTIONS,

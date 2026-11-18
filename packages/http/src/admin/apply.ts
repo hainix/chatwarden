@@ -2,6 +2,7 @@ import { validateSanctionInput } from '@chatwarden/core';
 import type { Chatwarden, DecisionAction, DecisionInput, Role, SanctionInput, SanctionKind, Source, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { PermissionKey } from '../permissions.js';
+import type { ScopedLimits } from './context.js';
 import { bodyText, has, parseAction } from './validate.js';
 import type { AiEchoBody } from './validate.js';
 
@@ -90,6 +91,18 @@ export function checkDurationsOffered(cw: Chatwarden, actions: readonly Decision
   if (lengths.some((a) => !offered.has(a.durationMs as number))) throw new HttpError('duration_not_offered');
 }
 
+/**
+ * What a scoped moderator may apply: only the kinds of `limits.kinds`, and a restriction or ban only for a length of at most `limits.maxDurationMs` (a permanent one, `durationMs: null`, never).
+ * A warning or a note has no length. 400 `invalid_sanction` otherwise. Called after the report is known to be in scope, so an out-of-scope id is still the 404 of an unknown id.
+ */
+export function checkScopedLimits(actions: readonly DecisionAction[], limits: Readonly<ScopedLimits>): void {
+  for (const a of actions) {
+    if (!(limits.kinds as readonly string[]).includes(a.kind)) throw new HttpError('invalid_sanction');
+    if (a.kind === 'warning' || a.kind === 'note') continue;
+    if (a.durationMs === null || a.durationMs > limits.maxDurationMs) throw new HttpError('invalid_sanction');
+  }
+}
+
 /** What a decision DOES needs the right to do it: `need` throws 403. Call it before anything is read or written. */
 export function needForDecision(actions: readonly DecisionAction[], need: (permission: PermissionKey) => void): void {
   if (actions.length > 0) need('sanctions.apply');
@@ -115,8 +128,10 @@ export async function applyDecision(
   actor: string,
   ai?: { echo?: AiEchoBody; role: Role },
   source: Source = 'moderator',
+  scope?: readonly string[],
 ): Promise<DecisionOutcome> {
-  const report = cw.reports.get(reportId);
+  // With a staff scope an out-of-scope report is exactly an unknown one.
+  const report = cw.reports.get(reportId, scope === undefined ? undefined : { scope });
   if (report === null) throw new NotFoundError();
   // The staff refs the report shows, or the ids it was filed under (the facade makes them canonical, so a ref gone
   // stale through a later merge still replays).
@@ -204,8 +219,9 @@ export async function applySanction(
   cw: Chatwarden,
   sanction: ParsedSanction,
   actor: string,
+  forReport?: string,
 ): Promise<{ groupId: string; refCode: string }> {
   checkSanction(cw, sanction, actor);
-  const done = await cw.sanctions.apply(sanctionInput(sanction, actor));
+  const done = await cw.sanctions.apply(sanctionInput(sanction, actor), forReport === undefined ? undefined : { forReport });
   return { groupId: done.groupId, refCode: done.refCode };
 }

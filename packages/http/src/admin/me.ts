@@ -2,6 +2,7 @@ import type { Role } from '@chatwarden/core';
 import { PERMISSION_KEYS, roleAtLeast } from '../permissions.js';
 import type { PermissionKey } from '../permissions.js';
 import type { RouteTable } from '../router.js';
+import { SCOPE_AWARE_PERMISSIONS } from './context.js';
 import type { AdminContext } from './context.js';
 
 /** Which of the optional staff features are on right now. Present in `GET /me` only when at least one is on. */
@@ -29,6 +30,11 @@ export interface Me {
   can: Record<PermissionKey, boolean>;
   /** The staff features that are on. This server always sends it (`rooms`, `workflow` and `insights` are booleans); the type leaves it optional for a client written before it. */
   features?: MeFeatures;
+  /**
+   * The staff scope of a scoped caller (the room labels they may see), present only for one. For a scoped caller `can` is true only for the permissions the scope-aware routes ask for
+   * (and the role holds), so a hub shows nothing the server would refuse.
+   */
+  scope?: readonly string[];
 }
 
 /**
@@ -42,10 +48,10 @@ export interface Me {
 export function meRoutes(ctx: AdminContext, options: { community?: boolean } = {}): RouteTable {
   const { permissions, cw } = ctx;
   return {
-    'GET /me': ctx.authenticated(({ authz }) => {
+    'GET /me': ctx.authenticated(({ authz, scope }) => {
       const can = {} as Record<PermissionKey, boolean>;
-      for (const key of PERMISSION_KEYS) can[key] = roleAtLeast(authz.role, permissions[key]);
-      const body: Me = { actor: authz.actor, role: authz.role, can };
+      for (const key of PERMISSION_KEYS) can[key] = roleAtLeast(authz.role, permissions[key]) && (scope === undefined || SCOPE_AWARE_PERMISSIONS.includes(key));
+      const body: Me = { actor: authz.actor, role: authz.role, can, ...(scope === undefined ? {} : { scope: [...scope] }) };
       const community = options.community === true;
       const features: MeFeatures = {
         appeals: cw.appeals.enabled(),
@@ -58,6 +64,6 @@ export function meRoutes(ctx: AdminContext, options: { community?: boolean } = {
       };
       body.features = features;
       return { status: 200, body };
-    }),
+    }, { scoped: true }),
   };
 }

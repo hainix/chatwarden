@@ -164,15 +164,15 @@ describe('the filter statements (migration 26) bind exactly as many values as th
     category: 'spam', reportedReason: 'spam', note: null, lineId: null, excerpt: [], people: [], status: 'open', origin: 'filter', originKey: 'link.unlisted',
   };
 
-  it('the report insert has one plain ? for each of its 21 columns and 21 values, the origin pair, then urgent and the evidence ref last (0 and null when the report has none)', () => {
-    expect(placeholders(REPORT_INSERT_SQL)).toBe(21);
-    expect(reportInsertArgs(stored)).toHaveLength(21);
-    expect(reportInsertArgs(stored).slice(-4)).toEqual(['filter', 'link.unlisted', 0, null]);
-    expect(reportInsertArgs({ ...stored, urgent: true, evidenceRef: 'm_1' }).slice(-2)).toEqual([1, 'm_1']);
+  it('the report insert has one plain ? for each of its 22 columns and 22 values, the origin pair, then urgent, the evidence ref and the scope last (0, null and null when the report has none)', () => {
+    expect(placeholders(REPORT_INSERT_SQL)).toBe(22);
+    expect(reportInsertArgs(stored)).toHaveLength(22);
+    expect(reportInsertArgs(stored).slice(-5)).toEqual(['filter', 'link.unlisted', 0, null, null]);
+    expect(reportInsertArgs({ ...stored, urgent: true, evidenceRef: 'm_1', scope: 'creator:alice' }).slice(-3)).toEqual([1, 'm_1', 'creator:alice']);
     const plain = { ...stored } as Partial<StoredReport>;
     delete plain.origin;
     delete plain.originKey;
-    expect(reportInsertArgs(plain as StoredReport).slice(-4)).toEqual([null, null, 0, null]);
+    expect(reportInsertArgs(plain as StoredReport).slice(-5)).toEqual([null, null, 0, null, null]);
     expect(reportInsertArgs(plain as StoredReport)).toHaveLength(placeholders(REPORT_INSERT_SQL));
     expect(REPORT_INSERT_SQL).not.toMatch(/\?\d/);
   });

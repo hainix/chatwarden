@@ -55,6 +55,7 @@ const record = (over: Partial<ReportRecord> = {}): ReportRecord => ({
   detailAt: null,
   urgent: false,
   evidenceRef: null,
+  scope: null,
   handoffAt: null,
   handoffBy: null,
   escalatedTo: null,

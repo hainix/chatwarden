@@ -22,6 +22,7 @@ import { reportReasonsContract } from './reportReasons.contract.js';
 import { reportsContract } from './reports.contract.js';
 import { retentionContract } from './retention.contract.js';
 import { sanctionsContract } from './sanctions.contract.js';
+import { scopeContract } from './scope.contract.js';
 import { signalsContract } from './signals.contract.js';
 import { strikesContract } from './strikes.contract.js';
 import { teamContract } from './team.contract.js';
@@ -50,6 +51,7 @@ export {
   reportsContract,
   retentionContract,
   sanctionsContract,
+  scopeContract,
   signalsContract,
   strikesContract,
   subjectsContract,
@@ -87,6 +89,7 @@ export const CONTRACT_AREAS = [
   'privacy',
   'legal',
   'desk',
+  'scope',
 ] as const;
 
 /**
@@ -120,4 +123,5 @@ export function storeContract(name: string, make: () => Store, dump?: (s: Store)
   privacyContract(name, make, dump);
   legalContract(name, make);
   deskContract(name, make);
+  scopeContract(name, make);
 }

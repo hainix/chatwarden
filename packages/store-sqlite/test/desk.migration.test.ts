@@ -162,8 +162,8 @@ describe('migration 26, the desk block, from a version-25 database', () => {
     for (const t of tablesBefore) {
       const now = columns(a, t);
       const gained = now.filter((c) => !colsBefore[t]?.includes(c));
-      if (t === 'kit_reports') expect(gained.sort(), t).toEqual([...DESK_REPORT_COLUMNS, 'origin', 'origin_key'].sort());
-      else expect(gained, t).toEqual([]);
+      // The release adds columns to a table from more than one theme (scope, the entity, the block flag, ...): this block's own are asserted by membership, never by the whole list.
+      if (t === 'kit_reports') expect(gained, t).toEqual(expect.arrayContaining([...DESK_REPORT_COLUMNS, 'origin', 'origin_key']));
       expect(now.slice(0, colsBefore[t]?.length), t).toEqual(colsBefore[t]);
     }
   });

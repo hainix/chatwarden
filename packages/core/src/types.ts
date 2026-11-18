@@ -223,6 +223,11 @@ export interface SanctionListQuery {
   beforeId?: string;
   /** Only the rows of this sanction group (its subject row: an IP row is never listed). Optional, additive (0.1.12). */
   groupId?: string;
+  /**
+   * Only the rows whose `reportId` names a report whose `scope` is one of these (a staff scope). A row with no report (a direct or an automatic sanction) is never matched, nor one of a report with
+   * no scope. An empty list matches nothing. Absent: every row.
+   */
+  scope?: readonly string[];
   /** Clamped to 1..200 (a fraction is floored). */
   limit: number;
 }
@@ -762,6 +767,12 @@ export interface StoredReport {
    * @experimental
    */
   evidenceRef?: string | null;
+  /**
+   * The room's staff `scope` tag when it was filed (`^[a-z0-9][a-z0-9:_.-]{0,63}$`, for example `creator:alice`), or null/omitted when the room had none. A moderator whose `Authz` carries a
+   * scope sees only the reports whose scope is one of theirs; a report with no scope is invisible to such a caller. Stamped by the kit from the room's tag, never from a player. A store returns
+   * it on every record.
+   */
+  scope?: string | null;
   status: 'open';
 }
 
@@ -788,7 +799,7 @@ export interface FilterHitRow {
  * until then. `badFaith` marks a dismissal as the reporter's bad faith (it counts toward their suspension).
  * Private: moderator tools only.
  */
-export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason' | 'origin' | 'originKey' | 'urgent' | 'evidenceRef'> {
+export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason' | 'origin' | 'originKey' | 'urgent' | 'evidenceRef' | 'scope'> {
   /** Where the report came from: `'filter'`, `'watch'`, or null for a player's report. Every first-party store returns it. See {@link StoredReport.origin}. */
   origin: ReportOrigin | null;
   /** The counter key of an origin report; null otherwise. */
@@ -807,6 +818,8 @@ export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedRea
   urgent: boolean;
   /** The game's evidence id, or null (see {@link StoredReport.evidenceRef}). Every store returns it. @experimental */
   evidenceRef: string | null;
+  /** The staff scope the room carried when the report was filed (see {@link StoredReport.scope}), or null. Every store returns it. */
+  scope: string | null;
   /** When a moderator marked the case as passed to the game's safety team, and who: the first mark only. Null until then. Staff ids, not players. @experimental */
   handoffAt: number | null;
   handoffBy: string | null;
@@ -836,6 +849,11 @@ export interface ReportListQuery {
   reason?: string | null;
   /** Only urgent reports when true; false or omitted keeps all. @experimental */
   urgent?: boolean;
+  /**
+   * Only reports whose `scope` is one of these (a staff scope): applied in the query, so paging and the cursor are the unscoped ones. An empty list matches nothing and a report with no scope is
+   * never matched. Absent: every report. A store MUST apply it (the contract suite fails one that does not).
+   */
+  scope?: readonly string[];
   limit: number;
 }
 
@@ -850,6 +868,8 @@ export interface OpenReportQuery {
   /** Keyset cursor: only reports newer than this (`createdAt` above it, or equal with an id above `afterId`). `afterId` without `after` is ignored. */
   after?: number;
   afterId?: string;
+  /** Only reports whose `scope` is one of these: see {@link ReportListQuery.scope}. */
+  scope?: readonly string[];
   /** Clamped to 1..200 (a fraction is floored). */
   limit: number;
 }
@@ -1192,6 +1212,9 @@ export interface Store {
   /** One report with its decision columns, or null when there is none by that id. */
   loadReport(id: string): ReportRecord | null;
 
+  /** {@link Store.loadReport}, but null unless the report's `scope` is one of `scope` (an empty list matches nothing; a report with no scope is never matched). The read behind a scoped moderator's case. */
+  loadReportInScope(id: string, scope: readonly string[]): ReportRecord | null;
+
   /**
    * How many reports with this origin were filed (`createdAt`) at or after `since`, whatever their status. The read behind the filters' daily
    * cap, so processes sharing one store share the count.
@@ -1221,9 +1244,9 @@ export interface Store {
   /**
    * Reports filed AGAINST any of the given subjects (`targetSubject` as stored: pass the person's canonical id and every
    * alias merged into it), newest first (`created_at` descending, then `id` descending), whole records. `limit` is
-   * clamped to 1..200 (a fraction is floored). An empty list matches nothing.
+   * clamped to 1..200 (a fraction is floored). An empty list matches nothing. With `scope`, only reports whose scope is one of these (an empty scope list matches nothing).
    */
-  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[];
 
   /**
    * Reports that are still `open`, OLDEST first (`createdAt` ascending, then `id` ascending, so a tie is stable), whole
@@ -1237,9 +1260,9 @@ export interface Store {
    * The OPEN reports filed AGAINST any of the given subjects (`targetSubject` as stored: pass the person's canonical id
    * and every alias merged into it), newest first (`createdAt` descending, then `id` descending), whole records. `limit` is
    * clamped to 1..201 (a fraction is floored; 201 so a caller can ask for 200 and one more to learn whether there is more, as
-   * `dismissMany` does: a custom store that clamps at 200 only makes it under-report `more`). An empty list matches nothing.
+   * `dismissMany` does: a custom store that clamps at 200 only makes it under-report `more`). An empty list matches nothing. With `scope`, only reports whose scope is one of these.
    */
-  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[];
 
   /**
    * OPTIONAL. The OPEN reports FILED BY any of the given subjects (`reporterSubject` as stored: pass the person's canonical id
@@ -1955,8 +1978,8 @@ export interface Store {
    */
   setEscalation?(id: string, patch: { to: 'senior' | 'owner'; by: string; at: number } | null): boolean;
 
-  /** How many reports are open and urgent. */
-  countOpenUrgent?(): number;
+  /** How many reports are open and urgent; with `scope`, only those whose scope is one of these (an empty list counts none). */
+  countOpenUrgent?(scope?: readonly string[]): number;
 
   /** How many open reports are escalated, by the role asked. */
   countOpenEscalated?(): Record<'senior' | 'owner', number>;

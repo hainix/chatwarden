@@ -78,6 +78,8 @@ describe('migration 6: kit_reports', () => {
       'origin', 'origin_key',
       // Migration 26 (release 0.2.0, the urgent lane): urgent, the hand-off pair, the escalation triple and the game's evidence id.
       'urgent', 'handoff_at', 'handoff_by', 'escalated_to', 'escalated_by', 'escalated_at', 'evidence_ref',
+      // Migration 26 (release 0.2.0, staff scope): the scope tag of the room the report was filed in.
+      'scope',
     ]);
     const by = (n: string) => info.find((c) => c.name === n);
     expect(by('status')?.dflt_value).toBe("'open'");

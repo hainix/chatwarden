@@ -76,6 +76,13 @@ export interface KitResponse {
 export interface Authz {
   actor: string;
   role: Role;
+  /**
+   * Limits the caller to the rooms that carry one of these staff scope labels (1 to 20 labels of `^[a-z0-9][a-z0-9:_.-]{0,63}$`, for example `creator:alice`): a room is tagged with its
+   * `scope` at `cw.rooms.seat`. A caller with no `scope` is global and sees everything, as before. A scoped caller sees and acts on the reports filed in those rooms and nothing else; an id
+   * outside is 404, and every route that has not declared itself scope-aware is 403. The `owner` role cannot be scoped. A malformed scope (an empty list, a bad label, a non-list, or a scope with
+   * the owner role) makes the whole `Authz` malformed: 401, fail closed.
+   */
+  scope?: readonly string[];
 }
 
 /** The route params, already decoded and checked against `^[A-Za-z0-9_-]{1,64}$`. */

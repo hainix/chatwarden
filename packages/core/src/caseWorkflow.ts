@@ -1,3 +1,4 @@
+import { checkScope } from './contexts.js';
 import { isValidAuditActor } from './audit.js';
 import type { KitEvent } from './events.js';
 import { StoreCapabilityError } from './storeCapability.js';
@@ -81,8 +82,9 @@ export class CaseWorkflow {
     return { ok: true };
   }
 
-  /** How many open reports are urgent. 0 for a store without the urgent lane. */
-  urgentCount(): number {
-    return typeof this.store.countOpenUrgent === 'function' ? this.store.countOpenUrgent() : 0;
+  /** How many open reports are urgent, or with a `scope`, how many of those filed in a room of one of these staff scopes. 0 for a store without the urgent lane. */
+  urgentCount(scope?: readonly string[]): number {
+    if (typeof this.store.countOpenUrgent !== 'function') return 0;
+    return scope === undefined ? this.store.countOpenUrgent() : this.store.countOpenUrgent(checkScope(scope, 'cases.urgentCount: scope'));
   }
 }

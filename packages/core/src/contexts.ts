@@ -41,6 +41,21 @@ const WORD_MAX = 40;
 
 /** Is `v` a well-formed context name? */
 export const isContextName = (v: unknown): v is string => typeof v === 'string' && CONTEXT_NAME.test(v);
+/** The staff scope a room's tags carry: the `scope` tag when it is a well-formed label, else null. */
+export const scopeOfTags = (tags: Readonly<Record<string, string>>): string | null => (Object.hasOwn(tags, 'scope') && isScopeLabel(tags['scope']) ? (tags['scope'] as string) : null);
+/**
+ * Check a staff scope list: an array of at most {@link MAX_SCOPE_LABELS} well-formed labels (an empty one is allowed in the core and means nobody). Returns a copy; throws RangeError and
+ * never echoes a label.
+ */
+export function checkScope(v: unknown, what = 'scope'): readonly string[] {
+  if (!Array.isArray(v) || v.length > MAX_SCOPE_LABELS) throw new RangeError(`${what} must be a list of at most ${MAX_SCOPE_LABELS} scope labels`);
+  const out: string[] = [];
+  for (const label of v as unknown[]) {
+    if (!isScopeLabel(label)) throw new RangeError(`${what} holds a label that is not a scope label`);
+    out.push(label);
+  }
+  return out;
+}
 /** Is `v` a well-formed staff scope label? */
 export const isScopeLabel = (v: unknown): v is string => typeof v === 'string' && SCOPE_LABEL.test(v);
 

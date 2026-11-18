@@ -3,7 +3,8 @@ import type { Chatwarden, Logger, Role, Source } from '@chatwarden/core';
 import { requireRole } from '../auth.js';
 import { roleAtLeast } from '../permissions.js';
 import type { Permissions, PermissionKey } from '../permissions.js';
-import { applyDecision, checkDurationsOffered, needForDecision } from './apply.js';
+import { applyDecision, checkDurationsOffered, checkScopedLimits, needForDecision } from './apply.js';
+import type { ScopedLimits } from './context.js';
 import type { DecisionOutcome, ParsedDecision } from './apply.js';
 import { gateClaim } from './claims.js';
 import type { AiEchoBody } from './validate.js';
@@ -54,6 +55,11 @@ interface DecideAsBase {
   echo?: AiEchoBody;
   /** For the one line logged when ending the actor's claim fails (class only). */
   logger?: Logger;
+  /**
+   * A scoped moderator's staff scope and limits: the report is read through the scope (out of scope is an unknown report: 404) and the actions are held to the limits (400 `invalid_sanction`),
+   * after the report is found, so the refusal never tells an out-of-scope id from an unknown one. Absent for a global caller.
+   */
+  scoped?: { scope: readonly string[]; limits: Readonly<ScopedLimits> };
 }
 
 /**
@@ -73,7 +79,8 @@ export async function decideAs(cw: Chatwarden, input: DecideAsInput): Promise<De
 
   // A report that is no longer open is a replay or an already_decided: a claim taken since must not turn that into a 409. The lengths on offer
   // apply to a decision that would be applied now, not to a replay or an answer of `already_decided`.
-  const existing = cw.reports.get(input.reportId);
+  const existing = cw.reports.get(input.reportId, input.scoped === undefined ? undefined : { scope: input.scoped.scope });
+  if (input.scoped !== undefined && existing !== null) checkScopedLimits(decision.actions, input.scoped.limits);
   if (existing !== null && existing.status === 'open') checkDurationsOffered(cw, decision.actions);
   const person = existing !== null && existing.status === 'open' ? existing.targetPerson : null;
   if (person !== null && input.claims === 'gate') {
@@ -90,6 +97,7 @@ export async function decideAs(cw: Chatwarden, input: DecideAsInput): Promise<De
     actor,
     { ...(input.echo === undefined ? {} : { echo: input.echo }), role },
     input.source ?? 'moderator',
+    input.scoped?.scope,
   );
   // Deciding the person's last open report ends the actor's own claim; while other reports about them are open the claim is kept (one case
   // per person). Not on a replay: the actor may hold a fresh claim on the person's next report.

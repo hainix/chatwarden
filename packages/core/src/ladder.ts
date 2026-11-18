@@ -47,9 +47,14 @@ export type LadderStep = 0 | 1 | 2 | 3 | 4 | 5;
  * The canonical person's actions over the last 90 days (`startsAt >= now - HISTORY_LOOKBACK_MS`, inclusive),
  * across every alias that has been merged into them. Revoked rows are included, flagged `revoked`.
  */
-export function historyOf(store: Store, subjects: SubjectIndex, subject: SubjectId, now: number): ActionRecord[] {
+export function historyOf(store: Store, subjects: SubjectIndex, subject: SubjectId, now: number, scope?: readonly string[]): ActionRecord[] {
   const root = subjects.canonical(subject);
   const out: ActionRecord[] = [];
+  // A staff scope keeps only the actions made from a report filed in one of its rooms (a direct or an automatic sanction has no report and is never one of them).
+  if (scope !== undefined) {
+    for (const row of store.listSubjectSanctions({ subjects: subjects.aliasesOf(root), since: now - HISTORY_LOOKBACK_MS, scope, limit: 200 })) out.push(toRecord(row));
+    return out;
+  }
   for (const row of store.loadSubjectActions(now - HISTORY_LOOKBACK_MS)) {
     if (row.targetType !== 'subject' || subjects.canonical(row.value) !== root) continue;
     out.push(toRecord(row));
@@ -175,6 +180,11 @@ export interface SuggestContext {
    * @experimental
    */
   hideSignalText?: boolean;
+  /**
+   * Read only what happened in these staff scopes: the person's record is the actions made from reports filed in a room of one of them, and no signal rule is read (a count of what other
+   * players did would reach past the scope). Set by a staff route for a scoped moderator; `cw.suggest` applies it. An empty list reads an empty record.
+   */
+  scope?: readonly string[];
 }
 
 /**

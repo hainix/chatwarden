@@ -1,3 +1,4 @@
+import { checkScope } from './contexts.js';
 import { ownLineIdsByPerson } from './notices.js';
 import { canonicalReasonId, isReasonId, reasonOfCategory } from './reporting.js';
 import type { ReportReason } from './reporting.js';
@@ -99,6 +100,11 @@ export interface ReportQuery {
    * `false` or absent: every report. @experimental
    */
   urgent?: boolean;
+  /**
+   * Only reports filed in a room whose `scope` tag is one of these (a staff scope): applied in the store query, so the order and the cursor are the unscoped ones. A report with no scope is never
+   * listed, an empty list lists nothing, and absent is every report. At most 20 well-formed labels (`RangeError` otherwise).
+   */
+  scope?: readonly string[];
 }
 
 /**
@@ -174,14 +180,17 @@ export function staffReport(record: ReportRecord, subjects: SubjectIndex): Staff
 
 /** One page of the staff queue. Throws {@link ReportQueryError} for an unknown status or a bad cursor. */
 export function listStaffReports(store: Store, subjects: SubjectIndex, q: ReportQuery = {}, reasons: readonly ReportReason[] = []): ReportPage {
+  const scope = q.scope === undefined ? undefined : checkScope(q.scope, 'reports.list: scope');
+  // Applied in the store query; applied again to what comes back, so a store that ignored it still cannot show another scope's report (the page may then be short, never wrong).
+  const inScope = (r: { scope: string | null }): boolean => scope === undefined || (r.scope !== null && scope.includes(r.scope));
   if (q.person !== undefined) {
     if (typeof q.person !== 'string' || q.person === '') throw new ReportQueryError('person');
     if (q.status !== undefined) throw new ReportQueryError('status');
     if (q.reason !== undefined) throw new ReportQueryError('reason');
     if (q.urgent !== undefined) throw new ReportQueryError('urgent');
     if (q.before !== undefined && q.before !== null) throw new ReportQueryError('before');
-    const rows = store.listReportsByPerson(subjects.aliasesOf(q.person), clampLimit(q.limit));
-    return { items: rows.map((r) => staffReport(r, subjects)), next: null };
+    const rows = store.listReportsByPerson(subjects.aliasesOf(q.person), clampLimit(q.limit), scope);
+    return { items: rows.filter(inScope).map((r) => staffReport(r, subjects)), next: null };
   }
   if (q.status !== undefined && !STATUSES.includes(q.status)) throw new ReportQueryError('status');
   if (q.reason !== undefined && q.reason !== null && !isReasonId(q.reason)) throw new ReportQueryError('reason');
@@ -196,12 +205,13 @@ export function listStaffReports(store: Store, subjects: SubjectIndex, q: Report
     ...(urgentOnly ? { status: 'open' as const, urgent: true } : q.status === undefined ? {} : { status: q.status }),
     ...(cursor === null ? {} : { before: cursor.createdAt, beforeId: cursor.id }),
     ...(reason === undefined ? {} : { reason }),
+    ...(scope === undefined ? {} : { scope }),
     limit,
   });
   const last = rows[rows.length - 1];
   // The cursor and "is there more" follow the rows the store gave; the filter is applied again to what it returned, so a store
   // that does not know `reason` still cannot show the wrong reports.
-  const items = rows.map((r) => staffReport(r, subjects)).filter((r) => !urgentOnly || r.urgent);
+  const items = rows.filter(inScope).map((r) => staffReport(r, subjects)).filter((r) => !urgentOnly || r.urgent);
   return {
     items: reason === undefined ? items : items.filter((r) => r.reportedReason === reason),
     next: rows.length === limit && last !== undefined ? encodeReportCursor(last.createdAt, last.id) : null,

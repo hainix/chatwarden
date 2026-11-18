@@ -1,3 +1,4 @@
+import { scopeOfTags } from './contexts.js';
 import { randomId } from './crypto.js';
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
 import { FILTER_LIMITS } from './filters.js';
@@ -364,6 +365,7 @@ export class ReportService {
     const { roomId } = input;
 
     const { excerpt, people } = this.snapshotOf(roomId);
+    const tags = this.roster.tags(roomId);
     const line = typeof input.lineId === 'string' ? this.buffer.get(roomId, input.lineId) : undefined;
     // The seat and handle the person last spoke from in this room, when the buffer still shows one: for the staff view, never for a player.
     let seen: { seatId: string; handle: string } | undefined = line === undefined ? undefined : { seatId: line.seatId, handle: line.handle };
@@ -377,7 +379,7 @@ export class ReportService {
       id,
       createdAt: now,
       roomId,
-      tags: this.roster.tags(roomId),
+      tags,
       reporterSubject: `filter:${id}`,
       reporterSeat: '',
       reporterHandle: '',
@@ -395,6 +397,7 @@ export class ReportService {
       originKey: input.originKey,
       urgent: input.urgent === true,
       evidenceRef: null,
+      scope: scopeOfTags(tags),
     };
     const dayStart = Math.floor(now / DAY_MS) * DAY_MS;
     const cap = this.flagCap();
@@ -539,12 +542,13 @@ export class ReportService {
       remaining = Math.max(0, this.limits.perDay - limits.used - 1);
 
       const { excerpt, people } = this.snapshotOf(roomId);
+      const tags = this.roster.tags(roomId);
 
       row = {
         id: newId(),
         createdAt: now,
         roomId,
-        tags: this.roster.tags(roomId),
+        tags,
         reporterSubject: reporter,
         reporterSeat: input.reporterSeat,
         reporterHandle: reporterOcc.handle,
@@ -561,6 +565,7 @@ export class ReportService {
         // A snapshot: the reason's flag as it is now, or the kit's own caller said so. Never from the player's input.
         urgent: (given.id !== null && findReason(this.reporting().reasons, given.id)?.urgent === true) || extras?.urgent === true,
         evidenceRef: this.cleanEvidenceRef(extras?.evidenceRef ?? input.evidenceRef),
+        scope: scopeOfTags(tags),
       };
       const toStore = row;
       const written = this.store.transaction(() => this.store.insertReport(toStore));

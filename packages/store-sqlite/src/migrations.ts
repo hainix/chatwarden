@@ -857,6 +857,12 @@ CREATE TABLE kit_report_comments (
 CREATE INDEX kit_report_comments_by_report ON kit_report_comments (report_id, at, id);
 CREATE INDEX kit_reports_by_reporter_outcome_reason ON kit_reports (reporter_subject, created_at, status, bad_faith, reported_reason);
 
+-- any-server-rooms-languages: kit_reports.scope. The staff scope of the room a report was filed in (its scope tag), kept in a column of its own so a scoped moderator's reads filter in the
+-- query. Null for a room with no scope; the backfill copies the tag from the reports already stored.
+ALTER TABLE kit_reports ADD COLUMN scope TEXT;
+CREATE INDEX kit_reports_by_scope ON kit_reports (scope, status, created_at);
+UPDATE kit_reports SET scope = json_extract(tags_json, '$.scope') WHERE json_extract(tags_json, '$.scope') IS NOT NULL;
+
 CREATE TABLE kit_chat_days (
   day       TEXT PRIMARY KEY,
   delivered INTEGER NOT NULL,

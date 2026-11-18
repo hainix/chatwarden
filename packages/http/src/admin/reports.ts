@@ -254,8 +254,9 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
   /** A report's claim, only while its case is open. */
   const claimOf = (r: StaffReport): CaseClaim | undefined => (r.status === 'open' ? cw.cases.holders([r.targetPerson]).get(r.targetPerson) : undefined);
 
-  const load = (id: string): StaffReport => {
-    const report = cw.reports.get(id);
+  /** The report, read through the caller's staff scope: a report out of scope (or with none) is exactly an unknown one. */
+  const load = (id: string, scope?: readonly string[]): StaffReport => {
+    const report = cw.reports.get(id, scope === undefined ? undefined : { scope });
     if (report === null) throw new NotFoundError();
     return report;
   };
@@ -266,6 +267,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
 
   return {
     'GET /reports': ctx.secure('reports.read', (c) => {
+      const scope = c.scope;
       const { status, cursor, reason, urgent } = c.req.query;
       const limit = queryLimit(c.req.query.limit);
       // The urgent queue: `urgent=1` and nothing else is a value; it means open reports, so another status is a contradiction (the facade refuses it too).
@@ -279,6 +281,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         ...(limit === undefined ? {} : { limit }),
         // `none` is the reports with no reason; a malformed id is the facade's ReportQueryError (400).
         ...(reason === undefined ? {} : { reason: reason === 'none' ? null : reason }),
+        // A scoped caller's list is filtered in the store query by their scope; it never comes from the request.
+        ...(scope === undefined ? {} : { scope }),
       });
       const open = [...new Set(page.items.filter((r) => r.status === 'open').map((r) => r.targetPerson))];
       const claims = cw.cases.holders(open);
@@ -287,7 +291,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // here must not take the queue down: the rows then carry null.
       let accuracy = new Map<string, ReporterAccuracy>();
       let boosted = new Set<string>();
-      if (roleAtLeast(c.authz.role, ctx.permissions['history.read'])) {
+      // A scoped caller sees no reporter record, signal boost or AI brief: each is read across scopes.
+      if (scope === undefined && roleAtLeast(c.authz.role, ctx.permissions['history.read'])) {
         // Who meets the queue signal feed: one grouped read for the page, and none at all with the feed off. It never throws.
         if (open.length > 0 && cw.profile.signals.feeds.queue !== undefined) boosted = cw.signals.boosted(open);
         const reporters = [...new Set(page.items.filter((r) => r.status === 'open').flatMap((r) => (r.reporterPerson === null ? [] : [r.reporterPerson])))];
@@ -300,7 +305,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         }
       }
       // The AI's brief of each open report: one batch for the page. The AI can never take the queue down; it answers an empty map.
-      const briefs = cw.ai.briefs(page.items.filter((r) => r.status === 'open').map((r) => r.id));
+      const briefs = scope === undefined ? cw.ai.briefs(page.items.filter((r) => r.status === 'open').map((r) => r.id)) : new Map<string, AiBrief>();
       c.audit('report.view');
       const flagged = handleFlags(cw);
       const workflow = cw.desk.workflowEnabled();
@@ -312,22 +317,24 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         ...flagKey(flagged, 'reporterHandleFlagged', r.reporterHandle),
       }));
       return { status: 200, body: { items, next: page.next } };
-    }),
+    }, { scoped: true }),
 
     'GET /reports/:id': ctx.secure('reports.read', (c) => {
       const id = c.params.id as string;
+      const scope = c.scope;
       const level = queryLevel(c.req.query.level);
-      const report = load(id);
+      const report = load(id, scope);
       const rule = ruleOf(cw, report);
-      const history = Object.fromEntries(peopleOf(report).map((p) => [p, cw.history(p)]));
-      const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report), ...hideSignalsFor(c) });
+      // A scoped caller reads the record as it stands in their scope: the history is the actions made from their reports, the suggestion is built from it and no signal is read.
+      const history = Object.fromEntries(peopleOf(report).map((p) => [p, scope === undefined ? cw.history(p) : cw.scopedHistory(p, scope).history]));
+      const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report), ...hideSignalsFor(c), ...(scope === undefined ? {} : { scope }) });
       const claim = claimView(claimOf(report));
-      // Opening a case is when a missing or stale read is asked for; the answer is whatever is stored now.
-      const ai = cw.ai.read(id, { open: true });
+      // Opening a case is when a missing or stale read is asked for; the answer is whatever is stored now. The AI's read was made from the whole record, so a scoped caller is not shown it.
+      const ai = scope === undefined ? cw.ai.read(id, { open: true }) : null;
       // Whether a read is on its way, so the hub waits only when one is: present when the AI is on (level 1 or 2), absent when it is off, so a
       // server with the AI off answers exactly as before. False in a degraded mode (breaker open, a daily cap reached, a read that ended
       // without an answer).
-      const aiExpected = cw.ai.level() === 0 ? undefined : cw.ai.expected(id);
+      const aiExpected = scope !== undefined || cw.ai.level() === 0 ? undefined : cw.ai.expected(id);
       c.audit('report.view', { type: 'report', ref: id });
       // The handles the matcher flags (the report's two, and each excerpt line's): the hub masks them until shown. Absent when none is.
       const flagged = handleFlags(cw);
@@ -362,8 +369,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (failed.length > 0) safeWarn(ctx.logger, 'chatwarden.http_notice_text_failed', { error: failed[0] instanceof Error ? failed[0].name : 'unknown', count: failed.length });
       // A player's report carries no `origin` keys (the body is as it was); a report nobody filed carries them, with `reporterPerson` null. The raw hand-off, escalation and evidence
       // columns are not the body's shape: `urgent` and `handoff: { at, by }` stand in for them (staff ids, never a player's).
-      const { origin: _origin, originKey: _originKey, handoffAt, handoffBy, escalatedTo, escalatedBy, escalatedAt, evidenceRef: _ref, ...plain } = report;
-      void [_origin, _originKey, _ref];
+      const { origin: _origin, originKey: _originKey, handoffAt, handoffBy, escalatedTo, escalatedBy, escalatedAt, evidenceRef: _ref, scope: _scope, ...plain } = report;
+      void [_origin, _originKey, _ref, _scope];
       // With the workflow on: the staff thread and the second look asked of a senior or the owner. With it off the keys are not there at all.
       const workflow = cw.desk.workflowEnabled()
         ? {
@@ -372,7 +379,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
           }
         : {};
       // A held report shows `hold: { code, at }` (never who held it); every other body is as it was.
-      const held = cw.legal.status(id);
+      const held = scope === undefined ? cw.legal.status(id) : null;
       const shown = {
         ...plain,
         urgent: report.urgent,
@@ -390,7 +397,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         status: 200,
         body: { report: shown, history, suggest, rule, claim, ai, ...(aiExpected === undefined ? {} : { aiExpected }) },
       };
-    }),
+    }, { scoped: true }),
 
     'POST /reports/:id/urgent': ctx.secure('reports.urgent', (c) => {
       const id = c.params.id as string;
@@ -416,22 +423,24 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
 
     'POST /reports/:id/suggest': ctx.secure('reports.read', (c) => {
       const id = c.params.id as string;
+      const scope = c.scope;
       const body = bodyObject(c.req);
       const level = bodyLevel(body.level);
       const person = has(body, 'person') ? bodyId(body.person) : undefined;
       const rule = has(body, 'rule') ? bodyRule(body.rule) : undefined;
       if (rule !== undefined && !cw.rules.isCitable(rule)) throw new ValidationError();
-      const report = load(id);
+      const report = load(id, scope);
       // Only the people the report names: this is not a way to look up anyone's record.
       const named = namedIn(report);
       if (person !== undefined && !named.has(person)) throw new ValidationError();
       const suggestion = cw.suggest(person ?? report.targetPerson, level, rule ?? ruleOf(cw, report), {
         roomId: roomOf(report),
         ...hideSignalsFor(c),
+        ...(scope === undefined ? {} : { scope }),
       });
       c.audit('suggest', { type: 'report', ref: id });
       return { status: 200, body: suggestion };
-    }),
+    }, { scoped: true }),
 
     'POST /reports/:id/decide': ctx.secure('reports.decide', async (c) => {
       const id = c.params.id as string;
@@ -440,6 +449,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // judged (as `POST /people/:ref/rename` does) and before anything is written.
       let rename: { rule: number } | undefined;
       if (has(body, 'rename')) {
+        // Names and renames are not scope-aware: a scoped caller never asks one (before anything is read, so it tells nothing about the id).
+        if (c.scope !== undefined) throw new HttpError('forbidden');
         c.need('sanctions.apply');
         if (!cw.names.renamesEnabled()) throw new NotFoundError();
         rename = bodyDecideRename(body.rename);
@@ -447,7 +458,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const decision = parseDecision(Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'rename')));
       const takeOver = bodyTakeOver(body);
       const echo = has(body, 'ai') ? bodyAiEcho(body.ai) : undefined;
-      const reported = cw.reports.get(id);
+      const reported = cw.reports.get(id, c.scope === undefined ? undefined : { scope: c.scope });
       if (rename !== undefined) {
         // Only an upheld decision asks for a rename, and only of the reported person: an action on anyone else is refused, never moved.
         if (decision.verdict !== 'upheld') throw new ValidationError();
@@ -468,6 +479,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         role: c.authz.role,
         permissions: ctx.permissions,
         claims: 'gate',
+        ...(c.scope === undefined ? {} : { scoped: { scope: c.scope, limits: ctx.scopedLimits } }),
         ...(takeOver ? { takeOver: true as const } : {}),
         onTakeOver: (person) => c.audit('case.takeover', { type: 'person', ref: cw.people.canonical(person) }, 'required'),
         ...(echo === undefined ? {} : { echo }),
@@ -495,7 +507,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       }
       if (answer.status === 'asked') c.audit('name.rename_required', { type: 'person', ref: cw.people.canonical(reported.targetPerson) }, 'best-effort');
       return { status: 200, body: { ok: true, replay: result.replay, groups: result.groups, rename: answer } };
-    }),
+    }, { scoped: true }),
 
     'POST /reports/dismiss-open': ctx.secure('reports.decide.bulk', async (c) => {
       // A sweep is a lot of dismissals: it also needs the right to dismiss one (lowering one permission never bypasses the other).
@@ -542,6 +554,17 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
     'GET /people/:ref/history': ctx.secure('history.read', (c) => {
       const ref = c.params.ref as string;
       const limit = queryLimit(c.req.query.limit) ?? HISTORY_REPORTS_DEFAULT;
+      if (c.scope !== undefined) {
+        // A scoped caller sees the reports filed in their rooms and the sanctions that came from them: no account ids, signals, links, appeals, renames or the person's record as a reporter.
+        // A person with nothing in scope is a person nobody holds (404).
+        const seen = cw.scopedHistory(ref, c.scope);
+        if (seen.reports.length === 0) throw new NotFoundError();
+        c.audit('history.view', { type: 'person', ref });
+        return {
+          status: 200,
+          body: { history: seen.history, reports: seen.reports.slice(0, limit), sanctions: seen.sanctions, handle: seen.handle, ...flagKey(handleFlags(cw), 'handleFlagged', seen.handle) },
+        };
+      }
       const history = cw.history(ref);
       const filed = cw.reports.list({ person: ref, limit }).items;
       const reports = filed.map((r) => ({
@@ -580,7 +603,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
           ...(mark.allowed ? {} : { automation: { code: mark.code, at: mark.at } }),
         },
       };
-    }),
+    }, { scoped: true }),
   };
 }
 

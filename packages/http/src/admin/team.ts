@@ -63,9 +63,11 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
       const found = cw.cases.next(c.authz.actor, {
         ...(category === undefined ? {} : { category }),
         ...(reason === undefined ? {} : { reason }),
+        // A scoped caller is served only a case with an open report in their scope; the scope is the caller's, never from the body.
+        ...(c.scope === undefined ? {} : { scope: c.scope }),
         rankDownHabitual: true,
         // With the queue signal feed on, a case whose person meets it is claimed ahead of older ordinary ones (capped, never hiding a case).
-        ...(cw.profile.signals.feeds.queue === undefined ? {} : { signalBoost: true }),
+        ...(cw.profile.signals.feeds.queue === undefined || c.scope !== undefined ? {} : { signalBoost: true }),
       });
       return {
         status: 200,
@@ -76,12 +78,14 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
               : { person: found.person, reportId: found.reportId, claim: { by: found.claim.by, since: found.claim.since, until: found.claim.until } },
         },
       };
-    }),
+    }, { scoped: true }),
 
     'POST /cases/:ref/claim': ctx.secure('reports.decide', (c) => {
       const ref = c.params.ref as string;
       const takeOver = bodyTakeOver(optionalBody(c.req));
       const actor = c.authz.actor;
+      // A person with no report in the caller's scope is a person nobody holds, before anything is read or audited.
+      if (c.scope !== undefined && !cw.cases.inScope(ref, c.scope)) throw new NotFoundError();
       // Only a live claim of somebody else is a takeover; it is recorded before it happens, so an unrecorded one cannot.
       let moving = false;
       if (takeOver && canOverrideClaims(ctx, c)) {
@@ -91,7 +95,7 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
           moving = true;
         }
       }
-      const out = cw.cases.claim(ref, actor, { takeOver: moving });
+      const out = cw.cases.claim(ref, actor, { takeOver: moving, ...(c.scope === undefined ? {} : { scope: c.scope }) });
       if (!out.ok) {
         if (out.error === 'no_case') throw new NotFoundError();
         throw new ClaimedError(out.claim);
@@ -100,32 +104,35 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
         status: 200,
         body: { claim: { by: out.claim.by, since: out.claim.since, until: out.claim.until }, tookOverFrom: out.tookOverFrom },
       };
-    }),
+    }, { scoped: true }),
 
-    'POST /cases/:ref/release': ctx.secure('reports.decide', (c) => ({
-      status: 200,
-      body: { released: cw.cases.release(c.params.ref as string, c.authz.actor) },
-    })),
+    'POST /cases/:ref/release': ctx.secure('reports.decide', (c) => {
+      const ref = c.params.ref as string;
+      if (c.scope !== undefined && !cw.cases.inScope(ref, c.scope)) throw new NotFoundError();
+      return { status: 200, body: { released: cw.cases.release(ref, c.authz.actor) } };
+    }, { scoped: true }),
 
     'POST /cases/:ref/viewing': ctx.secure('reports.read', (c) => {
       const ref = c.params.ref as string;
       // Only a real case is tracked: 404 for a person with no open report, so made-up refs fill nothing.
-      if (!cw.cases.view(ref, c.authz.actor)) throw new NotFoundError();
+      if (!cw.cases.view(ref, c.authz.actor, c.scope)) throw new NotFoundError();
       return { status: 200, body: { viewers: cw.cases.viewers(ref, c.authz.actor) } };
-    }),
+    }, { scoped: true }),
 
     'GET /changes': ctx.secure('reports.read', (c) => {
       const since = c.req.query.since;
       if (since !== undefined && !TOKEN_RE.test(since)) throw new HttpError('invalid_query');
       const token = cw.changes.token();
       // The open appeals, only while appeals are on and the caller may read them: else the body is what 0.1.7 sent.
-      const appeals = cw.appeals.enabled() && roleAtLeast(c.authz.role, ctx.permissions['appeals.read']) ? { appeals: cw.appeals.openCount() } : {};
+      // A scoped caller is told only the urgent reports in their scope: the appeals and the asked counts are not scope-aware, and the token is an opaque counter that carries no count or id.
+      const scoped = c.scope !== undefined;
+      const appeals = !scoped && cw.appeals.enabled() && roleAtLeast(c.authz.role, ctx.permissions['appeals.read']) ? { appeals: cw.appeals.openCount() } : {};
       // The open urgent reports, for the queue's one chip: a count, always there (0 when none). With the staff workflow on, the open reports asked of a senior or the owner, by role asked.
-      const asked = cw.desk.workflowEnabled() ? { asked: cw.cases.askedCount() } : {};
-      return { status: 200, body: { token, changed: since !== token, urgent: cw.cases.urgentCount(), ...asked, ...appeals } };
-    }),
+      const asked = !scoped && cw.desk.workflowEnabled() ? { asked: cw.cases.askedCount() } : {};
+      return { status: 200, body: { token, changed: since !== token, urgent: c.scope === undefined ? cw.cases.urgentCount() : cw.cases.urgentCount(c.scope), ...asked, ...appeals } };
+    }, { scoped: true }),
 
-    'GET /reasons': ctx.secure('reasons.read', () => ({ status: 200, body: { reasons: cw.reasons.list() } })),
+    'GET /reasons': ctx.secure('reasons.read', () => ({ status: 200, body: { reasons: cw.reasons.list() } }), { scoped: true }),
 
     'POST /reasons': ctx.secure('reasons.write', (c) => {
       const body = bodyObject(c.req);

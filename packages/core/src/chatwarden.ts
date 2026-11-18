@@ -48,7 +48,7 @@ import type { FilterStats } from './filters/counters.js';
 import { checkLines, createFilterEngine, shiftTestSpans, testLine } from './filters/engine.js';
 import type { FilterCheckResult, FilterTestResult } from './filters/engine.js';
 import { checkPace, mergePace } from './pace.js';
-import { Contexts, effectiveOf } from './contexts.js';
+import { checkScope, Contexts, effectiveOf } from './contexts.js';
 import type { EffectiveContext } from './contexts.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
@@ -78,7 +78,7 @@ import { VERSION } from './version.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
-import { applySanction, isInternalSource, normalizeRefCode, SanctionError, SanctionIndex } from './sanctions.js';
+import { APPEALS_START_TOKEN, applySanction, isInternalSource, normalizeRefCode, SanctionError, SanctionIndex, validateSanctionInput } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
 import {
@@ -89,6 +89,7 @@ import {
   reporterRecord,
   sanctionByRef,
   sanctionsOfPerson,
+  scopedHistoryOf,
 } from './staffViews.js';
 import { reporterAccuracyFor } from './reporterAccuracy.js';
 import type { ReporterAccuracy } from './reporterAccuracy.js';
@@ -101,6 +102,7 @@ import type {
   SanctionGroupView,
   SanctionListInput,
   SanctionPage,
+  ScopedHistory,
 } from './staffViews.js';
 import { listStaffReports, staffReport } from './staffReports.js';
 import type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
@@ -479,7 +481,7 @@ export interface Chatwarden {
      * One report as a {@link StaffReport}, or null for an unknown id. Throws the store's own error if it fails.
      * Carries subject ids: staff channels only, never send to a player.
      */
-    get(id: string): StaffReport | null;
+    get(id: string, opts?: { scope?: readonly string[] }): StaffReport | null;
     /**
      * How the reports this person FILED stand (total, open, actioned, dismissed, bad faith) and when their reporting
      * suspension ends (null if none), under the same rule intake uses, and how often their reported reason was borne out
@@ -549,7 +551,7 @@ export interface Chatwarden {
      * process that loses the database lock race in between (SQLite BUSY) is retried up to `CLAIM_BUSY_TRIES` times with
      * a fresh read, so it answers `claimed` with the winner, not an error.
      */
-    claim(person: SubjectId, actor: string, opts?: { takeOver?: boolean }): ClaimOutcome;
+    claim(person: SubjectId, actor: string, opts?: { takeOver?: boolean; scope?: readonly string[] }): ClaimOutcome;
     /** End `actor`'s own claim. True only when it ended a live one; never touches another moderator's. */
     release(person: SubjectId, actor: string): boolean;
     /**
@@ -580,7 +582,7 @@ export interface Chatwarden {
      * usual, so nothing is ever left out. A boosted case is never ranked down. A non-boolean value is a `RangeError`.
      * @experimental (the `rankDownHabitual` and `signalBoost` filters)
      */
-    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean }): NextCase | null;
+    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean; scope?: readonly string[] }): NextCase | null;
     /**
      * Mark an open report urgent or not urgent (any moderator, both directions; the staff layer audits it). `ok: true` also for a repeat; `closed` for a decided report, `not_found` for
      * an unknown id. Urgent is a stored snapshot (a reason's flag sets it at filing, see `reporting.reasons[].urgent`); this is the one other way it changes. Moves the change token,
@@ -608,14 +610,19 @@ export interface Chatwarden {
     clearEscalation(reportId: string, actor: string, role: Role): ClearEscalationResult;
     /** How many open reports are asked of each role (zeros with the workflow off). @experimental */
     askedCount(): { senior: number; owner: number };
-    /** How many open reports are urgent (0 for a store without the urgent lane). @experimental */
-    urgentCount(): number;
+    /** How many open reports are urgent (0 for a store without the urgent lane); with `scope`, only those filed in a room of one of these staff scopes. @experimental */
+    urgentCount(scope?: readonly string[]): number;
     /**
      * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
      * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
      * (`VIEWING_PER_ACTOR_MAX`), a newer beat dropping their oldest. True when the beat was recorded.
      */
-    view(person: SubjectId, actor: string): boolean;
+    view(person: SubjectId, actor: string, scope?: readonly string[]): boolean;
+    /**
+     * Does the person have a report, open or decided, filed in a room of one of these staff scopes? What a scoped caller's id routes ask before they answer: a person with none is
+     * answered as a person nobody holds. An empty list says no.
+     */
+    inScope(person: SubjectId, scope: readonly string[]): boolean;
     /** Who has the person's case open now (sorted), leaving `except` out. In this process's memory: other processes are not seen. */
     viewers(person: SubjectId, except?: string): string[];
     /** `viewers` for several people at once; people nobody is viewing are absent. */
@@ -691,18 +698,18 @@ export interface Chatwarden {
      * Write one sanction group and make it live at once. Resolves with the group id and the player-quotable ref
      * code. This writes no player notice: `decide` is the path that does.
      */
-    apply(input: SanctionInput): Promise<{ groupId: string; refCode: string }>;
+    apply(input: SanctionInput, opts?: { forReport?: string }): Promise<{ groupId: string; refCode: string }>;
     /**
      * Revoke a whole group and withdraw its player notice in the same transaction: an unseen notice is never shown,
      * a seen one leaves "My record". Resolves true when this call revoked something.
      */
-    revoke(groupId: string, actor: string, reason: string): Promise<boolean>;
+    revoke(groupId: string, actor: string, reason: string, opts?: { scope?: readonly string[] }): Promise<boolean>;
     /**
      * A person's sanctions as staff see them, newest first: the last 90 days plus every unrevoked permanent one, across
      * the aliases merged into them, at most 200. Each is a {@link SanctionGroupView} built from the group's subject row
      * (never an IP row, never a hashed identifier). Carries staff-only text (reason, actor): never send to a player.
      */
-    forPerson(subject: SubjectId): SanctionGroupView[];
+    forPerson(subject: SubjectId, opts?: { scope?: readonly string[] }): SanctionGroupView[];
     /**
      * Every person's sanctions, newest first, one page at a time (`limit` default 50, clamped to 1..200; `cursor` is the
      * previous `next`; `source` filters). Not windowed. Throws {@link SanctionQueryError} for a cursor that is not ours or an
@@ -973,6 +980,12 @@ export interface Chatwarden {
    * only, never send to a player (the returned `label` and `why` themselves hold no identifier).
    */
   suggest(subject: SubjectId, level: ConductLevel | null, rule: RuleRef, context?: SuggestContext): Suggestion;
+  /**
+   * The person as a moderator limited to `scope` (a staff scope: the labels of the rooms they may see) may see them: the reports filed against them in those rooms and the sanctions that came
+   * from those reports, never an account id, a signal, a link or another scope's report. Folds merged aliases in. At most 20 well-formed labels (`RangeError` otherwise); an empty list sees nothing.
+   * Carries subject ids and staff-only text: never send to a player.
+   */
+  scopedHistory(subject: SubjectId, scope: readonly string[]): ScopedHistory;
   /** Rule gaps: sanctions a moderator filed under `'uncovered'`, for the periodic rules review. Staff only. */
   gaps: {
     list(): GapRow[];
@@ -1628,12 +1641,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
 
   // The case read (`reports.get`): the staff report plus the evidence pointer with its link and, when `desk.surge` is on and the person is over its threshold, the surge hint. Neither is stored, raised or
   // used by anything else; a failure of the surge read leaves the case without the hint.
-  const caseOf = (report: StaffReport): StaffReport => {
+  const caseOf = (report: StaffReport, withSurge = true): StaffReport => {
     const profile = policy.profileNow();
     const evidence = report.evidenceRef === null ? null : { ref: report.evidenceRef, url: evidenceLink(profile.reporting, report.evidenceRef) };
     let surge: ReportSurge | null = null;
     try {
-      surge = surgeOf(report.targetPerson, clock.now(), profile.desk.surge, {
+      if (withSurge) surge = surgeOf(report.targetPerson, clock.now(), profile.desk.surge, {
         listReportsByPerson: (people, limit) => store.listReportsByPerson(people, limit),
         aliasesOf: (subject) => subjects.aliasesOf(subject),
         canonical: (subject) => subjects.canonical(subject),
@@ -1969,9 +1982,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         return res;
       },
       list: (q) => listStaffReports(store, subjects, q, policy.profileNow().reporting.reasons),
-      get: (id) => {
-        const record = typeof id === 'string' ? store.loadReport(id) : null;
-        return record === null ? null : caseOf(staffReport(record, subjects));
+      get: (id, o) => {
+        const scope = o?.scope === undefined ? undefined : checkScope(o.scope, 'reports.get: scope');
+        const record = typeof id !== 'string' ? null : scope === undefined ? store.loadReport(id) : store.loadReportInScope(id, scope);
+        if (record === null) return null;
+        // A scoped read leaves the surge hint out: it counts the reports filed against the person in every scope.
+        return scope === undefined ? caseOf(staffReport(record, subjects)) : caseOf(staffReport(record, subjects), false);
       },
       reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
       reporterAccuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
@@ -1994,8 +2010,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       escalate: (reportId, actor, role, input) => commentService.escalate(reportId, actor, role, input),
       clearEscalation: (reportId, actor, role) => commentService.clearEscalation(reportId, actor, role),
       askedCount: () => commentService.askedCount(),
-      urgentCount: () => caseWorkflow.urgentCount(),
-      view: (person, actor) => desk.view(person, actor),
+      urgentCount: (scope) => caseWorkflow.urgentCount(scope),
+      view: (person, actor, scope) => desk.view(person, actor, scope),
+      inScope: (person, scope) => desk.inScope(person, scope),
       viewers: (person, except) => desk.viewers(person, except),
       viewersOf: (people, except) => desk.viewersOf(people, except),
     },
@@ -2025,9 +2042,16 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
-      apply: async (input) => {
+      apply: async (given, o) => {
         // The AI's own source is not for a caller (design 6.1): refused before the clock, the store or the index is touched.
-        if (isInternalSource(input.source)) throw new SanctionError('applySanction: invalid source');
+        if (isInternalSource(given.source)) throw new SanctionError('applySanction: invalid source');
+        let input = given;
+        if (o?.forReport !== undefined) {
+          // A sanction made for a report (a scoped moderator's): the whole ordinary check runs first, then the report is named on the row, so the scoped reads find it.
+          validateSanctionInput(given);
+          if (typeof o.forReport !== 'string' || o.forReport === '' || store.loadReport(o.forReport) === null) throw new SanctionError('applySanction: unknown report');
+          input = { ...given, reportId: o.forReport, startsAtToken: APPEALS_START_TOKEN };
+        }
         const now = clock.now();
         const done = await applySanction(store, subjects, input, now, sanctions);
         try {
@@ -2053,7 +2077,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         }
         return done;
       },
-      revoke: async (groupId, actor, reason) => {
+      revoke: async (groupId, actor, reason, o) => {
+        // With a staff scope, only a sanction made from a report filed in one of its rooms can be revoked: a direct or an automatic one, another scope's and an unknown group are all "not found".
+        if (o?.scope !== undefined) {
+          const scope = checkScope(o.scope, 'sanctions.revoke: scope');
+          if (typeof groupId !== 'string' || groupId === '' || store.listSubjectSanctions({ groupId, scope, limit: 1 }).length === 0) return false;
+        }
         // One instant for the stored revokedAt and the event, so a consumer correlating the two sees the same time.
         const at = clock.now();
         const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, {
@@ -2089,7 +2118,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         }
         return revoked;
       },
-      forPerson: (subject) => sanctionsOfPerson(store, subjects, subject, clock.now()),
+      forPerson: (subject, o) => sanctionsOfPerson(store, subjects, subject, clock.now(), o?.scope === undefined ? undefined : checkScope(o.scope, 'sanctions.forPerson: scope')),
       list: (q) => listSanctionGroups(store, subjects, q ?? {}, clock.now()),
       byRef: (refCode) => {
         const code = normalizeRefCode(refCode);
@@ -2165,11 +2194,18 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
+    scopedHistory: (subject, scope) => {
+      if (typeof subject !== 'string' || subject === '') throw new RangeError('scopedHistory: subject must be a non-empty string');
+      return scopedHistoryOf(store, subjects, subject, checkScope(scope, 'scopedHistory: scope'), clock.now());
+    },
     suggest: (subject, level, rule, context) => {
       const now = clock.now();
       // The signal hits are the kit's to compute: a list the caller passes is dropped, the real one set when a ladder rule is met.
       const { signals: _ignored, ...given } = (context ?? {}) as SuggestContext;
       void _ignored;
+      // A scoped suggestion reads only the actions made from reports in that scope and no signal rule: both would carry what happened in other rooms.
+      const scope = given.scope === undefined ? undefined : checkScope(given.scope, 'suggest: scope');
+      if (scope !== undefined) return suggest(policy.profileNow(), historyOf(store, subjects, subject, now, scope), level, rule, now, { ...given, scope, hideSignalText: true });
       const hits = signals.ladderHits(subject);
       return suggest(policy.profileNow(), historyOf(store, subjects, subject, now), level, rule, now, hits.length === 0 ? given : { ...given, signals: hits });
     },

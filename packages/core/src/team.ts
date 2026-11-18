@@ -1,3 +1,4 @@
+import { checkScope } from './contexts.js';
 import { randomId } from './crypto.js';
 import { isValidAuditActor } from './audit.js';
 import { RANK_DOWN_SCAN_MAX, REPORTER_ACCURACY_BATCH_MAX, REPORTER_RANK_LAPSE_MS } from './reporterAccuracy.js';
@@ -261,12 +262,14 @@ export class CaseDesk {
    * person (else `no_case`). `takeOver` moves a live claim of someone else to `actor`; the caller decides who may use it.
    * One atomic conditional write in the store: of two moderators racing, exactly one wins.
    */
-  claim(person: SubjectId, actor: string, opts: { takeOver?: boolean } = {}): ClaimOutcome {
+  claim(person: SubjectId, actor: string, opts: { takeOver?: boolean; scope?: readonly string[] } = {}): ClaimOutcome {
     needActor(actor);
     const canonical = this.subjects.canonical(needPerson(person));
+    const scope = opts.scope === undefined ? undefined : checkScope(opts.scope, 'cases.claim: scope');
     return retryBusy(() =>
       this.store.transaction((): ClaimOutcome => {
-        if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1).length === 0) {
+        // With a staff scope the case must have an open report in that scope: a case that exists only elsewhere is no case here.
+        if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1, scope).length === 0) {
           return { ok: false, error: 'no_case' };
         }
         const now = this.clock.now();
@@ -330,8 +333,10 @@ export class CaseDesk {
    * overdue case does not come straight back to the person who let it lapse. Other moderators are not affected, it is still served when it
    * is all that is left, and it is kept in this process only (a restart forgets it).
    */
-  next(actor: string, filter: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean } = {}): NextCase | null {
+  next(actor: string, filter: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean; scope?: readonly string[] } = {}): NextCase | null {
     needActor(actor);
+    // A staff scope limits every read below (the urgent pass, the scan, the rank-down reads and the report the case opens on); an empty one serves nothing.
+    const scope = filter.scope === undefined ? undefined : checkScope(filter.scope, 'cases.next: scope');
     const category = filter.category;
     if (category !== undefined && !REPORT_CATEGORIES.includes(category)) throw new RangeError('cases: unknown category');
     const asked = filter.reason;
@@ -344,7 +349,7 @@ export class CaseDesk {
     if (boost !== undefined && typeof boost !== 'boolean') throw new RangeError('cases: signalBoost must be a boolean');
     const boostMode = boost === true;
     // An urgent case first, whatever rank-down and the signal boost would say; a case another moderator holds is skipped, never taken.
-    const urgent = this.nextUrgent(actor, category, reason);
+    const urgent = this.nextUrgent(actor, category, reason, scope);
     if (urgent !== null) return urgent;
     const seen = new Set<SubjectId>();
     // Ranked-down people in the order the scan met them (oldest first).
@@ -362,6 +367,7 @@ export class CaseDesk {
       const page = this.store.listOpenReports({
         ...(category === undefined ? {} : { category }),
         ...(reason === undefined ? {} : { reason }),
+        ...(scope === undefined ? {} : { scope }),
         ...(after === undefined ? {} : { after: after.createdAt, afterId: after.id }),
         limit: NEXT_PAGE,
       });
@@ -390,7 +396,7 @@ export class CaseDesk {
       // reports of a whole page of candidates to claim the first one.
       for (let i = 0; i < free.length; i += RANK_SLICE) {
         const slice = free.slice(i, i + RANK_SLICE);
-        const down = rankDown ? this.rankedDown(slice) : new Set<SubjectId>();
+        const down = rankDown ? this.rankedDown(slice, scope) : new Set<SubjectId>();
         for (const person of slice) {
           if (boostMode && this.lapsedByMe(actor, person, now)) {
             lapsed.push(person);
@@ -405,7 +411,7 @@ export class CaseDesk {
             ordinary.push(person);
             continue;
           }
-          const won = this.tryClaim(person, actor);
+          const won = this.tryClaim(person, actor, scope);
           if (won !== null) return won;
         }
       }
@@ -422,7 +428,7 @@ export class CaseDesk {
     const heldNow = new Set(this.store.loadClaims(rest, this.clock.now()).map((c) => c.person));
     for (const person of rest) {
       if (heldNow.has(person)) continue;
-      const won = this.tryClaim(person, actor);
+      const won = this.tryClaim(person, actor, scope);
       if (won !== null) return won;
     }
     return null;
@@ -433,7 +439,7 @@ export class CaseDesk {
    * when there is none (a store that cannot count urgent reports has none, so the ordinary scan runs unchanged; a page is checked for the flag itself, so a custom store that
    * ignores the `urgent` filter cannot make an ordinary report look urgent).
    */
-  private nextUrgent(actor: string, category: ReportCategory | undefined, reason: string | null | undefined): NextCase | null {
+  private nextUrgent(actor: string, category: ReportCategory | undefined, reason: string | null | undefined, scope: readonly string[] | undefined): NextCase | null {
     if (typeof this.store.countOpenUrgent !== 'function' || this.store.countOpenUrgent() === 0) return null;
     const seen = new Set<SubjectId>();
     let after: { createdAt: number; id: string } | undefined;
@@ -442,6 +448,7 @@ export class CaseDesk {
         urgent: true,
         ...(category === undefined ? {} : { category }),
         ...(reason === undefined ? {} : { reason }),
+        ...(scope === undefined ? {} : { scope }),
         ...(after === undefined ? {} : { after: after.createdAt, afterId: after.id }),
         limit: NEXT_PAGE,
       });
@@ -456,7 +463,7 @@ export class CaseDesk {
       const held = new Set(this.store.loadClaims(candidates, this.clock.now()).map((c) => c.person));
       for (const person of candidates) {
         if (held.has(person)) continue;
-        const won = this.tryClaim(person, actor);
+        const won = this.tryClaim(person, actor, scope);
         if (won !== null) return won;
       }
       const last = page[page.length - 1];
@@ -485,7 +492,7 @@ export class CaseDesk {
   }
 
   /** One atomic 'free' claim of a person's case, opened on their newest open report; null when a rival won or the case closed. */
-  private tryClaim(person: SubjectId, actor: string): NextCase | null {
+  private tryClaim(person: SubjectId, actor: string, scope: readonly string[] | undefined): NextCase | null {
     return retryBusy(() =>
       this.store.transaction(() => {
         const now = this.clock.now();
@@ -495,7 +502,7 @@ export class CaseDesk {
         this.served.delete(key);
         this.served.set(key, res.claim.until);
         if (this.served.size > SERVED_MAX) this.served.delete(this.served.keys().next().value!);
-        const newest = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 1)[0];
+        const newest = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 1, scope)[0];
         if (newest === undefined) {
           // The case closed under us: do not leave a claim on nothing.
           this.store.releaseClaim(person, actor, now);
@@ -511,13 +518,13 @@ export class CaseDesk {
    * against them came from a habitual reporter. One read of each person's open reports and the accuracy of all their reporters
    * (chunked at the accuracy batch limit). A person with more open reports than one read returns is never ranked down.
    */
-  private rankedDown(people: readonly SubjectId[]): Set<SubjectId> {
+  private rankedDown(people: readonly SubjectId[], scope: readonly string[] | undefined): Set<SubjectId> {
     const out = new Set<SubjectId>();
     if (people.length === 0) return out;
     const now = this.clock.now();
     const reporters = new Map<SubjectId, SubjectId[]>();
     for (const person of people) {
-      const open = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 201);
+      const open = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 201, scope);
       // 201 or more is a case of its own kind: never bury it. One report past the lapse is a case that has waited long enough.
       if (open.length === 0 || open.length > 200) continue;
       if (open.some((r) => now - r.createdAt >= REPORTER_RANK_LAPSE_MS)) continue;
@@ -539,12 +546,19 @@ export class CaseDesk {
    * person with an open report is tracked (false otherwise, nothing recorded), and one actor keeps at most
    * {@link VIEWING_PER_ACTOR_MAX} cases open: a newer beat drops their oldest. True when the beat was recorded.
    */
-  view(person: SubjectId, actor: string): boolean {
+  view(person: SubjectId, actor: string, scope?: readonly string[]): boolean {
     needActor(actor);
     const canonical = this.subjects.canonical(needPerson(person));
-    if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1).length === 0) return false;
+    const checked = scope === undefined ? undefined : checkScope(scope, 'cases.view: scope');
+    if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1, checked).length === 0) return false;
     this.presence.touch(canonical, actor);
     return true;
+  }
+
+  /** Does the person have a report, open or decided, filed in a room of one of these staff scopes? The test a scoped caller's id route makes before it answers (an empty list says no). */
+  inScope(person: SubjectId, scope: readonly string[]): boolean {
+    const canonical = this.subjects.canonical(needPerson(person));
+    return this.store.listReportsByPerson(this.subjects.aliasesOf(canonical), 1, checkScope(scope, 'cases.inScope: scope')).length > 0;
   }
 
   /** Who has the person's case open now, sorted, leaving `except` out. */
