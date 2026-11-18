@@ -4,6 +4,7 @@ import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:
 import { BODY_MAX_BYTES } from '../body.js';
 import { errorResponse } from '../errors.js';
 import type { ErrorCode } from '../errors.js';
+import { SERVICE_API_VERSION, requestIdFor } from './contract.js';
 
 /** The longest the bridge waits for a request's body to arrive. */
 export const READ_TIMEOUT_MS = 10_000;
@@ -73,13 +74,27 @@ function headersOf(raw: IncomingHttpHeaders): Headers {
   return headers;
 }
 
+/** Is this path the service API (`/v1` or under it)? Its answers all carry the version and a request id, bridge errors included. */
+const isService = (pathname: string): boolean => pathname === '/v1' || pathname.startsWith('/v1/');
+
+/** The headers every /v1 answer carries, for an error the bridge writes itself: the version, the caller's request id when it is a valid one (else a fresh one), no-store and nosniff. */
+function serviceHeaders(req: IncomingMessage): Record<string, string> {
+  const given = req.headers['x-request-id'];
+  return { 'chatwarden-api': String(SERVICE_API_VERSION), 'x-request-id': requestIdFor(typeof given === 'string' ? given : undefined), 'x-content-type-options': 'nosniff' };
+}
+
 function sendError(res: ServerResponse, code: ErrorCode | 'internal' | 'timeout', extra: Record<string, string> = {}, close = false): void {
   if (res.headersSent) {
     res.destroy();
     return;
   }
-  // `internal` and `timeout` are the bridge's own: a 500 with no detail, and a 408 for a body that did not arrive.
-  const { status, body } = code === 'internal' ? { status: 500, body: { error: 'internal' } } : code === 'timeout' ? { status: 408, body: { error: 'request_timeout' } } : errorResponse(code);
+  // `internal` and `timeout` are the bridge's own: a 500 with no detail, and a 408 for a body that did not arrive. Every body is `{ error, message }`, as the API's other errors are.
+  const { status, body } =
+    code === 'internal'
+      ? { status: 500, body: { error: 'internal', message: 'Something went wrong on the server.' } }
+      : code === 'timeout'
+        ? { status: 408, body: { error: 'request_timeout', message: 'The request body did not arrive in time.' } }
+        : errorResponse(code);
   const text = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'content-length': Buffer.byteLength(text), ...(close ? { connection: 'close' } : {}), ...extra });
   res.end(text);
@@ -133,8 +148,17 @@ async function send(response: Response, res: ServerResponse): Promise<void> {
   if (!res.destroyed) res.end();
 }
 
+/** The path of a request's target, or '' when it has none that parses. */
+function pathOf(req: IncomingMessage): string {
+  try {
+    return new URL(req.url ?? '/', 'http://chatwarden.invalid').pathname;
+  } catch {
+    return '';
+  }
+}
+
 /**
- * A request listener for `http.createServer`: `createServer(nodeHandler(toFetch(mounts, { remoteAddress: peerAddress })))`. HEAD is refused (405: the service does not answer it). A body over the cap is
+ * A request listener for `http.createServer`: `createServer(nodeHandler(toFetch(mounts, { remoteAddress: peerAddress })))`. HEAD is answered on `/healthz` and `/readyz` only (as GET, no body) and is 405 everywhere else. A body over the cap is
  * 413 and one that does not arrive in time is 408, both before the handler runs. Nothing a handler throws reaches the client: a 500 with no detail.
  */
 export function nodeHandler(handle: (request: Request) => Promise<Response | null>, options: NodeHandlerOptions = {}): (req: IncomingMessage, res: ServerResponse) => void {
@@ -143,8 +167,7 @@ export function nodeHandler(handle: (request: Request) => Promise<Response | nul
   return (req, res) => {
     void (async () => {
       try {
-        const method = (req.method ?? 'GET').toUpperCase();
-        if (method === 'HEAD') return sendError(res, 'method_not_allowed', { allow: 'GET, POST, PUT, DELETE' });
+        let method = (req.method ?? 'GET').toUpperCase();
         const target = req.url ?? '/';
         if (!target.startsWith('/')) return sendError(res, 'invalid_request');
         let url: URL;
@@ -153,26 +176,33 @@ export function nodeHandler(handle: (request: Request) => Promise<Response | nul
         } catch {
           return sendError(res, 'invalid_request');
         }
+        // Errors the bridge writes itself on /v1 carry the service headers, as every other /v1 answer does.
+        const more = isService(url.pathname) ? serviceHeaders(req) : {};
+        if (method === 'HEAD') {
+          // A load balancer or an uptime monitor may probe the two health paths with HEAD: answered as GET (Node sends no body). Nothing else answers HEAD.
+          if (url.pathname !== '/healthz' && url.pathname !== '/readyz') return sendError(res, 'method_not_allowed', { allow: 'GET, POST, PUT, DELETE', ...more });
+          method = 'GET';
+        }
         let body: Buffer | undefined;
         if (method !== 'GET') {
           const read = await readBody(req, max, timeoutMs);
-          if (read.kind === 'too_large') return sendError(res, 'payload_too_large', {}, true);
+          if (read.kind === 'too_large') return sendError(res, 'payload_too_large', more, true);
           if (read.kind === 'timeout') {
-            sendError(res, 'timeout', {}, true);
+            sendError(res, 'timeout', more, true);
             req.destroy();
             return;
           }
-          if (read.kind === 'failed') return sendError(res, 'invalid_request', {}, true);
+          if (read.kind === 'failed') return sendError(res, 'invalid_request', more, true);
           body = read.body;
         }
         const request = new Request(url, { method, headers: headersOf(req.headers), ...(body === undefined || body.length === 0 ? {} : { body }) });
         const address = req.socket.remoteAddress;
         if (address !== undefined) peers.set(request, address);
         const response = await handle(request);
-        if (response === null) return sendError(res, 'not_found');
+        if (response === null) return sendError(res, 'not_found', more);
         await send(response, res);
       } catch {
-        sendError(res, 'internal');
+        sendError(res, 'internal', isService(pathOf(req)) ? serviceHeaders(req) : {});
       }
     })();
   };

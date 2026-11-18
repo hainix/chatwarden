@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 describe('serve.ts source', () => {
   it('is ASCII only and names the byte order mark with an escape', () => {
     const src = readFileSync(new URL('../src/service/serve.ts', import.meta.url), 'utf8');
-    expect(src).not.toMatch(/[^\x00-\x7F]/);
+    expect(/^[\p{ASCII}]*$/u.test(src)).toBe(true);
     expect(src).toContain(`${String.fromCharCode(92)}uFEFF`);
   });
 });

@@ -188,3 +188,141 @@ describe('methods and responses', () => {
     expect(cancelled).toBe(1);
   });
 });
+
+// Review m4 and m5: HEAD on the two health paths, and the bridge's own errors on /v1 carry the service headers and a `message`.
+
+const v1: RouteTable = {
+  'POST /v1/echo': (req): KitResponse => ({ status: 200, body: { bytes: (req.rawBody ?? '').length } }),
+  'GET /v1/boom': () => {
+    throw new Error('detail that must not leak');
+  },
+  'GET /boom': () => {
+    throw new Error('detail that must not leak');
+  },
+  'GET /healthz': () => ({ status: 200, body: { ok: true } }),
+  'GET /readyz': () => ({ status: 200, body: { ready: true } }),
+  'GET /ping': () => ({ status: 200, body: { pong: true } }),
+  'GET /v1': () => ({ status: 200, body: { api: 1 } }),
+};
+
+describe('HEAD (review m4)', () => {
+  it('/healthz and /readyz answer HEAD like GET with no body; the handler sees a GET', async () => {
+    const s = await listen(v1);
+    for (const path of ['/healthz', '/readyz', '/healthz?probe=1']) {
+      const res = await fetch(`${s.base}${path}`, { method: 'HEAD' });
+      expect(res.status, path).toBe(200);
+      expect(await res.text(), path).toBe('');
+      expect(res.headers.get('content-type'), path).toMatch(/json/);
+    }
+    expect(s.seen.calls.map((c) => c.method)).toEqual(['GET', 'GET', 'GET']);
+  });
+
+  it('every other path stays 405 for HEAD, /v1 included, and the handler never runs', async () => {
+    const s = await listen(v1);
+    for (const path of ['/ping', '/v1', '/v1/echo', '/healthzz', '/healthz/x', '/', '/readyz/', '/Healthz']) {
+      const res = await fetch(`${s.base}${path}`, { method: 'HEAD' });
+      expect(res.status, path).toBe(405);
+      expect(res.headers.get('allow'), path).toMatch(/GET/);
+    }
+    expect(s.seen.calls).toHaveLength(0);
+  });
+
+  it('a POST to /healthz is not turned into anything: it is the router that answers', async () => {
+    const s = await listen(v1);
+    const res = await fetch(`${s.base}/healthz`, { method: 'POST', body: 'x' });
+    expect(res.status).not.toBe(200);
+  });
+});
+
+describe('the bridge errors on /v1 (review m5)', () => {
+  const RID = /^[0-9a-f]{16}$/;
+  const serviceHeaders = (res: Response, rid?: string): void => {
+    expect(res.headers.get('chatwarden-api')).toBe('1');
+    expect(res.headers.get('x-request-id')).toMatch(rid === undefined ? RID : new RegExp(`^${rid}$`));
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  };
+
+  it('413 on /v1 carries the version, a request id, no-store and a message', async () => {
+    const s = await listen(v1);
+    const res = await fetch(`${s.base}/v1/echo`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: `"${'a'.repeat(65_535)}"` });
+    expect(res.status).toBe(413);
+    serviceHeaders(res);
+    expect(await res.json()).toEqual({ error: 'payload_too_large', message: 'The request body is too large.' });
+  });
+
+  it('a request id the caller sent (a valid one) is echoed; a bad one is replaced', async () => {
+    const s = await listen(v1);
+    const body = `"${'a'.repeat(65_535)}"`;
+    const given = await fetch(`${s.base}/v1/echo`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-request-id': 'call-1234' }, body });
+    serviceHeaders(given, 'call-1234');
+    const bad = await fetch(`${s.base}/v1/echo`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-request-id': 'bad id!' }, body });
+    serviceHeaders(bad);
+  });
+
+  it('408 on /v1 (a slow body) carries the same and a message', async () => {
+    const s = await listen(v1, { readTimeoutMs: 150 });
+    const head = 'POST /v1/echo HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ncontent-length: 100\r\nconnection: close\r\n\r\n{"a"';
+    const reply = await rawRequest(s.port, head, () => undefined);
+    // a closed socket is also allowed (the read timeout may win the race with the client)
+    if (reply !== '') {
+      expect(reply).toMatch(/^HTTP\/1\.1 408/);
+      expect(reply.toLowerCase()).toContain('chatwarden-api: 1');
+      expect(reply.toLowerCase()).toMatch(/x-request-id: [0-9a-f]{16}/);
+      expect(reply).toContain('"message"');
+    }
+    expect(s.seen.calls).toHaveLength(0);
+  });
+
+  /** A server whose fetch handler itself throws (what the bridge's own 500 is for), over the bridge alone. */
+  async function throwing(): Promise<string> {
+    const server = createServer(
+      nodeHandler(() => {
+        throw new Error('detail that must not leak');
+      }),
+    );
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  }
+
+  it('500 on /v1 carries the same, a message and no detail', async () => {
+    const base = await throwing();
+    const res = await fetch(`${base}/v1/boom`);
+    expect(res.status).toBe(500);
+    serviceHeaders(res);
+    const text = await res.text();
+    expect(text).not.toContain('must not leak');
+    const body = JSON.parse(text) as { error: string; message: string };
+    expect(body.error).toBe('internal');
+    expect(typeof body.message).toBe('string');
+    expect(body.message.length).toBeGreaterThan(0);
+  });
+
+  it('a 405 for HEAD on /v1 carries the service headers too', async () => {
+    const s = await listen(v1);
+    const res = await fetch(`${s.base}/v1`, { method: 'HEAD' });
+    expect(res.status).toBe(405);
+    serviceHeaders(res);
+  });
+
+  it('outside /v1 the bridge errors stay plain (no service headers) but still carry a message', async () => {
+    const s = await listen(v1);
+    const base = await throwing();
+    const res = await fetch(`${base}/boom`);
+    expect(res.status).toBe(500);
+    expect(res.headers.get('chatwarden-api')).toBeNull();
+    expect(res.headers.get('x-request-id')).toBeNull();
+    expect(((await res.json()) as { message?: string }).message).toBeTypeOf('string');
+    const over = await fetch(`${s.base}/ping`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: `"${'a'.repeat(65_535)}"` });
+    expect(over.status).toBe(413);
+    expect(over.headers.get('chatwarden-api')).toBeNull();
+  });
+
+  it('a path that merely starts with /v1 (like /v10 or /v1x) is not the service', async () => {
+    const base = await throwing();
+    const res = await fetch(`${base}/v10/boom`);
+    expect(res.status).toBe(500);
+    expect(res.headers.get('chatwarden-api')).toBeNull();
+  });
+});
