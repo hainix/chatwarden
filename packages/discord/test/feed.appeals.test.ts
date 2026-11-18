@@ -400,9 +400,12 @@ describe('a moot closure posts nothing', () => {
     const done = await cw.appeals.decide({ appealId: filed.appeal.id, outcome: 'reduce', actor: 'senior_bea', reason: REASON, to: { kind: 'chat', durationMs: H } });
     expect(done.ok).toBe(true);
     await idle();
-    expect(d.calls).toHaveLength(2);
-    expect(contents(d.calls)[1]).toContain('Appeal decided: lighter.');
-    expect(d.creates()).toHaveLength(1);
+    // a reduction overturns the original decision, which is its own line in the shared thread (the event names no person)
+    expect(d.calls).toHaveLength(3);
+    const later = contents(d.calls).slice(1);
+    expect(later.filter((t) => t.includes('Appeal decided: lighter.'))).toHaveLength(1);
+    expect(later.filter((t) => t === 'Overturned on appeal: a moderator decision.')).toHaveLength(1);
+    expect(d.creates()).toHaveLength(2);
     for (const call of d.calls) {
       for (const text of visibleTexts(call.body)) expect(leaks(text, [STATEMENT, REASON, HANDLE, target, filed.appeal.id, 'mod_ann', 'senior_bea']), text).toEqual([]);
     }

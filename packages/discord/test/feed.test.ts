@@ -213,7 +213,7 @@ describe('construction', () => {
     expect(k.listeners.size).toBe(0);
   });
 
-  it('subscribes to the eight event types (the six staff ones and the two appeal ones), once each, and not to rename.required', () => {
+  it('subscribes to the nine event types (the six staff ones, the two appeal ones and sanction.overturned), once each, and not to rename.required', () => {
     const k = fakeKit();
     start(k);
     expect([...k.listeners].map((l) => l.type).sort()).toEqual([
@@ -224,6 +224,7 @@ describe('construction', () => {
       'report.closed',
       'report.created',
       'sanction.applied',
+      'sanction.overturned',
       'sanction.revoked',
     ]);
   });
@@ -1318,7 +1319,7 @@ describe('dispose', () => {
   it('unsubscribes every listener and is idempotent', () => {
     const k = fakeKit();
     const { feed } = start(k);
-    expect(k.listeners.size).toBe(8);
+    expect(k.listeners.size).toBe(9);
     feed.dispose();
     expect(k.listeners.size).toBe(0);
     expect(() => feed.dispose()).not.toThrow();

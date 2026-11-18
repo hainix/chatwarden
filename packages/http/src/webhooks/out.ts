@@ -136,8 +136,8 @@ interface Delivery {
  * `${timestamp}.${body}` with the endpoint's secret) sign each ATTEMPT afresh, so a retry is never outside the
  * receiver's 5 minute window; verify them with `verify` (this package). Events carry subject ids: send them to staff
  * channels only. `includeExcerpts` puts chat text in the body: read its warning. `includeAccounts` puts the game's own account ids in a
- * `rename.required` body (nothing else): read its warning. The appeal events (`appeal.created`, `appeal.decided`) and `rename.required` carry ids,
- * codes and times only, never a statement, a reason or a handle, and `events` accepts them like any other type.
+ * `rename.required` body (nothing else): read its warning. The appeal events (`appeal.created`, `appeal.decided`), `sanction.overturned` (0.2.1: the group, the source, the time and
+ * the term id or the filter key, and no person) and `rename.required` carry ids, codes and times only, never a statement, a reason or a handle, and `events` accepts them like any other type.
  *
  * Delivery: a 2xx succeeds. A network error, a timeout (10 s per attempt), a 5xx or a 429 is retried, up to 5 times
  * (6 attempts), after 1, 2, 4, 8 and 16 seconds with plus or minus 20 percent jitter; a 429's `retry-after` (seconds or

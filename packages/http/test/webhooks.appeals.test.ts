@@ -264,3 +264,69 @@ describe('accounts are fetched when the event is raised, not cached', () => {
     expect(JSON.stringify(logged)).not.toContain('s_target');
   });
 });
+
+describe('sanction.overturned over a webhook (0.2.1): ids, codes and times only', () => {
+  const overturned: KitEvent = { type: 'sanction.overturned', groupId: 'g_group_0000000000000', at: NOW, source: 'auto_filter', termId: 'syn:zorbak' };
+  const overturnedByFilter: KitEvent = { type: 'sanction.overturned', groupId: 'g_group_0000000000001', at: NOW, source: 'auto_filter', filterKey: 'link.url' };
+
+  it("a webhook endpoint with events ['sanction.overturned'] is accepted and receives the event body with groupId, source, at and termId or filterKey, and no subject, no text", async () => {
+    const k = fakeKit();
+    const f = fakeFetch();
+    webhooksOut(k.kit, { endpoints: [endpoint({ events: ['sanction.overturned'] })], fetch: f.fetch, clock });
+    for (const e of [appealCreated, overturned, overturnedByFilter]) k.emit(e);
+    await wait(f, 2);
+    expect(f.calls).toHaveLength(2);
+    const bodies = f.calls.map(bodyOf);
+    expect(bodies.map((b) => b.type)).toEqual(['sanction.overturned', 'sanction.overturned']);
+    expect(bodies.map((b) => b.data)).toEqual([overturned, overturnedByFilter]);
+    expect(Object.keys(bodies[0]?.data ?? {}).sort()).toEqual(['at', 'groupId', 'source', 'termId', 'type']);
+    expect(Object.keys(bodies[1]?.data ?? {}).sort()).toEqual(['at', 'filterKey', 'groupId', 'source', 'type']);
+    for (const [i, call] of f.calls.entries()) {
+      expect(call.init.headers[SIGNATURE_HEADER]).toBe(sign(SECRET, NOW / 1000, call.init.body));
+      expect(call.init.headers[DELIVERY_HEADER]).toBe((bodies[i] as (typeof bodies)[number]).id);
+    }
+    const text = f.calls.map((c) => c.init.body).join('\n');
+    for (const v of ['subject', 's_target', 'handle', 'account', 'excerpt']) expect(text, v).not.toContain(v);
+  });
+
+  it('it is delivered next to the other appeal events, and under "*"', async () => {
+    const k = fakeKit();
+    const f = fakeFetch();
+    webhooksOut(k.kit, { endpoints: [endpoint({ events: ['appeal.decided', 'sanction.overturned'] })], fetch: f.fetch, clock });
+    for (const e of [appealDecided, overturned, reportClosed]) k.emit(e);
+    await wait(f, 2);
+    expect(f.calls.map((c) => bodyOf(c).type)).toEqual(['appeal.decided', 'sanction.overturned']);
+    const all = fakeFetch();
+    const k2 = fakeKit();
+    webhooksOut(k2.kit, { endpoints: [endpoint({ events: '*' })], fetch: all.fetch, clock });
+    k2.emit(overturned);
+    await wait(all, 1);
+    expect(bodyOf(all.calls[0] as Call).type).toBe('sanction.overturned');
+  });
+
+  it("a kit's real overturn (a moderator decision revoked on appeal) arrives with the group, the source and the time only", async () => {
+    const w = await appealsWorld();
+    const f = fakeFetch();
+    const out = webhooksOut(w.cw, { endpoints: [endpoint({ events: ['sanction.overturned'] })], fetch: f.fetch });
+    const a = await w.appeal({ statement: STATEMENT });
+    const res = await w.cw.appeals.decide({ appealId: a.appealId, outcome: 'revoke', actor: 'senior_bea', reason: REASON, reasonCode: 'mistake' } as never);
+    expect(res).toMatchObject({ ok: true });
+    await wait(f, 1);
+    const data = bodyOf(f.calls[0] as Call).data;
+    expect(data).toMatchObject({ type: 'sanction.overturned', source: 'moderator' });
+    expect(Object.keys(data).sort()).toEqual(['at', 'groupId', 'source', 'type']);
+    const text = f.calls.map((c) => c.init.body).join('\n');
+    for (const v of [STATEMENT, REASON, HANDLE, 'senior_bea', 'mod_ann']) expect(text, v).not.toContain(v);
+    out.dispose();
+  });
+
+  it('an endpoint that lists an unknown event type is still refused, and the doc comment of webhooksOut names sanction.overturned', async () => {
+    const k = fakeKit();
+    for (const events of [['sanction.overturned', 'sanction.overturn'], ['sanction.overturnedd'], []]) {
+      expect(() => webhooksOut(k.kit, { endpoints: [endpoint({ events: events as never })], fetch: fakeFetch().fetch, clock })).toThrow(RangeError);
+    }
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../src/webhooks/out.ts', import.meta.url), 'utf8');
+    expect(source).toContain('sanction.overturned');
+  });
+});
