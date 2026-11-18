@@ -12,6 +12,7 @@ type Manifest = {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
 };
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -47,7 +48,7 @@ describe('the real manifests', () => {
   it('never publishes a package before an @chatwarden package it requires as a peer', () => {
     const at = new Map(order(manifests).map((n, i) => [n, i]));
     for (const pkg of manifests) {
-      for (const dep of Object.keys(pkg.peerDependencies ?? {})) {
+      for (const dep of Object.keys(pkg.peerDependencies ?? {}).filter((d) => pkg.peerDependenciesMeta?.[d]?.optional !== true)) {
         if (dep.startsWith('@chatwarden/')) expect(at.get(dep), `${dep} before ${pkg.name}`).toBeLessThan(at.get(pkg.name) as number);
       }
     }

@@ -1,6 +1,7 @@
 // The plan: what init would do, as pure data (design 5.2). No file system, no clock, no randomness: the same answers give the same plan, byte
 // for byte, on every machine. Applying it is apply.ts's job.
-import type { Answers, AppLayout, EnvName, FileSpec, PackageManager, Plan, Project, TodoItem, Versions } from './types.js';
+import { serviceFiles } from './templates/service.js';
+import type { Answers, AppLayout, EnvName, FileSpec, PackageManager, Plan, Project, ServiceAnswers, TodoItem, Versions } from './types.js';
 
 /** The shared and framework templates (Tasks 3, 5 and 6), as `renderAll` or as the list it returns. Injected so this file is tested with stubs. */
 export type Templates = FileSpec[] | ((answers: Answers, versions: Versions) => FileSpec[]);
@@ -155,5 +156,39 @@ export function buildPlan(answers: Answers, versions: Versions, templates: Templ
     nextSteps: nextSteps(answers, command, project, project.moduleType ?? 'module'),
     warnings,
     todo: todoOf(files),
+  };
+}
+
+/** The environment variables the service reads: the secret and the service keys are required, the staff token is optional. Names only. */
+export function serviceEnvNames(): EnvName[] {
+  return [
+    { name: 'CHATWARDEN_SECRET', required: true },
+    { name: 'CHATWARDEN_SERVICE_KEYS', required: true },
+    { name: 'CHATWARDEN_ADMIN_TOKEN', required: false },
+  ];
+}
+
+/**
+ * The plan of `init --service`: the six files of the recipe folder. There is nothing to install (the Dockerfile does that when it builds) and no starter marker. The `answers` field holds
+ * placeholders the report never prints (`service` holds the real ones).
+ */
+export function buildServicePlan(service: ServiceAnswers, versions: Versions): Plan {
+  if (!VERSION_PATTERN.test(versions.chatwarden)) throw new Error('the version for the Dockerfile must be a plain version such as 1.2.3');
+  const files = serviceFiles(service, versions).sort((a, b) => compare(a.path, b.path));
+  const { dir } = service;
+  return {
+    answers: { framework: 'none', store: service.store, chat: 'none', chatTransport: 'sse', hub: 'none', discord: false, profile: service.profile, base: '/chatwarden', dir, lang: 'js' },
+    service,
+    files,
+    install: { manager: 'npm', command: '', packages: [] },
+    env: serviceEnvNames(),
+    nextSteps: [
+      `Copy ${dir}/.env.example to ${dir}/.env and fill in the three variables (a value: openssl rand -base64 32).`,
+      `Build and run it: docker compose -f ${dir}/compose.yaml up --build`,
+      'Ask it something: curl -H "Authorization: Bearer YOUR_SERVICE_KEY" http://127.0.0.1:8787/v1',
+      'The moderator hub is at http://127.0.0.1:8787/mod, signed in with CHATWARDEN_ADMIN_TOKEN. The word list is a placeholder until you give it a terms file (see the README in the folder).',
+    ],
+    warnings: [],
+    todo: [],
   };
 }

@@ -147,13 +147,14 @@ describe('what it reaches', () => {
       // A template's own import lines are inside template strings, which `specifiers` does not read as imports of the file.
       expect(real, rel(file)).toEqual([]);
     }
-    // The one relative import out of src/cli is the VERSION constant of this package, from src/version.ts (not the package root, which loads core).
+    // The relative imports out of src/cli are the VERSION constant of this package, from src/version.ts (not the package root, which loads core), and `chatwarden serve`'s launcher,
+    // service/launch.ts, which holds only types and loads the process (and the kit with it) with a dynamic import when `serve` is the command.
     const outside = files.flatMap((file) => specifiers(textOf(file)).filter((spec) => spec.startsWith('..') && !resolve(dirname(file), spec).startsWith(cliDir)).map((spec) => `${rel(file)} -> ${spec}`));
     expect(outside.length).toBeGreaterThan(0);
-    expect(outside.every((line) => line.endsWith(' -> ../version.js')), outside.join('\n')).toBe(true);
+    expect(outside.every((line) => line.endsWith(' -> ../version.js') || line.endsWith(' -> ../service/launch.js')), outside.join('\n')).toBe(true);
   });
 
-  it('the bin loads only src/cli and src/version.ts: the http root, core and every other package stay out of its start-up', () => {
+  it('the bin loads only src/cli, src/version.ts and the serve launcher: the http root, core and every other package stay out of its start-up', () => {
     const seen = new Set<string>();
     const external = new Set<string>();
     const walk = (file: string): void => {
@@ -169,7 +170,7 @@ describe('what it reaches', () => {
     };
     walk(join(cliDir, 'bin.ts'));
     const outside = [...seen].filter((file) => !file.startsWith(cliDir)).map((file) => relative(join(root, 'src'), file).replaceAll('\\', '/'));
-    expect(outside).toEqual(['version.ts']);
+    expect(outside.sort()).toEqual(['service/launch.ts', 'version.ts']);
     expect([...external]).toEqual([]);
     expect(seen.size).toBeGreaterThan(20);
   });

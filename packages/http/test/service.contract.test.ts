@@ -282,13 +282,14 @@ describe('logging', () => {
 describe('the service folder is browser-safe', () => {
   it('service/ imports nothing from node: or from node.ts and serve.ts (a static scan)', () => {
     const dir = fileURLToPath(new URL('../src/service/', import.meta.url));
-    const files = readdirSync(dir).filter((f) => f.endsWith('.ts') && f !== 'node.ts' && f !== 'serve.ts');
+    // node.ts, serve.ts and serveStaff.ts are the process (they import node: on purpose); everything else in the folder runs in a browser
+    const files = readdirSync(dir).filter((f) => f.endsWith('.ts') && !/^(node|serve)/.test(f));
     expect(files).toEqual(expect.arrayContaining(['contract.ts', 'auth.ts', 'idempotency.ts', 'index.ts', 'wrap.ts']));
     for (const file of files) {
       const text = readFileSync(`${dir}${file}`, 'utf8');
       expect(text, file).not.toMatch(/from\s+['"]node:/);
       expect(text, file).not.toMatch(/import\s*\(\s*['"]node:/);
-      expect(text, file).not.toMatch(/from\s+['"]\.\/(?:node|serve)\.js['"]/);
+      expect(text, file).not.toMatch(/from\s+['"]\.\/(?:node|serve)[A-Za-z]*\.js['"]/);
       expect(text, file).not.toMatch(/\brequire\s*\(/);
       expect(text, file).not.toMatch(/\bBuffer\b/);
       expect(text, file).not.toMatch(/\bprocess\./);

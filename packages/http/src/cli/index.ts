@@ -5,7 +5,7 @@ import { VERSION } from '../version.js';
 import { canPrompt, isAsked, resolveAnswers } from './answers.js';
 import type { QuestionName } from './answers.js';
 import { applyPlan, exitCodeOf } from './apply.js';
-import { OPTIONS, helpText, parseCli } from './args.js';
+import { OPTIONS, helpText, parseCli, serveHelpText } from './args.js';
 import type { Parsed } from './args.js';
 import { checkProject, renderCheck, renderCheckJson } from './check.js';
 import { createConflictAsker } from './conflict.js';
@@ -13,6 +13,9 @@ import { detect } from './detect.js';
 import { nodeEnv } from './env.js';
 import type { CliEnv } from './env.js';
 import { installCommand, nodeSpawner, runInstall } from './install.js';
+import { runServe } from './serve.js';
+import type { ServeOverrides } from './serve.js';
+import { runServiceInit } from './service.js';
 import { buildPlan } from './plan.js';
 import { createPrompter } from './prompts.js';
 import type { Prompter, Question } from './prompts.js';
@@ -24,6 +27,8 @@ import type { Answers, Detected, FileSpec, Versions } from './types.js';
 export type { CliEnv } from './env.js';
 
 export interface RunOptions {
+  /** Replaces what `chatwarden serve` reads from the machine (the importer, the log, the signals). For tests only. @internal */
+  serve?: ServeOverrides;
   /** Replaces the templates. For tests only. @internal */
   render?: (answers: Answers, versions: Versions, options: CtxOptions) => FileSpec[];
 }
@@ -90,6 +95,13 @@ async function run(argv: readonly string[], env: CliEnv, options: RunOptions): P
     env.stdout.write(`${VERSION}\n`);
     return 0;
   }
+  if (parsed.command === 'serveHelp') {
+    env.stdout.write(serveHelpText());
+    return 0;
+  }
+  if (parsed.command === 'serve') return runServe(parsed.serve ?? { printOpenapi: false }, env, options.serve);
+  // `init --service` writes a folder that needs no project: nothing is detected and nothing is asked.
+  if (parsed.service === true) return runServiceInit(parsed, env, VERSION);
 
   const detected = await detect(env);
   if ('error' in detected) return usage(detected.error);

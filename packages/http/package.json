@@ -117,6 +117,10 @@
   },
   "peerDependencies": {
     "@chatwarden/core": "^0.1.14",
+    "@chatwarden/hub-element": "^0.1.0",
+    "@chatwarden/matcher": "^0.1.0",
+    "@chatwarden/profanity": "^0.1.0",
+    "@chatwarden/store-sqlite": "^0.1.0",
     "@types/express": "^5.0.0",
     "express": "^5.0.0"
   },
@@ -126,11 +130,24 @@
     },
     "@types/express": {
       "optional": true
+    },
+    "@chatwarden/hub-element": {
+      "optional": true
+    },
+    "@chatwarden/matcher": {
+      "optional": true
+    },
+    "@chatwarden/profanity": {
+      "optional": true
+    },
+    "@chatwarden/store-sqlite": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@chatwarden/core": "0.1.14",
     "@chatwarden/discord": "0.1.14",
+    "@chatwarden/hub-element": "0.1.14",
     "@chatwarden/matcher": "0.1.14",
     "@chatwarden/profanity": "0.1.14",
     "@chatwarden/store-sqlite": "0.1.14",

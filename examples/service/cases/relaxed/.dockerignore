@@ -1,0 +1,10 @@
+# What the image build leaves out.
+# Written by `chatwarden init --service`. It is yours now: edit freely. Re-running never overwrites a file you changed.
+
+.env
+.env.*
+*.db
+node_modules
+Dockerfile
+compose.yaml
+README.txt
