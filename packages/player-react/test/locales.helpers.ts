@@ -106,5 +106,10 @@ export function afterHeader(source: string): string {
   const lines = source.split('\n');
   let i = 0;
   while (i < lines.length && (lines[i] as string).startsWith('//')) i++;
-  return lines.slice(i).join('\n').replace(/reviewed(By|At)/g, '');
+  // The key of a catalogue line is a name, not text: `hub.reports.row.review` is not a claim.
+  return lines
+    .slice(i)
+    .join('\n')
+    .replace(/reviewed(By|At)/g, '')
+    .replace(/^ *'[A-Za-z0-9_.]+': /gm, '  ');
 }
