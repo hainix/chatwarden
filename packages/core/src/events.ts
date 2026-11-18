@@ -1,5 +1,5 @@
 import { safeWarn } from './log.js';
-import type { AppealOutcome } from './appeals.js';
+import type { AppealOutcome, AppealReasonCode } from './appeals.js';
 import type { HoldCode } from './legal.js';
 import type { RoomMode } from './roomSettings.js';
 import type { RuleRef } from './rules.js';
@@ -82,11 +82,11 @@ export type KitEvent =
    */
   | { type: 'appeal.created'; appealId: string; createdAt: number; target: StaffRef; kind: SanctionKind; rule: RuleRef | null }
   /**
-   * A moderator decided an appeal: `outcome` is uphold, reduce or revoke. Never the reason, the statement or a handle; an appeal made
-   * moot by someone else's revoke announces nothing.
+   * A moderator decided an appeal: `outcome` is uphold, reduce or revoke, and `reason` the fixed reason code of the decision (0.2.1: `context_considered` when
+   * the decision gave none). Never the moderator's free text, the statement or a handle; an appeal made moot by someone else's revoke announces nothing.
    * Carries subject ids: staff channels only, never send to a player.
    */
-  | { type: 'appeal.decided'; appealId: string; at: number; target: StaffRef; outcome: AppealOutcome; rule: RuleRef | null }
+  | { type: 'appeal.decided'; appealId: string; at: number; target: StaffRef; outcome: AppealOutcome; rule: RuleRef | null; reason: AppealReasonCode }
   /**
    * A moderator required a rename. It names no name and no reason: the game learns who to rename through `cw.people.accountIds(target)`
    * or a webhook that opted in to accounts. With `entity` the rename is of something the target owns (a clan, guild, team: `kind` and the game's opaque `ref`, never its label): the kit made no notice for it, and the game tells the owner in its own UI.

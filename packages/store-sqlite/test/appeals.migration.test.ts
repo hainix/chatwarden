@@ -54,6 +54,8 @@ const APPEAL_INDEXES = ['kit_appeals_by_group', 'kit_appeals_by_replacement', 'k
 const APPEAL_COLUMNS = [
   'id', 'subject_id', 'group_id', 'notice_id', 'report_id', 'rule', 'kind', 'statement', 'status', 'created_at', 'decided_at', 'decided_by',
   'decision_reason', 'replacement_group_id',
+  // migration 27, block 2 (release 0.2.1): the fixed reason of the decision
+  'reason_code',
 ];
 
 const notice = (i: number, kind: NoticeKind, over: Partial<NoticeRow> = {}): NoticeRow => ({

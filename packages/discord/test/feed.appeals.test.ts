@@ -98,6 +98,7 @@ const decided = (target: string, outcome: 'uphold' | 'reduce' | 'revoke', over: 
   target,
   outcome,
   rule: 2,
+  reason: 'context_considered',
   ...over,
 });
 const rename = (target: string): KitEvent => ({ type: 'rename.required', at: NOW, target, rule: 1 });

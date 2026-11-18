@@ -410,6 +410,11 @@ export interface AppealRow {
   decisionReason: string | null;
   /** The group written in place of a reduced sanction. */
   replacementGroupId: string | null;
+  /**
+   * The fixed reason the decision gave (one of `APPEAL_REASONS` for the outcome), as TEXT. Null or absent for an appeal not decided, a moot one, and one decided before
+   * 0.2.1. Optional so a store written for 0.2.0 still type-checks; read an absent value as null. A reader accepts only a known code.
+   */
+  reasonCode?: string | null;
 }
 
 /**
@@ -1752,11 +1757,12 @@ export interface Store {
 
   /**
    * OPTIONAL. Decide an appeal, ONLY from `open`, as ONE atomic statement: false, and nothing changed, for an unknown id or an appeal that
-   * is decided or moot. True when it moved. `clearStatement` also nulls the statement (retention with `appealStatementsMs` at 0).
+   * is decided or moot. True when it moved. `clearStatement` also nulls the statement (retention with `appealStatementsMs` at 0). `reasonCode`
+   * (0.2.1) is the fixed reason, stored as given (the closed list is the core's check); left out, the row keeps none.
    */
   decideAppeal?(
     id: string,
-    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean },
+    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean; reasonCode?: string },
   ): boolean;
 
   /**
@@ -1984,6 +1990,12 @@ export interface Store {
    * write order). The caller passes a person's stored ids (a canonical subject and the ones merged into it).
    */
   loadNotices(subjects: readonly SubjectId[]): NoticeRow[];
+
+  /**
+   * OPTIONAL (0.2.1). One notice by its id alone, whatever its owner or state (seen, unseen or withdrawn), as a copy; null for an unknown id. The appeal page reads it
+   * to show a person the notice behind a signed link.
+   */
+  loadNotice?(id: string): NoticeRow | null;
 
   /** Mark a notice seen at `at`. Returns true only when this call did it: not when already seen, withdrawn or unknown. */
   ackNotice(id: string, at: number): boolean;

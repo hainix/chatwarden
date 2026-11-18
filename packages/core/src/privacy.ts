@@ -392,8 +392,11 @@ export interface SubjectExport {
   }>;
   strikes: Array<{ at: number; roomId: string; line: string }>;
   blockedNames: Array<{ at: number; name: string; reason: string }>;
-  /** `overturnedAt` is when a granted appeal overturned the decision (null when none did). */
-  appeals: Array<{ createdAt: number; kind: string; rule: string | null; status: string; statement: string | null; decidedAt: number | null; overturnedAt: number | null }>;
+  /**
+   * `overturnedAt` is when a granted appeal overturned the decision (null when none did); `reasonCode` the fixed reason the decision gave (null when it gave none or
+   * is not decided). The moderator's free text is never exported.
+   */
+  appeals: Array<{ createdAt: number; kind: string; rule: string | null; status: string; statement: string | null; decidedAt: number | null; overturnedAt: number | null; reasonCode: string | null }>;
   signals: Array<{ at: number; kind: string }>;
   mutes: { placed: number; received: number };
   ai: { noAutomation: string | null; reads: number; outcomes: Array<{ verdict: string; agreement: string }> };

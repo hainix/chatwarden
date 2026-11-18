@@ -166,7 +166,7 @@ export const EXPORT_ABOUT_SQL = `SELECT created_at, category, reported_reason, s
   ORDER BY created_at DESC, id DESC LIMIT ?`;
 export const EXPORT_STRIKES_SQL = `SELECT at, room_id, raw_line FROM kit_strikes WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
 export const EXPORT_NAMES_SQL = `SELECT at, name, reason FROM kit_blocked_names WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
-export const EXPORT_APPEALS_SQL = `SELECT a.created_at, a.kind, a.rule, a.status, a.statement, a.decided_at, o.at AS overturned_at
+export const EXPORT_APPEALS_SQL = `SELECT a.created_at, a.kind, a.rule, a.status, a.statement, a.decided_at, a.reason_code, o.at AS overturned_at
   FROM kit_appeals a LEFT JOIN kit_overturns o ON o.group_id = a.group_id
   WHERE a.subject_id IN ${IN_ARG} ORDER BY a.created_at DESC, a.id DESC LIMIT ?`;
 export const EXPORT_SIGNALS_SQL = `SELECT at, kind FROM kit_signals WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
@@ -550,6 +550,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
         statement: r.statement === null ? null : String(r.statement),
         decidedAt: r.decided_at === null ? null : num(r.decided_at),
         overturnedAt: r.overturned_at === null ? null : num(r.overturned_at),
+        reasonCode: r.reason_code === null ? null : String(r.reason_code),
       })),
       signals: section('signals', EXPORT_SIGNALS_SQL, (r) => ({ at: num(r.at), kind: String(r.kind) })),
       mutes: { placed: num(mutes?.placed), received: num(mutes?.received) },

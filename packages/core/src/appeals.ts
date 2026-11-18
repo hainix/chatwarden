@@ -21,6 +21,31 @@ export const APPEAL_OUTCOMES = ['uphold', 'reduce', 'revoke'] as const;
 export type AppealOutcome = (typeof APPEAL_OUTCOMES)[number];
 
 /**
+ * The fixed reasons a moderator gives with a decision (0.2.1): a closed list, so the player is told something true in their own language and the kit can
+ * count why appeals are granted. The free-text reason stays private and is never shown. Every outcome offers `context_considered`.
+ */
+export const APPEAL_REASON_CODES = Object.freeze([
+  'rule_applies',
+  'evidence_clear',
+  'context_considered',
+  'first_offence',
+  'lighter_fits',
+  'mistake',
+  'not_a_violation',
+] as const);
+export type AppealReasonCode = (typeof APPEAL_REASON_CODES)[number];
+
+/** The reason codes each outcome accepts. A code of another outcome is refused as `invalid_reason`. */
+export const APPEAL_REASONS: Readonly<Record<AppealOutcome, readonly AppealReasonCode[]>> = Object.freeze({
+  uphold: Object.freeze(['rule_applies', 'evidence_clear', 'context_considered'] as const),
+  reduce: Object.freeze(['first_offence', 'lighter_fits', 'context_considered'] as const),
+  revoke: Object.freeze(['mistake', 'not_a_violation', 'context_considered'] as const),
+});
+
+/** What a decision without a code is stored with. */
+export const APPEAL_REASON_DEFAULT: AppealReasonCode = 'context_considered';
+
+/**
  * Where an appeal stands. `open` until decided; `upheld`, `reduced` and `revoked` are the three outcomes; `moot` means the sanction was
  * revoked by someone else while the appeal was open, so nobody ruled on it.
  */
@@ -165,13 +190,19 @@ export interface AppealDecision {
   actor: string;
   /** Private, 1 to 500 characters after trimming. Never shown to the player. */
   reason: string;
+  /**
+   * The fixed reason, one of {@link APPEAL_REASONS} for the outcome. OPTIONAL in 0.2.1 so the release is additive: a decision without one is stored with
+   * `context_considered` (the hub always sends one). A code that is not a string, not in the closed list or not offered for this outcome is refused as
+   * `invalid_reason` before anything is read from the store. The free-text `reason` stays required and private.
+   */
+  reasonCode?: AppealReasonCode;
   /** `reduce` only: the lighter outcome that replaces the sanction. A warning has no length (`null`). */
   to?: { kind: 'warning' | 'chat' | 'area' | 'ban'; durationMs: number | null };
 }
 
 export type AppealDecideResult =
   | { ok: true; status: 'upheld' | 'reduced' | 'revoked'; replacementGroupId?: string }
-  | { ok: false; error: 'not_found' | 'already_decided' | 'invalid' | 'same_decider' | 'gone' };
+  | { ok: false; error: 'not_found' | 'already_decided' | 'invalid' | 'invalid_reason' | 'same_decider' | 'gone' };
 
 /** Below this many sanctions in the window a rule has no rate. */
 export const APPEAL_STATS_MIN_SANCTIONS = 10;
@@ -201,8 +232,11 @@ export interface AppealSummary {
 export interface AppealDetail extends AppealSummary {
   /** The player's words. Staff only. Null once purged. Masked by the hub when `statementFlagged`. */
   statement: string | null;
-  /** Who decided (or, for a moot appeal, who revoked the sanction), when, and why (private; empty for a moot appeal), once it is no longer open. */
-  decided: { by: string; at: number; reason: string; replacementGroupId: string | null } | null;
+  /**
+   * Who decided (or, for a moot appeal, who revoked the sanction), when, and why (private; empty for a moot appeal), once it is no longer open. `reasonCode` is the
+   * fixed reason (null for an appeal decided before 0.2.1, for one a store kept no code for, and for a moot one).
+   */
+  decided: { by: string; at: number; reason: string; reasonCode: AppealReasonCode | null; replacementGroupId: string | null } | null;
   /** The report whose decision made the sanction, when known. */
   reportId: string | null;
   /** What the player was shown with the sanction: their own lines, as the notice kept them (already masked where blocked). */

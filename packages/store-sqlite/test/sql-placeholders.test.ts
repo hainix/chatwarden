@@ -25,6 +25,7 @@ import {
   FILTER_HITS_LIST_SQL,
   FILTER_HITS_PURGE_SQL,
   INSIGHT_ROWS_SQL,
+  NOTICE_BY_ID_SQL,
   OVERTURN_FILTER_COUNTS_SQL,
   OVERTURN_INSERT_SQL,
   OVERTURN_PURGE_SQL,
@@ -349,6 +350,16 @@ describe('the overturn statements (migration 27) bind exactly as many values as 
     for (const sql of [OVERTURN_INSERT_SQL, OVERTURN_SANCTION_SQL, OVERTURN_REPORT_SQL, OVERTURN_TERM_COUNTS_SQL, OVERTURN_FILTER_COUNTS_SQL, OVERTURN_PURGE_SQL, overturnStrikesSql(3), latestAutoChatStartSql(2)]) {
       expect(known.has(sql), sql.slice(0, 60)).toBe(true);
     }
+  });
+});
+
+describe('the notice lookup (loadNotice, 0.2.1) binds exactly one value', () => {
+  it('one plain ? placeholder, and the statement runs with the one value', () => {
+    expect(placeholders(NOTICE_BY_ID_SQL)).toBe(1);
+    expect(NOTICE_BY_ID_SQL).not.toMatch(/\?\d/);
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    expect(store.loadNotice?.('nothing')).toBeNull();
   });
 });
 

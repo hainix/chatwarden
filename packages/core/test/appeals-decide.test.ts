@@ -410,7 +410,7 @@ describe('events and the AI seam', () => {
     expect(k.events.filter((e) => e.type === 'appeal.decided')).toEqual([]);
     await k.cw.appeals.decide(decision(s.appealId, { reason: SECRET }));
     const ev = k.events.filter((e) => e.type === 'appeal.decided');
-    expect(ev).toEqual([{ type: 'appeal.decided', appealId: s.appealId, at: NOW, target: s.subject, outcome: 'uphold', rule: 2 }]);
+    expect(ev).toEqual([{ type: 'appeal.decided', appealId: s.appealId, at: NOW, target: s.subject, outcome: 'uphold', rule: 2, reason: 'context_considered' }]);
     expect(status).toBe('upheld');
     expect(JSON.stringify(k.events)).not.toMatch(/PRIVATE-REASON|MY-STATEMENT/);
     expect(JSON.stringify(k.logged)).not.toMatch(/PRIVATE-REASON|MY-STATEMENT/);

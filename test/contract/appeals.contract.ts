@@ -371,6 +371,54 @@ export function appealsContract(name: string, make: () => Store): void {
         expect(store().decideAppeal('nope', decide())).toBe(false);
       });
 
+      it('stores reasonCode and every read returns it (0.2.1)', () => {
+        const s = store();
+        const a = appeal({ subject: 's_rc', groupId: 'g-rc-a' });
+        const b = appeal({ subject: 's_rc', groupId: 'g-rc-b' });
+        s.insertAppeal(a);
+        s.insertAppeal(b);
+        expect(s.decideAppeal(a.id, decide({ status: 'revoked', reasonCode: 'not_a_violation' }))).toBe(true);
+        expect(s.loadAppeal(a.id)?.reasonCode).toBe('not_a_violation');
+        expect(s.listAppeals({ status: 'decided', limit: 10 }).find((r) => r.id === a.id)?.reasonCode).toBe('not_a_violation');
+        expect(s.listAppealsBy(['s_rc'], 10).find((r) => r.id === a.id)?.reasonCode).toBe('not_a_violation');
+        // The other appeal of the same person is still open and has none.
+        expect(s.loadAppeal(b.id)?.reasonCode ?? null).toBeNull();
+        // The rest of the decision is exactly as before.
+        expect(s.loadAppeal(a.id)).toEqual({ ...a, status: 'revoked', decidedAt: NOW + DAY, decidedBy: 'senior_bea', decisionReason: 'the rule applied', reasonCode: 'not_a_violation' });
+      });
+
+      it('a row decided without a reasonCode reads null or absent, on every read', () => {
+        const s = store();
+        const a = appeal({ subject: 's_rc2', groupId: 'g-rc2' });
+        s.insertAppeal(a);
+        expect(s.decideAppeal(a.id, decide({ status: 'upheld' }))).toBe(true);
+        expect(s.loadAppeal(a.id)?.reasonCode ?? null).toBeNull();
+        expect(s.listAppeals({ status: 'decided', limit: 10 }).find((r) => r.id === a.id)?.reasonCode ?? null).toBeNull();
+        expect(s.listAppealsBy(['s_rc2'], 10).find((r) => r.id === a.id)?.reasonCode ?? null).toBeNull();
+        expect(s.loadAppeal(a.id)).toEqual({ ...a, status: 'upheld', decidedAt: NOW + DAY, decidedBy: 'senior_bea', decisionReason: 'the rule applied' });
+      });
+
+      it('a moot appeal has no reasonCode, and a second decision does not change the first one\'s', () => {
+        const s = store();
+        const a = appeal({ groupId: 'g-rc3' });
+        const m = appeal({ groupId: 'g-rc4' });
+        s.insertAppeal(a);
+        s.insertAppeal(m);
+        s.decideAppeal(a.id, decide({ status: 'upheld', reasonCode: 'rule_applies' }));
+        expect(s.decideAppeal(a.id, decide({ status: 'revoked', reasonCode: 'mistake' }))).toBe(false);
+        expect(s.loadAppeal(a.id)?.reasonCode).toBe('rule_applies');
+        s.closeAppealsForGroup('g-rc4', 'mod_ann', NOW + 5);
+        expect(s.loadAppeal(m.id)?.reasonCode ?? null).toBeNull();
+      });
+
+      it('any text a caller passes as the code is stored as given (the closed list lives in core, not in the store)', () => {
+        const s = store();
+        const a = appeal({ groupId: 'g-rc5' });
+        s.insertAppeal(a);
+        s.decideAppeal(a.id, decide({ status: 'upheld', reasonCode: 'a_future_code' }));
+        expect(s.loadAppeal(a.id)?.reasonCode).toBe('a_future_code');
+      });
+
       it('clearStatement nulls the text; without it the text stays', () => {
         const s = store();
         const keep = appeal();

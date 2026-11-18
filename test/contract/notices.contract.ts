@@ -21,6 +21,10 @@ const notice = (id: string, over: Partial<NoticeRow> = {}): NoticeRow => ({
   ...over,
 });
 const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
+const needLoadNotice = (s: Store): ((id: string) => NoticeRow | null) => {
+  if (s.loadNotice === undefined) throw new Error('this store has no loadNotice');
+  return (id) => (s.loadNotice as (id: string) => NoticeRow | null)(id);
+};
 
 export function noticesContract(name: string, make: () => Store): void {
   describe(`notices contract: ${name}`, () => {
@@ -42,6 +46,52 @@ export function noticesContract(name: string, make: () => Store): void {
       s.insertNotice(notice('other', { subject: 's_other', createdAt: T }));
       expect(ids(s.loadNotices(['s_a', 's_alias']))).toEqual(['alias', 'tie1', 'tie2', 'late']);
       expect(ids(s.loadNotices(['s_other']))).toEqual(['other']);
+    });
+
+    describe('loadNotice (0.2.1)', () => {
+      it('returns a notice by id alone: any owner, any state (withdrawn and seen too), null for an unknown id', () => {
+        const s = make();
+        const loadNotice = needLoadNotice(s);
+        s.insertNotice(notice('n1'));
+        s.insertNotice(notice('n2', { subject: 's_other', groupId: null, kind: 'report_outcome', rule: null, refCode: null, excerpt: [] }));
+        s.insertNotice(notice('n3'));
+        s.ackNotice('n3', T + 5);
+        s.insertNotice(notice('n4', { groupId: 'g-w' }));
+        s.withdrawNoticeGroup('g-w', T + 6);
+        expect(loadNotice('n1')).toEqual(notice('n1'));
+        expect(loadNotice('n2')).toEqual(notice('n2', { subject: 's_other', groupId: null, kind: 'report_outcome', rule: null, refCode: null, excerpt: [] }));
+        expect(loadNotice('n3')).toEqual(notice('n3', { ackedAt: T + 5 }));
+        expect(loadNotice('n4')).toEqual(notice('n4', { groupId: 'g-w', withdrawnAt: T + 6 }));
+        expect(loadNotice('nope')).toBeNull();
+        expect(loadNotice('')).toBeNull();
+        expect(loadNotice("n1' OR '1'='1")).toBeNull();
+        expect(loadNotice('N1')).toBeNull();
+      });
+
+      it('is the same row loadNotices gives, and a copy: changing it changes nothing stored', () => {
+        const s = make();
+        const loadNotice = needLoadNotice(s);
+        s.insertNotice(notice('n1'));
+        const got = loadNotice('n1');
+        expect(got).toEqual(s.loadNotices(['s_a'])[0]);
+        (got as NoticeRow).excerpt[0]!.text = 'tampered';
+        (got as NoticeRow).refCode = 'M-ZZZZZ';
+        expect(loadNotice('n1')).toEqual(notice('n1'));
+        expect(s.loadNotices(['s_a'])).toEqual([notice('n1')]);
+      });
+
+      it('sees a notice written inside a transaction that was undone as unknown', () => {
+        const s = make();
+        const loadNotice = needLoadNotice(s);
+        expect(() =>
+          s.transaction(() => {
+            s.insertNotice(notice('gone'));
+            expect(loadNotice('gone')).not.toBeNull();
+            throw new Error('boom');
+          }),
+        ).toThrow('boom');
+        expect(loadNotice('gone')).toBeNull();
+      });
     });
 
     it('controls: an empty list, an unknown subject and a different case match nothing', () => {

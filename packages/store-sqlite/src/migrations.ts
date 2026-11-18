@@ -908,6 +908,8 @@ CREATE INDEX kit_pace_by_who ON kit_pace (who);
     //   export; it holds no text. Its indexes serve the counts by term and by filter (partial: a row with none is not indexed), the export and the erase (by person), and the
     //   retention delete (by time). `kit_reports_by_reporter_outcome_overturned` replaces `kit_reports_by_reporter_outcome_reason` with `overturned_at` added, so the reporter read is
     //   still answered from one covering index.
+    // Block 2 (appeals landing, fixed reasons): `kit_appeals.reason_code`, the fixed reason a decision gave (a code from a closed list of seven, kept in core: no CHECK here, so a later
+    //   code needs no migration). NULL on every existing appeal and on one decided without a code; the free-text `decision_reason` is untouched and stays private.
     version: 27,
     sql: `
 -- Block 1 (appeals landing, overturn storage)
@@ -930,6 +932,9 @@ CREATE INDEX kit_overturns_by_subject ON kit_overturns (subject_id);
 CREATE INDEX kit_overturns_by_at      ON kit_overturns (at);
 DROP INDEX kit_reports_by_reporter_outcome_reason;
 CREATE INDEX kit_reports_by_reporter_outcome_overturned ON kit_reports (reporter_subject, created_at, status, bad_faith, reported_reason, overturned_at);
+
+-- Block 2 (appeals landing, fixed reasons)
+ALTER TABLE kit_appeals ADD COLUMN reason_code TEXT;
 `,
   },
 ];

@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { APPEAL_OUTCOMES } from '../src/appeals.js';
-import type { AppealOutcome, AppealStatus } from '../src/appeals.js';
+import type { AppealOutcome, AppealReasonCode, AppealStatus } from '../src/appeals.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES } from '../src/audit.js';
 import type { AuditAction, AuditTargetType } from '../src/audit.js';
 import { createChatwarden } from '../src/chatwarden.js';
@@ -144,11 +144,15 @@ describe('events', () => {
       target: StaffRef;
       outcome: AppealOutcome;
       rule: RuleRef | null;
+      /** The fixed reason code (0.2.1), never the moderator's free text. */
+      reason: AppealReasonCode;
     }>();
     expectTypeOf<KitEventOf<'rename.required'>>().toEqualTypeOf<{ type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null; entity?: { kind: string; ref: string } }>();
     // no field of any of them is free text of a player or a moderator
     type Keys = keyof KitEventOf<'appeal.created'> | keyof KitEventOf<'appeal.decided'> | keyof KitEventOf<'rename.required'>;
-    expectTypeOf<Extract<Keys, 'statement' | 'reason' | 'decisionReason' | 'handle' | 'name' | 'note' | 'accounts' | 'label'>>().toEqualTypeOf<never>();
+    // (`reason` on `appeal.decided` is a code from a closed list of seven, since 0.2.1; the free text of the decision is `decisionReason`, which no event has)
+    expectTypeOf<Extract<Keys, 'statement' | 'decisionReason' | 'handle' | 'name' | 'note' | 'accounts' | 'label'>>().toEqualTypeOf<never>();
+    expectTypeOf<KitEventOf<'appeal.decided'>['reason']>().toEqualTypeOf<'rule_applies' | 'evidence_clear' | 'context_considered' | 'first_offence' | 'lighter_fits' | 'mistake' | 'not_a_violation'>();
     expectTypeOf<KitEventOf<'appeal.decided'>['outcome']>().toEqualTypeOf<'uphold' | 'reduce' | 'revoke'>();
     // and they are members of the union, so cw.on('*') hears them
     expectTypeOf<KitEvent['type']>().toExtend<string>();

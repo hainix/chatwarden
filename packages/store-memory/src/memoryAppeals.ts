@@ -134,18 +134,25 @@ class MemoryAppeals extends MemoryStore {
 
   decideAppeal(
     id: string,
-    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean },
+    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean; reasonCode?: string },
   ): boolean {
     const row = this.appealState().rows.get(id);
     if (row === undefined || row.status !== 'open') return false;
     const before = { ...row };
+    // `before` has no reasonCode key when there was none: restoring must remove one the decision added.
+    const hadCode = Object.hasOwn(row, 'reasonCode');
     row.status = patch.status;
     row.decidedAt = patch.at;
     row.decidedBy = patch.by;
     row.decisionReason = patch.reason;
     row.replacementGroupId = patch.replacementGroupId;
+    // Left out, the row keeps no code (the key stays absent, as in a row decided before 0.2.1).
+    if (patch.reasonCode !== undefined) row.reasonCode = patch.reasonCode;
     if (patch.clearStatement === true) row.statement = null;
-    this.undoWith(() => Object.assign(row, before));
+    this.undoWith(() => {
+      Object.assign(row, before);
+      if (!hadCode) delete row.reasonCode;
+    });
     this.bump();
     return true;
   }

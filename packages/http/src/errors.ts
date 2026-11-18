@@ -42,6 +42,7 @@ const TABLE = {
   already_held: { status: 409, message: 'This report is already held.' },
   comment_limit: { status: 409, message: 'This report already holds as many comments as it can.' },
   already_appealed: { status: 409, message: 'This has already been appealed.' },
+  invalid_reason: { status: 400, message: 'That reason does not fit the decision.' },
   same_decider: { status: 409, message: 'The person who made the decision cannot decide its appeal.' },
   gone: { status: 409, message: 'The sanction this appeal was about is gone.' },
   not_shareable: { status: 409, message: 'This term cannot be shared.' },

@@ -2,6 +2,9 @@ import {
   APPEAL_OUTCOMES,
   APPEAL_RATE_ELEVATED,
   APPEAL_RATE_HIGH,
+  APPEAL_REASON_CODES,
+  APPEAL_REASON_DEFAULT,
+  APPEAL_REASONS,
   APPEAL_STATEMENT_MAX,
   APPEAL_STATS_MIN_SANCTIONS,
   normalizeStatement,
@@ -15,6 +18,7 @@ import type {
   AppealFileResult,
   AppealOutcome,
   AppealPage,
+  AppealReasonCode,
   AppealRuleStats,
   AppealStats,
   AppealSummary,
@@ -101,17 +105,24 @@ class Stop extends Error {
 const OUTCOME_STATUS = { uphold: 'upheld', reduce: 'reduced', revoke: 'revoked' } as const;
 const OUTCOME_NOTICE = { uphold: 'appeal_upheld', reduce: 'appeal_reduced', revoke: 'appeal_revoked' } as const;
 const INVALID = { ok: false, error: 'invalid' } as const;
+const INVALID_REASON = Symbol('invalid_reason');
 
 interface CheckedDecision {
   appealId: string;
   outcome: AppealOutcome;
   actor: string;
   reason: string;
+  /** The fixed reason, resolved: the one given, or the default when the key was absent. */
+  reasonCode: AppealReasonCode;
   to: { kind: 'warning' | 'chat' | 'area' | 'ban'; durationMs: number | null } | null;
 }
 
-/** The decision as the service reads it, or null when it is not well formed. Each field is read once. */
-function checkDecision(input: AppealDecision): CheckedDecision | null {
+/**
+ * The decision as the service reads it: null when it is not well formed (`invalid`), the marker {@link INVALID_REASON} when the shape is fine but the
+ * reason code is not one the outcome offers (`invalid_reason`), else the checked decision. Each field is read once, and the code is read only after the
+ * shape passed (an absent key, or `undefined`, is the one way to ask for the default; `null` is not).
+ */
+function checkDecision(input: AppealDecision): CheckedDecision | typeof INVALID_REASON | null {
   if (typeof input !== 'object' || input === null) return null;
   const { appealId, outcome, actor, reason, to } = input as unknown as Record<string, unknown>;
   if (typeof appealId !== 'string' || appealId === '') return null;
@@ -119,7 +130,17 @@ function checkDecision(input: AppealDecision): CheckedDecision | null {
   if (!isValidAuditActor(actor)) return null;
   const why = typeof reason === 'string' ? reason.trim() : '';
   if (why === '' || why.length > 500) return null;
-  if (outcome !== 'reduce') return to === undefined ? { appealId, outcome: outcome as AppealOutcome, actor, reason: why, to: null } : null;
+  let code: AppealReasonCode;
+  const given: unknown = (input as unknown as Record<string, unknown>).reasonCode;
+  if (given === undefined) {
+    code = APPEAL_REASON_DEFAULT;
+  } else {
+    // A string that is one of the seven AND one this outcome offers: compared against the frozen lists, never by property lookup (so 'toString' is not a code).
+    if (typeof given !== 'string' || !(APPEAL_REASON_CODES as readonly string[]).includes(given)) return INVALID_REASON;
+    if (!(APPEAL_REASONS[outcome as AppealOutcome] as readonly string[]).includes(given)) return INVALID_REASON;
+    code = given as AppealReasonCode;
+  }
+  if (outcome !== 'reduce') return to === undefined ? { appealId, outcome: outcome as AppealOutcome, actor, reason: why, reasonCode: code, to: null } : null;
   if (typeof to !== 'object' || to === null) return null;
   const { kind, durationMs } = to as Record<string, unknown>;
   if (typeof kind !== 'string' || !(SANCTION_KIND_ORDER as readonly string[]).includes(kind)) return null;
@@ -128,7 +149,13 @@ function checkDecision(input: AppealDecision): CheckedDecision | null {
   } else if (durationMs !== null && (typeof durationMs !== 'number' || !Number.isSafeInteger(durationMs) || durationMs <= 0 || durationMs > MAX_SANCTION_DURATION_MS)) {
     return null;
   }
-  return { appealId, outcome: 'reduce', actor, reason: why, to: { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs: durationMs as number | null } };
+  return { appealId, outcome: 'reduce', actor, reason: why, reasonCode: code, to: { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs: durationMs as number | null } };
+}
+
+/** The stored reason code of a decided appeal when it is one the kit knows (a moot appeal, an older row and anything else read null). */
+function knownReasonCode(r: AppealRow): AppealReasonCode | null {
+  const code = r.reasonCode;
+  return r.status !== 'moot' && typeof code === 'string' && (APPEAL_REASON_CODES as readonly string[]).includes(code) ? (code as AppealReasonCode) : null;
 }
 
 /** A refusal that must roll the filing's transaction back (the row was written to test the unique group and the rate). */
@@ -266,6 +293,7 @@ export class AppealService {
     if (!this.enabled()) return { ok: false, error: 'not_found' };
     const d = checkDecision(input);
     if (d === null) return INVALID;
+    if (d === INVALID_REASON) return { ok: false, error: 'invalid_reason' };
     try {
       return this.decideChecked(d);
     } catch (err) {
@@ -335,6 +363,7 @@ export class AppealService {
           at: now,
           by: d.actor,
           reason: d.reason,
+          reasonCode: d.reasonCode,
           replacementGroupId: written === null ? null : (written as ReturnType<typeof writeSanction>).groupId,
           ...(clear ? { clearStatement: true } : {}),
         });
@@ -371,7 +400,7 @@ export class AppealService {
     const made = written as ReturnType<typeof writeSanction> | null;
     if (made !== null) fenced(() => this.d.index.add(made.rows, now));
     fenced(() => notices.announce(person));
-    fenced(() => this.d.emit({ type: 'appeal.decided', appealId: appeal.id, at: now, target: person, outcome: d.outcome, rule: ruleRefOf(appeal.rule) }));
+    fenced(() => this.d.emit({ type: 'appeal.decided', appealId: appeal.id, at: now, target: person, outcome: d.outcome, rule: ruleRefOf(appeal.rule), reason: d.reasonCode }));
     return { ok: true, status: OUTCOME_STATUS[d.outcome], ...(made === null ? {} : { replacementGroupId: made.groupId }) };
   }
 
@@ -459,7 +488,10 @@ export class AppealService {
       return {
         ...this.summaryOf(r),
         statement: r.statement,
-        decided: r.decidedAt === null || r.decidedBy === null ? null : { by: r.decidedBy, at: r.decidedAt, reason: r.decisionReason ?? '', replacementGroupId: r.replacementGroupId },
+        decided:
+          r.decidedAt === null || r.decidedBy === null
+            ? null
+            : { by: r.decidedBy, at: r.decidedAt, reason: r.decisionReason ?? '', reasonCode: knownReasonCode(r), replacementGroupId: r.replacementGroupId },
         reportId: r.reportId,
         shown: notice === undefined ? [] : notice.excerpt.map((l) => ({ text: l.text, day: l.day })),
       };

@@ -347,8 +347,28 @@ function toSanctionRow(r: Record<string, unknown>): SanctionRow {
   };
 }
 
+const NOTICE_COLUMNS = 'id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at';
+/** One notice by id, whatever its owner or state. Binds: the id. */
+export const NOTICE_BY_ID_SQL = `SELECT ${NOTICE_COLUMNS} FROM kit_notices WHERE id = ?`;
+
+function toNoticeRow(r: Record<string, unknown>): NoticeRow {
+  return {
+    id: String(r.id),
+    subject: String(r.subject_id),
+    groupId: r.group_id === null ? null : String(r.group_id),
+    kind: String(r.kind) as NoticeKind,
+    rule: r.rule === null ? null : String(r.rule),
+    until: r.until === null ? null : Number(r.until),
+    refCode: r.ref_code === null ? null : String(r.ref_code),
+    excerpt: JSON.parse(String(r.excerpt_json)) as Array<{ text: string; day: string }>,
+    createdAt: Number(r.created_at),
+    ackedAt: r.acked_at === null ? null : Number(r.acked_at),
+    withdrawnAt: r.withdrawn_at === null ? null : Number(r.withdrawn_at),
+  };
+}
+
 const APPEAL_COLUMNS =
-  'id, subject_id, group_id, notice_id, report_id, rule, kind, statement, status, created_at, decided_at, decided_by, decision_reason, replacement_group_id';
+  'id, subject_id, group_id, notice_id, report_id, rule, kind, statement, status, created_at, decided_at, decided_by, decision_reason, replacement_group_id, reason_code';
 
 function toAppealRow(r: Record<string, unknown>): AppealRow {
   return {
@@ -366,6 +386,8 @@ function toAppealRow(r: Record<string, unknown>): AppealRow {
     decidedBy: r.decided_by === null ? null : String(r.decided_by),
     decisionReason: r.decision_reason === null ? null : String(r.decision_reason),
     replacementGroupId: r.replacement_group_id === null ? null : String(r.replacement_group_id),
+    // Only a decision that gave a code has the key, so every row decided before 0.2.1 keeps the shape it had.
+    ...(r.reason_code === null || r.reason_code === undefined ? {} : { reasonCode: String(r.reason_code) }),
   };
 }
 
@@ -1707,14 +1729,14 @@ export class SqliteStore implements Store, TermStore {
         .prepare(
           `INSERT INTO kit_appeals
              (id, subject_id, group_id, notice_id, report_id, rule, kind, statement, status, created_at, decided_at, decided_by,
-              decision_reason, replacement_group_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              decision_reason, replacement_group_id, reason_code)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING
            RETURNING id`,
         )
         .get(
           row.id, row.subject, row.groupId, row.noticeId, row.reportId, row.rule, row.kind, row.statement, row.status, row.createdAt,
-          row.decidedAt, row.decidedBy, row.decisionReason, row.replacementGroupId,
+          row.decidedAt, row.decidedBy, row.decisionReason, row.replacementGroupId, row.reasonCode ?? null,
         );
       if (wrote === undefined) return false;
       this.bump();
@@ -1797,18 +1819,18 @@ export class SqliteStore implements Store, TermStore {
 
   decideAppeal(
     id: string,
-    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean },
+    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean; reasonCode?: string },
   ): boolean {
     return this.transaction(() => {
       // One conditional UPDATE: only an open appeal moves, so of two connections deciding one appeal exactly one changes a row.
       const res = this.db
         .prepare(
           `UPDATE kit_appeals
-           SET status = ?, decided_at = ?, decided_by = ?, decision_reason = ?, replacement_group_id = ?,
+           SET status = ?, decided_at = ?, decided_by = ?, decision_reason = ?, replacement_group_id = ?, reason_code = ?,
                statement = CASE WHEN ? = 1 THEN NULL ELSE statement END
            WHERE id = ? AND status = 'open'`,
         )
-        .run(patch.status, patch.at, patch.by, patch.reason, patch.replacementGroupId, patch.clearStatement === true ? 1 : 0, id);
+        .run(patch.status, patch.at, patch.by, patch.reason, patch.replacementGroupId, patch.reasonCode ?? null, patch.clearStatement === true ? 1 : 0, id);
       if (Number(res.changes) === 0) return false;
       this.bump();
       return true;
@@ -3118,25 +3140,15 @@ export class SqliteStore implements Store, TermStore {
     if (subjects.length === 0) return [];
     return this.transaction(() =>
       this.db
-        .prepare(
-          `SELECT id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at
-           FROM kit_notices WHERE subject_id IN (${subjects.map(() => '?').join(', ')}) ORDER BY created_at, rowid`,
-        )
+        .prepare(`SELECT ${NOTICE_COLUMNS} FROM kit_notices WHERE subject_id IN (${subjects.map(() => '?').join(', ')}) ORDER BY created_at, rowid`)
         .all(...subjects)
-        .map((r) => ({
-          id: String(r.id),
-          subject: String(r.subject_id),
-          groupId: r.group_id === null ? null : String(r.group_id),
-          kind: String(r.kind) as NoticeKind,
-          rule: r.rule === null ? null : String(r.rule),
-          until: r.until === null ? null : Number(r.until),
-          refCode: r.ref_code === null ? null : String(r.ref_code),
-          excerpt: JSON.parse(String(r.excerpt_json)) as Array<{ text: string; day: string }>,
-          createdAt: Number(r.created_at),
-          ackedAt: r.acked_at === null ? null : Number(r.acked_at),
-          withdrawnAt: r.withdrawn_at === null ? null : Number(r.withdrawn_at),
-        })),
+        .map(toNoticeRow),
     );
+  }
+
+  loadNotice(id: string): NoticeRow | null {
+    const r = this.transaction(() => this.db.prepare(NOTICE_BY_ID_SQL).get(id));
+    return r === undefined ? null : toNoticeRow(r);
   }
 
   ackNotice(id: string, at: number): boolean {

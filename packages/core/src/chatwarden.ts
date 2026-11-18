@@ -970,7 +970,9 @@ export interface Chatwarden {
      * Decide an open appeal: `uphold` (the sanction stands), `reduce` (to a lighter kind, or the same kind and shorter, keeping the original
      * start so the ladder does not restart, never ending later than the original) or `revoke`. A moderator may not decide an appeal of
      * their own decision unless `appeals.allowSelfReview` is on (`same_decider`); an automatic sanction has no such decider. `reason` is
-     * private (1 to 500 characters). One transaction; the player is told through a notice; `appeal.decided` is emitted after the commit.
+     * private (1 to 500 characters). `reasonCode` (0.2.1) is the fixed reason: one of `APPEAL_REASONS[outcome]`, `context_considered` when left out, and
+     * `{ ok: false, error: 'invalid_reason' }` for a code that is not a string, not in the list or not offered for the outcome (answered before the store is read,
+     * so nothing is written). One transaction; the player is told through a notice; `appeal.decided` is emitted after the commit with the code.
      * Staff-side: the permission and the audit row belong to the route. A store failure rejects and writes nothing.
      */
     decide(input: AppealDecision): Promise<AppealDecideResult>;

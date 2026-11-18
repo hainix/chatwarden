@@ -1273,6 +1273,11 @@ export class MemoryStore implements Store {
       .map(({ n }) => structuredClone(n));
   }
 
+  loadNotice(id: string): NoticeRow | null {
+    const n = this.notices.find((x) => x.id === id);
+    return n === undefined ? null : structuredClone(n);
+  }
+
   ackNotice(id: string, at: number): boolean {
     const n = this.notices.find((x) => x.id === id);
     if (n === undefined || n.ackedAt !== null || n.withdrawnAt !== null) return false;
@@ -1851,7 +1856,7 @@ export class MemoryStore implements Store {
       blockedNames: cap('blockedNames', (hooks.privacyExportBlockedNames?.(set) ?? []).map((r) => ({ at: r.at, name: r.name, reason: r.reason }))),
       appeals: cap(
         'appeals',
-        (hooks.privacyExportAppeals?.(set) ?? []).map((r) => ({ createdAt: r.createdAt, kind: r.kind, rule: r.rule, status: r.status, statement: r.statement, decidedAt: r.decidedAt, overturnedAt: r.overturnedAt ?? null })),
+        (hooks.privacyExportAppeals?.(set) ?? []).map((r) => ({ createdAt: r.createdAt, kind: r.kind, rule: r.rule, status: r.status, statement: r.statement, decidedAt: r.decidedAt, overturnedAt: r.overturnedAt ?? null, reasonCode: r.reasonCode ?? null })),
       ),
       signals: cap('signals', hooks.privacyExportSignals?.(set) ?? []),
       // `received` leaves blocks out: a person is never told they were blocked.

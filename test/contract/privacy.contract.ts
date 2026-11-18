@@ -23,9 +23,9 @@ export const WHO = {
 };
 export const OTHER = { id: 's_qq', account: 'acct-qq', handle: 'QQHandle', line: 'tarvo qq line' };
 
-type Opt = Required<Pick<Store, 'insertAppeal' | 'recordOverturn' | 'insertBlockedName' | 'insertSignal' | 'setNoAutomation' | 'insertAiAction' | 'reserveAiRead' | 'completeAiRead' | 'insertAiOutcome' | 'putLink' | 'listLinks'>>;
+type Opt = Required<Pick<Store, 'insertAppeal' | 'decideAppeal' | 'recordOverturn' | 'insertBlockedName' | 'insertSignal' | 'setNoAutomation' | 'insertAiAction' | 'reserveAiRead' | 'completeAiRead' | 'insertAiOutcome' | 'putLink' | 'listLinks'>>;
 const opt = (s: Store): Store & Opt => {
-  for (const m of ['insertAppeal', 'recordOverturn', 'insertBlockedName', 'insertSignal', 'setNoAutomation', 'insertAiAction', 'reserveAiRead', 'completeAiRead', 'insertAiOutcome', 'putLink', 'listLinks'] as const) {
+  for (const m of ['insertAppeal', 'decideAppeal', 'recordOverturn', 'insertBlockedName', 'insertSignal', 'setNoAutomation', 'insertAiAction', 'reserveAiRead', 'completeAiRead', 'insertAiOutcome', 'putLink', 'listLinks'] as const) {
     if (s[m] === undefined) throw new Error(`this store has no ${m}`);
   }
   return s as Store & Opt;
@@ -1216,6 +1216,20 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
         s.exportSubjects(['s_pp', 's_pp2']);
         expect(s.erasureEpoch()).toBe(0);
         if (dump !== undefined) expect(dump(s)).toBe(before);
+      });
+    });
+
+    describe('appeal reasons (0.2.1)', () => {
+      it('the export carries the reason code of a decided appeal, and null for one with none', async () => {
+        const s = make();
+        await seedWorld(s);
+        const x = opt(s);
+        expect(x.decideAppeal('ap-pp', { status: 'revoked', at: NOW, by: 'senior_bea', reason: 'private words', replacementGroupId: null, reasonCode: 'not_a_violation' })).toBe(true);
+        x.insertAppeal({ ...appeal('ap-extra', 's_pp', 'gNotDecided'), createdAt: NOW - 800 });
+        const out = s.exportSubjects(['s_pp', 's_pp2']);
+        expect(out.appeals.map((r) => r.reasonCode)).toEqual([null, 'not_a_violation']);
+        // never the free text
+        expect(JSON.stringify(out)).not.toContain('private words');
       });
     });
 

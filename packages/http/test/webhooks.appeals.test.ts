@@ -58,7 +58,7 @@ function fakeKit(accounts: { current: string[] | Error } = { current: [ACCOUNT] 
 }
 
 const appealCreated: KitEvent = { type: 'appeal.created', appealId: 'ap1', createdAt: NOW, target: 's_target_000000000000000', kind: 'chat', rule: 2 };
-const appealDecided: KitEvent = { type: 'appeal.decided', appealId: 'ap1', at: NOW, target: 's_target_000000000000000', outcome: 'reduce', rule: 2 };
+const appealDecided: KitEvent = { type: 'appeal.decided', appealId: 'ap1', at: NOW, target: 's_target_000000000000000', outcome: 'reduce', rule: 2, reason: 'lighter_fits' };
 const renameRequired = (n = 0): KitEvent => ({ type: 'rename.required', at: NOW + n, target: 's_target_000000000000000', rule: 1 });
 const reportClosed: KitEvent = { type: 'report.closed', reportId: 'r1', verdict: 'upheld', at: NOW };
 
@@ -112,7 +112,9 @@ describe('webhooksOut accepts the three types, signs them, and never adds a stat
     const text = f.calls.map((c) => c.init.body).join('\n');
     for (const v of [STATEMENT, REASON, HANDLE, 'RenameHandle', ACCOUNT, 'accounts', 'mod_ann', 'senior_bea']) expect(text, v).not.toContain(v);
     const decided = bodyOf(f.calls[1] as Call).data;
-    expect(Object.keys(decided).sort()).toEqual(['appealId', 'at', 'outcome', 'rule', 'target', 'type']);
+    // `reason` is the fixed reason code of the decision (0.2.1), never the moderator's text: REASON is not in the body (checked above).
+    expect(Object.keys(decided).sort()).toEqual(['appealId', 'at', 'outcome', 'reason', 'rule', 'target', 'type']);
+    expect((decided as { reason: string }).reason).toBe('context_considered');
     out.dispose();
   });
 
