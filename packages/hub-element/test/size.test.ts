@@ -27,7 +27,7 @@ import { bundle } from '../build/build.mjs';
 // Raised to 400 KB gzipped and 1.5 MB raw at 0.2.0 (Spanish and Portuguese): the standalone script inlines every lazy chunk, so both catalogues of the hub (about 2,260 words each, the hub, the AI parts and the
 // privacy parts) count in full, whichever one a page uses: +74 KB gzipped, +312 KB raw (measured 377,273 gzipped, 1,446,564 raw). The script was already past the old caps before them (302,958 gzipped,
 // 1,133,896 raw, measured with the catalogues left out): the urgent desk, the rooms, the privacy parts, the filters and the community list all landed since the last raise and this test was not run
-// without a built hub. A page that wants one language and a small script uses the module with its own bundler, where each catalogue is a lazy chunk.
+// without a built hub. The module export, `dist/index.js`, is the same single file (no code splitting), so a page that wants one language and a small download uses `@chatwarden/hub-react` with its own bundler, where each catalogue is a lazy chunk.
 const BUDGET_GZIP = 400 * 1024;
 const BUDGET_RAW = 1536 * 1024;
 

@@ -37,6 +37,7 @@ const TABLE = {
   forbidden: { status: 403, message: 'You do not have permission to do this.' },
   not_found: { status: 404, message: 'Not found.' },
   method_not_allowed: { status: 405, message: 'Method not allowed.' },
+  request_timeout: { status: 408, message: 'The request body did not arrive in time.' },
   already_decided: { status: 409, message: 'The report has already been decided.' },
   already_held: { status: 409, message: 'This report is already held.' },
   comment_limit: { status: 409, message: 'This report already holds as many comments as it can.' },

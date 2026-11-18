@@ -83,18 +83,13 @@ function serviceHeaders(req: IncomingMessage): Record<string, string> {
   return { 'chatwarden-api': String(SERVICE_API_VERSION), 'x-request-id': requestIdFor(typeof given === 'string' ? given : undefined), 'x-content-type-options': 'nosniff' };
 }
 
-function sendError(res: ServerResponse, code: ErrorCode | 'internal' | 'timeout', extra: Record<string, string> = {}, close = false): void {
+function sendError(res: ServerResponse, code: ErrorCode | 'internal', extra: Record<string, string> = {}, close = false): void {
   if (res.headersSent) {
     res.destroy();
     return;
   }
-  // `internal` and `timeout` are the bridge's own: a 500 with no detail, and a 408 for a body that did not arrive. Every body is `{ error, message }`, as the API's other errors are.
-  const { status, body } =
-    code === 'internal'
-      ? { status: 500, body: { error: 'internal', message: 'Something went wrong on the server.' } }
-      : code === 'timeout'
-        ? { status: 408, body: { error: 'request_timeout', message: 'The request body did not arrive in time.' } }
-        : errorResponse(code);
+  // `internal` is the bridge's own, a 500 with no detail (the README's `internal` row); a 408 for a body that did not arrive is the `request_timeout` code. Every body is `{ error, message }`, as the API's other errors are.
+  const { status, body } = code === 'internal' ? { status: 500, body: { error: 'internal', message: 'Something went wrong on the server.' } } : errorResponse(code);
   const text = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'content-length': Buffer.byteLength(text), ...(close ? { connection: 'close' } : {}), ...extra });
   res.end(text);
@@ -188,7 +183,7 @@ export function nodeHandler(handle: (request: Request) => Promise<Response | nul
           const read = await readBody(req, max, timeoutMs);
           if (read.kind === 'too_large') return sendError(res, 'payload_too_large', more, true);
           if (read.kind === 'timeout') {
-            sendError(res, 'timeout', more, true);
+            sendError(res, 'request_timeout', more, true);
             req.destroy();
             return;
           }

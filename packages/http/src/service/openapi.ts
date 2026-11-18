@@ -33,11 +33,17 @@ function parametersOf(spec: RouteSpec): Doc[] {
 function operationOf(spec: RouteSpec): Doc {
   const responses: Doc = {
     '200': { description: 'The answer. A refusal of a line, a report or a door is an answer too.', content: { 'application/json': { schema: spec.answer } } },
-    '400': errorResponse('The request is not valid (`invalid_request`, `invalid_json`, `forbidden_key`, `invalid_idempotency_key`).'),
+    '400': errorResponse('The request is not valid (`invalid_request`, `invalid_json`, `forbidden_key`, `invalid_idempotency_key`, and `invalid_value` for a number out of range, such as the seat cap of a room).'),
     '401': errorResponse('No service key, or a wrong one.'),
+    '405': errorResponse('`method_not_allowed`: the path exists under other methods (the `allow` header lists them).'),
     '429': errorResponse('Too many requests; see `retry-after`.'),
+    '500': errorResponse('`internal`: something went wrong on the server. No detail is sent; the log line holds the error class only.'),
   };
-  if (spec.request !== undefined) responses['413'] = errorResponse('The body is over 64 KiB.');
+  if (spec.openapiPath.includes('{')) responses['404'] = errorResponse('`not_found`: an id the service refuses (not a valid room, seat or notice id).');
+  if (spec.request !== undefined) {
+    responses['408'] = errorResponse('`request_timeout`: the body did not arrive in time.');
+    responses['413'] = errorResponse('The body is over 64 KiB.');
+  }
   if (spec.idempotent === true) responses['409'] = errorResponse('`idempotency_mismatch` (the key was used with another body) or `in_progress`.');
   const op: Doc = { operationId: spec.name, summary: spec.summary, responses };
   const parameters = parametersOf(spec);

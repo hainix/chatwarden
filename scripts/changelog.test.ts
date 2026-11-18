@@ -532,6 +532,40 @@ describe('the 0.2.0 notes (the release with breaking changes), in all ten CHANGE
     ]) expect(s.toLowerCase(), needle).toContain(needle.toLowerCase());
   });
 
+  it.each(dirs)('%s: lists the widened unions, the nullable reporterPerson and the welfare default', (dir) => {
+    const s = breaking(dir);
+    for (const needle of [
+      'Widened unions and new defaults', '`AuditAction` gains 14 names', '`AuditTargetType` gains `room`', '`PermissionKey` gains nine keys', '`rooms.manage`', '`KitEvent` gains six types', '`report.escalated`', '`case.escalated`',
+      '`ErrorCode` gains six codes', '`request_timeout`', '`StaffReport.reporterPerson` is now `SubjectId | null`', 'deleted after 30 days', '`retention.welfareReportsMs`',
+    ]) expect(s, needle).toContain(needle);
+    // and it says only http dropped the dev-dependency (hub-element still dev-depends on http)
+    expect(features(dir)).toContain('`@chatwarden/http` no longer dev-depends on `@chatwarden/hub-element`');
+    expect(features(dir)).not.toContain('no longer dev-depend on each other');
+    expect(features(dir)).toContain('duplicate column name');
+  });
+
+  it('the counts in the widened-unions bullet are the real ones (read from the source)', () => {
+    const arrayOf = (file: string, name: string): string[] => {
+      const src = readFileSync(join(root, file), 'utf8');
+      const m = new RegExp('const ' + name + '\\b[^=]*=\\s*\\[(.*?)\\]\\s*as const', 's').exec(src);
+      return [...(m?.[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] as string);
+    };
+    const s = breaking('core');
+    const named = (label: string): string[] => [...(new RegExp(label + '[^.]*?\\(([^)]*)\\)').exec(s)?.[1] ?? '').matchAll(/`([^`]+)`/g)].map((x) => x[1] as string);
+    const actions = arrayOf('packages/core/src/audit.ts', 'AUDIT_ACTIONS');
+    const keys = arrayOf('packages/http/src/permissions.ts', 'PERMISSION_KEYS');
+    for (const name of named('`AuditAction` gains 14 names')) expect(actions, name).toContain(name);
+    expect(named('`AuditAction` gains 14 names')).toHaveLength(14);
+    for (const name of named('`PermissionKey` gains nine keys')) expect(keys, name).toContain(name);
+    expect(named('`PermissionKey` gains nine keys')).toHaveLength(9);
+    const errors = readFileSync(join(root, 'packages', 'http', 'src', 'errors.ts'), 'utf8');
+    for (const name of named('`ErrorCode` gains six codes')) expect(errors, name).toContain(`  ${name}: {`);
+    expect(named('`ErrorCode` gains six codes')).toHaveLength(6);
+    const events = readFileSync(join(root, 'packages', 'core', 'src', 'events.ts'), 'utf8');
+    for (const name of named('`KitEvent` gains six types')) expect(events, name).toContain(`type: '${name}'`);
+    expect(named('`KitEvent` gains six types')).toHaveLength(6);
+  });
+
   it('every Store method the notes name is really on the Store interface, required or optional as claimed', () => {
     const { required, optional } = storeMethods();
     const s = breaking('core');

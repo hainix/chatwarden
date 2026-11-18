@@ -90,10 +90,10 @@ The `@chatwarden/http` package also ships a command, `chatwarden` (the `bin` in 
    A peer floor is the oldest version of a package we promise to work with. The setting above never raises one inside a compatible
    release, which is right when a release only fixes things. It is wrong when a package starts to use something that is new in
    `@chatwarden/core` (or `http`): the old floor would let `npm` install it beside a core that lacks the API, and it would break at
-   run time or in the consumer's type check. 0.1.2 is that case: `cw.policy`, `ResolvedProfile`, `reporting`, `reportedReason`,
+   run time or in the consumer's type check. 0.1.2 was that case (since 0.2.0 every `@chatwarden/*` peer is `^0.2.0`): `cw.policy`, `ResolvedProfile`, `reporting`, `reportedReason`,
    `addDetail`, `releaseWhenDone`, the take-next `reason`, `detailUntil` and the store methods for the policy layer, claims, reasons and
-   report details are new, so `store-memory`, `store-sqlite`, `http`, `hub-react` and `player-react` peer on `@chatwarden/core`
-   `^0.1.2` (`hub-react` also on `http`, `hub-element` on `hub-react`), while `core`, `matcher`, `profanity` and `discord` stay at
+   report details were new, so `store-memory`, `store-sqlite`, `http`, `hub-react` and `player-react` peered on `@chatwarden/core`
+   `^0.1.2` (`hub-react` also on `http`, `hub-element` on `hub-react`), while `core`, `matcher`, `profanity` and `discord` stayed at
    `^0.1.0`.
 
    This deliberately overrides `onlyUpdatePeerDependentsWhenOutOfRange`, by hand, for correctness. For a 0.x minor, set every range to the new minor

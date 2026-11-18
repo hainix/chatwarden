@@ -45,6 +45,20 @@ describe('openapi', () => {
     for (const item of Object.values(parsed.paths)) for (const key of Object.keys(item)) expect(['get', 'put', 'post', 'delete']).toContain(key);
   });
 
+  it('documents the answers the bridge and the router send: 404 (an id it refuses), 405, 408 (a body that did not arrive), 500, and invalid_value in the 400 text', () => {
+    const parsed = JSON.parse(JSON.stringify(SERVICE_OPENAPI)) as { paths: Record<string, Record<string, { responses: Record<string, { description?: string }> }>> };
+    for (const s of ROUTE_SPECS) {
+      const op = parsed.paths[`/v1${s.openapiPath === '/' ? '' : s.openapiPath}`]![s.method.toLowerCase()]!;
+      expect(op.responses['405'], `${s.name} 405`).toBeDefined();
+      expect(op.responses['500'], `${s.name} 500`).toBeDefined();
+      expect(op.responses['500']?.description, s.name).toContain('internal');
+      expect(Boolean(op.responses['404']), `${s.name} 404`).toBe(s.openapiPath.includes('{'));
+      expect(Boolean(op.responses['408']), `${s.name} 408`).toBe(s.request !== undefined);
+      if (s.request !== undefined) expect(op.responses['408']?.description, s.name).toContain('request_timeout');
+      expect(op.responses['400']?.description, s.name).toContain('invalid_value');
+    }
+  });
+
   it('paths use {braces} for params and every param name is the table\'s', () => {
     for (const s of ROUTE_SPECS) {
       const names = [...s.path.matchAll(/:([A-Za-z]+)/g)].map((m) => m[1]);
