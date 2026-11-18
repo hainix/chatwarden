@@ -753,3 +753,33 @@ describe('the core manifest in the repo and the notice-copy subpath (0.2.0)', ()
     expect(nodeImportProblems({ pkg: core, files: [{ path: 'dist/src/noticeCopy.js', source: `${source}\nimport fs from 'node:fs';\n` }] })).not.toEqual([]);
   });
 });
+
+describe('the notice-locales subpath of core (0.2.1)', () => {
+  const core = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/core/package.json', import.meta.url)), 'utf8')) as Pkg;
+  const FILES = ['noticeLocales', 'noticeLocales.es', 'noticeLocales.pt', 'appealWords', 'deliveryCopy', 'noticeCopy'];
+  it('is exported with types and ESM from dist, beside the root and notice-copy entries, and mapped for moduleResolution node', () => {
+    expect((core.exports as Record<string, unknown>)['./notice-locales']).toEqual({ types: './dist/src/noticeLocales.d.ts', default: './dist/src/noticeLocales.js' });
+    expect((core.exports as Record<string, unknown>)['./notice-copy']).toEqual({ types: './dist/src/noticeCopy.d.ts', default: './dist/src/noticeCopy.js' });
+    expect((core as unknown as { typesVersions: { '*': Record<string, string[]> } }).typesVersions['*']['notice-locales']).toEqual(['dist/src/noticeLocales.d.ts']);
+    const targets = exportTargets(core) as string[];
+    expect(targets).toContain('dist/src/noticeLocales.js');
+    expect(targets).toContain('dist/src/noticeLocales.d.ts');
+  });
+  it('a tarball that lacks the subpath is refused, and the manifest still passes the publish checks', () => {
+    expect(checkManifest(core, 'core')).toEqual([]);
+    const targets = exportTargets(core) as string[];
+    const sources = targets.filter((t) => t.endsWith('.js')).map((t) => t.replace(/^dist\//, '').replace(/\.js$/, '.ts'));
+    const files = ['package.json', 'README.md', 'LICENSE', ...targets, ...targets.map((t) => `${t}.map`), ...sources];
+    expect(checkFileList({ pkg: core, files })).toEqual([]);
+    for (const missing of ['dist/src/noticeLocales.js', 'dist/src/noticeLocales.d.ts']) {
+      expect(checkFileList({ pkg: core, files: files.filter((f) => f !== missing) }).join('\n'), missing).toContain(`export target is not in the tarball: ${missing}`);
+    }
+  });
+  it('core stays browser-safe: none of the words and delivery files imports a Node builtin', () => {
+    for (const name of FILES) {
+      const source = readFileSync(fileURLToPath(new URL(`../packages/core/src/${name}.ts`, import.meta.url)), 'utf8');
+      expect(nodeImportProblems({ pkg: core, files: [{ path: `dist/src/${name}.js`, source }] }), name).toEqual([]);
+      expect(source, name).not.toMatch(/from 'node:/);
+    }
+  });
+});

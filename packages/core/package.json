@@ -34,12 +34,19 @@
     "./notice-copy": {
       "types": "./dist/src/noticeCopy.d.ts",
       "default": "./dist/src/noticeCopy.js"
+    },
+    "./notice-locales": {
+      "types": "./dist/src/noticeLocales.d.ts",
+      "default": "./dist/src/noticeLocales.js"
     }
   },
   "typesVersions": {
     "*": {
       "notice-copy": [
         "dist/src/noticeCopy.d.ts"
+      ],
+      "notice-locales": [
+        "dist/src/noticeLocales.d.ts"
       ]
     }
   },
