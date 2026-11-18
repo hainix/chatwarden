@@ -49,8 +49,8 @@ function make(signals?: BuildAIInputArgs['signals'], preset: PresetName = 'stand
 
 describe('the prompt version', () => {
   it('moved on (5: 3 added the signal paragraph, 4 the appeal cautions, 5 the confirming prompt), and the input carries it', () => {
-    expect(AI_PROMPT_VERSION).toBe(5);
-    expect(make().promptVersion).toBe(5);
+    expect(AI_PROMPT_VERSION).toBe(6);
+    expect(make().promptVersion).toBe(6);
   });
 });
 
@@ -257,7 +257,7 @@ describe('snapshots', () => {
     const r = await w.file({ muted: 1 });
     await w.idle();
     const store = w.store as MemoryAiStore;
-    expect(store.loadAiRead(r.id)?.promptVersion).toBe(5);
+    expect(store.loadAiRead(r.id)?.promptVersion).toBe(6);
     // Make the stored read look like version 3's: another hash and version for the same report.
     for (const x of (store as unknown as { aiReads: Array<{ inputHash: string; promptVersion: number }> }).aiReads) {
       x.inputHash = 'f'.repeat(64);

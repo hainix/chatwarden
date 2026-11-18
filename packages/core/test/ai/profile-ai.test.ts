@@ -133,7 +133,7 @@ describe('the ai section of a policy layer', () => {
   });
 
   it('a layer may not carry a key outside the section', () => {
-    expect(pathOf(() => applyPolicyLayer(PRESETS.standard, { ai: { level: 1 }, aiContext: 'x' } as never))).toBe('layer.aiContext');
+    expect(pathOf(() => applyPolicyLayer(PRESETS.standard, { ai: { level: 1 }, profanity: { mode: 'allow' } } as never))).toBe('layer.profanity');
     expect(pathOf(() => applyPolicyLayer(PRESETS.standard, { ai: { adapter: 'x' } } as never))).toBe('layer.ai.adapter');
   });
 });

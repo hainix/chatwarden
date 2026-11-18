@@ -200,8 +200,8 @@ const standard = (n: number): AIExampleInput => ({ id: `s${n}`, rule: 2, severit
 
 describe('the prompt', () => {
   it('the version moved from 3 to 4, and on to 5 for the confirming prompt', () => {
-    expect(AI_PROMPT_VERSION).toBe(5);
-    expect(make().promptVersion).toBe(5);
+    expect(AI_PROMPT_VERSION).toBe(6);
+    expect(make().promptVersion).toBe(6);
   });
 
   it('AIExample.kind reaches the prompt with the fixed wording; a standard example is unchanged', () => {

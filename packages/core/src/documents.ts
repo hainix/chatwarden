@@ -53,7 +53,7 @@ export interface ModeratorGuideOptions {
 export interface PolicyJson {
   version: 1;
   /** With `durations` and `customDuration` filled in, so a profile written for 0.1.1 reads back with the two new keys. */
-  profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms'>;
+  profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms' | 'teamNotes'>;
   /** Every rule, retired ones included, in number order. */
   rules: CommunityRule[];
 }
@@ -85,6 +85,12 @@ function flat(v: string): string {
 }
 
 /** A value from outside this file (team text, a name, a rule): one trimmed line. */
+/** ` (CR 3)` for a note that cites a rule, ` (CR 3, retired)` when that rule is retired, nothing for a note with no rule. */
+function noteSuffix(rule: number | undefined, rules: CommunityRules): string {
+  if (rule === undefined) return '';
+  return rules.get(rule)?.retired === true ? ` (CR ${rule}, retired)` : ` (CR ${rule})`;
+}
+
 function clean(v: string): string {
   return flat(v).trim();
 }
@@ -573,6 +579,13 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
       { k: 'p', text: `Outcome: ${clean(tier.outcome)}` },
     );
   }
+  if (profile.teamNotes.length > 0) {
+    blocks.push(
+      { k: 'h', level: 2, text: 'Team notes' },
+      { k: 'p', text: 'Working notes for the moderation team. Players never see them.' },
+      { k: 'ul', items: profile.teamNotes.map((n) => `${clean(n.text)}${noteSuffix(n.rule, rules)}`) },
+    );
+  }
 
   blocks.push(
     { k: 'h', level: 2, text: 'First offense' },
@@ -684,6 +697,7 @@ export function agentBrief(policy: DocumentPolicy): string {
   lines.push(
     'Guidelines:',
     ...profile.guidelines.map((t) => `- ${clean(t.title)} (covers: ${t.covers.map(coverName).join(', ')}): ${clean(t.outcome)}`),
+    ...(profile.teamNotes.length === 0 ? [] : ['Team notes:', ...profile.teamNotes.map((n) => `- ${clean(n.text)}${noteSuffix(n.rule, rules)}`)]),
     `Profanity: ${profile.profanity.mode}. The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.`,
     '',
     'AI AUTO-ACT',
@@ -705,8 +719,8 @@ export function agentBrief(policy: DocumentPolicy): string {
  */
 export function policyJson(policy: DocumentPolicy): PolicyJson {
   const snapshot = checkPolicy(policy);
-  // The AI, pace, signal, appeal, name, filter, desk, safety and room settings are runtime switches, not policy text (the safety contact line is for staff only): the document tools never carry them.
-  const profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms'> & {
+  // The AI, pace, signal, appeal, name, filter, desk, safety and room settings are runtime switches, not policy text (the safety contact line and the team notes are for staff only): the document tools never carry them.
+  const profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms' | 'teamNotes'> & {
     ai?: unknown;
     pace?: unknown;
     signals?: unknown;
@@ -716,6 +730,7 @@ export function policyJson(policy: DocumentPolicy): PolicyJson {
     desk?: unknown;
     safety?: unknown;
     rooms?: unknown;
+    teamNotes?: unknown;
   } =
     structuredClone(snapshot.profile);
   delete profile.ai;
@@ -727,6 +742,7 @@ export function policyJson(policy: DocumentPolicy): PolicyJson {
   delete profile.desk;
   delete profile.safety;
   delete profile.rooms;
+  delete profile.teamNotes;
   return { version: 1, profile, rules: snapshot.rules.all() };
 }
 

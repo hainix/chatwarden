@@ -2,6 +2,8 @@ import { isValidAuditActor, AUDIT_REASON_MAX } from './audit.js';
 import { sampleRecords, suggest } from './ladder.js';
 import { checkFilterRules } from './filters.js';
 import { checkNameRules } from './names.js';
+import { promptPrinciples } from './principles.js';
+import type { PromptExcluded } from './principles.js';
 import { checkTeamNoteRules } from './teamNotes.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
 import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
@@ -83,6 +85,13 @@ export interface PolicyState {
    * far back a feed may look. Read only, deep-frozen.
    */
   limits: PolicyLimits;
+  /**
+   * What the AI prompt leaves out of the profile in force: indexes into `effective.guidelines` (`tiers`: screened, so the tier line keeps only
+   * its title and covers) and into `effective.teamNotes` (`notes`: screened and left out; `capped`: dropped for length), and whether the AI
+   * standard (`aiContext`) was screened and left out. Optional on the type for older servers; always set by `get()`, deep-frozen. It reflects
+   * the profile in force, so text from a code profile is screened too.
+   */
+  promptExcluded?: PromptExcluded;
 }
 
 /** What {@link PolicyService.save} and {@link PolicyService.reset} answer. */
@@ -282,6 +291,7 @@ export class PolicyService {
       ...(layerError === undefined ? {} : { layerError: { ...layerError } }),
       ...(dropped === undefined ? {} : { dropped }),
       limits: Object.freeze({ chatRate: this.chatRate, signalsMs: this.signalsMs(), filters: this.filtersLimits }),
+      promptExcluded: frozenCopy(promptPrinciples(effective).excluded),
     };
   }
 
