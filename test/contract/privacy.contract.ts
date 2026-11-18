@@ -374,6 +374,107 @@ const plan = (over: Partial<ErasePlan> = {}): ErasePlan => ({
 
 export function privacyContract(name: string, make: () => Store, dump?: (s: Store) => string): void {
   describe(`privacy contract: ${name}`, () => {
+    describe('staff comments on a report that stays', () => {
+      // A staff comment is free text and can quote the person ("pp keeps saying zorbak"). On a report ABOUT the person it goes with the report. On a report that STAYS (the person
+      // only filed it, or wrote one line in it) it is scrubbed, and an export counts it. A held report, and a report that does not name the person, are never touched.
+      const QUOTE = 'staff quote of ppname_vlemmo and PPHandle';
+      const c = (id: string, reportId: string, kind: 'comment' | 'ask' | 'escalate' | 'clear', text: string | null) => ({ id, reportId, at: NOW - 100, actor: 'mod_a', role: 'moderator' as const, kind, text });
+
+      async function seed(s: Store, o: { held?: boolean } = {}): Promise<void> {
+        await seedWorld(s, { held: o.held === true });
+        s.insertReport(report('rOther', 's_qq', 's_xx', { excerpt: [line(1, 0, OTHER.handle, OTHER.line), line(2, 1, 'XXHandle', 'plain xx line')], people: ['s_qq', 's_xx'], roomId: 'ROOM-o' }));
+        for (const row of [
+          c('c-about', 'rAbout', 'comment', QUOTE),
+          c('c-filed', 'rFiled', 'comment', QUOTE),
+          c('c-filed-ask', 'rFiled', 'ask', `${QUOTE} again`),
+          c('c-filed-clear', 'rFiled', 'clear', null),
+          c('c-third', 'rThird', 'comment', QUOTE),
+          c('c-third-esc', 'rThird', 'escalate', QUOTE),
+          c('c-other', 'rOther', 'comment', 'a note that names nobody of the set'),
+          ...(o.held === true ? [c('c-held', 'rHeld', 'comment', QUOTE)] : []),
+        ]) expect(s.insertComment?.(row), row.id).toBe(true);
+      }
+      const texts = (s: Store, id: string): Array<string | null> => (s.listComments?.(id) ?? []).map((r) => r.text);
+
+      it('has the comment methods', () => {
+        const s = make();
+        for (const m of ['insertComment', 'listComments'] as const) expect(typeof s[m], m).toBe('function');
+      });
+
+      it('an export counts the free-text comments on every report that names the person (about, filed, a line), never the text or the staff member, and not a report that does not', async () => {
+        const s = make();
+        await seed(s);
+        const out = s.exportSubjects(['s_pp', 's_pp2']);
+        // c-about, c-filed, c-filed-ask, c-third, c-third-esc: five with text (the null "clear" is not free text; c-other names nobody of the set)
+        expect(out.workflow).toEqual({ comments: 5 });
+        const text = JSON.stringify(out);
+        for (const bad of [QUOTE, 'mod_a', 'c-filed']) expect(text, bad).not.toContain(bad);
+        // another person: only the comments on reports that name them
+        expect(s.exportSubjects(['s_xx']).workflow).toEqual({ comments: 3 });
+        expect(s.exportSubjects(['s_qq']).workflow.comments).toBe(6);
+      });
+
+      it('an export of a person with no comments says 0, and an unknown person reads 0 too', async () => {
+        const s = make();
+        await s.saveSubject({ id: 's_lone', createdAt: NOW, mergedInto: null });
+        expect(s.exportSubjects(['s_lone']).workflow).toEqual({ comments: 0 });
+        expect(s.exportSubjects(['s_nobody']).workflow).toEqual({ comments: 0 });
+      });
+
+      it.each(['none', 'safety'] as const)('an erase (%s) deletes the comments of a report about the person and scrubs the text on reports that stay, leaving the rest', async (mode) => {
+        const s = make();
+        await seed(s);
+        const counts = s.eraseSubjects(plan({ mode }));
+        expect(s.loadReport('rAbout')).toBeNull();
+        expect(texts(s, 'rAbout')).toEqual([]);
+        expect(texts(s, 'rFiled')).toEqual(['[erased]', '[erased]', null]);
+        expect(texts(s, 'rThird')).toEqual(['[erased]', '[erased]']);
+        expect(texts(s, 'rOther')).toEqual(['a note that names nobody of the set']);
+        // who wrote it, when and what kind stay: staff rows
+        expect((s.listComments?.('rFiled') ?? []).map((r) => [r.actor, r.kind])).toEqual([['mod_a', 'comment'], ['mod_a', 'ask'], ['mod_a', 'clear']]);
+        // counted under workflow: the deleted comment and the four scrubbed ones
+        expect(counts.removed.workflow ?? 0).toBeGreaterThanOrEqual(5);
+        if (dump !== undefined) expect(dump(s)).not.toContain('ppname_vlemmo');
+      });
+
+      it('a dry run counts the same as the real erase, writes nothing, and leaves every comment as it was', async () => {
+        const s = make();
+        await seed(s);
+        const before = [...['rAbout', 'rFiled', 'rThird', 'rOther'].map((id) => texts(s, id))];
+        const preview = s.eraseSubjects(plan({ dryRun: true }));
+        expect(['rAbout', 'rFiled', 'rThird', 'rOther'].map((id) => texts(s, id))).toEqual(before);
+        expect(s.eraseSubjects(plan())).toEqual(preview);
+      });
+
+      it('a held report keeps its comments whole, and the held report is not scrubbed', async () => {
+        const s = make();
+        await seed(s, { held: true });
+        s.placeHold({ reportId: 'rHeld', code: 'legal_proceeding', heldBy: 'senior_a', heldAt: NOW, releasedBy: null, releasedAt: null });
+        s.eraseSubjects(plan({ heldReportIds: new Set(['rHeld']) }));
+        expect(texts(s, 'rHeld')).toEqual([QUOTE]);
+        expect(texts(s, 'rFiled')).toEqual(['[erased]', '[erased]', null]);
+      });
+
+      it('erasing a person who is in no report with comments changes no comment', async () => {
+        const s = make();
+        await seed(s);
+        await s.saveSubject({ id: 's_zz', createdAt: NOW, mergedInto: null });
+        s.eraseSubjects(plan({ subjects: ['s_zz'] }));
+        expect(texts(s, 'rFiled')).toEqual([QUOTE, `${QUOTE} again`, null]);
+        expect(texts(s, 'rThird')).toEqual([QUOTE, QUOTE]);
+        expect(texts(s, 'rAbout')).toEqual([QUOTE]);
+      });
+
+      it('a second erase of the same person scrubs nothing more and changes no text', async () => {
+        const s = make();
+        await seed(s);
+        s.eraseSubjects(plan());
+        const again = s.eraseSubjects(plan({ receiptId: 'e_again' }));
+        expect(again.found).toBe(false);
+        expect(texts(s, 'rFiled')).toEqual(['[erased]', '[erased]', null]);
+      });
+    });
+
     describe('erase, keep none', () => {
       it('has the methods', () => {
         const s = make();

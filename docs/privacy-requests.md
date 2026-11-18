@@ -28,7 +28,7 @@ person's page. The lookup is audited as `privacy.find` with no target: the accou
 `cw.privacy.export(person)` (or "Export data..." on the person's page, or `GET /people/:ref/privacy/export`) returns everything the kit holds about the person as one JSON file: the
 account ids as your game gave them, counts of keys and addresses (a hash never leaves the store), their sanctions, notices, the reports they filed and the reports about them (only the
 lines they wrote), blocked lines, appeals, signals, mutes as counts, the "do not automate" mark, the staff actions about them (what and when, never who), and how many reports
-about or by them are held (`holds: { reports: n }`: only that something is held, never which report, why or since when). It never contains another player's id, name or lines, a reporter's identity or a staff reference. A section is cut at 5000 rows and named in `truncated`.
+about or by them are held (`holds: { reports: n }`: only that something is held, never which report, why or since when). `workflow: { comments: n }` counts the free-text staff comments on reports that name them (never the text or the staff member). It never contains another player's id, name or lines, a reporter's identity or a staff reference. A section is cut at 5000 rows and named in `truncated`.
 
 The export is audited (`privacy.export`) before it is returned: if the audit row cannot be written, nothing is exported.
 
@@ -42,7 +42,7 @@ What goes, in one database transaction, then in memory:
 - The person's subject, accounts, keys and addresses, strikes, notices, mutes (both ways), blocked names, appeals, signals (about them and caused by them), AI marks and reads, claims,
   Discord thread entry.
 - Reports about them, with their decisions, AI rows and links. A report they filed stays for the person it is about, with their id, seat, name and note removed, and the AI's read of it
-  (which can quote the note) is deleted. Their lines inside other players' reports become the marker `[erased]`.
+  (which can quote the note) is deleted. Their lines inside other players' reports become the marker `[erased]`. The text of a staff comment on a report that stays (they filed it, or wrote a line in it) becomes the same marker; comments on a deleted report go with it.
 - Their name inside what other records stored: the entry for them in the stored decision of a report that stays (a decision can sanction a speaker or the reporter), the stored answer of a
   webhook that applied one of their sanctions (blanked), and the EOS link that pushed it. An EOS report link is only a hash of the report, names no person and ages out with the other links.
 - In memory: their seats become guests, their evidence lines lose text, name and subject, and every cache forgets them. A player who is still connected and speaks again makes a new,

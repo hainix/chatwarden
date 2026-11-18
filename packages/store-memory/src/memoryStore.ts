@@ -1422,6 +1422,11 @@ export class MemoryStore implements Store {
     });
     if (reports.some((r, i) => r !== this.reports[i])) this.swap(this.reports, reports, (v) => (this.reports = v));
     if (readsGone.size > 0) {
+      // A staff comment on a report that stays can quote the person: its text goes too (who wrote it and when stay: staff rows). Counted under `workflow`.
+      const comments = this.comments;
+      const scrubbedComments = comments.map((c) => (readsGone.has(c.reportId) && c.text !== null && c.text !== ERASED_LINE ? { ...c, text: ERASED_LINE } : c));
+      add('workflow', scrubbedComments.filter((c, i) => c !== comments[i]).length);
+      this.swap(comments, scrubbedComments, (v) => (this.comments = v));
       const reads = this.aiReads;
       const keptReads = reads.filter((r) => !readsGone.has(r.reportId));
       add('ai', reads.length - keptReads.length);
@@ -1688,6 +1693,7 @@ export class MemoryStore implements Store {
         ai: { noAutomation: null, reads: 0, outcomes: [] },
         audit: [],
         holds: { reports: 0 },
+        workflow: { comments: 0 },
         truncated,
       };
     }
@@ -1788,6 +1794,13 @@ export class MemoryStore implements Store {
           .sort((a, b) => a.at - b.at || compare(a.id, b.id))
           .map((r) => ({ at: r.at, action: r.action })),
       ),
+      // Free-text staff comments on the reports that name the person: a count, never the text or who wrote it.
+      workflow: {
+        comments: (() => {
+          const naming = new Set(this.reports.filter((r) => set.has(r.targetSubject) || set.has(r.reporterSubject) || r.people.some((p) => set.has(p))).map((r) => r.id));
+          return this.comments.filter((c) => c.text !== null && naming.has(c.reportId)).length;
+        })(),
+      },
       // Only that something is held: a count, never which report, why or since when.
       holds: { reports: this.listHolds().filter((h) => this.reports.some((r) => r.id === h.reportId && (set.has(r.targetSubject) || set.has(r.reporterSubject)))).length },
       truncated,

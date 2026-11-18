@@ -42,7 +42,7 @@ export const EXPORT_NOTES: readonly string[] = [
   'Keys and addresses are held only as keyed hashes, and a hash never leaves the store: the export shows counts and first and last seen.',
   'Other players are not included: no id, name or line of anyone else, and no mute is named (counts only).',
   'Who reported the person, and which staff member acted, is not included: a reporter and a staff reference stay out.',
-  'The staff workflow rows (a claim on the case, a Discord thread, an outside link) are not exported.',
+  'The staff workflow rows (a claim on the case, a Discord thread, an outside link) are not exported; of the staff comments only how many sit on reports that name the person is.',
 ];
 
 /** What `erase` answers when it cannot: an unknown person, or an input outside the closed lists. */
@@ -109,7 +109,7 @@ export function createPrivacy(deps: PrivacyDeps): PrivacyService {
       const out = store.exportSubjects(set);
       if (!out.found) return { ok: false, error: 'not_found' };
       const { createdAt, aliases, accounts, identifiers, truncated } = out;
-      const { sanctions, notices, reportsFiled, reportsAbout, strikes, blockedNames, appeals, signals, mutes, ai, audit, holds } = out;
+      const { sanctions, notices, reportsFiled, reportsAbout, strikes, blockedNames, appeals, signals, mutes, ai, audit, holds, workflow } = out;
       return {
         format: 'chatwarden.privacy-export',
         version: 1,
@@ -117,7 +117,7 @@ export function createPrivacy(deps: PrivacyDeps): PrivacyService {
         person: { ref: subjects.canonical(person), createdAt, aliases },
         accounts,
         identifiers,
-        sections: { sanctions, notices, reportsFiled, reportsAbout, strikes, blockedNames, appeals, signals, mutes, ai, audit, holds },
+        sections: { sanctions, notices, reportsFiled, reportsAbout, strikes, blockedNames, appeals, signals, mutes, ai, audit, holds, workflow },
         truncated,
         notes: [...EXPORT_NOTES],
       };

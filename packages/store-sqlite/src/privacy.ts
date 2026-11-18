@@ -62,6 +62,11 @@ export const REPORTS_NAMING_SQL = `SELECT id, reporter_subject, reporter_seat, r
 export const REPORTS_DELETE_SQL = `DELETE FROM kit_reports WHERE id IN ${IN_ARG}`;
 /** The staff thread entries of a list of reports (they go with the reports). Binds: the ids. */
 export const COMMENTS_DELETE_SQL = `DELETE FROM kit_report_comments WHERE report_id IN ${IN_ARG}`;
+/**
+ * The free text of the staff comments on reports that STAY and name the set (the person reported, or wrote a line) is replaced by a marker. Binds: the marker, the ids, the marker (a text already
+ * the marker is not counted as a change).
+ */
+export const COMMENTS_SCRUB_SQL = `UPDATE kit_report_comments SET text = ? WHERE report_id IN ${IN_ARG} AND text IS NOT NULL AND text <> ?`;
 /** The decisions of a list of reports. Binds: the ids. */
 export const DECISIONS_DELETE_SQL = `DELETE FROM kit_decisions WHERE report_id IN ${IN_ARG}`;
 export const AI_READS_DELETE_SQL = `DELETE FROM kit_ai_reads WHERE report_id IN ${IN_ARG}`;
@@ -162,6 +167,9 @@ export const EXPORT_NOAUTO_SQL = `SELECT code FROM kit_ai_noauto WHERE subject_i
 export const EXPORT_AI_READS_SQL = `SELECT COUNT(*) AS n FROM kit_ai_reads WHERE report_id IN (SELECT id FROM kit_reports WHERE target_subject IN ${IN_ARG})`;
 export const EXPORT_AI_OUTCOMES_SQL = `SELECT verdict, agreement FROM kit_ai_outcomes WHERE report_id IN (SELECT id FROM kit_reports WHERE target_subject IN ${IN_ARG})
   ORDER BY decided_at, report_id LIMIT ?`;
+/** How many free-text staff comments sit on reports that name the set (as target, reporter or a writer of a line). Binds: the set, the set, the set. */
+export const EXPORT_COMMENTS_SQL = `SELECT COUNT(*) AS n FROM kit_report_comments WHERE text IS NOT NULL AND report_id IN (SELECT id FROM kit_reports WHERE target_subject IN ${IN_ARG}
+  OR reporter_subject IN ${IN_ARG} OR EXISTS (SELECT 1 FROM json_each(kit_reports.people_json) p WHERE p.value IN ${IN_ARG}))`;
 export const EXPORT_AUDIT_SQL = `SELECT at, action FROM kit_audit WHERE subject_type = 'person' AND subject_ref IN ${IN_ARG} ORDER BY at, id LIMIT ?`;
 
 const j = (values: Iterable<string>): string => JSON.stringify([...values]);
@@ -317,6 +325,8 @@ function eraseInTransaction(db: DatabaseSync, plan: ErasePlan, set: string[], bu
     // The AI's summary of a report can quote a line or the reporter's note (cleared above): the read goes with either.
     if (lines !== null || asReporter) readsGone.push(id);
   }
+  // A staff comment on a report that stays can quote the person: its text goes too (who wrote it and when stay: staff rows). The report itself is only scrubbed, so this counts under `workflow`.
+  if (readsGone.length > 0) addCount(removed, 'workflow', num(db.prepare(COMMENTS_SCRUB_SQL).run(ERASED_LINE, j(readsGone), ERASED_LINE).changes));
   if (readsGone.length > 0) addCount(removed, 'ai', num(db.prepare(AI_READS_DELETE_SQL).run(j(readsGone)).changes));
   // A stored example holds the lines: it goes with a line of the person.
   if (scrubbed.length > 0) addCount(removed, 'ai', num(db.prepare(AI_OUTCOME_EXAMPLES_CLEAR_SQL).run(j(scrubbed)).changes));
@@ -444,6 +454,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
       ai: { noAutomation: null, reads: 0, outcomes: [] },
       audit: [],
       holds: { reports: 0 },
+      workflow: { comments: 0 },
       truncated: [],
     };
     if (set.length === 0) return empty;
@@ -531,6 +542,7 @@ export function exportSubjects(db: DatabaseSync, transaction: <T>(fn: () => T) =
       },
       audit: section('audit', EXPORT_AUDIT_SQL, (r) => ({ at: num(r.at), action: String(r.action) })),
       holds: { reports: holds },
+      workflow: { comments: num(db.prepare(EXPORT_COMMENTS_SQL).get(setJ, setJ, setJ)?.n) },
       truncated,
     };
   });

@@ -206,9 +206,9 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
   {
     category: 'workflow',
     tables: ['kit_claims', 'kit_discord_threads', 'kit_links', 'kit_report_comments'],
-    export: 'Not exported: these are staff workflow rows.',
-    eraseSafety: 'Deleted: a claim on the case, the Discord thread map entry, the staff comments on a deleted report, the links to deleted reports and the EOS link of a deleted sanction. An EOS report link is only a hash of the report and stays until it ages out.',
-    eraseNone: 'Deleted: a claim on the case, the Discord thread map entry, the staff comments on a deleted report, the links to deleted reports and the EOS link of a deleted sanction. An EOS report link is only a hash of the report and stays until it ages out.',
+    export: 'Only how many free-text staff comments sit on reports that name the person, never the text or the staff member. The other staff workflow rows are not exported.',
+    eraseSafety: 'Deleted: a claim on the case, the Discord thread map entry, the staff comments on a deleted report, the links to deleted reports and the EOS link of a deleted sanction. The text of a staff comment on a report that stays, where the person is the reporter or wrote a line, is replaced by a marker. An EOS report link is only a hash of the report and stays until it ages out.',
+    eraseNone: 'Deleted: a claim on the case, the Discord thread map entry, the staff comments on a deleted report, the links to deleted reports and the EOS link of a deleted sanction. The text of a staff comment on a report that stays, where the person is the reporter or wrote a line, is replaced by a marker. An EOS report link is only a hash of the report and stays until it ages out.',
     retention: null,
     jsonColumns: [],
   },
@@ -396,6 +396,8 @@ export interface SubjectExport {
   audit: Array<{ at: number; action: string }>;
   /** How many reports about or by the person are held. Only that something is held: never the reason (the code), the report or the time. */
   holds: { reports: number };
+  /** How many free-text staff comments sit on reports that name the person (as the player reported, the reporter or a speaker in the lines). Only the count: never the text, the report or the staff member. */
+  workflow: { comments: number };
   truncated: string[];
 }
 
@@ -423,6 +425,7 @@ export interface PrivacyExport {
     ai: SubjectExport['ai'];
     audit: SubjectExport['audit'];
     holds: SubjectExport['holds'];
+    workflow: SubjectExport['workflow'];
   };
   truncated: string[];
   /** What the kit does not put in an export, and why (from the registry). */

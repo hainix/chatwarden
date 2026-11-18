@@ -311,6 +311,8 @@ describe('the privacy statements bind exactly as many values as they have placeh
     HOLD_LOAD_SQL: 1,
     HOLD_LIST_SQL: 0,
     EXPORT_HOLDS_SQL: 2,
+    COMMENTS_SCRUB_SQL: 3,
+    EXPORT_COMMENTS_SQL: 3,
     SANCTION_ROWS_LEFT_SQL: 2,
     DECISIONS_NAMING_SQL: 2,
     DECISION_RESULT_SET_SQL: 2,

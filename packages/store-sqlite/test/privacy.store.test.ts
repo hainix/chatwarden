@@ -75,6 +75,8 @@ describe('one prepared statement per category, with the indexes the lookups need
     // in the front of a ref (one row per pushed sanction): an erase is rare and these three are bounded by their own retention.
     const scans = new Set([
       'REPORTS_NAMING_SQL',
+      // The export's count of comments on reports that name the person reads the people list inside each report (json): the same scan, once per export.
+      'EXPORT_COMMENTS_SQL',
       'APPEALS_UNLINK_SQL',
       'ERASURES_PURGE_SQL',
       'ERASURE_INSERT_SQL',

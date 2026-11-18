@@ -23,7 +23,7 @@ describe('export: the sections of the registry', () => {
     expect(e.person.aliases).toBe(1);
     expect(e.accounts).toEqual([A.account]);
     expect(e.identifiers).toMatchObject({ keys: 1, addresses: 1 });
-    expect(Object.keys(e.sections).sort()).toEqual(['ai', 'appeals', 'audit', 'blockedNames', 'holds', 'mutes', 'notices', 'reportsAbout', 'reportsFiled', 'sanctions', 'signals', 'strikes']);
+    expect(Object.keys(e.sections).sort()).toEqual(['ai', 'appeals', 'audit', 'blockedNames', 'holds', 'mutes', 'notices', 'reportsAbout', 'reportsFiled', 'sanctions', 'signals', 'strikes', 'workflow']);
     expect(e.sections.strikes.map((s) => s.line)).toEqual([A_LINE]);
     expect(e.sections.reportsFiled.map((r) => r.note)).toEqual(['alpha note about bravo']);
     expect(e.sections.reportsAbout.length).toBe(1);
@@ -114,5 +114,34 @@ describe('export: the sections of the registry', () => {
     const e = await exportOf(w);
     for (const note of e.notes) expect(PRIVACY_REGISTRY.some((r) => r.export === note || note.length > 20)).toBe(true);
     expect(e.notes.join(' ').toLowerCase()).toContain('hash');
+  });
+});
+
+describe('export and erase: staff comments on a report that stays', () => {
+  const QUOTE = 'staff note quoting alpha and AlphaHandle';
+
+  it('the export counts them (never the text or the staff member) and an erase replaces their text', async () => {
+    const w = await privacyWorld({ overrides: { desk: { workflow: true } } });
+    const { filed, third, about } = await fillA(w);
+    for (const id of [filed, third, about]) expect(w.cw.comments.add(id, 'mod_ann', 'moderator', QUOTE)).toMatchObject({ ok: true });
+    const e = await exportOf(w);
+    // the report A filed, the third-party report holding a line of A, the report about A
+    expect(e.sections.workflow).toEqual({ comments: 3 });
+    expect(JSON.stringify(e)).not.toContain(QUOTE);
+    expect(JSON.stringify(e)).not.toContain('mod_ann');
+    expect(e.notes.join(' ')).toMatch(/staff comments/);
+    const res = await w.cw.privacy.erase(w.aId, { keep: 'none', actor: 'owner_ann' });
+    expect('removed' in res && res.removed.workflow).toBeGreaterThanOrEqual(3);
+    // the report about A is gone with its thread; the other two stay with the text replaced
+    expect(w.store.listComments?.(about)).toEqual([]);
+    expect(w.store.listComments?.(filed)?.map((c) => c.text)).toEqual(['[erased]']);
+    expect(w.store.listComments?.(third)?.map((c) => c.text)).toEqual(['[erased]']);
+    expect(dump(w.store)).not.toContain(QUOTE);
+  });
+
+  it('a person with no comments exports 0', async () => {
+    const w = await privacyWorld({ overrides: { desk: { workflow: true } } });
+    await fillA(w);
+    expect((await exportOf(w)).sections.workflow).toEqual({ comments: 0 });
   });
 });
