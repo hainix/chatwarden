@@ -27,15 +27,19 @@ function expectNoLeak(res: { status: number; headers?: Record<string, string> | 
 }
 
 describe('the route table', () => {
-  it('holds the eight player routes, appeals on or off (a hub can turn them on at runtime)', async () => {
+  it('holds the eight player routes and the four landing routes, appeals on or off (a hub can turn them on at runtime)', async () => {
     for (const appeals of [{}, false] as const) {
       const w = await playerWorld({ appeals });
       expect(Object.keys(w.routes).sort()).toEqual([
+        'GET /appeal',
+        'GET /appeal/case',
         'GET /appeals',
         'GET /code-of-conduct',
         'GET /notices',
         'GET /record',
         'GET /rules',
+        'OPTIONS /appeal/case',
+        'POST /appeal/case',
         'POST /appeals',
         'POST /names/check',
         'POST /notices/:id/ack',

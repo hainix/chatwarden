@@ -48,6 +48,8 @@ export interface PlayerWorldOptions {
   wrap?: (cw: Chatwarden) => Chatwarden;
   /** The kit's matcher (default: the one-term `blocker`). */
   matcher?: Matcher;
+  /** More `createChatwarden` options (the `appeals` landing options, `notices`, ...). */
+  kit?: Record<string, unknown>;
 }
 
 export async function playerWorld(over: PlayerWorldOptions = {}) {
@@ -64,6 +66,7 @@ export async function playerWorld(over: PlayerWorldOptions = {}) {
     matcher: over.matcher ?? blocker,
     profanity: snerpFilter,
     retention: false,
+    ...(over.kit ?? {}),
     overrides: {
       ...(over.appeals === false ? {} : { appeals: { enabled: true, ...(over.appeals ?? {}) } }),
       ...(over.names === undefined ? {} : { names: over.names }),
@@ -75,14 +78,22 @@ export async function playerWorld(over: PlayerWorldOptions = {}) {
   const call = (
     method: string,
     path: string,
-    o: { who?: RawWho; query?: Record<string, string>; body?: unknown; raw?: string; headers?: Record<string, string> } = {},
+    o: { who?: RawWho; query?: Record<string, string>; body?: unknown; raw?: string; headers?: Record<string, string>; remoteAddress?: string } = {},
   ): Promise<KitResponse> => {
     const headers: Record<string, string> = { ...o.headers };
     if (o.who?.clientKey !== undefined) headers['x-key'] = o.who.clientKey;
     if (o.who?.accountId !== undefined) headers['x-account'] = o.who.accountId;
     if (o.who?.ip !== undefined && o.who.ip !== null) headers['x-ip'] = o.who.ip;
     const rawBody = o.raw ?? (o.body === undefined ? undefined : JSON.stringify(o.body));
-    return router({ method, path, query: o.query ?? {}, headers, body: undefined, ...(rawBody === undefined ? {} : { rawBody }) });
+    return router({
+      method,
+      path,
+      query: o.query ?? {},
+      headers,
+      body: undefined,
+      ...(rawBody === undefined ? {} : { rawBody }),
+      ...(o.remoteAddress === undefined ? {} : { remoteAddress: o.remoteAddress }),
+    });
   };
 
   let n = 0;

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { errorClass, playerReporting, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, DocumentFormat, Logger, PlayerAppeal, RawWho } from '@chatwarden/core';
 import { bodyObject } from './admin/validate.js';
+import { appealLandingRoutes } from './appealLanding.js';
 import { DEFAULT_GAME_NAME } from './admin/policy.js';
 import { HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
 import { checkLimit, Limiter } from './limiter.js';
@@ -30,6 +31,8 @@ export interface PlayerOptions {
    * positive whole numbers (`RangeError`). Malformed requests count. It is not the weekly cap (`profile.appeals.perPlayerPerWeek`, the core's).
    */
   appealsRateLimit?: NamesRateLimit;
+  /** `GET /appeal` and `GET /appeal/case` (the appeal landing page) limit per address. Default 60 per hour. Both must be positive whole numbers (`RangeError`). */
+  landingReadRateLimit?: NamesRateLimit;
   /** Where failures are logged (event and error class only). Defaults to `console.warn`. */
   logger?: Logger;
   /** Epoch-ms clock for the rate limit. Default `Date.now`. */
@@ -79,6 +82,10 @@ const known = (v: unknown): v is string => typeof v === 'string' && v !== '';
  *   notice that is not the caller's, one that is not an appealable sanction, and a malformed id); 409 `already_appealed`; 429 `rate_limited`
  *   with `retry-after` in whole seconds (at least 1), either from the request limiter (`appealsRateLimit`, default 10 an hour per identity,
  *   counting malformed bodies too) or the weekly cap. Both appeal routes are 404 `not_found` while appeals are off, and every answer is `no-store`.
+ * - The appeal landing routes (0.2.1), for a person who follows a signed link from a notice and is not signed in: `GET /appeal?t=` (the page, html), `GET /appeal/case?t=`
+ *   (the same case as json), `POST /appeal/case` (json `{ t, statement }` or a urlencoded form) and `OPTIONS /appeal/case`. The signed link is the only credential: none of them
+ *   calls `identify` or sets a cookie. See `appealLandingRoutes`. Their reads are limited per address (`landingReadRateLimit`, default 60 an hour) and their writes per address
+ *   and per token (`appealsRateLimit`, default 10 an hour). Keep query strings out of access logs: the token is in the query.
  * An unknown, IP-only or failed identity gets empty lists and 200.
  */
 export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable {
@@ -142,6 +149,12 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
   const playerAppeal = (a: PlayerAppeal): PlayerAppeal => ({ id: a.id, noticeId: a.noticeId, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt });
 
   return {
+    ...appealLandingRoutes(cw, {
+      ...(logger === undefined ? {} : { logger }),
+      now,
+      ...(options.appealsRateLimit === undefined ? {} : { appealsRateLimit: options.appealsRateLimit }),
+      ...(options.landingReadRateLimit === undefined ? {} : { readRateLimit: options.landingReadRateLimit }),
+    }),
     'GET /notices': route(async (req) => personal({ notices: cw.notices.pending(await identify(req)) })),
 
     'GET /record': route(async (req) => personal({ record: cw.notices.record(await identify(req)) })),
