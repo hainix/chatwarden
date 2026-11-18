@@ -42,10 +42,10 @@ import type {
   StaffReport,
   Suggestion,
 } from '@chatwarden/core';
-import type { ErasePreview, ErasureReceipt, FilterCheckResult, FilterKeyCounts, FilterTestResult, HoldCode, PrivacyExport, PrivacyStatement } from '@chatwarden/core';
+import type { ErasePreview, ErasureReceipt, FilterCheckResult, FilterKeyCounts, FilterTestResult, HoldCode, PrivacyExport, PrivacyStatement, PromptExcluded, TeamNote } from '@chatwarden/core';
 import type { AiReadAgainBody, ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
-export type { PolicyLayer, PolicySection };
+export type { PolicyLayer, PolicySection, PromptExcluded, TeamNote };
 
 /**
  * What the filters did over a window: per counter key the counts by action, and for a phrase key the rule's name as it is now (absent when the rule is gone). No person,

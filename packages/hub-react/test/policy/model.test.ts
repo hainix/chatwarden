@@ -3,6 +3,7 @@ import type { ModerationProfile } from '@chatwarden/core';
 import { describe, expect, it } from 'vitest';
 import { dirtySections, draftOf, fieldKeyOf, layerOf, otherSections, problemsOf, setSection } from '../../src/policy/model.js';
 import type { PolicyDraft } from '../../src/policy/model.js';
+import { tierDraftOf } from '../../src/policy/principles.js';
 
 // The settings screen edits a local draft of the profile. These are its rules as plain functions: the draft a profile makes, the
 // layer a draft sends (only what differs from the code's profile, so a section left alone is reset), what the draft refuses,
@@ -38,7 +39,8 @@ describe('an untouched draft', () => {
     expect(d.repeat).toMatchObject({ windowDays: '30', notes: '2', distinctGames: false });
     expect(d.areaRules).toEqual([5, 6]);
     expect(d.severeRules).toEqual([1]);
-    expect(d.guidelines).toEqual(base.guidelines.map((g) => g.outcome));
+    expect(d.guidelines).toEqual(base.guidelines.map(tierDraftOf));
+    expect(d.teamNotes).toEqual([]);
   });
   it('reads a profile that leaves the new fields out with their defaults (an older kit)', () => {
     const old: Record<string, unknown> = { ...base };
@@ -122,11 +124,11 @@ describe('each section, edited, sends only itself and is valid for the kit', () 
     expect(layer(d)).toEqual({ areaRules: [2, 5], severeRules: [] });
     expect(check(d, ['areaRules', 'severeRules']).areaRules).toEqual([2, 5]);
   });
-  it('the guidelines: positional, null for a tier left as it is', () => {
+  it('the guidelines: the whole form, every tier, never the positional list', () => {
     const d = fresh();
-    d.guidelines = d.guidelines.map((g, i) => (i === 1 ? 'A warning, then a short chat break.' : g));
+    d.guidelines = d.guidelines.map((g, i) => (i === 1 ? { ...g, outcome: 'A warning, then a short chat break.' } : g));
     const l = layer(d);
-    expect(l.guidelines).toEqual(base.guidelines.map((_, i) => (i === 1 ? { outcome: 'A warning, then a short chat break.' } : null)));
+    expect(l.guidelines).toEqual({ tiers: base.guidelines.map((g, i) => (i === 1 ? { ...g, outcome: 'A warning, then a short chat break.' } : g)) });
     expect(check(d, ['guidelines']).guidelines[1]?.outcome).toBe('A warning, then a short chat break.');
   });
   it('putting a value back to the code makes the section drop out of the layer', () => {
@@ -158,10 +160,11 @@ describe('the code can already differ from the preset: the layer is measured aga
 describe('dirtySections: what differs from what is saved', () => {
   it('names the sections in the kit order', () => {
     const d = fresh();
-    d.guidelines = d.guidelines.map((g, i) => (i === 0 ? 'x' : g));
+    d.guidelines = d.guidelines.map((g, i) => (i === 0 ? { ...g, outcome: 'x' } : g));
     d.durations = [H];
     d.severeRules = [1, 2];
-    expect(dirtySections(d, base)).toEqual(['durations', 'severeRules', 'guidelines']);
+    d.teamNotes = [{ text: 'a note', rule: '' }];
+    expect(dirtySections(d, base)).toEqual(['durations', 'severeRules', 'guidelines', 'teamNotes']);
   });
   it('a length typed but not yet valid still counts as a change', () => {
     const d = fresh();
@@ -205,11 +208,11 @@ describe('problemsOf: what the draft refuses before anything is sent', () => {
   });
   it('a guideline outcome must have words and at most 1000 characters', () => {
     const d = fresh();
-    d.guidelines = d.guidelines.map((g, i) => (i === 0 ? '   ' : i === 2 ? 'x'.repeat(1001) : g));
+    d.guidelines = d.guidelines.map((g, i) => (i === 0 ? { ...g, outcome: '   ' } : i === 2 ? { ...g, outcome: 'x'.repeat(1001) } : g));
     const p = problemsOf(d);
-    expect(Object.keys(p).sort()).toEqual(['guide-0', 'guide-2']);
-    d.guidelines[2] = 'x'.repeat(1000);
-    expect(Object.keys(problemsOf(d))).toEqual(['guide-0']);
+    expect(Object.keys(p).sort()).toEqual(['guide-0-outcome', 'guide-2-outcome']);
+    d.guidelines[2] = { ...d.guidelines[2]!, outcome: 'x'.repeat(1000) };
+    expect(Object.keys(problemsOf(d))).toEqual(['guide-0-outcome']);
   });
   it('layerOf refuses a draft with problems, and says which', () => {
     const d = fresh();
@@ -240,8 +243,8 @@ describe('fieldKeyOf: the field a server refusal points at', () => {
     ['layer.repeat.outcome.durationMs', 'repeat-length'],
     ['layer.areaRules[1]', 'area'],
     ['layer.severeRules', 'severe'],
-    ['layer.guidelines[2].outcome', 'guide-2'],
-    ['layer.guidelines', 'guide-0'],
+    ['layer.guidelines[2].outcome', 'guide-2-outcome'],
+    ['layer.guidelines', 'guide-covers'],
     ['layer', null],
     ['layer.profanity', null],
     ['version', null],

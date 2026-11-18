@@ -59,7 +59,7 @@ describe('the screen', () => {
   it('shows every section, with the profile in force', async () => {
     const w = await owner();
     await open(w);
-    for (const name of ['Lengths', 'The ladder', 'First offence', 'Repeated', 'Rules', 'Written guidelines', 'Preview']) {
+    for (const name of ['Lengths', 'The ladder', 'First offence', 'Repeated', 'Rules', 'Moderation principles', 'Team notes', 'Preview']) {
       expect(screen.getByRole('region', { name })).toBeInTheDocument();
     }
     const chips = within(screen.getByRole('list', { name: 'Lengths offered' })).getAllByRole('listitem');
@@ -380,7 +380,7 @@ describe('Rules', () => {
   });
 });
 
-describe('Written guidelines', () => {
+describe('Moderation principles', () => {
   it('the outcome text is saved and the generated guide says it', async () => {
     const w = await owner();
     const { user } = await open(w);
@@ -644,7 +644,7 @@ describe('Reset', () => {
   it('a section with nothing saved cannot be reset', async () => {
     const w = await owner();
     await open(w);
-    for (const name of ['Reset lengths', 'Reset the ladder', 'Reset first offence', 'Reset repeated', 'Reset rules', 'Reset guidelines', 'Reset steps and ladder']) {
+    for (const name of ['Reset lengths', 'Reset the ladder', 'Reset first offence', 'Reset repeated', 'Reset rules', 'Reset principles', 'Reset team notes', 'Reset steps and ladder']) {
       expect(screen.getByRole('button', { name })).toHaveAttribute('aria-disabled', 'true');
     }
   });
@@ -669,7 +669,7 @@ describe('Reset', () => {
     ['Reset first offence', 'firstOffense'],
     ['Reset repeated', 'repeat'],
     ['Reset rules', 'areaRules'],
-    ['Reset guidelines', 'guidelines'],
+    ['Reset principles', 'guidelines'],
   ])('%s resets its own section (%s)', async (button, section) => {
     const w = await owner();
     w.cw.policy.save(

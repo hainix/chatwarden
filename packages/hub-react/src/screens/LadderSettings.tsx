@@ -3,9 +3,11 @@ import type { ReactNode } from 'react';
 import { useHub } from '../context.js';
 import { byId, rootOf } from '../dom.js';
 import { useHubData } from '../hooks.js';
-import { FirstPanel, GuidelinesPanel, LadderPanel, LengthsPanel, RepeatPanel, RulesPanel } from '../policy/panels.js';
+import { FirstPanel, LadderPanel, LengthsPanel, RepeatPanel, RulesPanel } from '../policy/panels.js';
+import { NotesPanel } from '../policy/NotesPanel.js';
 import type { Problems } from '../policy/panels.js';
 import { Preview } from '../policy/Preview.js';
+import { PrinciplesPanel } from '../policy/PrinciplesPanel.js';
 import { ResetConfirm } from '../policy/ResetConfirm.js';
 import { dirtySections, draftOf, fieldKeyOf, layerOf, otherSections, setSection } from '../policy/model.js';
 import type { PolicyDraft } from '../policy/model.js';
@@ -149,7 +151,8 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
     </div>
   );
   const common = { draft, set: setDraft, problems };
-  const titles = state.effective.guidelines.map((g) => g.title);
+  // What the AI will not see of the saved principles and notes: only while the section is as saved (the indexes may not match an edited draft).
+  const excludedFor = (section: 'guidelines' | 'teamNotes') => (dirty.includes(section) ? undefined : state.promptExcluded);
 
   return (
     <div ref={root} className="cw-settings">
@@ -164,7 +167,8 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
         {part('first', <FirstPanel {...common} reset={resetButton('first')} />)}
         {part('repeat', <RepeatPanel {...common} reset={resetButton('repeat')} />)}
         {part('rules', <RulesPanel {...common} rules={rules} reset={resetButton('rules')} />)}
-        {part('guidelines', <GuidelinesPanel {...common} titles={titles} reset={resetButton('guidelines')} />)}
+        {part('guidelines', <PrinciplesPanel {...common} editable={editable} excluded={excludedFor('guidelines')} reset={resetButton('guidelines')} />)}
+        {part('notes', <NotesPanel {...common} editable={editable} excluded={excludedFor('teamNotes')} rules={rules} reset={resetButton('notes')} />)}
       </fieldset>
       <Preview state={preview} rules={rules} rule={rule} onRule={setRule} />
 

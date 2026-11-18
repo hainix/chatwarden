@@ -3,6 +3,8 @@ import type { ConductLevel, ModerationProfile, Outcome, PolicyLayer, PolicyLadde
 import type { Problem } from '../decision.js';
 import { lengthValue, resolveLength } from './length.js';
 import type { LengthDraft } from './length.js';
+import { noteProblems, notesOf, tierDraftOf, tierProblems, tiersOf } from './principles.js';
+import type { NoteDraft, TierDraft } from './principles.js';
 
 // The settings screen edits a local draft of the profile and sends a layer. The draft holds what was typed or picked (lengths as a
 // menu value, numbers as text) so a half-typed value is kept as typed; the functions here turn it into the layer the kit takes,
@@ -37,13 +39,14 @@ export interface PolicyDraft {
   repeat: { windowDays: string; notes: string; distinctGames: boolean; outcome: OutcomeDraft };
   areaRules: number[];
   severeRules: number[];
-  /** The outcome text of each guideline tier, by position. */
-  guidelines: string[];
+  /** The principles (the guideline tiers), each as typed. */
+  guidelines: TierDraft[];
+  /** The team notes, each as typed. */
+  teamNotes: NoteDraft[];
 }
 
 /** The kit's longest repeat window: the record only reaches back 90 days. */
 export const MAX_WINDOW_DAYS = 90;
-export const GUIDELINE_OUTCOME_MAX = 1000;
 
 /** A kind has a length when it is a restriction or a ban. */
 export const timed = (kind: string): boolean => kind === 'chat' || kind === 'area' || kind === 'ban';
@@ -72,7 +75,8 @@ export function draftOf(profile: ProfileLike): PolicyDraft {
     },
     areaRules: [...(profile.areaRules ?? DEFAULT_AREA_RULES)],
     severeRules: [...(profile.severeRules ?? DEFAULT_SEVERE_RULES)],
-    guidelines: profile.guidelines.map((g) => g.outcome),
+    guidelines: profile.guidelines.map(tierDraftOf),
+    teamNotes: (profile.teamNotes ?? []).map((n) => ({ text: n.text, rule: n.rule === undefined ? '' : String(n.rule) })),
   };
 }
 
@@ -96,6 +100,8 @@ export function setSection(draft: PolicyDraft, section: PolicySection, profile: 
       return { ...draft, severeRules: from.severeRules };
     case 'guidelines':
       return { ...draft, guidelines: from.guidelines };
+    case 'teamNotes':
+      return { ...draft, teamNotes: from.teamNotes };
     default:
       // A section of a newer kit (Reporting) is edited by its own screen: this draft holds none of it.
       return draft;
@@ -128,7 +134,10 @@ function sectionKey(d: PolicyDraft, section: PolicySection): string {
     case 'severeRules':
       return JSON.stringify(d.severeRules);
     case 'guidelines':
-      return JSON.stringify(d.guidelines);
+      return JSON.stringify(tiersOf(d.guidelines));
+    case 'teamNotes':
+      // What a save would carry, with a rule that is not a number kept as typed (so an unfinished value still counts as a change).
+      return JSON.stringify(d.teamNotes.map((n) => [n.text.trim(), /^\d+$/.test(n.rule.trim()) ? Number(n.rule.trim()) : n.rule.trim()]));
     default:
       return '';
   }
@@ -144,7 +153,7 @@ export function otherSections(layer: PolicyLayer): PolicyLayer {
   return out as PolicyLayer;
 }
 
-export const SECTION_ORDER: readonly PolicySection[] = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines'];
+export const SECTION_ORDER: readonly PolicySection[] = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'teamNotes'];
 
 /** The sections whose draft differs from what is in force (`effective`), in the kit's order. */
 export function dirtySections(draft: PolicyDraft, effective: ProfileLike): PolicySection[] {
@@ -168,10 +177,7 @@ export function problemsOf(draft: PolicyDraft): Record<string, Problem> {
   if (!/^\d+$/.test(days) || Number(days) < 1 || Number(days) > MAX_WINDOW_DAYS) out['repeat-windowDays'] = { key: 'hub.settings.repeat.error.days', params: { max: MAX_WINDOW_DAYS } };
   if (!/^\d+$/.test(draft.repeat.notes.trim()) || Number(draft.repeat.notes.trim()) < 1) out['repeat-notes'] = { key: 'hub.settings.repeat.error.notes' };
   checkLength('repeat-length', draft.repeat.outcome.kind, draft.repeat.outcome.length);
-  draft.guidelines.forEach((text, i) => {
-    if (text.trim() === '') out[`guide-${i}`] = { key: 'hub.settings.guideline.error.empty' };
-    else if (text.length > GUIDELINE_OUTCOME_MAX) out[`guide-${i}`] = { key: 'hub.settings.guideline.error.long', params: { max: GUIDELINE_OUTCOME_MAX } };
-  });
+  Object.assign(out, tierProblems(draft.guidelines), noteProblems(draft.teamNotes));
   return out;
 }
 
@@ -226,7 +232,9 @@ export function layerOf(draft: PolicyDraft, base: ProfileLike, effective: Profil
   }
   if (!same('areaRules')) layer.areaRules = [...draft.areaRules];
   if (!same('severeRules')) layer.severeRules = [...draft.severeRules];
-  if (!same('guidelines')) layer.guidelines = draft.guidelines.map((text, i) => (text === from.guidelines[i] ? null : { outcome: text }));
+  // The whole form, never the positional list: a layer another version saved is simply what is in force, and this replaces it.
+  if (!same('guidelines')) layer.guidelines = { tiers: tiersOf(draft.guidelines) };
+  if (!same('teamNotes')) layer.teamNotes = notesOf(draft.teamNotes);
   return { ok: true, layer };
 }
 
@@ -254,7 +262,11 @@ export function fieldKeyOf(path: string): string | null {
   }
   if (/^layer\.areaRules(\[\d+\])?$/.test(path)) return 'area';
   if (/^layer\.severeRules(\[\d+\])?$/.test(path)) return 'severe';
-  m = /^layer\.guidelines(?:\[(\d+)\](?:\.\w+)?)?$/.exec(path);
-  if (m !== null) return `guide-${m[1] ?? '0'}`;
+  m = /^layer\.guidelines\[(\d+)\](?:\.(title|description|examples|outcome|covers)(?:\[\d+\])?)?$/.exec(path);
+  if (m !== null) return m[2] === 'covers' ? 'guide-covers' : `guide-${m[1]}-${m[2] ?? 'title'}`;
+  // The structure as a whole (the tiers, a stray key, or the cross-tier rules of the kit): the covers.
+  if (path === 'layer.guidelines' || /^layer\.guidelines\.\w+$/.test(path)) return 'guide-covers';
+  m = /^layer\.teamNotes(?:\[(\d+)\](?:\.(text|rule))?)?$/.exec(path);
+  if (m !== null) return `note-${m[1] ?? '0'}-${m[2] ?? 'text'}`;
   return null;
 }

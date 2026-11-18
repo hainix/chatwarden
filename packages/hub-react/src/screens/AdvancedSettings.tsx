@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { toHubError } from '../client.js';
 import { useHub } from '../context.js';
-import { LazyAppealSettings, LazyDeskSettings, LazyFilterSettings, LazyNameSettings, LazyRoomsSettings, LazyPaceSettings, LazyPrivacySettings, LazyRoomContexts, LazySafetySettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
+import { LazyAppealSettings, LazyDeskSettings, LazyFilterSettings, LazyNameSettings, LazyRoomsSettings, LazyPaceSettings, LazyPrivacySettings, LazyRoomContexts, LazySafetySettings, LazySignalSettings, LazyStandardSettings, resetLazyParts } from '../lazyParts.js';
 import { usePolicy } from '../policyHooks.js';
 import { ErrorBlock, Fetched } from '../ui.js';
 import { YourView } from './YourView.js';
@@ -44,6 +44,7 @@ export function AdvancedSettingsScreen() {
               <LazyNameSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               <LazyFilterSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               <LazySafetySettings state={state} policy={policy} onFailed={() => setFailed(true)} />
+              <LazyStandardSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               <LazyDeskSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               {/* The rooms this server knows, for a role that may read them: a lock or emergency mode per room. */}
               {can('rooms.read') && <LazyRoomsSettings onFailed={() => setFailed(true)} />}

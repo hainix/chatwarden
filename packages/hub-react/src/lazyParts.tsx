@@ -69,6 +69,7 @@ export const partLoaders: {
   namePanel: () => Promise<ComponentType<PanelProps>>;
   filterPanel: () => Promise<ComponentType<PanelProps>>;
   safetyPanel: () => Promise<ComponentType<PanelProps>>;
+  standardPanel: () => Promise<ComponentType<PanelProps>>;
   privacyPanel: () => Promise<ComponentType<Record<string, never>>>;
   appealList: () => Promise<ComponentType<{ selected: string | null }>>;
   shareTerm: () => Promise<ComponentType<ShareTermProps>>;
@@ -95,6 +96,7 @@ export const partLoaders: {
   namePanel: () => import('./screens/NameSettings.js').then((m) => m.NameSettings),
   filterPanel: () => import('./screens/FilterSettings.js').then((m) => m.FilterSettings),
   safetyPanel: () => import('./screens/SafetySettings.js').then((m) => m.SafetySettings),
+  standardPanel: () => import('./screens/StandardSettings.js').then((m) => m.StandardSettings),
   privacyPanel: () => import('./screens/PrivacySettings.js').then((m) => m.PrivacySettings),
   appealList: () => import('./appeals/AppealList.js').then((m) => m.AppealList),
   shareTerm: () => import('./terms/ShareTerm.js').then((m) => m.ShareTerm),
@@ -172,6 +174,7 @@ const appealPanel = lazyPart(() => partLoaders.appealPanel());
 const namePanel = lazyPart(() => partLoaders.namePanel());
 const filterPanel = lazyPart(() => partLoaders.filterPanel());
 const safetyPanel = lazyPart(() => partLoaders.safetyPanel());
+const standardPanel = lazyPart(() => partLoaders.standardPanel());
 const privacyPanel = lazyPart(() => partLoaders.privacyPanel());
 const appealList = lazyPart(() => partLoaders.appealList());
 const shareTerm = lazyPart(() => partLoaders.shareTerm(), true);
@@ -226,6 +229,9 @@ export const LazyFilterSettings = filterPanel.Part;
 /** The "Safety and urgent cases" panel of Settings > Advanced: loaded when that screen is opened. */
 export const LazySafetySettings = safetyPanel.Part;
 
+/** The "The AI's standard" panel of Settings > Advanced: loaded when that screen is opened. */
+export const LazyStandardSettings = standardPanel.Part;
+
 /** The "Privacy requests" panel of Settings > Advanced (the owner's): loaded when that screen is opened. */
 export const LazyPrivacySettings = privacyPanel.Part as ComponentType<FailureAware>;
 
@@ -279,6 +285,7 @@ export function resetLazyParts(): void {
   namePanel.reset();
   filterPanel.reset();
   safetyPanel.reset();
+  standardPanel.reset();
   privacyPanel.reset();
   appealList.reset();
   shareTerm.reset();

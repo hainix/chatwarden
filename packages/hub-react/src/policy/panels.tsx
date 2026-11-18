@@ -19,7 +19,7 @@ import type { CellDraft, CellKind, Column, EditedLevel, OutcomeDraft, OutcomeKin
 export type SetDraft = (update: (draft: PolicyDraft) => PolicyDraft) => void;
 export type Problems = Readonly<Record<string, Problem>>;
 
-interface PanelProps {
+export interface PanelProps {
   draft: PolicyDraft;
   set: SetDraft;
   problems: Problems;
@@ -392,37 +392,6 @@ export function RulesPanel({ draft, set, problems, reset, rules }: PanelProps & 
         <p className="cw-hint">{t('hub.settings.rules.hint')}</p>
         <RulePicker field="area" legend={t('hub.settings.rules.area')} picked={draft.areaRules} rules={rules} onChange={(areaRules) => set((d) => ({ ...d, areaRules }))} problem={problems.area} />
         <RulePicker field="severe" legend={t('hub.settings.rules.severe')} picked={draft.severeRules} rules={rules} onChange={(severeRules) => set((d) => ({ ...d, severeRules }))} problem={problems.severe} />
-      </div>
-    </Panel>
-  );
-}
-
-// ---- Written guidelines ----------------------------------------------------------------------------------------------------
-
-export function GuidelinesPanel({ draft, set, problems, reset, titles }: PanelProps & { titles: readonly string[] }) {
-  const { t } = useHub();
-  const base = useId();
-  return (
-    <Panel title={t('hub.settings.guidelines.title')} action={reset}>
-      <div className="cw-form cw-panel-pad">
-        <p className="cw-hint">{t('hub.settings.guidelines.hint')}</p>
-        {draft.guidelines.map((text, i) => {
-          const problem = problems[`guide-${i}`];
-          return (
-            <div key={i} className="cw-field">
-              <label htmlFor={`${base}-${i}`}>{t('hub.settings.guideline.label', { title: titles[i] ?? '' })}</label>
-              <textarea
-                id={`${base}-${i}`}
-                data-field={`guide-${i}`}
-                rows={2}
-                value={text}
-                {...(problem === undefined ? {} : { 'aria-invalid': true as const, 'aria-describedby': `${base}-${i}-err` })}
-                onChange={(e) => set((d) => ({ ...d, guidelines: d.guidelines.map((g, j) => (j === i ? e.target.value : g)) }))}
-              />
-              <FieldError id={`${base}-${i}-err`} problem={problem} />
-            </div>
-          );
-        })}
       </div>
     </Panel>
   );
