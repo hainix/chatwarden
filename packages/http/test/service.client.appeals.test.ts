@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ServiceError, createServiceClient } from '../src/service/client.js';
-import type { Appeal, ServiceClient } from '../src/service/client.js';
+import type { Appeal } from '../src/service/client.js';
 import { KEY_A } from './serviceKit.js';
 
 // The typed client's three appeal methods (0.2.1): appealLink, fileAppeal, appeals. A refusal is an answer (returned); a 4xx is thrown; a refusal reason the client does not know is returned as
@@ -25,7 +25,7 @@ function scripted(replies: Response[], retries = 3) {
     i += 1;
     return next.clone();
   }) as unknown as typeof fetch;
-  const client: ServiceClient = createServiceClient({ baseUrl: 'https://svc.test/', key: KEY_A, fetch: fetchImpl, sleep: async () => undefined, retries });
+  const client: ReturnType<typeof createServiceClient> = createServiceClient({ baseUrl: 'https://svc.test/', key: KEY_A, fetch: fetchImpl, sleep: async () => undefined, retries });
   return { client, sent };
 }
 

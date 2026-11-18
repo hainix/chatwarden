@@ -1652,12 +1652,19 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   });
   const signals = signalRef.service;
   /** The sanction notices of a player's list with their signed appeal link, when one can be made. Fresh objects; any other notice is passed through untouched. */
-  const withAppealUrls = (list: PlayerNotice[]): PlayerNotice[] =>
-    list.map((n) => {
+  const withAppealUrls = (list: PlayerNotice[]): PlayerNotice[] => {
+    // One link per notice id for this call only (a list that names a notice twice reads the store once for it); nothing is kept for the next call.
+    const links = new Map<string, string | null>();
+    return list.map((n) => {
       if (!isSanction(n.kind)) return n;
-      const url = appealService.link(n.id);
+      let url = links.get(n.id);
+      if (url === undefined) {
+        url = appealService.link(n.id);
+        links.set(n.id, url);
+      }
       return url === null ? n : { ...n, appealUrl: url };
     });
+  };
   /** A player-facing read: a store failure is logged (class only) and reads as `fallback`. */
   const forPlayer = <T>(who: RawWho, fallback: T, read: (subject: SubjectId) => T): T => {
     try {

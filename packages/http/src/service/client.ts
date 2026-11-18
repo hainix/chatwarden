@@ -175,16 +175,19 @@ export interface ServiceClient {
   checkName(name: string, options?: { kind?: 'player' | 'entity'; who?: ServiceWho }): Promise<{ ok: true } | { ok: false; reason: string; rule: number }>;
   checkDoor(kind: DoorKind, who: ServiceWho): Promise<{ ok: true } | { ok: false; refusal: { kind: 'ban' | 'area'; until: number | null; refCode: string; noticeId?: string; appealUrl?: string } }>;
   blocksBetween(who: ServiceWho, others: ServiceWho[]): Promise<{ blocked: boolean[] }>;
-  /** A signed link to the appeal page for one sanction notice, or `{ url: null }` when none can be made. */
-  appealLink(noticeId: string): Promise<{ url: string | null }>;
-  /** File an appeal for a person against one of their own sanction notices. A refusal is returned, not thrown. */
-  fileAppeal(who: ServiceWho, noticeId: string, statement: string): Promise<AppealFileAnswer>;
-  /** The appeals a person filed, newest first. */
-  appeals(who: ServiceWho): Promise<{ appeals: Appeal[] }>;
+  /**
+   * A signed link to the appeal page for one sanction notice, or `{ url: null }` when none can be made. (Optional on the interface so a `ServiceClient` written against 0.2.0 still compiles;
+   * the client `createServiceClient` returns always has it.)
+   */
+  appealLink?(noticeId: string): Promise<{ url: string | null }>;
+  /** File an appeal for a person against one of their own sanction notices. A refusal is returned, not thrown. Optional on the interface, always on the client `createServiceClient` returns. */
+  fileAppeal?(who: ServiceWho, noticeId: string, statement: string): Promise<AppealFileAnswer>;
+  /** The appeals a person filed, newest first. Optional on the interface, always on the client `createServiceClient` returns. */
+  appeals?(who: ServiceWho): Promise<{ appeals: Appeal[] }>;
 }
 
 /** A typed client of `/v1`. See the file's header for what it does for you; everything else (the answer shapes, the refusals) is in the API description (`SERVICE_OPENAPI`). */
-export function createServiceClient(options: ServiceClientOptions): ServiceClient {
+export function createServiceClient(options: ServiceClientOptions): ServiceClient & Required<Pick<ServiceClient, 'appealLink' | 'fileAppeal' | 'appeals'>> {
   if (typeof options !== 'object' || options === null) throw new TypeError('createServiceClient: options must be an object');
   if (typeof options.baseUrl !== 'string' || options.baseUrl === '') throw new TypeError('createServiceClient: baseUrl is required');
   if (typeof options.key !== 'string' || !KEY_RE.test(options.key)) throw new TypeError('createServiceClient: key is required and must be a service key (no spaces)');
