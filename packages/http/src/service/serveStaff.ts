@@ -10,7 +10,7 @@ import type { NamesRateLimit } from '../limiter.js';
 import type { KitRequest } from '../types.js';
 import { FailureThrottle } from './auth.js';
 import { peerAddress } from './node.js';
-import { resolvePathFromProject } from './projectResolve.js';
+import { resolvePathFromProject } from './serveResolve.js';
 
 /** The staff token is at least this long, or it protects nothing. */
 export const MIN_TOKEN_LENGTH = 24;

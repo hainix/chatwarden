@@ -1,5 +1,5 @@
 // A small JSON Schema checker for the service tests: only the vocabulary the service's own schemas use (type, properties, required, additionalProperties, items, enum, const,
-// oneOf, $ref into the document's components, and the length and range keywords). It returns the problems found, an empty list when the value fits.
+// oneOf, anyOf, $ref into the document's components, and the length, range, property-count and property-name keywords). It returns the problems found, an empty list when the value fits.
 
 type Schema = Record<string, unknown>;
 
@@ -19,6 +19,10 @@ export function check(schema: Schema, value: unknown, doc: { components?: { sche
     return fits === 1 ? [] : [`${path}: matches ${fits} of ${results.length} alternatives (${results.map((r) => r[0]).join(' | ')})`];
   }
   const problems: string[] = [];
+  if (Array.isArray(schema.anyOf)) {
+    const results = (schema.anyOf as Schema[]).map((s) => check(s, value, doc, path));
+    if (!results.some((r) => r.length === 0)) problems.push(`${path}: matches none of ${results.length} alternatives (${results.map((r) => r[0]).join(' | ')})`);
+  }
   const actual = typeOf(value);
   const allowed = schema.type === undefined ? undefined : (Array.isArray(schema.type) ? (schema.type as string[]) : [schema.type as string]);
   if (allowed !== undefined && !allowed.some((t) => t === actual || (t === 'number' && actual === 'integer'))) return [`${path}: expected ${allowed.join('|')}, got ${actual}`];
@@ -41,10 +45,14 @@ export function check(schema: Schema, value: unknown, doc: { components?: { sche
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     const o = value as Record<string, unknown>;
     const props = (schema.properties ?? {}) as Record<string, Schema>;
+    if (typeof schema.minProperties === 'number' && Object.keys(o).length < schema.minProperties) problems.push(`${path}: too few properties`);
+    if (typeof schema.maxProperties === 'number' && Object.keys(o).length > schema.maxProperties) problems.push(`${path}: too many properties`);
     for (const key of (schema.required ?? []) as string[]) if (!Object.hasOwn(o, key)) problems.push(`${path}.${key}: required`);
     for (const [key, v] of Object.entries(o)) {
+      if (schema.propertyNames !== undefined) problems.push(...check(schema.propertyNames as Schema, key, doc, `${path}{${key}}`));
       if (props[key] !== undefined) problems.push(...check(props[key], v, doc, `${path}.${key}`));
       else if (schema.additionalProperties === false) problems.push(`${path}.${key}: not allowed`);
+      else if (typeof schema.additionalProperties === 'object' && schema.additionalProperties !== null) problems.push(...check(schema.additionalProperties as Schema, v, doc, `${path}.${key}`));
     }
   }
   return problems;

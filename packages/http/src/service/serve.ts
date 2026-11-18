@@ -16,7 +16,7 @@ import { toFetch } from '../fetch.js';
 import { healthRoutes } from '../health.js';
 import { parseKeys } from './auth.js';
 import { nodeHandler, peerAddress } from './node.js';
-import { projectImporter } from './projectResolve.js';
+import { projectImporter } from './serveResolve.js';
 import { SERVICE_OPENAPI } from './openapi.js';
 import { serviceRoutes } from './index.js';
 import { hubHandler, hubScriptPath, MIN_TOKEN_LENGTH, tokenStaff } from './serveStaff.js';

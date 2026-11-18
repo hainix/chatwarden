@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { projectImporter, resolveFromProject } from '../src/service/projectResolve.js';
+import { projectImporter, resolveFromProject } from '../src/service/serveResolve.js';
 import { hubScriptPath } from '../src/service/serveStaff.js';
 
 // Review m14: `chatwarden serve` loads the kit's optional packages from the project it runs in (the current directory) before its own location, so `npx -p @chatwarden/http chatwarden serve` and a strict

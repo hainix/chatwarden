@@ -41,10 +41,30 @@ const str = (min = 1, max = 256): Schema => ({ type: 'string', minLength: min, m
 const obj = (properties: Record<string, Schema>, required: string[] = []): Schema => ({ type: 'object', properties, required, additionalProperties: false });
 const nullable = (type: string): Schema => ({ type: [type, 'null'] });
 const okTrue: Schema = { const: true };
+/** The schema, or null (the handlers read an optional field set to null as absent). */
+const orNull = (schema: Schema): Schema => ({ ...schema, type: [schema.type as string, 'null'] });
+
+// The patterns the handlers enforce, written as the regular expressions OpenAPI carries (ECMA 262, no flags). The unicode escapes are built, so this file holds none.
+const BS = String.fromCharCode(92);
+const u = (...ranges: Array<number | [number, number]>): string => ranges.map((r) => (Array.isArray(r) ? `${BS}u${r[0].toString(16).padStart(4, '0')}-${BS}u${r[1].toString(16).padStart(4, '0')}` : `${BS}u${r.toString(16).padStart(4, '0')}`)).join('');
+/** An entity label: not blank, no control, direction or zero-width character (the kit refuses them: `entity_invalid`, a 400). */
+const LABEL_PATTERN = `^(?=.*${BS}S)[^${BS}x00-${BS}x1f${BS}x7f-${BS}x9f${BS}xad${u(0x061c, [0x200b, 0x200f], [0x2028, 0x202e], 0x2060, [0x2066, 0x2069], 0xfeff)}]{1,64}$`;
+const ENTITY: Schema = obj(
+  {
+    kind: { type: 'string', pattern: '^[a-z][a-z_]{0,23}$' },
+    ref: { type: 'string', pattern: '^[A-Za-z0-9_:-]{1,64}$' },
+    label: { type: 'string', minLength: 1, maxLength: 64, pattern: LABEL_PATTERN },
+  },
+  ['kind', 'ref', 'label'],
+);
+/** The room tags: at most 8, keys `[a-z][a-z0-9_]{0,23}`, values 1 to 64 characters. */
+const TAGS: Schema = { type: 'object', maxProperties: 8, propertyNames: { pattern: '^[a-z][a-z0-9_]{0,23}$' }, additionalProperties: str(1, 64) };
 
 /** The schemas the routes share, as `components.schemas`. */
 export const SERVICE_SCHEMAS: Record<string, Schema> = {
-  Who: obj({ clientKey: str(), accountId: str(), ip: str() }),
+  // A person as the game names them: at least one of the three. `Identity` is the one that can own a seat, a record or a notice: a client key or an account id (an address alone cannot).
+  Who: { type: 'object', properties: { clientKey: str(), accountId: str(), ip: str() }, minProperties: 1, additionalProperties: false },
+  Identity: { type: 'object', properties: { clientKey: str(), accountId: str(), ip: str() }, minProperties: 1, additionalProperties: false, anyOf: [{ required: ['clientKey'] }, { required: ['accountId'] }] },
   Error: obj({ error: str(), message: str() }, ['error', 'message']),
   Refusal: obj(
     {
@@ -77,6 +97,7 @@ export const SERVICE_SCHEMAS: Record<string, Schema> = {
 
 const ID: Schema = { type: 'string', pattern: '^[A-Za-z0-9_.:@~-]{1,128}$' };
 const WHO = ref('Who');
+const IDENTITY = ref('Identity');
 const REFUSED_LINE = obj({ ok: { const: false }, refused: ref('Refusal') }, ['ok', 'refused']);
 const SEATED_WHO = { clientKey: 'raw-client-key-0001' };
 const NOTICE_EXAMPLE = { id: 'n1', kind: 'warning', rule: 2, ruleLabel: 'Be respectful', until: null, refCode: 'CW-0001', excerpt: [{ text: 'a line', day: '2026-11-17' }], createdAt: 1_800_000_000_000, mustAcknowledge: true };
@@ -110,7 +131,7 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/rooms/:room~room/seats/:seat~room',
     openapiPath: '/rooms/{room}/seats/{seat}',
     summary: 'Seat a person: the room, the seat, who sits there and the name moderators see. A repeat replaces. Answers the restriction they are under, so the game can say so at once.',
-    request: obj({ who: WHO, handle: str(1, 64), tags: { type: 'object', additionalProperties: str(1, 64) } }, ['who', 'handle']),
+    request: obj({ who: IDENTITY, handle: str(1, 64), tags: TAGS }, ['who', 'handle']),
     requestExample: { who: SEATED_WHO, handle: 'Plenk', tags: { context: 'kids' } },
     answer: obj({ ok: okTrue, restriction: { oneOf: [ref('Restriction'), { type: 'null' }] } }, ['ok', 'restriction']),
     examples: [{ ok: true, restriction: null }, { ok: true, restriction: { until: 1_800_003_600_000, kind: 'chat' } }],
@@ -196,7 +217,7 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/rooms/:room~room/seats/:seat~room/reports',
     openapiPath: '/rooms/{room}/seats/{seat}/reports',
     summary: 'This seat reports another. The kit snapshots the chat it saw. No report id comes back. Honours Idempotency-Key.',
-    request: obj({ target: ID, lineId: str(1, 64), reason: str(1, 64), note: str(1, 500), entity: obj({ kind: str(1, 24), ref: str(1, 64), label: str(1, 64) }, ['kind', 'ref', 'label']) }, ['target']),
+    request: obj({ target: ID, lineId: orNull({ type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' }), reason: orNull(str(1, 64)), note: orNull(str(1, 500)), entity: { oneOf: [ENTITY, { type: 'null' }] } }, ['target']),
     requestExample: { target: 'b', reason: 'name', entity: { kind: 'clan', ref: 'clan-42', label: 'Example Clan' } },
     answer: {
       oneOf: [
@@ -213,7 +234,7 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/notices/pending',
     openapiPath: '/notices/pending',
     summary: 'The notices this person has not acknowledged, oldest first. An unknown person has none.',
-    request: obj({ who: WHO }, ['who']),
+    request: obj({ who: IDENTITY }, ['who']),
     requestExample: { who: SEATED_WHO },
     answer: obj({ notices: { type: 'array', items: ref('Notice') } }, ['notices']),
     examples: [{ notices: [NOTICE_EXAMPLE] }, { notices: [] }],
@@ -224,7 +245,7 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/notices/:id/ack',
     openapiPath: '/notices/{id}/ack',
     summary: 'This person has seen the notice. `ok: false` (still 200) for a notice that is not theirs or not there, so ids cannot be probed.',
-    request: obj({ who: WHO }, ['who']),
+    request: obj({ who: IDENTITY }, ['who']),
     requestExample: { who: SEATED_WHO },
     answer: obj({ ok: { type: 'boolean' } }, ['ok']),
     examples: [{ ok: true }, { ok: false }],
@@ -235,7 +256,7 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/record',
     openapiPath: '/record',
     summary: '"My record": the notices of the sanctions that still apply to this person, seen or not.',
-    request: obj({ who: WHO }, ['who']),
+    request: obj({ who: IDENTITY }, ['who']),
     requestExample: { who: SEATED_WHO },
     answer: obj({ record: { type: 'array', items: ref('Notice') } }, ['record']),
     examples: [{ record: [NOTICE_EXAMPLE] }],
@@ -246,7 +267,7 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/restriction',
     openapiPath: '/restriction',
     summary: 'Is this person chat-restricted now, until when and by what kind of restriction?',
-    request: obj({ who: WHO, roomId: ID, seatId: ID }, ['who']),
+    request: obj({ who: IDENTITY, roomId: ID, seatId: ID }, ['who']),
     requestExample: { who: SEATED_WHO, roomId: 'lobby', seatId: 'a' },
     answer: obj({ restricted: { type: 'boolean' }, until: nullable('number'), kind: nullable('string') }, ['restricted', 'until', 'kind']),
     examples: [{ restricted: false, until: null, kind: null }, { restricted: true, until: 1_800_003_600_000, kind: 'chat' }],
@@ -268,7 +289,7 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/blocks/between',
     openapiPath: '/blocks/between',
     summary: 'Has the first person blocked, or been blocked by, each of the others? Persons are found, never created: an unknown person is false. For matchmaking. At most 50 others.',
-    request: obj({ who: WHO, others: { type: 'array', items: WHO, minItems: 1, maxItems: 50 } }, ['who', 'others']),
+    request: obj({ who: IDENTITY, others: { type: 'array', items: IDENTITY, minItems: 1, maxItems: 50 } }, ['who', 'others']),
     requestExample: { who: SEATED_WHO, others: [{ clientKey: 'raw-client-key-0002' }] },
     answer: obj({ blocked: { type: 'array', items: { type: 'boolean' } } }, ['blocked']),
     examples: [{ blocked: [true, false] }],
@@ -279,7 +300,7 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     path: '/doors/check',
     openapiPath: '/doors/check',
     summary: 'The login and matchmaking check: may this person join, create, host publicly or queue? A refusal carries the kind, when it ends and the code to quote.',
-    request: obj({ kind: { enum: ['join', 'create', 'public', 'matchmaking'] }, who: WHO }, ['kind', 'who']),
+    request: obj({ kind: { enum: ['join', 'create', 'public', 'matchmaking'] }, who: IDENTITY }, ['kind', 'who']),
     requestExample: { kind: 'join', who: SEATED_WHO },
     answer: {
       oneOf: [
@@ -574,6 +595,7 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
 
     notices_ack: (c) => {
       const who = parseWho(bodyOf(c.body, ['who'], ['who']).who, { identity: true });
+      // The id's segment is checked by the router (1 to 64 of A-Za-z0-9_-, else 404), as the document says; the kit then answers `ok: false` for one it does not hold.
       return ok({ ok: cw.notices.ack(who as RawWho, c.params.id as string) });
     },
 
