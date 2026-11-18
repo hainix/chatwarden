@@ -11,9 +11,11 @@
 // The copy is written for a player in the middle of a game: second person, sentence case, plain words, and never shaming. It says
 // what happened, until when, and what the player can do.
 
+import { NOTICE_WORDS } from '@chatwarden/core/notice-copy';
 import type { enChat } from './chat/words.js';
 
 export const en = {
+  ...NOTICE_WORDS,
   'player.error.network': 'Could not reach the server. Check your connection and try again.',
   'player.error.unauthorized': 'You are signed out. Sign in again, then try again.',
   'player.error.forbidden': 'This account cannot do that.',
@@ -28,41 +30,7 @@ export const en = {
 
   'player.notices.loadFailed': 'We could not check for notices.',
 
-  'player.notice.title.warning': 'You have a warning',
-  'player.notice.title.chat': 'Your chat is turned off',
-  'player.notice.title.area': 'You cannot join public rooms',
-  'player.notice.title.ban': 'You are banned',
-  'player.notice.title.report_outcome': 'Thanks for your report',
-  'player.notice.title.rename_required': 'Please choose a new name',
-  'player.notice.title.appeal_upheld': 'We looked again and kept the decision',
-  'player.notice.title.appeal_reduced': 'We looked again and changed the decision',
-  'player.notice.title.appeal_revoked': 'We looked again and removed the decision',
-  'player.notice.title.fallback': 'A message from the moderators',
-  'player.notice.body.warning': 'A moderator gave you a warning for something you wrote. You can keep playing.',
-  'player.notice.body.chat': 'A moderator turned off your chat. You can still play.',
-  'player.notice.body.area': 'A moderator stopped you joining public rooms and matchmaking. You can still play in private rooms.',
-  'player.notice.body.ban': 'A moderator banned you from playing.',
-  'player.notice.body.report_outcome': 'A moderator looked at your report and took action. We do not share what was done.',
-  'player.notice.body.rename_required': 'A moderator asked you to change your name because it breaks the community rules. Choose a new name to keep playing.',
-  'player.notice.body.appeal_upheld': 'A moderator read your appeal. The original decision stands.',
-  'player.notice.body.appeal_reduced': 'A moderator read your appeal and made the decision lighter. The new decision is on your record.',
-  'player.notice.body.appeal_revoked': 'A moderator read your appeal and took the decision off your record.',
-  'player.notice.body.fallback': 'There is a new message about your account.',
   'player.notice.position': 'Notice {n} of {total}',
-  'player.notice.rule': 'Rule',
-  'player.notice.given': 'Given',
-  'player.notice.until': 'Until',
-  'player.notice.ended': 'Ended',
-  'player.notice.noEnd': 'No end date',
-  'player.notice.onRecordUntil': 'On your record until',
-  'player.notice.untilLeft': '{when} ({left})',
-  'player.notice.ref': 'Reference',
-  'player.notice.refHint': 'Quote this code if you contact us.',
-  'player.notice.lines': 'Your messages that led to this',
-  'player.notice.todo.warning': 'Press Acknowledge to confirm you saw this.',
-  'player.notice.acknowledge': 'Acknowledge',
-  'player.notice.gotIt': 'Got it',
-  'player.notice.appeal': 'Think this is a mistake?',
   'player.notice.ackFailed': 'Your notice is still here.',
   'player.notice.closeForNow': 'Close for now',
 
@@ -100,17 +68,13 @@ export const en = {
   // The words a sign-up screen shows beside a name field the check refused (`nameReasonText`).
   'player.name.not_allowed': 'That name is not allowed. Choose another.',
   'player.name.profane': 'That name is not allowed here. Choose another.',
+  'player.name.reserved': 'That name is reserved. Choose another.',
 
   'player.rules.title': 'Community rules',
   'player.rules.loading': 'Loading the rules',
   'player.rules.loadFailed': 'We could not load the rules.',
   'player.rules.empty': 'No rules are published yet.',
 
-  'player.restricted.moderator.until': 'A moderator turned off your chat until {when} ({left}).',
-  'player.restricted.moderator.noEnd': 'A moderator turned off your chat. It does not end on its own.',
-  'player.restricted.filter.until': 'Your chat is off until {when} ({left}). The automatic filter caught a message.',
-  'player.restricted.filter.noEnd': 'Your chat is off. It does not end on its own. The automatic filter caught a message.',
-  'player.restricted.ended': 'Your chat is back on. The restriction ended {when}.',
   'player.restricted.ref': 'Reference {code}',
 
   // A pause, not a sanction (slow mode, too many lines, the same line again). {left} is the wait with its own "in" ("in 3 seconds").
@@ -177,7 +141,37 @@ export const en = {
   'player.report.cancel': 'Cancel',
   'player.report.close': 'Close',
   'player.report.failed': 'Your report was not sent.',
-  'player.report.thanks': 'Thanks. We got your report.',
+  // The default thank-you, as `GET /rules` sends it (core's DEFAULT_REPORT_THANKS); also what shows when the server sends none.
+  'player.report.thanks': "Thanks for the report. We'll look into it.",
+  // The default report reasons, as `GET /rules` sends them. The dialog shows a translation of one only while the server's text still equals this English (see `reasonText`); a test holds them equal to core's defaults.
+  'player.report.reason.harassment.label': 'Insults or harassment',
+  'player.report.reason.harassment.hint': 'Insults, put-downs or picking on someone',
+  'player.report.reason.hate.label': 'Hate',
+  'player.report.reason.hate.hint': 'Hate aimed at who someone is',
+  'player.report.reason.sexual.label': 'Sexual content',
+  'player.report.reason.sexual.hint': 'Sexual messages or pressure',
+  'player.report.reason.threat.label': 'Threats',
+  'player.report.reason.threat.hint': 'Threatening someone',
+  'player.report.reason.spam.label': 'Spam or ads',
+  'player.report.reason.spam.hint': 'Repeated messages, flooding or advertising',
+  'player.report.reason.personal_info.label': 'Sharing personal info',
+  'player.report.reason.personal_info.hint': "Posting someone's private details",
+  'player.report.reason.name.label': 'Inappropriate name',
+  'player.report.reason.name.hint': 'An offensive or inappropriate player name',
+  'player.report.reason.impersonation.label': 'Pretending to be staff or someone else',
+  'player.report.reason.impersonation.hint': 'A name or message that pretends to be a moderator, the game or another player',
+  'player.report.reason.welfare.label': 'Someone may be in trouble',
+  'player.report.reason.welfare.hint': 'Someone who says they want to hurt themselves, or may be at risk',
+  'player.report.reason.cheating.label': 'Cheating',
+  'player.report.reason.cheating.hint': 'Cheating or exploiting a bug',
+  'player.report.reason.griefing.label': 'Throwing or griefing',
+  'player.report.reason.griefing.hint': 'Losing on purpose or ruining the game',
+  'player.report.reason.afk.label': 'Leaving or AFK',
+  'player.report.reason.afk.hint': 'Leaving the game or not playing',
+  'player.report.reason.other.label': 'Something else',
+  'player.report.reason.other.hint': 'Anything else you want us to look at',
+  // The heading over the owner's help resources, shown after the thank-you for a reason that offers them.
+  'player.report.resources': 'Where to get help',
   'player.report.remaining.zero': 'You have no more reports left today.',
   'player.report.remaining.one': 'You can send {count} more report today.',
   'player.report.remaining.other': 'You can send {count} more reports today.',
@@ -189,6 +183,7 @@ export const en = {
   'player.report.refused.suspended': 'You cannot send reports from this account for now.',
   'player.report.refused.reason_required': 'This report needs a reason. Close this and report again to choose one.',
   'player.report.refused.reason_unknown': 'That reason is not available any more. Close this and report again.',
+  'player.report.refused.entity_invalid': 'This report is missing some details, so we could not take it.',
   'player.report.refused.unknown': 'We could not take that report.',
 } as const;
 

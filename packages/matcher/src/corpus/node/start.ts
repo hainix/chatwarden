@@ -11,20 +11,18 @@ import { fileCache } from './fileCache.js';
 const STARTUP_BOUND_MS = 10_000;
 const systemClock: Clock = { now: () => Date.now() };
 
-/** @experimental */
 export type StartCorpusOptions = Omit<CorpusLoaderOptions, 'cache' | 'clock'> & { dir: string; clock?: Clock };
 
-/** A running loader: everything {@link CorpusLoader} does, and `stop()` for the periodic refresh the starter began. @experimental */
+/** A running loader: everything {@link CorpusLoader} does, and `stop()` for the periodic refresh the starter began. */
 export type StartedCorpus = CorpusLoader & { stop(): void };
 
-/** A running eval-set loader (`kind: 'eval'`): everything {@link CorpusEvalLoader} does, and `stop()`. @experimental */
+/** A running eval-set loader (`kind: 'eval'`): everything {@link CorpusEvalLoader} does, and `stop()`. */
 export type StartedEvalCorpus = CorpusEvalLoader & { stop(): void };
 
 /**
  * Open the cache folder, refresh once (waiting at most 10 seconds for it; a slower refresh carries on in the background), start the
  * periodic refresh (24 hours, plus or minus 10 percent, unref'd) and return the loader. With `apply: 'auto'` and `terms`, the verified
  * list is applied inside that first refresh.
- * @experimental
  */
 export async function startCorpus(options: StartCorpusOptions & { kind: 'eval' }): Promise<StartedEvalCorpus>;
 export async function startCorpus(options: StartCorpusOptions & { kind?: 'terms' }): Promise<StartedCorpus>;

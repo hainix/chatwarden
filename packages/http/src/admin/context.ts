@@ -1,12 +1,47 @@
-import { isValidAuditActor, safeWarn } from '@chatwarden/core';
-import type { AuditAction, AuditDetail, AuditTarget, Chatwarden, Logger, Role } from '@chatwarden/core';
+import { isValidAuditActor, MAX_SANCTION_DURATION_MS, safeWarn, SANCTION_KINDS } from '@chatwarden/core';
+import type { AuditAction, AuditDetail, AuditTarget, Chatwarden, Logger, Role, SanctionKind } from '@chatwarden/core';
 import { guard, requireAuthz, requireRole } from '../auth.js';
 import type { Authenticate } from '../auth.js';
-import { withErrors } from '../errors.js';
+import { HttpError, withErrors } from '../errors.js';
 import { resolvePermissions } from '../permissions.js';
 import type { PermissionKey, Permissions } from '../permissions.js';
 import type { RouteHandler } from '../router.js';
 import type { Authz, KitRequest, KitResponse, RouteParams } from '../types.js';
+
+const DAY_MS = 24 * 3_600_000;
+
+/** What a scoped moderator may apply: the kinds, and the longest length (a permanent one is never allowed). */
+export interface ScopedLimits {
+  kinds: readonly SanctionKind[];
+  maxDurationMs: number;
+}
+
+/** The default limits of a scoped moderator: a warning or a chat restriction of at most 7 days. */
+export const SCOPED_DEFAULT_LIMITS: Readonly<ScopedLimits> = Object.freeze({ kinds: Object.freeze(['warning', 'chat'] as const) as readonly SanctionKind[], maxDurationMs: 7 * DAY_MS });
+
+/**
+ * The permissions a scoped caller may hold at all: the ones the scope-aware routes ask for. `GET /me` lists only these as true for a scoped caller, so the hub hides what the server would
+ * refuse; every other permission is false for them whatever their role holds.
+ */
+export const SCOPE_AWARE_PERMISSIONS: readonly PermissionKey[] = Object.freeze(['reports.read', 'reports.decide', 'history.read', 'sanctions.apply', 'sanctions.revoke', 'reasons.read', 'claims.override'] as const);
+
+/** The route handlers that declared themselves scope-aware (`secure(..., { scoped: true })`). Everything else answers 403 to a scoped caller. */
+const SCOPE_AWARE = new WeakSet<RouteHandler>();
+/** Did this route handler declare itself scope-aware? The guard test over the whole admin table reads it. */
+export const isScopeAware = (handler: RouteHandler): boolean => SCOPE_AWARE.has(handler);
+
+function resolveScopedLimits(given: ScopedLimits | undefined): Readonly<ScopedLimits> {
+  if (given === undefined) return SCOPED_DEFAULT_LIMITS;
+  const kinds = given.kinds as unknown;
+  const max = given.maxDurationMs as unknown;
+  if (!Array.isArray(kinds) || kinds.length === 0 || !kinds.every((k) => (SANCTION_KINDS as readonly unknown[]).includes(k))) {
+    throw new RangeError('adminRoutes: scopedLimits.kinds must list at least one sanction kind');
+  }
+  if (typeof max !== 'number' || !Number.isSafeInteger(max) || max < 1 || max > MAX_SANCTION_DURATION_MS) {
+    throw new RangeError('adminRoutes: scopedLimits.maxDurationMs must be a whole number of milliseconds from 1 to 365 days');
+  }
+  return Object.freeze({ kinds: Object.freeze([...(kinds as SanctionKind[])]), maxDurationMs: max });
+}
 
 /** What the adopter gives the admin API. */
 export interface AdminOptions {
@@ -20,6 +55,11 @@ export interface AdminOptions {
   permissions?: Partial<Record<PermissionKey, Role | undefined>>;
   /** Where unexpected errors are logged (event and error class only). Defaults to `console.warn`. */
   logger?: Logger;
+  /**
+   * What a scoped moderator (`Authz.scope`) may apply, by `POST /sanctions` and in a decision: only these kinds, at most this long, never permanent. Default {@link SCOPED_DEFAULT_LIMITS}.
+   * Validated once, when the routes are built (`RangeError` for a bad one).
+   */
+  scopedLimits?: ScopedLimits;
 }
 
 /** What a staff route handler is given, after the caller is authenticated and holds the route's permission. */
@@ -27,6 +67,8 @@ export interface AdminCall {
   req: KitRequest;
   params: RouteParams;
   authz: Authz;
+  /** The caller's staff scope (`authz.scope`), or undefined for a global caller. A scope-aware route passes it to every read. */
+  scope: readonly string[] | undefined;
   /** Require one more permission (for example a sanction's); throws 403 `forbidden`. */
   need(permission: PermissionKey): void;
   /**
@@ -46,13 +88,21 @@ export interface AdminContext {
   readonly cw: Chatwarden;
   /** Where the route groups log (event and counts only). */
   readonly logger: Logger | undefined;
-  /** Wrap a staff handler: authenticate, require `permission`, run it, and turn every throw into a fixed response. */
-  secure(permission: PermissionKey, handler: (call: AdminCall) => KitResponse | Promise<KitResponse>): RouteHandler;
+  /**
+   * Wrap a staff handler: authenticate, require `permission`, run it, and turn every throw into a fixed response. A caller with a staff scope gets 403 `forbidden` unless the route declares
+   * `{ scoped: true }`, which says it reads and writes only through the caller's scope (`call.scope`): default deny, so a route added later is closed to scoped callers until it opts in.
+   */
+  secure(permission: PermissionKey, handler: (call: AdminCall) => KitResponse | Promise<KitResponse>, options?: { scoped?: boolean }): RouteHandler;
   /**
    * Like `secure`, for a route that needs no permission, only a signed-in caller (401 otherwise): `GET /me`. It gets no
-   * `audit` and no `need`, so it cannot write a row.
+   * `audit` and no `need`, so it cannot write a row. Scoped callers get 403 unless `{ scoped: true }`.
    */
-  authenticated(handler: (call: { req: KitRequest; params: RouteParams; authz: Authz }) => KitResponse | Promise<KitResponse>): RouteHandler;
+  authenticated(
+    handler: (call: { req: KitRequest; params: RouteParams; authz: Authz; scope: readonly string[] | undefined }) => KitResponse | Promise<KitResponse>,
+    options?: { scoped?: boolean },
+  ): RouteHandler;
+  /** The limits of a scoped moderator, validated (the default when none was given). */
+  readonly scopedLimits: Readonly<ScopedLimits>;
   /** The effective minimum role for each permission: the defaults with the adopter's overrides applied (a frozen copy). */
   readonly permissions: Permissions;
 }
@@ -95,26 +145,38 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
   };
   // Validated once, here: a bad override fails at start-up, not on the first request.
   const permissions = resolvePermissions(options.permissions);
+  const scopedLimits = resolveScopedLimits(options.scopedLimits);
   return {
     cw,
     logger,
     permissions,
-    authenticated(handler) {
-      return noStore(
+    scopedLimits,
+    authenticated(handler, o) {
+      const route = noStore(
         withErrors(async (req, params) => {
           const authz = await authorize(req);
           requireAuthz(authz);
-          return handler({ req, params, authz });
+          if (authz.scope !== undefined && o?.scoped !== true) throw new HttpError('forbidden');
+          return handler({ req, params, authz, scope: authz.scope });
         }, logger),
       );
+      if (o?.scoped === true) SCOPE_AWARE.add(route);
+      return route;
     },
-    secure(permission, handler) {
-      const guarded = guard({ authenticate: authorize, permissions }, permission, (req, params, authz) =>
-        handler({
+    secure(permission, handler, o) {
+      const guarded = guard({ authenticate: authorize, permissions }, permission, (req, params, authz) => {
+        // Default deny: a scoped caller reaches only a route that declared itself scope-aware. Nothing is logged here (no scope, actor or id).
+        if (authz.scope !== undefined && o?.scoped !== true) throw new HttpError('forbidden');
+        return handler({
           req,
           params,
           authz,
-          need: (p) => void requireRole(authz, p, permissions),
+          scope: authz.scope,
+          need: (p) => {
+            // A scoped caller never holds a permission outside the scope-aware ones, whatever their role would hold.
+            if (authz.scope !== undefined && !SCOPE_AWARE_PERMISSIONS.includes(p)) throw new HttpError('forbidden');
+            requireRole(authz, p, permissions);
+          },
           audit: (action, target, mode = 'required', detail) => {
             let written: boolean;
             try {
@@ -132,9 +194,11 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
             if (mode === 'required') throw new AuditFailedError();
             safeWarn(logger, 'chatwarden.http_audit_failed');
           },
-        }),
-      );
-      return noStore(withErrors(guarded, logger));
+        });
+      });
+      const route = noStore(withErrors(guarded, logger));
+      if (o?.scoped === true) SCOPE_AWARE.add(route);
+      return route;
     },
   };
 }

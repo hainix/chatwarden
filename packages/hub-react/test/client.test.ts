@@ -123,7 +123,7 @@ describe('every staff route has a client method', () => {
   };
 
   /** The world every route is exercised in: appeals and renames are on, so their routes answer instead of 404. */
-  const world = () => appealsHub({ role: 'owner', ai: { level: 2, options: { maxLevel: 3, act: {} } }, names: { renames: true } });
+  const world = () => appealsHub({ role: 'owner', ai: { level: 2, options: { maxLevel: 3, act: {} } }, names: { renames: true }, overrides: { desk: { workflow: true, insights: true } } });
 
   async function exercise(w: AppealsHub) {
     const { id, person } = await w.file({ target: 'Mallory', reporter: 'Rita' });
@@ -133,6 +133,18 @@ describe('every staff route has a client method', () => {
     const gap = await w.sanction(person, 'warning', 'uncovered');
     const termId = w.live.rows.terms[0]!.id;
     const c = w.client;
+    // The owner asks no one for a second look (the role order): the same client asks as a moderator for that one call.
+    const seeded = w.cw.comments.add(id, 'mod_ann', 'moderator', 'a seeded comment');
+    const commentId = seeded.ok ? seeded.comment.id : 'missing';
+    const asModerator = async <T,>(fn: () => Promise<T>): Promise<T> => {
+      const was = w.session.who;
+      w.session.who = { actor: 'maya@example.test', role: 'moderator' };
+      try {
+        return await fn();
+      } finally {
+        w.session.who = was;
+      }
+    };
     const newTerm = await c.addTerm({ term: 'quibblex', language: 'en', note: 'n' });
     const newExc = await c.addException({ phrase: 'quibblexes', language: 'en' });
     const reasonId = (await w.direct.addReason({ label: 'Repeat', text: 'Again after a warning.' })).reason.id;
@@ -140,11 +152,32 @@ describe('every staff route has a client method', () => {
     const filed = await w.appeal({ target: 'Appellant' });
     const renamed = await w.file({ target: 'Mallory2', reporter: 'Rita2' });
 
-    type Expect = { method: string; path: string; query?: Record<string, string | number>; body?: unknown };
+    // A line in a room the kit knows, said when asked (the evidence buffer keeps a line 15 minutes, and a later call moves the clock by days).
+    w.cw.rooms.seat('RX', 'p1', { clientKey: 'rooms-key-RX-p1-aaaaaaaa' }, 'Handle-p1');
+    let lineId = 'missing';
+    const sayLine = (): void => {
+      w.clock.t += 6000;
+      const said = w.cw.chat.accept('RX', 'p1', 'a delivered line');
+      if ('deliver' in said) lineId = said.deliver.lineId;
+    };
+
+    type Expect = { method: string; path: string | (() => string); query?: Record<string, string | number>; body?: unknown };
     const calls: Array<[string, () => Promise<unknown>, Expect]> = [
       ['me', () => c.me(), { method: 'GET', path: '/me' }],
       ['listReports', () => c.listReports({ status: 'open', limit: 5 }), { method: 'GET', path: '/reports', query: { status: 'open', limit: 5 } }],
       ['listReports no filter', () => c.listReports(), { method: 'GET', path: '/reports' }],
+      ['listReports urgent', () => c.listReports({ status: 'open', urgent: true }), { method: 'GET', path: '/reports', query: { status: 'open', urgent: '1' } }],
+      ['listReports urgent false sends none', () => c.listReports({ urgent: false }), { method: 'GET', path: '/reports' }],
+      ['setUrgent on', () => c.setUrgent(id, true), { method: 'POST', path: `/reports/${id}/urgent`, body: { on: true } }],
+      ['setUrgent off', () => c.setUrgent(id, false), { method: 'POST', path: `/reports/${id}/urgent`, body: { on: false } }],
+      ['handoff', () => c.handoff(id), { method: 'POST', path: `/reports/${id}/handoff` }],
+      ['handoff takeOver', () => c.handoff(id, { takeOver: true }), { method: 'POST', path: `/reports/${id}/handoff`, body: { takeOver: true } }],
+      ['addComment', () => c.addComment(id, 'seen it'), { method: 'POST', path: `/reports/${id}/comments`, body: { text: 'seen it' } }],
+      ['removeComment', () => c.removeComment(id, commentId), { method: 'DELETE', path: `/reports/${id}/comments/${commentId}` }],
+      ['escalate', () => asModerator(() => c.escalate(id, { to: 'senior' })), { method: 'POST', path: `/reports/${id}/escalate`, body: { to: 'senior' } }],
+      ['escalate with a note', () => asModerator(() => c.escalate(id, { to: 'owner', note: 'please look' })), { method: 'POST', path: `/reports/${id}/escalate`, body: { to: 'owner', note: 'please look' } }],
+      ['clearEscalation', () => c.clearEscalation(id), { method: 'DELETE', path: `/reports/${id}/escalate` }],
+      ['handoff takeOver false sends none', () => c.handoff(id, { takeOver: false }), { method: 'POST', path: `/reports/${id}/handoff` }],
       ['getReport', () => c.getReport(id, { level: 'rude' }), { method: 'GET', path: `/reports/${id}`, query: { level: 'rude' } }],
       ['suggest', () => c.suggest(id, { level: 'hostile', rule: 1 }), { method: 'POST', path: `/reports/${id}/suggest`, body: { level: 'hostile', rule: 1 } }],
       ['personHistory', () => c.personHistory(person, { limit: 3 }), { method: 'GET', path: `/people/${person}/history`, query: { limit: 3 } }],
@@ -160,6 +193,9 @@ describe('every staff route has a client method', () => {
       ['listTerms', () => c.listTerms(), { method: 'GET', path: '/terms' }],
       ['checkTerm', () => c.checkTerm({ term: 'abcdef', language: 'en' }), { method: 'POST', path: '/terms/check', body: { term: 'abcdef', language: 'en' } }],
       ['testText', () => c.testText('hello'), { method: 'POST', path: '/terms/test', body: { text: 'hello' } }],
+      ['filterStats', () => c.filterStats(7), { method: 'GET', path: '/filters/stats', query: { days: 7 } }],
+      ['filterTest', () => c.filterTest({ text: 'hi', candidate: { links: { action: 'count' } } }), { method: 'POST', path: '/filters/test', body: { text: 'hi', candidate: { links: { action: 'count' } } } }],
+      ['filterCheck', () => c.filterCheck({ candidate: {} }), { method: 'POST', path: '/filters/check', body: { candidate: {} } }],
       ['updateTerm', () => c.updateTerm(newTerm.id, { note: 'changed' }), { method: 'PATCH', path: `/terms/${newTerm.id}`, body: { note: 'changed' } }],
       ['setTermActive', () => c.setTermActive(termId, false), { method: 'POST', path: `/terms/${encodeURIComponent(termId)}/active`, body: { active: false } }],
       ['updateException', () => c.updateException(newExc.id, { note: 'changed' }), { method: 'PATCH', path: `/exceptions/${newExc.id}`, body: { note: 'changed' } }],
@@ -217,8 +253,8 @@ describe('every staff route has a client method', () => {
       ],
       [
         'rename',
-        () => c.rename(renamed.person, { reason: 'Please choose another name.' }),
-        { method: 'POST', path: `/people/${renamed.person}/rename`, body: { reason: 'Please choose another name.' } },
+        () => c.rename(renamed.person, { reason: 'Please choose another name.', rule: 7 }),
+        { method: 'POST', path: `/people/${renamed.person}/rename`, body: { reason: 'Please choose another name.', rule: 7 } },
       ],
       // AI levels 3 and 4, release 1: the gate table's data and the "do not automate" mark (the encoded id, the body as given).
       ['aiGates', () => c.aiGates(), { method: 'GET', path: '/ai/gates' }],
@@ -239,6 +275,32 @@ describe('every staff route has a client method', () => {
         { method: 'POST', path: '/ai/acting/start', body: { confirm: 'ACT', reason: 'Shadow was fine' } },
       ],
       ['aiActingStep off', () => c.aiActingStep('off', { reason: 'Enough' }), { method: 'POST', path: '/ai/acting/off', body: { reason: 'Enough' } }],
+      // Privacy requests and legal hold (0.2.0): the owner's routes, the person's ref and the report id as given.
+      ['privacyFind', () => c.privacyFind('acct-none'), { method: 'POST', path: '/privacy/find', body: { accountId: 'acct-none' } }],
+      ['privacyExport', () => c.privacyExport(person), { method: 'GET', path: `/people/${person}/privacy/export` }],
+      ['privacyErase preview', () => c.privacyErase(renamed.person, { keep: 'safety', confirm: renamed.person, dryRun: true }), { method: 'POST', path: `/people/${renamed.person}/privacy/erase`, body: { keep: 'safety', confirm: renamed.person, dryRun: true } }],
+      ['privacyStatement', () => c.privacyStatement(), { method: 'GET', path: '/privacy/statement' }],
+      ['holdReport', () => c.holdReport(renamed.id, 'safety_review'), { method: 'PUT', path: `/reports/${renamed.id}/hold`, body: { code: 'safety_review' } }],
+      ['releaseHold', () => c.releaseHold(renamed.id), { method: 'DELETE', path: `/reports/${renamed.id}/hold` }],
+      // Rooms, Insights and linked accounts (0.2.0): the room and line as given (encoded), the mode body as given, the days as a query.
+      ['insights', () => c.insights(), { method: 'GET', path: '/insights' }],
+      ['insights 7 days', () => c.insights(7), { method: 'GET', path: '/insights', query: { days: 7 } }],
+      ['rooms', () => c.rooms(), { method: 'GET', path: '/rooms' }],
+      ['contexts', () => c.contexts(), { method: 'GET', path: '/policy/contexts' }],
+      ['rules', () => c.rules(), { method: 'GET', path: '/policy/rules' }],
+      ['setRoomMode locked', () => c.setRoomMode('RX', 'locked', 120_000), { method: 'POST', path: '/rooms/RX/mode', body: { mode: 'locked', forMs: 120_000 } }],
+      ['setRoomMode normal sends no length', () => c.setRoomMode('RX', 'normal'), { method: 'POST', path: '/rooms/RX/mode', body: { mode: 'normal' } }],
+      ['personLinks', () => c.personLinks(person), { method: 'GET', path: `/people/${person}/links` }],
+      [
+        'retractLine',
+        () => {
+          sayLine();
+          return c.retractLine('RX', lineId);
+        },
+        { method: 'POST', path: () => `/rooms/RX/lines/${lineId}/retract` },
+      ],
+      ['reportBundle', () => c.reportBundle(renamed.id), { method: 'GET', path: `/reports/${renamed.id}/bundle` }],
+      ['reportBundle with accounts', () => c.reportBundle(renamed.id, { accounts: true }), { method: 'GET', path: `/reports/${renamed.id}/bundle`, query: { accounts: '1' } }],
     ];
     expect(aiRead).not.toBeNull();
     const results: unknown[] = [];
@@ -246,7 +308,7 @@ describe('every staff route has a client method', () => {
       const before = w.sent.length;
       results.push(await call().catch((e: unknown) => `${name} threw ${String(e)}`));
       const req = w.sent[before]!;
-      expect(req, name).toMatchObject({ method: want.method, path: want.path });
+      expect(req, name).toMatchObject({ method: want.method, path: typeof want.path === 'function' ? want.path() : want.path });
       expect(req.query ?? {}, name).toEqual(want.query ?? {});
       if (want.body === undefined) expect(req.body, name).toBeUndefined();
       else expect(req.body, name).toEqual(want.body);
@@ -266,6 +328,7 @@ describe('every staff route has a client method', () => {
     await exercise(w);
     const keys = Object.keys(w.routes);
     expect(keys.length).toBeGreaterThanOrEqual(26);
+    // Every route the API mounts has a hub method now (the evidence bundle too): none is exempt.
     const missing = keys.filter((key) => {
       const { method, re } = matcher(key.replace(/~ref/g, ''));
       return !w.sent.some((r) => r.method === method && re.test(r.path));
@@ -280,6 +343,18 @@ describe('every staff route has a client method', () => {
     await w.client.revokeSanction('a b', 'r').catch(() => undefined);
     expect(w.sent.map((r) => r.path)).toEqual(['/reports/a%2Fb%3Fx%3D1%23y', '/people/..%2Faudit/history', '/sanctions/a%20b/revoke']);
     expect(w.sent.every((r) => r.query === undefined || Object.keys(r.query).length === 0)).toBe(true);
+  });
+
+  it('reportBundle encodes the id and sends accounts only when asked', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    await w.client.reportBundle('a/b?x=1#y').catch(() => undefined);
+    await w.client.reportBundle('r2', { accounts: false }).catch(() => undefined);
+    await w.client.reportBundle('r3', { accounts: true }).catch(() => undefined);
+    expect(w.sent.map((r) => [r.method, r.path, r.query ?? {}])).toEqual([
+      ['GET', '/reports/a%2Fb%3Fx%3D1%23y/bundle', {}],
+      ['GET', '/reports/r2/bundle', {}],
+      ['GET', '/reports/r3/bundle', { accounts: '1' }],
+    ]);
   });
 
   it('typed: me() answers who is signed in and what they can do', async () => {
@@ -333,7 +408,7 @@ describe('the team methods', () => {
     const w = await hubWorld({ role: 'moderator' });
     const first = await w.client.changes();
     expect(first.changed).toBe(true);
-    expect(await w.client.changes(first.token)).toEqual({ token: first.token, changed: false });
+    expect(await w.client.changes(first.token)).toEqual({ token: first.token, changed: false, urgent: 0 });
     await w.file({ target: 'Mallory' });
     const after = await w.client.changes(first.token);
     expect(after.changed).toBe(true);

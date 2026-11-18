@@ -15,10 +15,12 @@ import type { NextReport, QueueGroup } from '../queue.js';
 import type { AiBus, AiCaseApi } from '../ai/api.js';
 import type { DecisionForm } from '../decision.js';
 import { LazyAiParts } from '../lazyParts.js';
-import { NameRevealContext } from '../names.js';
+import { NameRevealContext, NameToggle, NameValue } from '../names.js';
 import type { NameReveal } from '../names.js';
-import type { AiReadView, DecideInput, PersonHistory, ReportDetail } from '../types.js';
+import type { AiReadView, ContextRow, DecideInput, PersonHistory, ReportDetail } from '../types.js';
 import { QUICK_ACT_COOLDOWN_MS, hasAged, monotonicNow } from './actGuard.js';
+import { useCareOpen } from './useCare.js';
+import type { CareOpen } from './useCare.js';
 import { useDecisionForm } from './useDecisionForm.js';
 import type { DecisionDraft } from './useDecisionForm.js';
 
@@ -42,6 +44,8 @@ export interface CaseValue {
   entry: DecisionEntry | undefined;
   /** The decision was made in this visit and the case is off the screen (waiting or just sent). False for a later visit to a closed case. */
   left: boolean;
+  /** The careful view of this case: whether its excerpts are hidden until opened, opening them, and the break note. A visit's state: gone when the case is left. */
+  care: CareOpen;
   /** The decision form, shared by the transcript's margin boxes and the decision bar. */
   draft: DecisionDraft;
   /** What the AI read of this report, or null (the AI is off, or no read yet). Advice, never a decision. */
@@ -77,6 +81,48 @@ export function useCase(): CaseValue {
   return value;
 }
 
+/**
+ * The room type chip: the label of the context the report's room had. It is drawn only when the report has a context, the caller may read the policy and the server declares at least one context
+ * (one context used in every room still shows: the kind of room is information); the label is the name when the context has none or the profile no longer declares it (a typo is visible).
+ * A report with no context, and a caller who may not read the policy (a scoped moderator among them), ask nothing.
+ */
+export function ContextChip() {
+  const { t, client, can } = useHub();
+  const { detail } = useCase();
+  const context = detail.data?.report.context ?? null;
+  const wants = context !== null && can('policy.read');
+  const list = useHubData<ContextRow[] | null>(wants ? 'contexts' : 'contexts:idle', () => (wants ? client.contexts().then((r) => r.contexts) : Promise.resolve(null)));
+  if (!wants || list.data === undefined || list.data === null || list.data.length === 0) return null;
+  const label = list.data.find((c) => c.name === context)?.label ?? context;
+  return (
+    <span className="cw-tag cw-tag--idle cw-context" role="note" aria-label={t('hub.case.context', { label })}>
+      {label}
+    </span>
+  );
+}
+
+/** The word for an entity's kind: the hub's own for the kinds it knows (a clan, guild, team, deck, pet or item), "Entity" for any other word of the game's. */
+export function entityWord(t: ReturnType<typeof useHub>['t'], kind: string): string {
+  return t(['clan', 'guild', 'team', 'deck', 'pet', 'item'].includes(kind) ? (`hub.case.entity.${kind}` as 'hub.case.entity.clan') : 'hub.case.entity.unknown');
+}
+
+/**
+ * The entity row: "Clan: {label}", drawn only when the report names a clan, guild, team or other entity. The label is a name a player chose, so it is masked like one while the server flags it
+ * (the same hidden label and Show control as a flagged handle). Nothing for a report about a player alone.
+ */
+export function EntityRow() {
+  const { t } = useHub();
+  const { detail } = useCase();
+  const entity = detail.data?.report.entity;
+  if (entity === undefined || entity === null) return null;
+  const flagged = detail.data?.report.entityLabelFlagged === true;
+  return (
+    <p className="cw-entity">
+      <span className="cw-entity-kind">{entityWord(t, entity.kind)}</span> <NameValue text={entity.label} flagged={flagged} place="entity" /> <NameToggle flagged={flagged} place="entity" />
+    </p>
+  );
+}
+
 /** Same, for the parts that also show without a case (the context pane on a screen with no case). */
 export function useOptionalCase(): CaseValue | null {
   return useContext(CaseContext);
@@ -98,6 +144,7 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     wantsHistory ? client.personHistory(person, { limit: 1 }) : Promise.resolve(null),
   );
 
+  const care = useCareOpen(now);
   const [revealAll, setRevealAll] = useState(false);
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((lineId: string): void => {
@@ -170,6 +217,7 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     next: report === undefined ? null : nextOpenReport(queue?.groups ?? [], report.targetPerson, reportId, decisions.decidedIds()),
     entry,
     left,
+    care,
     draft,
     aiRead,
     aiCase,

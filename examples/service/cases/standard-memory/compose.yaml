@@ -1,0 +1,14 @@
+# Runs the service with Docker Compose. It binds 8787 to 127.0.0.1 only: put a TLS proxy or a private network in front before you expose it. A service key is a database password.
+# Written by `chatwarden init --service`. It is yours now: edit freely. Re-running never overwrites a file you changed.
+
+services:
+  chatwarden:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      CHATWARDEN_SECRET: ${CHATWARDEN_SECRET:?set CHATWARDEN_SECRET in .env}
+      CHATWARDEN_SERVICE_KEYS: ${CHATWARDEN_SERVICE_KEYS:?set CHATWARDEN_SERVICE_KEYS in .env}
+      CHATWARDEN_ADMIN_TOKEN: ${CHATWARDEN_ADMIN_TOKEN:-}
+    restart: unless-stopped

@@ -31,7 +31,10 @@ export class MemoryTermStore implements TermStore {
   insertTerm(record: TermRecord): void {
     this.fail('insertTerm');
     if (this.state.terms.some((t) => t.id === record.id)) throw new Error('UNIQUE constraint failed: terms.id');
-    this.state.terms.push(structuredClone(record));
+    const copy = structuredClone(record);
+    // A row with no mode has no key (the shape every earlier row had).
+    if (copy.matchMode === null || copy.matchMode === undefined) delete copy.matchMode;
+    this.state.terms.push(copy);
   }
   updateTerm(id: string, patch: TermPatch): void {
     this.fail('updateTerm');
@@ -39,6 +42,10 @@ export class MemoryTermStore implements TermStore {
     if (!row) throw new Error(`term not found: ${id}`);
     if (patch.term !== undefined) row.term = patch.term;
     if (patch.language !== undefined) row.language = patch.language;
+    if (patch.matchMode !== undefined) {
+      if (patch.matchMode === null) delete row.matchMode;
+      else row.matchMode = patch.matchMode;
+    }
     if (patch.note !== undefined) row.note = patch.note;
     row.updatedBy = patch.updatedBy;
     row.updatedAt = patch.updatedAt;

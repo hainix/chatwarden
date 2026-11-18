@@ -548,11 +548,12 @@ describe('ReportView: loading and failing', () => {
     const a = await w.fileRich({ target: 'Alpha', lines: [{ who: 'reporter', text: 'text of alpha' }, { who: 'target', text: 'alpha spoke' }] });
     const b = await w.fileRich({ target: 'Beta', lines: [{ who: 'reporter', text: 'text of beta' }, { who: 'target', text: 'beta spoke' }] });
     const { router } = await open(w, a.id);
-    expect(screen.getByText('alpha spoke')).toBeInTheDocument();
+    // Scoped to the chat list: once the lazy "What the player sees" panel has loaded it quotes the same lines, so a page-wide query finds two.
+    expect(within(chat()).getByText('alpha spoke')).toBeInTheDocument();
     act(() => router.navigate(`/reports/${b.id}`));
     await heading('Insults or harassment report against Beta');
-    expect(screen.queryByText('alpha spoke')).not.toBeInTheDocument();
-    expect(screen.getByText('beta spoke')).toBeInTheDocument();
+    expect(within(chat()).queryByText('alpha spoke')).not.toBeInTheDocument();
+    expect(within(chat()).getByText('beta spoke')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText(/text of alpha/)).not.toBeInTheDocument());
   });
 });

@@ -74,6 +74,14 @@ describe('migration 6: kit_reports', () => {
       'people_json', 'status', 'bad_faith', 'actioned_at', 'actioned_by', 'mod_note', 'bad_faith_evidence',
       // Migration 17: the reason the reporter gave and the time of their one follow-up.
       'reported_reason', 'detail_at',
+      // Migration 26 (release 0.2.0, chat filters): reports nobody filed.
+      'origin', 'origin_key',
+      // Migration 26 (release 0.2.0, the urgent lane): urgent, the hand-off pair, the escalation triple and the game's evidence id.
+      'urgent', 'handoff_at', 'handoff_by', 'escalated_to', 'escalated_by', 'escalated_at', 'evidence_ref',
+      // Migration 26 (release 0.2.0, staff scope): the scope tag of the room the report was filed in.
+      'scope',
+      // Migration 26 (release 0.2.0, reserved names): the clan, guild or team the report is about.
+      'entity_json',
     ]);
     const by = (n: string) => info.find((c) => c.name === n);
     expect(by('status')?.dflt_value).toBe("'open'");

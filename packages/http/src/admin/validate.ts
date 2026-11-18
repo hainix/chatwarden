@@ -31,6 +31,19 @@ export function bodyTakeOver(body: Record<string, unknown>): boolean {
   return body.takeOver;
 }
 
+/** What `POST /reports/:id/urgent` takes: exactly `{ on: boolean }`, else 400 `invalid_request`. */
+export function bodyUrgentOn(body: Record<string, unknown>): boolean {
+  const keys = Object.keys(body);
+  if (keys.length !== 1 || keys[0] !== 'on' || typeof body.on !== 'boolean') throw new ValidationError();
+  return body.on;
+}
+
+/** What `POST /reports/:id/handoff` takes: nothing, or only `{ takeOver?: boolean }` (the claim gate's, like a decision's), else 400 `invalid_request`. */
+export function bodyHandoff(body: Record<string, unknown>): { takeOver: boolean } {
+  for (const key of Object.keys(body)) if (key !== 'takeOver') throw new ValidationError();
+  return { takeOver: bodyTakeOver(body) };
+}
+
 /** What `POST /reports/dismiss-open` takes, checked for shape. */
 export interface DismissOpenBody {
   scope: 'person' | 'reporter';
@@ -243,22 +256,51 @@ export function bodyAppealDecision(body: Record<string, unknown>): AppealDecisio
 /** What `POST /people/:ref/rename` takes, checked for shape. */
 export interface RenameBody {
   reason: string;
-  rule?: number;
+  rule: number;
   takeOver: boolean;
+  /** The entity (a clan, guild, team) the rename is about, when it is not the player's own name. */
+  entity: { kind: string; ref: string } | null;
 }
 
 /**
- * The body of `POST /people/:ref/rename`: `{ reason, rule?, takeOver? }`. `reason` is text that is not blank (the core keeps it to 500 characters); `rule`
- * a whole number from 1 (the core checks that it is an active rule; `'uncovered'` is not one); `takeOver` a boolean. Anything else is 400.
+ * The body of `POST /people/:ref/rename`: `{ reason, rule, takeOver? }`. `reason` is text that is not blank (the core keeps it to 500 characters); `rule`
+ * is required (a rename always cites a rule) and a whole number from 1 (the core checks that it is an active rule; `'uncovered'` is not one); `takeOver` a
+ * boolean; `entity` (optional, null is none) is exactly `{ kind, ref }` for a rename of a clan, guild or team (a label is never sent). Anything else is 400.
  */
 export function bodyRename(body: Record<string, unknown>): RenameBody {
   const reason = bodyText(body.reason);
   if (reason.trim() === '') throw new ValidationError();
   const takeOver = bodyTakeOver(body);
-  if (!has(body, 'rule')) return { reason, takeOver };
   const rule = body.rule;
   if (typeof rule !== 'number' || !Number.isSafeInteger(rule) || rule < 1) throw new ValidationError();
-  return { reason, rule, takeOver };
+  return { reason, rule, takeOver, entity: bodyEntityRef(body.entity) };
+}
+
+const ENTITY_KIND = /^[a-z][a-z_]{0,23}$/;
+const ENTITY_REF = /^[A-Za-z0-9_:-]{1,64}$/;
+
+/** An entity a rename is about: exactly `{ kind, ref }` (the kit's grammar; a label is refused), or null for none. Anything else is 400. */
+function bodyEntityRef(value: unknown): { kind: string; ref: string } | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new ValidationError();
+  const keys = Object.keys(value);
+  const { kind, ref } = value as Record<string, unknown>;
+  if (keys.length !== 2 || !keys.includes('kind') || !keys.includes('ref')) throw new ValidationError();
+  if (typeof kind !== 'string' || !ENTITY_KIND.test(kind) || typeof ref !== 'string' || !ENTITY_REF.test(ref)) throw new ValidationError();
+  return { kind, ref };
+}
+
+/**
+ * The `rename` of `POST /reports/:id/decide`: exactly `{ rule }`, a whole number from 1 (the core checks that it is an active rule). Any other
+ * shape, or any other key, is 400. Where the decision's own reason, actor and person come from is the route's business, never this object's.
+ */
+export function bodyDecideRename(value: unknown): { rule: number } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new ValidationError();
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== 'rule') throw new ValidationError();
+  const rule = (value as { rule: unknown }).rule;
+  if (typeof rule !== 'number' || !Number.isSafeInteger(rule) || rule < 1) throw new ValidationError();
+  return { rule };
 }
 
 /** What `PUT /people/:id/automation` takes, checked for shape. */
@@ -296,4 +338,50 @@ export function bodyAutomation(body: Record<string, unknown>): AutomationBody {
   const code = body.code;
   if (typeof code !== 'string' || !(AUTOMATION_CODES as readonly string[]).includes(code)) throw new ValidationError();
   return { allowed: false, code: code as AutomationCode };
+}
+
+/** The longest room id a staff route takes, in characters. */
+const ROOM_ID_MAX = 128;
+
+/**
+ * A `:room` param as the game's own id: 1 to 128 characters once decoded, and no control character (a NUL or a line break has no place in an id, in a log or in an audit ref). Anything else is 400
+ * `invalid_request`, never a silent 404 (the router only checks it is some text).
+ */
+export function roomParam(v: unknown): string {
+  // eslint-disable-next-line no-control-regex -- a control character is exactly what is refused
+  if (typeof v !== 'string' || v.length < 1 || v.length > ROOM_ID_MAX || /[\u0000-\u001f\u007f]/.test(v)) throw new ValidationError();
+  return v;
+}
+
+/** A `:line` param: the kit's own line number, as the router already checked it (a token), else 400. */
+export function lineParam(v: unknown): string {
+  return bodyId(v);
+}
+
+/** A room mode: `normal`, `locked` or `emergency`, else 400 `invalid_mode`. */
+export function bodyMode(v: unknown): 'normal' | 'locked' | 'emergency' {
+  if (v === 'normal' || v === 'locked' || v === 'emergency') return v;
+  throw new HttpError('invalid_mode');
+}
+
+/** How long a mode lasts, in ms: absent is the profile's default; otherwise a whole number from 60 000 to 86 400 000, else 400 `invalid_value`. */
+export function bodyForMs(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 60_000 || v > 86_400_000) throw new HttpError('invalid_value');
+  return v;
+}
+
+/** What `POST /rooms/:room/mode` takes: `{ mode, forMs? }` and nothing else (a bad mode is 400 `invalid_mode`, a bad length 400 `invalid_value`, any other key or shape 400 `invalid_request`). */
+export function bodyRoomMode(body: Record<string, unknown>): { mode: 'normal' | 'locked' | 'emergency'; forMs?: number } {
+  for (const key of Object.keys(body)) if (key !== 'mode' && key !== 'forMs') throw new ValidationError();
+  const mode = bodyMode(body.mode);
+  if (!has(body, 'forMs')) return { mode };
+  return { mode, forMs: bodyForMs(body.forMs) };
+}
+
+/** What `POST /rooms/:room/lines/:line/retract` takes: nothing, or only `{ allFromAuthor?: boolean }`, else 400 `invalid_request`. */
+export function bodyRetract(body: Record<string, unknown>): { allFromAuthor: boolean } {
+  for (const key of Object.keys(body)) if (key !== 'allFromAuthor') throw new ValidationError();
+  if (!has(body, 'allFromAuthor')) return { allFromAuthor: false };
+  if (typeof body.allFromAuthor !== 'boolean') throw new ValidationError();
+  return { allFromAuthor: body.allFromAuthor };
 }

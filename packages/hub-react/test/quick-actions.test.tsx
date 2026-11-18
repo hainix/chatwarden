@@ -434,7 +434,7 @@ describe('a11y of the new controls', () => {
   it('the Nothing wrong here button has a name and a description, and aria-keyshortcuts only with Quick keys on and shortcuts on', async () => {
     const on = await start({ mode: 'detailed', quickKeys: 'on', cases: 1 });
     const button = within(decision()).getByRole('button', { name: 'Nothing wrong here' });
-    expect(button).toHaveAccessibleDescription('Closes the report with no action. Nobody is told and nobody is marked.');
+    expect(button).toHaveAccessibleDescription('Closes the report with no action. Nobody is told, nobody is marked and nothing is sent to anyone.');
     expect(button).toHaveAttribute('aria-keyshortcuts', '2');
     on.unmount();
     document.body.replaceChildren();

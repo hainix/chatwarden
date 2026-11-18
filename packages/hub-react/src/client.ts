@@ -1,3 +1,4 @@
+import type { FilterSettings } from '@chatwarden/core';
 import type { Transport, TransportRequest, TransportResponse } from './transport.js';
 import type {
   AiReadAgainResult,
@@ -7,6 +8,12 @@ import type {
   AppealRow,
   AppealStats,
   AutomationInput,
+  ErasePreviewView,
+  ErasureReceiptView,
+  EvidenceBundleView,
+  HoldCodeView,
+  PrivacyExportView,
+  PrivacyStatementView,
   AiActingInput,
   AiActingState,
   AiActingStep,
@@ -18,17 +25,28 @@ import type {
   BlockedName,
   CloseGapInput,
   CommunityApplied,
+  CommunityRule,
   CommunityStatus,
   DecideInput,
   DecideResult,
   DismissOpenInput,
   DismissOpenResult,
+  ReportComment,
+  ReportMarkResult,
   ExceptionInput,
   ExceptionPatch,
+  FilterCheckView,
+  FilterStatsView,
+  FilterTestView,
   GapRow,
   GuideSection,
   ListAppealsQuery,
   ListAuditQuery,
+  InsightsView,
+  PersonLinksView,
+  ContextRow,
+  RoomMode,
+  RoomRow,
   ListReportsQuery,
   ListSanctionsQuery,
   Me,
@@ -70,7 +88,6 @@ import type {
  * not the shape the hub expects, `unexpected` for anything else, and `http_<status>` when the body is not a kit error.
  * `retryAfter` is the seconds from a `retry-after` header (a 429). A `claimed` error (409: another moderator is handling the
  * case) also says who (`heldBy`) and until when (`heldUntil`, epoch ms).
- * @experimental
  */
 export class HubError extends Error {
   readonly status: number;
@@ -95,7 +112,6 @@ export class HubError extends Error {
 
 /**
  * A `HubError` as is; anything else (a bug in the caller's code, say) becomes status 0, code `unexpected`.
- * @experimental
  */
 export function toHubError(e: unknown): HubError {
   if (e instanceof HubError) return e;
@@ -142,7 +158,6 @@ const q = (query: Record<string, string | number | undefined>): Record<string, s
   Object.fromEntries(Object.entries(query).filter(([, v]) => v !== undefined)) as Record<string, string | number>;
 const enc = encodeURIComponent;
 
-/** @experimental */
 export interface HubClient {
   // The signed-in staff member
   /** `GET /me`: who is calling and what their role may do. */
@@ -158,9 +173,61 @@ export interface HubClient {
   /** `POST /reports/:id/decide`: decide the report. A replay of the same decision applies nothing twice. */
   decide(id: string, input: DecideInput, options?: { keepalive?: boolean }): Promise<DecideResult>;
   /**
+   * `POST /reports/:id/urgent` (needs `reports.urgent`, a moderator's by default): mark an open report urgent or not urgent. Rejects with `not_found` (404) or `already_decided` (409).
+   */
+  setUrgent(id: string, on: boolean): Promise<ReportMarkResult>;
+  /**
+   * `POST /reports/:id/handoff` (needs `reports.handoff`): mark the case as passed to the game's safety team (who and when, the first mark only). It honours the claim like a decision:
+   * `takeOver: true` (a senior's) moves another moderator's claim. Rejects with `claimed` (409), `not_found` (404) or `already_decided` (409). It contacts no one.
+   */
+  handoff(id: string, options?: { takeOver?: boolean }): Promise<ReportMarkResult>;
+  /**
+   * `POST /reports/:id/comments` (needs `reports.comment`; 404 with `desk.workflow` off): add a staff comment of 1 to 500 characters (at most 50 entries a report). Never claim-gated.
+   * Rejects with `invalid_request` (400), `not_found` (404) or `comment_limit` (409).
+   */
+  addComment(id: string, text: string): Promise<{ comment: ReportComment }>;
+  /**
+   * `DELETE /reports/:id/comments/:cid` (needs `reports.comment`): remove a comment (its author, or a senior). Another moderator's and an unknown id are the same `not_found`.
+   */
+  removeComment(id: string, commentId: string): Promise<ReportMarkResult>;
+  /**
+   * `POST /reports/:id/escalate` (needs `reports.escalate`): ask a senior or the owner for a second look, with an optional note that joins the thread. An owner asks no one (`forbidden`).
+   * Rejects with `invalid_request`, `not_found`, `already_decided` or `forbidden`.
+   */
+  escalate(id: string, input: { to: 'senior' | 'owner'; note?: string }): Promise<ReportMarkResult>;
+  /**
+   * `DELETE /reports/:id/escalate` (needs `reports.escalate`): "Looked at": clear the ask (the asker, or anyone at or above the role asked; else `forbidden`).
+   */
+  clearEscalation(id: string): Promise<ReportMarkResult>;
+  /**
+   * `GET /insights?days` (needs `insights.read`; 404 with `desk.insights` off): the team's numbers over 7, 30 (the default) or 90 days. Counts and times only: never a person, a
+   * staff member or any text. A median that is not there yet is `null`.
+   */
+  insights(days?: 7 | 30 | 90): Promise<InsightsView>;
+  /**
+   * `GET /rooms` (needs `rooms.read`): the rooms this server process knows (seated players, or a mode set), up to 500, the most seated first. No seat id and no handle.
+   */
+  rooms(): Promise<{ rooms: RoomRow[] }>;
+  /**
+   * `GET /policy/contexts` (needs `policy.read`; 403 for a scoped caller): the room contexts the profile declares, as `{ name, label, overrides }` (the sections each sets, names only). They are declared in code, so the hub
+   * only lists them and shows the label of a case's room.
+   */
+  contexts(): Promise<{ contexts: ContextRow[] }>;
+  /**
+   * `POST /rooms/:room/mode` (needs `rooms.manage`): put the room in `normal` (at once), `locked` or `emergency` (each ends by itself after `forMs`, 60 000 to 86 400 000, else the profile's default).
+   * Rejects with `invalid_mode`, `invalid_value` or `invalid_request` (400). A mode is never a sanction.
+   */
+  setRoomMode(room: string, mode: RoomMode, forMs?: number): Promise<{ mode: RoomMode; since: number | null; until: number | null }>;
+  /**
+   * `POST /rooms/:room/lines/:line/retract` (needs `rooms.manage`): take a delivered line back for everyone, keeping it as evidence; `allFromAuthor` takes back every delivered line of its author still in the
+   * evidence buffer too. Answers how many were taken back; 404 `not_found` for a line that is too old or gone. Not a sanction.
+   */
+  retractLine(room: string, line: string, options?: { allFromAuthor?: boolean }): Promise<{ count: number }>;
+  /** `GET /people/:ref/links` (needs `history.read`, audited): how many accounts and devices the kit has linked to the person, as counts only. */
+  personLinks(ref: string): Promise<PersonLinksView>;
+  /**
    * `POST /reports/dismiss-open` (needs `reports.decide.bulk`): dismiss every open report about one person, or from one reporter, as "nothing
    * wrong here" (the kit's standard reason; a sweep never takes one). Retrying is safe: a closed report counts as `replayed`.
-   * @experimental
    */
   dismissOpen(input: DismissOpenInput, options?: { keepalive?: boolean }): Promise<DismissOpenResult>;
 
@@ -169,27 +236,26 @@ export interface HubClient {
    * `POST /reports/:id/ai/read` (needs `reports.decide`): ask for the read again. `ready` carries the read when nothing changed (no call is
    * made); `pending` means one was queued, so read the case again in a moment. Rejects with `ai_off`, `ai_final` (409), `ai_budget` (429),
    * `rate_limited` (429) or `ai_unavailable` (503, with `retryAfter` seconds).
-   * @experimental
    */
   readAgain(id: string): Promise<AiReadAgainResult>;
-  /** `GET /ai/status` (needs `policy.read`, audited like the settings): the state, today's reads and spend, and the casebook counts. @experimental */
+  /** `GET /ai/status` (needs `policy.read`, audited like the settings): the state, today's reads and spend, and the casebook counts. */
   aiStatus(): Promise<AiStatusView>;
   /**
    * `GET /ai/gates` (needs `policy.read`, audited like the settings): the gate table's data. Read it when the table is opened, not on a timer. 404 from a server
-   * before 0.1.13. Nothing in the answer lets the AI act: acting does not exist in this release. @experimental
+   * before 0.1.13. Nothing in the answer lets the AI act: acting does not exist in this release.
    */
   aiGates(): Promise<AiGatesView>;
-  /** `GET /ai/acting` (needs `policy.read`, audited like the settings): where acting stands (the mode, paused, the days of shadow and what it would have done). 404 from a server before 0.1.14. @experimental */
+  /** `GET /ai/acting` (needs `policy.read`, audited like the settings): where acting stands (the mode, paused, the days of shadow and what it would have done). 404 from a server before 0.1.14. */
   aiActing(): Promise<AiActingState>;
   /**
    * `POST /ai/acting/shadow|start|pause|resume|off`: one step. `shadow`, `start`, `resume` and `off` are the owner's and fixed in the server's code; `pause` needs `ai.pause`. `shadow` from `off` and `start` take
    * `{ confirm: 'ACT', reason }`, the others `{ reason }`. The server checks the word and the role again. 409 `wrong_state`, `no_appeals`, `ai_level`, `acting_unavailable`; 400 `invalid_request`. In this
-   * release no step applies anything to a player. @experimental
+   * release no step applies anything to a player.
    */
   aiActingStep(step: AiActingStep, input: AiActingInput): Promise<AiActingState>;
-  /** `GET /ai/actions` (needs `ai.review`): what the AI did or, in shadow, would have done, newest first. Pass `next` back as `cursor` for the following page. @experimental */
+  /** `GET /ai/actions` (needs `ai.review`): what the AI did or, in shadow, would have done, newest first. Pass `next` back as `cursor` for the following page. */
   aiActions(query?: { state?: 'shadow' | 'all'; limit?: number; cursor?: string }): Promise<AiActionsPage>;
-  /** `POST /reports/:id/ai/dont-teach` (needs `reasons.write`): the decided case's example text is never used to teach the AI again. 404 when it has none. @experimental */
+  /** `POST /reports/:id/ai/dont-teach` (needs `reasons.write`): the decided case's example text is never used to teach the AI again. 404 when it has none. */
   dontTeach(id: string): Promise<{ ok: true }>;
 
   // People and sanctions
@@ -203,29 +269,45 @@ export interface HubClient {
   revokeSanction(groupId: string, reason: string): Promise<{ ok: true }>;
 
   // Appeals (needs `features.appeals` and `appeals.read`; every route is a 404 while appeals are off)
-  /** `GET /appeals`: the inbox, oldest first, `open` unless asked. No statement is in a list. @experimental */
+  /** `GET /appeals`: the inbox, oldest first, `open` unless asked. No statement is in a list. */
   appeals(query?: ListAppealsQuery): Promise<Page<AppealRow>>;
-  /** `GET /appeals/:id`: one appeal in full, the player's statement included. Audited. @experimental */
+  /** `GET /appeals/:id`: one appeal in full, the player's statement included. Audited. */
   appeal(id: string): Promise<{ appeal: AppealDetail }>;
   /**
    * `POST /appeals/:id/decide` (needs `appeals.decide`): keep the decision, make it lighter (`to`) or remove it, with a private reason. Rejects with
-   * `already_decided`, `same_decider` or `gone` (409), `duration_not_offered` or another 400 for a `to` the profile does not allow. @experimental
+   * `already_decided`, `same_decider` or `gone` (409), `duration_not_offered` or another 400 for a `to` the profile does not allow.
    */
   decideAppeal(id: string, input: AppealDecisionInput): Promise<AppealDecided>;
-  /** `GET /appeals/stats`: the per-rule counts over the last 30, 90 (default) or 365 days. Audited. @experimental */
+  /** `GET /appeals/stats`: the per-rule counts over the last 30, 90 (default) or 365 days. Audited. */
   appealStats(options?: { days?: 30 | 90 | 365 }): Promise<AppealStats>;
 
   // Names
   /**
    * `POST /people/:ref/rename` (needs `sanctions.apply`, and `features.renames`): ask the player for a new name, with no sanction. The reason is checked
-   * and kept by the audit trail only. Rejects with `pending_rename` (409) while one is waiting, `claimed` (409) like a sanction. @experimental
+   * and kept by the audit trail only. Rejects with `pending_rename` (409) while one is waiting, `claimed` (409) like a sanction.
    */
-  rename(ref: string, input: { reason: string; rule?: number; takeOver?: boolean }): Promise<{ ok: true }>;
+  rename(ref: string, input: { reason: string; rule: number; takeOver?: boolean; entity?: { kind: string; ref: string } }): Promise<{ ok: true }>;
   /**
    * `PUT /people/:id/automation` (needs `automation.write`, a senior's by default): mark a person "do not automate" with one of the closed reason codes, or clear the mark.
-   * Rejects with 403 below the role, 400 for a code the server does not know, 404 for an unknown person or a store that cannot keep the mark. @experimental
+   * Rejects with 403 below the role, 400 for a code the server does not know, 404 for an unknown person or a store that cannot keep the mark.
    */
   setAutomation(person: string, input: AutomationInput): Promise<{ ok: true }>;
+
+  // Privacy requests and legal hold (0.2.0). The owner's routes (fixed on the server); the hub only offers them to the owner and reads the answer.
+  /** `POST /privacy/find`: the person's ref for an account id, or `{ ref: null }`. Creates no one. Owner only. */
+  privacyFind(accountId: string): Promise<{ ref: string | null }>;
+  /** `GET /people/:ref/privacy/export`: the export of one person. The route audits before it answers, so a failed audit rejects and nothing is returned. Owner only. */
+  privacyExport(ref: string): Promise<PrivacyExportView>;
+  /** `POST /people/:ref/privacy/erase`: with `dryRun` the preview (nothing written), otherwise the receipt. `confirm` must be the person's ref. Owner only. */
+  privacyErase(ref: string, input: { keep: 'safety' | 'none'; confirm: string; dryRun?: boolean }): Promise<ErasePreviewView | ErasureReceiptView>;
+  /** `GET /privacy/statement`: what the kit keeps and for how long. Owner only. */
+  privacyStatement(): Promise<PrivacyStatementView>;
+  /** `PUT /reports/:id/hold` (needs `legal.hold`, a senior's by default): hold a report for one of the closed codes. 409 `already_held`. */
+  holdReport(id: string, code: HoldCodeView): Promise<{ ok: true }>;
+  /** `DELETE /reports/:id/hold`: release a hold. Owner only. */
+  releaseHold(id: string): Promise<{ ok: true }>;
+  /** `GET /reports/:id/bundle` (owner only): the report's evidence bundle, signed when the kit has a `bundleSecret`. Account ids only with `accounts: true`. The route audits before it answers. */
+  reportBundle(id: string, options?: { accounts?: boolean }): Promise<EvidenceBundleView>;
 
   // Rule gaps
   /** `GET /gaps`. */
@@ -237,7 +319,13 @@ export interface HubClient {
   /** `GET /terms`. */
   listTerms(): Promise<TermsList>;
   /** `POST /terms/check`: a dry run of a new term. */
-  checkTerm(input: { term: string; language: string }): Promise<{ hits: string[] }>;
+  checkTerm(input: { term: string; language: string; matchMode?: 'word' | 'segment' | 'contains' }): Promise<{ hits: string[]; matchMode?: 'segment' | 'contains' }>;
+  /** `GET /filters/stats?days=` (needs `filters.read`): what the chat filters did over the last 7 or 30 days. */
+  filterStats(days: 7 | 30): Promise<FilterStatsView>;
+  /** `POST /filters/test` (needs `filters.read`): the verdict for one line under `candidate` (filter settings not saved) or the settings in force. */
+  filterTest(input: { text: string; candidate?: FilterSettings }): Promise<FilterTestView>;
+  /** `POST /filters/check` (needs `filters.read`): `candidate` over the adopter's recent lines. */
+  filterCheck(input: { candidate: FilterSettings }): Promise<FilterCheckView>;
   /** `POST /terms/test`: would the live list block this line? */
   testText(text: string): Promise<{ verdict: TextVerdict; termId: string | null }>;
   /** `POST /terms`. */
@@ -297,10 +385,15 @@ export interface HubClient {
   // Blocked lines, policy, audit
   /** `GET /blocked`: the lines the term filter refused (default the last 7 days). */
   listBlocked(options?: { days?: BlockedDays }): Promise<{ items: BlockedLine[] }>;
-  /** `GET /blocked?source=name` (needs `blocked.read`): the blocked names kept as evidence (`names.keepBlocked`), default the last 7 days. Empty (still 200) when none was kept. @experimental */
+  /** `GET /blocked?source=name` (needs `blocked.read`): the blocked names kept as evidence (`names.keepBlocked`), default the last 7 days. Empty (still 200) when none was kept. */
   listBlockedNames(options?: { days?: BlockedDays }): Promise<{ items: BlockedName[] }>;
   /** `GET /policy`: the profile, rules and generated documents. */
   policy(options?: { format?: PolicyFormat; omit?: readonly GuideSection[] }): Promise<PolicyDocs>;
+  /**
+   * `GET /policy/rules` (0.2.0): the Community Rules alone, for a scoped moderator, who cannot read `GET /policy` and needs the list to act on a case. A caller with no scope may use it too (it needs `policy.read` for them).
+   * Read-only; no profile and no documents.
+   */
+  rules(): Promise<{ rules: CommunityRule[] }>;
   /** `GET /audit` (senior). */
   listAudit(query?: ListAuditQuery): Promise<Page<AuditItem>>;
 
@@ -319,7 +412,6 @@ export interface HubClient {
 /**
  * The hub's view of the staff API: one method per route, each resolving with the parsed answer or rejecting with a
  * {@link HubError}. It knows nothing about how the call travels: that is the {@link Transport}.
- * @experimental
  */
 export function createHubClient(transport: Transport): HubClient {
   const call = async <T>(req: TransportRequest): Promise<T> => {
@@ -335,10 +427,23 @@ export function createHubClient(transport: Transport): HubClient {
   return {
     me: () => get<Me>('/me'),
 
-    listReports: (query = {}) => get<Page<ReportSummary>>('/reports', q({ status: query.status, reason: query.reason === null ? 'none' : query.reason, cursor: query.cursor, limit: query.limit })),
+    listReports: (query = {}) =>
+      get<Page<ReportSummary>>('/reports', q({ status: query.status, reason: query.reason === null ? 'none' : query.reason, urgent: query.urgent === true ? '1' : undefined, cursor: query.cursor, limit: query.limit })),
     getReport: (id, options = {}) => get<ReportDetail>(`/reports/${enc(id)}`, q({ level: options.level })),
     suggest: (id, input) => post<Suggestion>(`/reports/${enc(id)}/suggest`, input),
     decide: (id, input, options = {}) => post<DecideResult>(`/reports/${enc(id)}/decide`, input, options),
+    setUrgent: (id, on) => post<ReportMarkResult>(`/reports/${enc(id)}/urgent`, { on }),
+    handoff: (id, options = {}) => post<ReportMarkResult>(`/reports/${enc(id)}/handoff`, options.takeOver === true ? { takeOver: true } : undefined),
+    addComment: (id, text) => post<{ comment: ReportComment }>(`/reports/${enc(id)}/comments`, { text }),
+    removeComment: (id, commentId) => call<ReportMarkResult>({ method: 'DELETE', path: `/reports/${enc(id)}/comments/${enc(commentId)}` }),
+    escalate: (id, input) => post<ReportMarkResult>(`/reports/${enc(id)}/escalate`, { to: input.to, ...(input.note === undefined ? {} : { note: input.note }) }),
+    clearEscalation: (id) => call<ReportMarkResult>({ method: 'DELETE', path: `/reports/${enc(id)}/escalate` }),
+    insights: (days) => get<InsightsView>('/insights', q({ days })),
+    rooms: () => get<{ rooms: RoomRow[] }>('/rooms'),
+    contexts: () => get<{ contexts: ContextRow[] }>('/policy/contexts'),
+    setRoomMode: (room, mode, forMs) => post(`/rooms/${enc(room)}/mode`, { mode, ...(forMs === undefined ? {} : { forMs }) }),
+    retractLine: (room, line, options = {}) => post<{ count: number }>(`/rooms/${enc(room)}/lines/${enc(line)}/retract`, options.allFromAuthor === true ? { allFromAuthor: true } : undefined),
+    personLinks: (ref) => get<PersonLinksView>(`/people/${enc(ref)}/links`),
     dismissOpen: (input, options = {}) => post<DismissOpenResult>('/reports/dismiss-open', input, options),
     readAgain: (id) => post<AiReadAgainResult>(`/reports/${enc(id)}/ai/read`, undefined),
     aiStatus: () => get<AiStatusView>('/ai/status'),
@@ -354,6 +459,13 @@ export function createHubClient(transport: Transport): HubClient {
     appealStats: (options = {}) => get<AppealStats>('/appeals/stats', q({ days: options.days })),
     rename: (ref, input) => post<{ ok: true }>(`/people/${enc(ref)}/rename`, input),
     setAutomation: (person, input) => call<{ ok: true }>({ method: 'PUT', path: `/people/${enc(person)}/automation`, body: input }),
+    privacyFind: (accountId) => post<{ ref: string | null }>('/privacy/find', { accountId }),
+    privacyExport: (ref) => get<PrivacyExportView>(`/people/${enc(ref)}/privacy/export`),
+    privacyErase: (ref, input) => post<ErasePreviewView | ErasureReceiptView>(`/people/${enc(ref)}/privacy/erase`, input),
+    privacyStatement: () => get<PrivacyStatementView>('/privacy/statement'),
+    holdReport: (id, code) => call<{ ok: true }>({ method: 'PUT', path: `/reports/${enc(id)}/hold`, body: { code } }),
+    releaseHold: (id) => call<{ ok: true }>({ method: 'DELETE', path: `/reports/${enc(id)}/hold` }),
+    reportBundle: (id, options) => get<EvidenceBundleView>(`/reports/${enc(id)}/bundle`, options?.accounts === true ? { accounts: '1' } : undefined),
 
     personHistory: (ref, options = {}) => get<PersonHistory>(`/people/${enc(ref)}/history`, q({ limit: options.limit })),
     listSanctions: (query = {}) => get<Page<SanctionRow>>('/sanctions', q({ cursor: query.cursor, limit: query.limit, source: query.source })),
@@ -364,8 +476,11 @@ export function createHubClient(transport: Transport): HubClient {
     closeGap: (groupId, input) => post<{ ok: true }>(`/gaps/${enc(groupId)}/close`, input),
 
     listTerms: () => get<TermsList>('/terms'),
-    checkTerm: (input) => post<{ hits: string[] }>('/terms/check', input),
+    checkTerm: (input) => post<{ hits: string[]; matchMode?: 'segment' | 'contains' }>('/terms/check', input),
     testText: (text) => post<{ verdict: TextVerdict; termId: string | null }>('/terms/test', { text }),
+    filterStats: (days) => get<FilterStatsView>('/filters/stats', q({ days })),
+    filterTest: (input) => post<FilterTestView>('/filters/test', input),
+    filterCheck: (input) => post<FilterCheckView>('/filters/check', input),
     addTerm: (input) => post<{ id: string }>('/terms', input),
     updateTerm: (id, p) => patch<{ ok: true }>(`/terms/${enc(id)}`, p),
     setTermActive: (id, active) => post<{ ok: true }>(`/terms/${enc(id)}/active`, { active }),
@@ -401,6 +516,7 @@ export function createHubClient(transport: Transport): HubClient {
     listBlocked: (options = {}) => get<{ items: BlockedLine[] }>('/blocked', q({ days: options.days })),
     listBlockedNames: (options = {}) => get<{ items: BlockedName[] }>('/blocked', q({ days: options.days, source: 'name' })),
     policy: (options = {}) => get<PolicyDocs>('/policy', q({ format: options.format, omit: options.omit === undefined || options.omit.length === 0 ? undefined : options.omit.join(',') })),
+    rules: () => get<{ rules: CommunityRule[] }>('/policy/rules'),
     policyProfile: () => get<PolicyState>('/policy/profile'),
     savePolicyProfile: (input) => call<PolicySaved>({ method: 'PUT', path: '/policy/profile', body: input }),
     previewPolicyProfile: (input) => post<{ samples: PolicySamples }>('/policy/profile/preview', input),
@@ -413,7 +529,6 @@ export function createHubClient(transport: Transport): HubClient {
  * Follows `next` until the list ends, joining the pages in order. At most `maxPages` pages (default 20); when it stops early
  * the result's `next` is where to carry on. A cursor that repeats ends the loop, so a server that never finishes cannot hold
  * the page. A failed page rejects: the caller still has what it had before.
- * @experimental
  */
 export async function fetchAll<T>(
   loadPage: (cursor: string | undefined) => Promise<Page<T>>,

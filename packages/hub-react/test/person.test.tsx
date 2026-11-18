@@ -482,7 +482,8 @@ describe('revoke', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Your role cannot do this.');
     expect(reasonBox()).toHaveValue('because');
     expect(histories(w)).toHaveLength(1);
-    expect(within(inForce()).getAllByRole('listitem')).toHaveLength(1);
+    // The sanctions in force (the revoke panel's own effect lines are list items too, one list deeper).
+    expect(within(inForce()).getAllByRole('listitem').filter((li) => li.closest('.cw-pv') === null)).toHaveLength(1);
   });
 
   it('a network failure keeps the reason and Confirm sends it again, once', async () => {
@@ -553,7 +554,7 @@ describe('as a reporter', () => {
     const ids: string[] = [];
     for (let i = 0; i < 4; i += 1) ids.push((await w.fileRich({ reporter: 'Rae', target: `T${i}`, room: `s${i}` })).id);
     for (const id of ids.slice(0, 3)) await w.client.decide(id, { verdict: 'bad_faith', reason: 'lied', evidence: 'made up', actions: [] });
-    const rae = (await w.client.getReport(ids[0]!)).report.reporterPerson;
+    const rae = (await w.client.getReport(ids[0]!)).report.reporterPerson!;
     await open(w, rae);
     const panel = reporterPanel();
     expect(within(panel).getByText('3 for bad faith.')).toBeInTheDocument();
@@ -565,7 +566,7 @@ describe('as a reporter', () => {
     const ids: string[] = [];
     for (let i = 0; i < 4; i += 1) ids.push((await w.fileRich({ reporter: 'Rae', target: `T${i}`, room: `s${i}` })).id);
     for (const id of ids.slice(0, 3)) await w.client.decide(id, { verdict: 'bad_faith', reason: 'lied', evidence: 'made up', actions: [] });
-    const rae = (await w.client.getReport(ids[0]!)).report.reporterPerson;
+    const rae = (await w.client.getReport(ids[0]!)).report.reporterPerson!;
     w.clock.t += 40 * DAY;
     await open(w, rae);
     expect(within(reporterPanel()).queryByText(/suspended/)).toBeNull();

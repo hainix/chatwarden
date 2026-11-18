@@ -4,8 +4,9 @@ import { ReporterStanding, ReporterTotals } from '../case/ReporterStanding.js';
 import { useHub } from '../context.js';
 import { useHubData } from '../hooks.js';
 import { categoryLabel, groupName, kindLabel } from '../labels.js';
-import { LazyPersonAutomation, LazySignalLines } from '../lazyParts.js';
+import { LazyPersonAutomation, LazyPersonPrivacy, LazySignalLines } from '../lazyParts.js';
 import { LocalReveal, NameToggle, NameValue } from '../names.js';
+import { PersonMenu } from '../person/PersonMenu.js';
 import { Revoke } from '../person/Revoke.js';
 import { SanctionForm } from '../person/SanctionForm.js';
 import type { AppealSummary, SanctionGroupView, PersonHistory } from '../types.js';
@@ -44,7 +45,7 @@ export function timelineOf(history: Pick<PersonHistory, 'reports' | 'sanctions'>
  * once more, never on a timer.
  */
 export function Person({ person }: { person: string }) {
-  const { client, t, can } = useHub();
+  const { client, t, can, me } = useHub();
   const history = useHubData(`person:${person}`, () => client.personHistory(person));
   const [form, setForm] = useState<Form>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
@@ -64,7 +65,8 @@ export function Person({ person }: { person: string }) {
   const flagged = data?.handleFlagged === true;
   // Hidden while the server flags the handle: in the title, in the forms and in every label. The title's own Show reveals it.
   const name = groupName(t, { handle, person, handleFlagged: flagged });
-  const canApply = can('sanctions.apply');
+  // A scoped moderator acts from a case: the case carries the report id a scoped sanction needs, and this form sends none (the server answers 404). So no Sanction or Note button for them.
+  const canApply = can('sanctions.apply') && me.scope === undefined;
   const wrote = (): void => {
     refocus.current = true;
     history.reload();
@@ -88,6 +90,7 @@ export function Person({ person }: { person: string }) {
             {handle !== null && <PersonChip person={person} />}
             <NameToggle flagged={flagged} place="head" />
           </div>
+          <PersonMenu person={person} />
           {canApply && (
             <div className="cw-bar-actions">
               <button ref={sanctionButton} type="button" className="cw-btn cw-btn--primary" aria-expanded={form === 'sanction'} onClick={() => toggle('sanction')}>
@@ -105,6 +108,7 @@ export function Person({ person }: { person: string }) {
             person={person}
             name={name}
             mode={form}
+            entities={data?.entities ?? []}
             onDone={() => {
               setForm(null);
               wrote();
@@ -133,15 +137,19 @@ export function Person({ person }: { person: string }) {
 }
 
 function PersonBody({ person, onMarked, history, revoking, setRevoking, onRevoked }: { person: string; onMarked: () => void; history: PersonHistory; revoking: string | null; setRevoking: (id: string | null) => void; onRevoked: () => void }) {
-  const { t, can } = useHub();
+  const { t, can, me } = useHub();
   const standing = history.sanctions.filter((s) => s.active && s.revokedAt === null);
+  const asReporter = history.asReporter as PersonHistory['asReporter'] | undefined;
   const entries = useMemo(() => timelineOf(history), [history]);
   const canRevoke = can('sanctions.revoke');
   // "Do not automate" (AI levels 3 and 4): a quiet line while the person is marked, and a `...` item for a senior. Its code is its own chunk, fetched only when one of the two applies.
   const automation = can('automation.write') || history.automation !== undefined ? <LazyPersonAutomation person={person} mark={history.automation ?? null} canWrite={can('automation.write')} onChanged={onMarked} /> : null;
+  // Export and erase (privacy requests): the owner's, behind its own `...`; no one else is offered it, and its code is its own chunk.
+  const privacy = me.role === 'owner' ? <LazyPersonPrivacy person={person} /> : null;
   return (
     <>
       {automation}
+      {privacy}
       <Panel title={t('hub.person.inForce.title')}>
         {standing.length === 0 ? (
           <Empty>{t('hub.person.inForce.none')}</Empty>
@@ -170,14 +178,17 @@ function PersonBody({ person, onMarked, history, revoking, setRevoking, onRevoke
         )}
         {Array.isArray(history.signals) && history.signals.length > 0 && <LazySignalLines signals={history.signals} />}
       </Panel>
-      <Panel title={t('hub.person.reporter.title')}>
-        <div className="cw-panel-pad">
-          <p>
-            <ReporterTotals record={history.asReporter} />
-          </p>
-          {history.asReporter.reports > 0 && <ReporterStanding record={history.asReporter} />}
-        </div>
-      </Panel>
+      {/* A scoped caller's history carries no reporter record (it spans every room): no panel. */}
+      {asReporter !== undefined && (
+        <Panel title={t('hub.person.reporter.title')}>
+          <div className="cw-panel-pad">
+            <p>
+              <ReporterTotals record={asReporter} />
+            </p>
+            {asReporter.reports > 0 && <ReporterStanding record={asReporter} />}
+          </div>
+        </Panel>
+      )}
     </>
   );
 }

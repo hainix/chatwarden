@@ -18,13 +18,13 @@ describe('packages/store-memory/README.md, the test kit', () => {
     for (const name of [...values, ...types]) expect(flat(section), name).toContain(name);
   });
 
-  it('says first that it is not for production, that it needs no test runner and no node: import, and that its names are experimental until 0.2', () => {
+  it('says first that it is not for production, that it needs no test runner and no node: import, and that its names are part of the API', () => {
     const text = flat(section);
     expect(text.indexOf('Not for production')).toBeGreaterThanOrEqual(0);
     expect(text.indexOf('Not for production')).toBeLessThan(80);
     expect(text).toContain('needs no test runner');
     expect(text).toContain('no `node:` import');
-    expect(text).toContain('`@experimental` until 0.2');
+    expect(text).not.toContain('@experimental');
   });
 
   it('control: a name the entry does not export is not in the section', () => {

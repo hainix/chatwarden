@@ -1,6 +1,7 @@
 import { LazyAiStrip } from '../lazyParts.js';
 import type { AiReadView } from '../types.js';
 import { useOptionalCase } from './CaseContext.js';
+import { HiddenExcerpt } from './HiddenExcerpt.js';
 
 /**
  * The place the AI's read goes, between the case header and the transcript. It renders nothing without a read unless the server says one is
@@ -15,5 +16,7 @@ export function AiReadSlot({ read }: { read: AiReadView | null | undefined }) {
   if (status !== undefined && status !== 'open') return null;
   const expected = c?.detail.data?.aiExpected === true;
   if (read == null && !expected) return null;
-  return <LazyAiStrip read={read ?? null} expected={expected} />;
+  const strip = <LazyAiStrip read={read ?? null} expected={expected} />;
+  // The careful view hides the AI's summary until the case is opened; a read still on its way has no text to hide.
+  return read == null ? strip : <HiddenExcerpt what="ai">{strip}</HiddenExcerpt>;
 }

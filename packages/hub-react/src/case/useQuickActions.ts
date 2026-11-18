@@ -80,7 +80,7 @@ export interface QuickActionsOptions {
 }
 
 /** A form without its action ids, to tell whether the moderator has changed it. */
-export const shapeOf = (form: DecisionForm): string => JSON.stringify({ verdict: form.verdict, reason: form.reason, actions: form.actions.map((a) => ({ ...a, uid: '' })) });
+export const shapeOf = (form: DecisionForm): string => JSON.stringify({ verdict: form.verdict, reason: form.reason, rename: form.rename, actions: form.actions.map((a) => ({ ...a, uid: '' })) });
 
 /** The quick actions of the open case. Used inside `<CaseProvider>`. */
 export function useQuickActions({ enabled = true, paused = false, refresh = false }: QuickActionsOptions = {}): QuickActions {

@@ -9,21 +9,18 @@ import type { AiGateName } from './gates.js';
  * The prompt version. Bumped when the prompt or the output schema changes; part of the input hash, so a bump makes every stored
  * read stale. 2 added the full-stop spacing line; 3 added the stable paragraph about signal counts; 4 added the stable paragraph about
  * appeal cautions and corrective examples; 5 added the confirming read's prompt (`purpose: 'confirm'`) beside it, so every stored read is stale once.
- * @experimental
  */
 export const AI_PROMPT_VERSION = 5;
 
 /**
  * The version of the confirming read's own prompt (`purpose: 'confirm'`): a counter apart from {@link AI_PROMPT_VERSION}, so a confirming read is never mistaken for a read
  * of the same version. Bumped when the confirming prompt changes.
- * @experimental
  */
 export const AI_CONFIRM_PROMPT_VERSION = 1;
 
 /**
  * One signal count about the reported person (P1), as the model is shown it: the adopter's own short label, whether it counts for or
  * against, how many DIFFERENT players, and over how many days. Nothing else about a signal ever leaves the process.
- * @experimental
  */
 export interface AISignal {
   label: string;
@@ -35,7 +32,6 @@ export interface AISignal {
 /**
  * One speaker in a read: an alias (`P1` is the reported person, `P2` the reporter, the rest `P3...` in order of first appearance)
  * and the part they play. No identifier ever travels with it.
- * @experimental
  */
 export interface AIPerson {
   alias: string;
@@ -45,7 +41,6 @@ export interface AIPerson {
 /**
  * A pseudonymised casebook example: a decided case, as aliases and redacted lines only (at most 6), with the human's final
  * verdict as its label. It sits in the variable part of the prompt.
- * @experimental
  */
 export interface AIExample {
   /**
@@ -63,14 +58,12 @@ export interface AIExample {
 /**
  * A casebook example as the store hands it over: the {@link AIExample} and its row id. The id never reaches the provider; the read
  * stores the ids of the examples it used (`AIStoredRead.exampleIds`).
- * @experimental
  */
 export type AIExampleInput = AIExample & { id: string };
 
 /**
  * Everything an adapter may use to read one report. The lines and the note are already redacted and carry aliases and refs
  * only; no identifier is in here.
- * @experimental
  */
 export interface AIReadInput {
   /** Bumped when the prompt or schema changes; part of the cache key and of the invalidation hash. */
@@ -115,7 +108,6 @@ export interface AIReadInput {
 /**
  * A read as it is stored: the validated answer plus the ids of the casebook examples that were in its prompt. The examples are not part
  * of the input hash (a growing casebook must not make every stored read look stale), so the read records which ones it saw.
- * @experimental
  */
 export interface AIStoredRead extends AIRead {
   exampleIds: string[];
@@ -123,7 +115,6 @@ export interface AIStoredRead extends AIRead {
 
 /**
  * What an adapter returns. No outcome, no sanction: `output` is the model's JSON, which core validates.
- * @experimental
  */
 export interface AIReadResult {
   /** Parsed JSON as the model produced it. Core validates it; the adapter does not need to. */
@@ -133,7 +124,6 @@ export interface AIReadResult {
 
 /**
  * What one call cost. Core only sums it.
- * @experimental
  */
 export interface AIUsage {
   model: string;
@@ -148,7 +138,6 @@ export interface AIUsage {
 /**
  * The part of an `AbortSignal` that core and an adapter use, written out so core's published declarations need no DOM or Node lib: a real
  * `AbortSignal` is one. It says whether the call was given up on, and tells a listener once when it is.
- * @experimental
  */
 export interface AbortSignalLike {
   readonly aborted: boolean;
@@ -158,7 +147,6 @@ export interface AbortSignalLike {
 
 /**
  * Implemented outside core. Runs on the server only. No method may hold or return a credential.
- * @experimental
  */
 export interface ModerationAI {
   /** Stable label for audit and logs, e.g. `anthropic:claude-haiku-5-5`. Never a key. */
@@ -169,7 +157,6 @@ export interface ModerationAI {
 /**
  * What an adapter throws. Core never inspects a provider error type.
  * `declined` means the provider refused to answer.
- * @experimental
  */
 export class AIError extends Error {
   readonly kind: 'retryable' | 'fatal' | 'declined' | 'timeout';
@@ -183,7 +170,6 @@ export class AIError extends Error {
 /**
  * The validated output core stores and the hub shows. The recommendation never carries an outcome (no kind, no duration): the
  * hub asks the ladder for one. It can never be `bad_faith`.
- * @experimental
  */
 export interface AIRead {
   /** banter | rude | hostile | severe, as the profile defines them. */
@@ -208,7 +194,6 @@ export interface AIRead {
 
 /**
  * Why an AI action was refused: a closed code, never text (design 4.2). `gate_failed:<name>` names the gate that does not hold.
- * @experimental
  */
 export type AiActRefusal =
   | 'acting_off'
@@ -238,7 +223,6 @@ export type AiActRefusal =
 /**
  * What the AI module hands the actor: ids, never a step (design 6.1). The actor recomputes everything from the store; a proposal that disagrees with what it computes is refused,
  * never corrected.
- * @experimental
  */
 export interface AiActionProposal {
   reportId: string;
@@ -248,12 +232,10 @@ export interface AiActionProposal {
 
 /**
  * What the actor answers. `mode` is `shadow` when it only recorded "would have acted"; `acted` belongs to the acting release. `replay` is true when the action was already recorded.
- * @experimental
  */
 export type AiActResult = { ok: true; actionId: string; mode: 'shadow' | 'acted'; replay: boolean } | { ok: false; refused: AiActRefusal };
 
 /**
  * Injected by the kit: the AI module calls it with ids and never learns what it does.
- * @experimental
  */
 export type ActionProposer = (p: AiActionProposal) => Promise<AiActResult>;

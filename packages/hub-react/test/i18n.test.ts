@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { aiEn } from '../src/ai/i18n.js';
+import { privacyEn } from '../src/privacy/i18n.js';
 import { createT, en } from '../src/i18n.js';
 import type { HubText } from '../src/i18n.js';
 
@@ -190,5 +191,36 @@ describe('the AI catalog', () => {
   });
   it('never says the AI decides: it reads, suggests and waits', () => {
     for (const key of keys) expect(text(key), key).not.toMatch(/\b(the AI|AI) (bans|punishes|decides|sanctions)\b/i);
+  });
+});
+
+describe('the privacy and legal-hold catalog', () => {
+  const keys = Object.keys(privacyEn);
+  const text = (k: string): string => (privacyEn as Record<string, string>)[k] as string;
+  it('is keyed hub.privacy.* or hub.legal.*, apart from the hub catalog, and has no empty text', () => {
+    expect(keys.length).toBeGreaterThan(40);
+    for (const key of keys) {
+      expect(key, key).toMatch(/^hub\.(privacy|legal)(\.[a-z][A-Za-z0-9_]*)+$/);
+      expect(Object.hasOwn(en, key), `${key} is also in the hub catalog`).toBe(false);
+      expect(Object.hasOwn(aiEn, key), `${key} is also in the AI catalog`).toBe(false);
+      expect(text(key), key).not.toBe('');
+    }
+  });
+  it('writes every placeholder as {name} with letters only and uses no plural form without its pair', () => {
+    for (const key of keys) for (const m of text(key).matchAll(/\{([^}]*)\}/g)) expect(m[1], key).toMatch(/^[a-zA-Z]+$/);
+    expect(keys.filter((x) => /\.(zero|one|two|few|many|other)$/.test(x))).toEqual([]);
+  });
+  it('is plain: ASCII, no marketing words, no em dash, no exclamation mark, and never a claim of compliance or legality', () => {
+    for (const key of keys) {
+      expect(text(key), key).not.toMatch(/[—!]/);
+      expect(text(key), key).toMatch(/^[ -~]+$/);
+      expect(text(key), key).not.toMatch(/\b(seamless|powerful|robust|blazing|magic|smart|revolutionary)\b/i);
+      expect(text(key), key).not.toMatch(/\b(compliant|compliance|GDPR|legally)\b/i);
+    }
+  });
+  it('says "not legal advice" where it describes erasing or holding', () => {
+    expect(text('hub.privacy.erase.lead')).toContain('not legal advice');
+    expect(text('hub.privacy.statement.note')).toContain('not legal advice');
+    expect(text('hub.legal.hold.lead')).toContain('not a legal conclusion');
   });
 });

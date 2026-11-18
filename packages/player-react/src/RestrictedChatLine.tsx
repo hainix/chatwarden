@@ -1,5 +1,6 @@
 import { useRef } from 'react';
-import { secondsLeft, timeLeft, untilText } from './format.js';
+import { restrictedChatText } from '@chatwarden/core/notice-copy';
+import { secondsLeft } from './format.js';
 import { Card, Root, useUi } from './ui.js';
 import type { PlayerUiProps } from './ui.js';
 
@@ -14,7 +15,6 @@ export interface RestrictedChatLineProps extends PlayerUiProps {
    * A pause, not a sanction: pass the refusal's `reason` and `retryAfterMs`. When given it replaces `until` and `byModerator`, draws no
    * referee card, and says how long to wait in seconds. The end is worked out once, when the line first renders, so a re-render does not
    * restart the wait.
-   * @experimental
    */
   pace?: { reason: 'slow_mode' | 'flood' | 'duplicate'; retryAfterMs: number };
 }
@@ -40,14 +40,8 @@ export function RestrictedChatLine(props: RestrictedChatLineProps) {
     );
   }
 
-  const ends = typeof until === 'number' && Number.isFinite(until);
-  const when = ends ? untilText(until, locale, timeZone) : '';
-  const left = ends ? timeLeft(until, ui.now(), locale) : null;
-  const text = !ends
-    ? t(byModerator ? 'player.restricted.moderator.noEnd' : 'player.restricted.filter.noEnd')
-    : left === null
-      ? t('player.restricted.ended', { when })
-      : t(byModerator ? 'player.restricted.moderator.until' : 'player.restricted.filter.until', { when, left });
+  // The words come from core, the same text the moderator's hub shows (a translation of these keys still applies, through `t`).
+  const text = restrictedChatText((key, values) => t(key, values), { until, byModerator, now: ui.now(), locale, timeZone });
 
   return (
     <Root theme={theme} className={className}>

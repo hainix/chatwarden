@@ -8,7 +8,6 @@ import type { AIRead } from './types.js';
  * the confirming read has confidence of at least `medium`, neither read suspects an injection, and the two cite at least one line in common that the reported person wrote
  * (`ownLineIds`: real line ids, as the reads store them). Anything else, a different verdict, rule or level, a missing recommendation, low confidence, an injection or no shared
  * line by the reported person, is no agreement. Two reads that are not `upheld` never agree: there is nothing to act on.
- * @experimental
  */
 export function confirmAgrees(first: AIRead, second: AIRead, ownLineIds: ReadonlySet<string>): boolean {
   const a = first.recommendation;

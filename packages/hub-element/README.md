@@ -12,7 +12,7 @@ On your server you already mount the kit's staff routes at `/admin` (see `@chatw
 add the script and the element:
 
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.1/dist/hub-element.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.2/dist/hub-element.js"></script>
 <chatwarden-hub base-url="/admin"></chatwarden-hub>
 ```
 
@@ -147,6 +147,12 @@ selector. The element is `display: block` and `hidden` hides it.
 **The font.** The hub uses the system UI font. A `@font-face` rule inside a shadow root is ignored by browsers, so to use Instrument
 Sans, load `@chatwarden/hub-react/font.css` in your page (the page's own CSS) and set `--cw-font: 'Instrument Sans', system-ui, sans-serif` on the element.
 
+## Languages
+
+Spanish and Portuguese are machine-drafted (by an AI model) and have not been reviewed by a person. Read them with someone who speaks the language before you turn one on for your team.
+
+`locale="es"` (or `es-419`, `pt`, `pt-BR`) loads that language's catalogue; changing the attribute loads the new one, and a bad value falls back to English as before. A `t` property you set always wins. The standalone script carries both catalogues (it holds every lazy part in one file, about 74 KB gzipped more); with the module and your own bundler each language is a chunk loaded on demand. The words, the keys to review first and how a community adds a language are in [the translator's guide](https://github.com/hainix/chatwarden/blob/main/docs/recipes/translations.md).
+
 ## Keyboard shortcuts
 
 The hub's shortcuts (J and K to move between cases, N to take the next, `?` for help, Ctrl or Cmd+K for the command bar) work while
@@ -209,8 +215,8 @@ import (its entry is listed under `sideEffects`, so a bare `import '@chatwarden/
 
 ## Size
 
-`dist/hub-element.js` is about 677 KB minified, about 184 KB gzipped (gzip -9) and about 155 KB with brotli, with React, react-dom, the whole hub and
-its stylesheet in it. A test holds it under 200 KB gzipped. The scripts keep the licence banners of that third-party code, and
+`dist/hub-element.js` is about 1,447 KB minified, about 377 KB gzipped (gzip -9) and about 299 KB with brotli, with React, react-dom, the whole hub and
+its stylesheet in it. A test holds it under 400 KB gzipped. It is bigger than in 0.1.x because the script inlines every lazy chunk of the hub: the Spanish and Portuguese catalogues (about 2,260 words each, and the player words), the urgent desk, the rooms, the privacy parts, the filters and the community list all count in full, whichever language a page uses. `dist/index.js` is the same single file (it is built without code splitting), so a page that wants one language and a smaller download uses `@chatwarden/hub-react` with its own bundler, where each catalogue is a lazy chunk. The scripts keep the licence banners of that third-party code, and
 `dist/THIRD_PARTY_NOTICES.txt` lists each bundled package with its licence text; the build generates it from what it bundled. The cost is the price of needing nothing else on the page; a team that already ships React
 pays far less with `@chatwarden/hub-react`.
 

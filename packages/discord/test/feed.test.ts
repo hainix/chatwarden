@@ -143,7 +143,7 @@ function start(k: Kit, plan?: (n: number) => Step | undefined, options: Partial<
 }
 
 const created = (reportId: string, category = 'harassment'): KitEvent =>
-  ({ type: 'report.created', reportId, createdAt: NOW, category, roomTags: { mode: 'ranked' } }) as KitEvent;
+  ({ type: 'report.created', reportId, createdAt: NOW, category, reportedReason: null, urgent: false, roomTags: { mode: 'ranked' } }) as KitEvent;
 const closed = (reportId: string, verdict: 'upheld' | 'noted' | 'no_action' | 'bad_faith' = 'upheld'): KitEvent => ({
   type: 'report.closed',
   reportId,

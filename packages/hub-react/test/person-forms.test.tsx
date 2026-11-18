@@ -119,10 +119,14 @@ describe('the fields', () => {
     expect(screen.getByText('Also block their IP address for up to 24 hours')).toBeInTheDocument();
   });
 
-  it('says the player is not sent a notice from here', async () => {
+  it('shows "What the player sees" in the place of the old hint: nothing until a kind is chosen, then that no notice is sent', async () => {
     const { user } = await page();
     await openSanction(user);
-    expect(within(form('Sanction Mallory')).getByText(/The player is not sent a notice/)).toBeInTheDocument();
+    const panel = await within(form('Sanction Mallory')).findByRole('region', { name: 'What the player sees' });
+    expect(within(form('Sanction Mallory')).queryByText(/The player is not sent a notice/)).toBeNull();
+    expect(panel).toHaveTextContent('Choose what happens to see what the player is sent.');
+    await user.selectOptions(within(form('Sanction Mallory')).getByLabelText('What happens'), 'warning');
+    expect(await within(panel).findByText('No notice is sent. Only a decision on a report sends one.')).toBeInTheDocument();
   });
 
   it('the rule picker lists the rules in force and "No rule covers this", not a retired rule', async () => {

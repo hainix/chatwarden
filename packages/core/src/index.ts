@@ -1,4 +1,4 @@
-export const VERSION = '0.1.14';
+export { VERSION } from './version.js';
 
 export type {
   Clock,
@@ -22,6 +22,7 @@ export type {
   AiActionState,
   ReportCategory,
   ReportExcerptLine,
+  ReportEntity,
   ReportListQuery,
   ReportRecord,
   SanctionKind,
@@ -63,8 +64,15 @@ export type {
   StoredReport,
   StrikeRow,
   SubjectRecord,
+  FilterHitRow,
+  ReportOrigin,
+  ChatDayRow,
+  PaceStateRow,
+  CommentRow,
+  InsightRow,
+  ReportComment,
 } from './types.js';
-export { CLAIM_TTL_MS, CONDUCT_LEVELS } from './types.js';
+export { CLAIM_TTL_MS, COMMENTS_PER_REPORT_MAX, CONDUCT_LEVELS } from './types.js';
 export {
   CaseDesk,
   CLAIM_BUSY_TRIES,
@@ -102,8 +110,9 @@ export {
   SanctionIndex,
   validateSanctionInput,
 } from './sanctions.js';
-export type { ActiveSanction, SanctionInput, WrittenSanction } from './sanctions.js';
+export type { ActiveSanction, RevokeWithin, SanctionInput, WrittenSanction } from './sanctions.js';
 export { MAX_MUTES_PER_VIEWER, MUTE_TTL_MS, MuteService } from './mutes.js';
+export type { MuteOutcome } from './mutes.js';
 export {
   REPEAT_LOOKBACK_MS,
   REPEAT_RESTRICT_MS,
@@ -116,7 +125,11 @@ export type { StrikeDecision } from './strikes.js';
 export { slidingWindow } from './rateLimit.js';
 export type { SlidingWindow } from './rateLimit.js';
 export { ChatService } from './chat.js';
-export type { ChatResult, ChatServiceDeps, RefuseReason, RestrictedAnswer } from './chat.js';
+export type { ChatResult, ChatServiceDeps, RefuseReason, RestrictedAnswer, RoomChatRules } from './chat.js';
+export { CONTEXT_SECTIONS, checkRoomTags, checkScope, isContextName, isScopeLabel, MAX_CONTEXTS, MAX_ROOM_TAGS, MAX_SCOPE_LABELS, overriddenSections, resolveContexts, ROOM_TAG_KEYS, scopeOfTags } from './contexts.js';
+export type { ContextChat, ContextSection, ContextSettings, EffectiveContext, ResolvedContext, ResolvedContexts } from './contexts.js';
+export { checkPhraseBooks, MAX_PHRASE_BOOKS, MAX_PHRASES_PER_BOOK, PHRASE_GROUP_MAX, PHRASE_TEXT_MAX, PhraseBookError } from './phrases.js';
+export type { Phrase, PhraseBook, PhraseBooks } from './phrases.js';
 export {
   REPORT_CATEGORIES,
   REPORT_NOTE_MAX,
@@ -135,6 +148,8 @@ export type {
   ReportRefusal,
   ReportResult,
   ReportServiceDeps,
+  SystemReportInput,
+  SystemReportResult,
 } from './reports.js';
 export {
   canonicalReasonId,
@@ -152,6 +167,7 @@ export {
   playerReporting,
   reasonLabel,
   reasonOfCategory,
+  REPORT_EVIDENCE_URL_MAX,
   REPORT_FLOWS,
   suggestedRule,
 } from './reporting.js';
@@ -208,6 +224,7 @@ export type {
   SanctionGroupView,
   SanctionListInput,
   SanctionPage,
+  ScopedHistory,
 } from './staffViews.js';
 export {
   AUDIT_ACTIONS,
@@ -216,6 +233,7 @@ export {
   AUDIT_TARGET_TYPES,
   AuditQueryError,
   isValidAuditActor,
+  roomAuditRef,
   ROLES,
 } from './audit.js';
 export type {
@@ -233,9 +251,70 @@ export type {
 } from './audit.js';
 export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
+export { CaseWorkflow } from './caseWorkflow.js';
+export { evidenceLink } from './reporting.js';
+export { SURGE_MAX_REPORTERS, SURGE_MAX_REPORTS, surgeOf } from './surge.js';
+export type { ReportSurge } from './surge.js';
+export type { ReportEvidence } from './staffReports.js';
+export { computeInsights, INSIGHTS_DAYS, INSIGHTS_MIN_DECIDED, INSIGHTS_MIN_URGENT, INSIGHTS_READ_DAYS, INSIGHTS_ROW_CAP } from './insights.js';
+export type { InsightsBacklog, InsightsDays, InsightsResult } from './insights.js';
+export { COMMENT_MAX, CommentService, hasWorkflowMethods } from './commentService.js';
+export { StoreCapabilityError, URGENT_STORE_METHODS, hasUrgentMethods, missingUrgentMethods } from './storeCapability.js';
+export type { ClearEscalationResult, CommentRemoveResult, CommentResult, EscalateResult } from './commentService.js';
+export type { CaseMarkResult } from './caseWorkflow.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
+// Desk, safety and room settings: the three profile sections of the urgent-lane and rooms release, all defaulted.
+export { resolveDesk } from './desk.js';
+export type { DeskSettings, ResolvedDesk, SurgeSettings } from './desk.js';
+export {
+  DEFAULT_SAFETY_GUIDANCE,
+  resolveSafety,
+  SAFETY_CONTACT_MAX,
+  SAFETY_DETAIL_MAX,
+  SAFETY_GUIDANCE_MAX,
+  SAFETY_LABEL_MAX,
+  SAFETY_RESOURCES_MAX,
+  SAFETY_URL_MAX,
+} from './safety.js';
+export type { ResolvedSafety, SafetyResource, SafetyResourceInput, SafetySettings } from './safety.js';
+export { ROOM_MODES, resolveRooms } from './roomSettings.js';
+export type { EmergencySettings, ProbationSettings, ResolvedRooms, RoomMode, RoomsSettings, UnknownAge } from './roomSettings.js';
+export type { RoomModeState } from './roomModes.js';
 export { WEBHOOK_KEY_TTL_MS } from './types.js';
+export { HOLD_CODES, isHoldCode } from './legal.js';
+export type { HeldSet, HoldCode, HoldRow } from './legal.js';
+export { PRIVACY_DISCLAIMER } from './privacyService.js';
+export type { PrivacyRefusal, PrivacyService, PrivacyStatement } from './privacyService.js';
+export { BUNDLE_DISCLAIMER } from './legalService.js';
+export type { BundlePerson, EvidenceBundle, HoldResult, LegalService } from './legalService.js';
+export { CANONICALIZATION, canonicalJson, signBundle, verifyBundle } from './canonical.js';
+export type { BundleIntegrity } from './canonical.js';
+export {
+  ERASED_LINE,
+  EXPORT_SECTION_MAX,
+  NO_PERSON_JSON_COLUMNS,
+  NO_PERSON_TABLES,
+  PRIVACY_CATEGORIES,
+  PRIVACY_REGISTRY,
+  erasedReporter,
+  isNonPersonReporter,
+  isRestrictingKind,
+} from './privacy.js';
+export type {
+  EraseMode,
+  ErasePlan,
+  ErasePreview,
+  ErasureCounts,
+  ErasureReceipt,
+  ErasureRemoved,
+  ErasureRow,
+  PrivacyCategory,
+  PrivacyClock,
+  PrivacyExport,
+  PrivacyRule,
+  SubjectExport,
+} from './privacy.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
 export {
   ExcerptError,
@@ -256,9 +335,9 @@ export type {
   SanctionNoticeInput,
 } from './notices.js';
 export { KIT_EVENT_TYPES } from './events.js';
-export type { KitEvent, KitEventOf, KitListener, StaffRef, Subscribe } from './events.js';
+export type { InsightsDigest, KitEvent, KitEventOf, KitListener, StaffRef, Subscribe } from './events.js';
 export { createChatwarden } from './chatwarden.js';
-export type { Chatwarden, ChatwardenOptions, GapRow } from './chatwarden.js';
+export type { Chatwarden, ChatwardenOptions, GapRow, PersonLinks } from './chatwarden.js';
 export {
   CATEGORY_TO_RULE,
   CommunityRules,
@@ -332,17 +411,52 @@ export {
   resolveProfile,
   validateProfile,
 } from './profile.js';
-// Pace settings (@experimental): slow mode, burst limit and repeat refusal, all off until set.
+// Pace settings: slow mode, burst limit and repeat refusal, all off until set.
 export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
 export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
-// Appeals and names settings (@experimental): off until set (names masking in the hub is the one default-on setting).
+// Chat filter settings: links, personal info, phrases and caps or repeats, each with an action and a Community Rule, all off until set.
+export {
+  checkFilterRules,
+  checkFilters,
+  FILTER_ACTIONS,
+  FILTER_LIMITS,
+  FILTER_RULE_DEFAULTS,
+  FILTER_SUGGESTIONS,
+  filterRulePaths,
+  filtersActive,
+  mergeFilters,
+  overlayFilters,
+  PERSONAL_KINDS,
+  RATIO_DEFAULTS,
+  resolveFilters,
+  SHARED_HOSTING_SUFFIXES,
+} from './filters.js';
+export type {
+  FilterAction,
+  FilterPatch,
+  FilterSettings,
+  LinkSettings,
+  PersonalInfoSettings,
+  PersonalKind,
+  PhraseRuleSettings,
+  RatioSettings,
+  ResolvedFilters,
+  ResolvedLinks,
+  ResolvedPersonalInfo,
+  ResolvedPhraseRule,
+  ResolvedRatio,
+} from './filters.js';
+export type { FilterCheckResult, FilterCheckRule, FilterHit, FilterHitKind, FilterRefusal, FilterTestResult, FilterVerdict } from './filters/engine.js';
+export type { FilterKeyCounts, FilterStats } from './filters/counters.js';
+export type { FilterSpan } from './filters/fold.js';
+// Appeals and names settings: off until set (names masking in the hub is the one default-on setting).
 export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_STATEMENT_MAX, APPEAL_STATS_MIN_SANCTIONS, normalizeStatement, resolveAppeals, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
 export type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';
 export { LINK_SYSTEMS } from './links.js';
 export type { LinkRow, LinkSystem } from './links.js';
-export { resolveNames } from './names.js';
-export type { NameCheckResult, NameReason, NameSettings, ResolvedNames } from './names.js';
-// Signals (@experimental): kinds a game declares, the guards, and the feeds that say where counts may be read.
+export { checkNameRules, DEFAULT_RESERVED_RULE, MAX_RESERVED_ENTRIES, NAME_ALLOW_MAX, NAME_ENTRY_MAX, NAME_ENTRY_MIN, resolveNames } from './names.js';
+export type { NameCheckResult, NameKind, NameReason, NameSettings, ResolvedNames } from './names.js';
+// Signals: kinds a game declares, the guards, and the feeds that say where counts may be read.
 export {
   BUILTIN_SIGNAL_KINDS,
   checkSignalFeeds,
@@ -404,7 +518,7 @@ export type {
   RulesFlavour,
 } from './profile.js';
 
-// AI levels 1 and 2: the provider-free contract (@experimental). Kept apart from the rest so a bundler can drop it.
+// AI levels 1 and 2: the provider-free contract. Kept apart from the rest so a bundler can drop it.
 export { AI_CONFIRM_PROMPT_VERSION, AI_PROMPT_VERSION, AIError } from './ai/types.js';
 export { confirmAgrees } from './ai/confirm.js';
 export { AI_ACT_MAX_AGE_MS, capsOk, dueAt, isHeldBack, preFilter } from './ai/actPlan.js';

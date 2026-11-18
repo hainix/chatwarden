@@ -33,7 +33,7 @@ async function world() {
     if (!res.ok) throw new Error(`report refused: ${res.refused}`);
     const report = cw.reports.get(res.reportId);
     if (report === null) throw new Error('report missing');
-    return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson };
+    return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson! };
   };
   const authorize = (req: KitRequest): Authz | null => {
     const role = req.headers['x-role'];

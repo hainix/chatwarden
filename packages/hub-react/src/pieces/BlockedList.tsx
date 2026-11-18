@@ -4,7 +4,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * The props of `BlockedList`.
- * @experimental
  */
 export interface BlockedListProps extends PieceProps {
   /** A person was chosen. Without it they are plain text. */
@@ -23,7 +22,6 @@ export interface BlockedListProps extends PieceProps {
  * ```tsx
  * <BlockedList onOpenPerson={(ref) => navigate(`/people/${ref}`)} />
  * ```
- * @experimental
  */
 export function BlockedList({ className, onOpenPerson, onOpenTerms }: BlockedListProps) {
   return (

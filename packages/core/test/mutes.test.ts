@@ -103,7 +103,7 @@ describe('set / isMuted basics', () => {
     const v = person(who('vk'));
     const t = person(who('tk'));
     mutes.set(v, t, true);
-    expect(store.rawMutes()).toEqual([{ viewer: v, target: t, createdAt: clock.t }]);
+    expect(store.rawMutes()).toEqual([{ viewer: v, target: t, createdAt: clock.t, block: false }]);
   });
 
   it('set is synchronous: the very next isMuted sees it', () => {
@@ -111,7 +111,7 @@ describe('set / isMuted basics', () => {
     const v = person(who('vk'));
     const t = person(who('tk'));
     const out = mutes.set(v, t, true);
-    expect(out).toBeUndefined();
+    expect(out).toBe('ok');
     expect(mutes.isMuted(v, t)).toBe(true);
   });
 });
@@ -877,7 +877,7 @@ describe('mutedSeats', () => {
     const { mutes, store, roster, sit, clock } = room();
     const v = sit('p1', who('vk'));
     sit('p2', who('a'));
-    store.upsertMute({ viewer: v, target: v, createdAt: clock.t });
+    store.upsertMute({ viewer: v, target: v, createdAt: clock.t, block: false });
     await mutes.load();
     expect(mutes.mutedSeats('R', 'p1', roster)).toEqual([]);
   });

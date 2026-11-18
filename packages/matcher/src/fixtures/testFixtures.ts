@@ -4,6 +4,8 @@ import * as fixtures from './index.js';
 /** @deprecated Import from `@chatwarden/matcher/fixtures`. This alias is removed in the next release. */
 export const SYNTHETIC_TERMS = fixtures.SYNTHETIC_TERMS;
 /** @deprecated Import from `@chatwarden/matcher/fixtures`. This alias is removed in the next release. */
+export const SYNTHETIC_UNSPACED_TERMS = fixtures.SYNTHETIC_UNSPACED_TERMS;
+/** @deprecated Import from `@chatwarden/matcher/fixtures`. This alias is removed in the next release. */
 export const SYNTHETIC_EXCEPTIONS = fixtures.SYNTHETIC_EXCEPTIONS;
 /** @deprecated Import from `@chatwarden/matcher/fixtures`. This alias is removed in the next release. */
 export const UNLISTED_WORDS = fixtures.UNLISTED_WORDS;

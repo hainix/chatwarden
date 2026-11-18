@@ -11,29 +11,23 @@ import type { Store } from './store.js';
 
 /**
  * How long an Undo toast, and the action it holds, waits. The stylesheet's progress bar runs for the same 5 seconds.
- * @experimental
  */
 export const UNDO_MS = 5_000;
 /**
  * How long a plain toast stays. An error stays longer.
- * @experimental
  */
 export const TOAST_MS = 4_000;
-/** @experimental */
 export const TOAST_ERROR_MS = 7_000;
 /**
  * The most toasts on screen at once.
- * @experimental
  */
 export const TOAST_MAX = 3;
 /**
  * The most held (Undo) toasts at once, counted apart from {@link TOAST_MAX}: quick decisions stack several, each with its own Undo, and
  * news must not push one off. Past this the oldest is sent early (its Undo ends).
- * @experimental
  */
 export const TOAST_HELD_MAX = 10;
 
-/** @experimental */
 export interface ToastInput {
   text: string;
   tone?: 'neutral' | 'bad';
@@ -43,7 +37,6 @@ export interface ToastInput {
   ms?: number;
 }
 
-/** @experimental */
 export interface HoldInput {
   text: string;
   /** What runs when the window ends without Undo, or at once on `commit()`, a dismissal, or the hub closing. Runs once. */
@@ -55,7 +48,6 @@ export interface HoldInput {
   ms?: number;
 }
 
-/** @experimental */
 export interface Hold {
   /** Cancel the action. A no-op once it has run. */
   undo: () => void;
@@ -63,7 +55,6 @@ export interface Hold {
   commit: () => void;
 }
 
-/** @experimental */
 export interface Toasts {
   push: (input: ToastInput) => number;
   hold: (input: HoldInput) => Hold;
@@ -72,7 +63,6 @@ export interface Toasts {
 
 /**
  * One toast as it is shown.
- * @experimental
  */
 export interface ToastRecord {
   id: number;
@@ -84,7 +74,6 @@ export interface ToastRecord {
   held: boolean;
 }
 
-/** @experimental */
 export interface ToastStore extends Toasts, Store<readonly ToastRecord[]> {
   /** Stop the toast's own timer, keeping what is left of it (a pointer is over it, or focus is in it). */
   pause: (id: number) => void;
@@ -94,7 +83,6 @@ export interface ToastStore extends Toasts, Store<readonly ToastRecord[]> {
   dispose: () => void;
 }
 
-/** @experimental */
 export interface ToastStoreOptions {
   /** The words (the Undo label). Read each time, so a new catalog takes effect. */
   words: () => HubT;
@@ -122,7 +110,6 @@ interface Clock {
   timer: unknown;
 }
 
-/** @experimental */
 export function createToastStore(options: ToastStoreOptions): ToastStore {
   const timers = options.timers ?? browserTimers;
   const page = options.page ?? browserPage;

@@ -127,8 +127,8 @@ describe('parseCli', () => {
     expectOneSentence(positional);
     expect(err(['init', '--json', 'extra'])).toContain('extra');
 
-    const unknownCommand = err(['serve']);
-    expect(unknownCommand).toContain('serve');
+    const unknownCommand = err(['frobnicate']);
+    expect(unknownCommand).toContain('frobnicate');
     expectOneSentence(unknownCommand);
 
     const disagree = err(['init', '--force', '--on-conflict', 'skip']);
@@ -157,7 +157,7 @@ describe('parseCli', () => {
     expect(ok(['init', '--force', '--on-conflict', 'skip', '-h']).command).toBe('help');
     expect(ok(['--help', '--version']).command).toBe('help');
     expect(ok(['--version', '--help']).command).toBe('help');
-    expect(ok(['serve', '--help']).command).toBe('help');
+    expect(ok(['frobnicate', '--help']).command).toBe('help');
   });
 
   it('no arguments at all is the help', () => {

@@ -68,6 +68,15 @@ export function onPage(type: string, listener: (event: Event) => void): () => vo
   return () => window.removeEventListener(type, listener);
 }
 
+/**
+ * The same, in the capture phase: it runs before anything inside the page hears the event, so it can take a key (say, an Escape that closes a note) for itself with `stopPropagation()`
+ * before the hub's own handler acts on it.
+ */
+export function onPageFirst(type: string, listener: (event: Event) => void): () => void {
+  window.addEventListener(type, listener, true);
+  return () => window.removeEventListener(type, listener, true);
+}
+
 // ---- The page's hubs: who answers a key when nothing is focused -------------------------------------------------------------
 //
 // A hub hears the keys pressed while focus is inside it (React's `onKeyDown` on its root). After load, though, focus is on the page's
@@ -132,4 +141,22 @@ export function registerHub(root: Element, entry: HubEntry): () => void {
       r.stop = null;
     }
   };
+}
+
+/**
+ * Hands the browser one file to save: a Blob behind an object URL, a link clicked once and removed again. It is the page's, not the hub's root: a download belongs to the
+ * page (a link inside a shadow root would click the same). Nothing is kept: no copy in storage, no network call.
+ */
+export function saveBlob(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.rel = 'noopener';
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // After the click has been handled; the file is already on its way to the user's disk.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

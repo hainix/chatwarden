@@ -2,11 +2,12 @@ import type { ReactNode, Ref } from 'react';
 import { useHub } from '../context.js';
 import type { DecisionState } from '../decisions.js';
 import { kindLabel } from '../labels.js';
+import { Link } from '../ui.js';
 
 type Done = Extract<DecisionState, { status: 'done' }>;
 
 /** What a decision came to: closed, whether it was already on record, and the reference code of each action. `children` is the way on. */
-export function DecisionResult({ state, innerRef, children }: { state: Done; innerRef?: Ref<HTMLDivElement>; children?: ReactNode }) {
+export function DecisionResult({ state, innerRef, person, children }: { state: Done; innerRef?: Ref<HTMLDivElement>; person?: string; children?: ReactNode }) {
   const { t } = useHub();
   return (
     <div className="cw-result" tabIndex={-1} ref={innerRef}>
@@ -24,6 +25,23 @@ export function DecisionResult({ state, innerRef, children }: { state: Done; inn
             </li>
           ))}
         </ul>
+      )}
+      {state.rename !== undefined && (
+        <p className="cw-result-rename" data-rename={state.rename}>
+          {state.rename === 'asked' && t('hub.decide.result.rename.asked')}
+          {state.rename === 'already' && t('hub.decide.result.rename.already')}
+          {state.rename === 'failed' && (
+            <>
+              {t('hub.decide.result.rename.failed')}
+              {person !== undefined && (
+                <>
+                  {' '}
+                  <Link to={{ name: 'person', ref: person }}>{t('hub.decide.result.rename.failed.where')}</Link>
+                </>
+              )}
+            </>
+          )}
+        </p>
       )}
       {children}
     </div>

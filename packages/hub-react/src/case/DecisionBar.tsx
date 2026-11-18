@@ -8,6 +8,7 @@ import { isWaiting, useDecisions } from '../decisions.js';
 import { EVIDENCE_MAX, MAX_ACTIONS, REASON_MAX, resolveDraft, toInput } from '../decision.js';
 import type { Problem, UiVerdict } from '../decision.js';
 import { excerptLines, personName } from '../excerpt.js';
+import { useFeatures } from '../features.js';
 import { useHubData } from '../hooks.js';
 import { useKeyListener } from '../keyScope.js';
 import { useMode } from '../mode.js';
@@ -15,14 +16,16 @@ import { useQuickKeys } from '../quickKeys.js';
 import { decideErrorText } from '../labels.js';
 import { modKey, keyLabel } from '../shortcuts.js';
 import type { Reason, ReportDetail } from '../types.js';
-import { ErrorBlock, Kbd, Notice, Skeleton } from '../ui.js';
-import { ActionCard, Field } from './ActionEditor.js';
+import { ErrorBlock, Kbd, Link, Notice, Skeleton } from '../ui.js';
+import { decideOp } from '../preview/ops.js';
+import { ActionCard, Field, RuleOptions } from './ActionEditor.js';
 import { ActionRow } from './ActionRow.js';
 import { Decided } from './Decided.js';
 import { DecisionResult } from './DecisionResult.js';
 import { SuggestionCard } from './SuggestionCard.js';
 import { useCase } from './CaseContext.js';
-import { LazyAiParts, LazyBulkDismiss } from '../lazyParts.js';
+import { usePreviewParts } from './usePreviewParts.js';
+import { LazyAiParts, LazyBulkDismiss, LazyPlayerPreview } from '../lazyParts.js';
 import { actsBlocked, isRepeatClick } from './actGuard.js';
 import { DetailedQuickKeys } from './QuickKeys.js';
 import { takeLastQuick, useQuickActions } from './useQuickActions.js';
@@ -59,13 +62,15 @@ export function ReasonChips({ reasons, onPick }: { reasons: readonly Reason[]; o
 
 /** The dock: verdict, plan, reason, and the buttons. All of the case's decision lives here. */
 export function DecisionBar() {
-  const { t, can, session, shortcuts, go } = useHub();
+  const { t, can, me, session, shortcuts, go } = useHub();
   const listen = useKeyListener();
   const c = useCase();
   const decisions = useDecisions();
   const actions = useCaseActions();
   const { detail, entry, holder, people, left: gone } = c;
   const draft = c.draft;
+  const features = useFeatures();
+  const parts = usePreviewParts(detail.data?.report);
   // "Nothing wrong here" is one button in the bar in every mode. The digits act at once only in Detailed, and only when the moderator
   // turned Quick keys on (otherwise they choose a verdict, as they always did).
   const lite = useQuickActions({ enabled: false });
@@ -220,9 +225,17 @@ export function DecisionBar() {
     if (p.lines !== undefined) items.push({ id: where('person'), problem: p.lines });
   });
   if (shown.list !== undefined) items.push({ id: addId, problem: shown.list });
+  if (shown.rename !== undefined) items.push({ id: `${base}-rename-rule`, problem: shown.rename });
   if (shown.reason !== undefined) items.push({ id: `${base}-reason`, problem: shown.reason });
 
   const atLimit = form.actions.length >= MAX_ACTIONS;
+  // "Ask for a new name": a quiet row after the actions. Shown at once on a name report; for any other reason it waits behind the action editor (the existing disclosure).
+  const nameReport = report.reportedReason === 'name';
+  const renameRow = features.renames && !dismissal && (nameReport || editing || form.rename !== null);
+  // On a name report with renames unavailable: one plain line, where the row would be. Not for a role that cannot apply sanctions (nothing for it to switch on).
+  const renameOff = nameReport && !features.renames && can('sanctions.apply') && !dismissal && me.scope === undefined;
+  // Only the masked text the server sent for a line the person wrote is ever shown; a line without it is left out, never shown as it was typed.
+  const previewOp = decideOp(form, { target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order });
   // A problem on an action that is shown in short opens the editor, where the field is.
   const goTo = (id: string): void => {
     if (field(id) === null) {
@@ -260,7 +273,7 @@ export function DecisionBar() {
   if (!open) {
     body = (
       <>
-        {entry?.state.status === 'done' && <DecisionResult state={entry.state} />}
+        {entry?.state.status === 'done' && <DecisionResult state={entry.state} {...(report === undefined ? {} : { person: report.targetPerson })} />}
         {status === 'conflict' && (
           <Notice tone="warn" role="alert">
             <div ref={conflictRef} tabIndex={-1}>
@@ -302,7 +315,7 @@ export function DecisionBar() {
           </div>
         )}
         {status === 'done' && entry?.state.status === 'done' && (
-          <DecisionResult state={entry.state} innerRef={resultRef}>
+          <DecisionResult state={entry.state} innerRef={resultRef} person={report.targetPerson}>
             {wayOn(true)}
           </DecisionResult>
         )}
@@ -460,6 +473,45 @@ export function DecisionBar() {
                       </button>
                       {atLimit && <p className="cw-hint">{t('hub.decide.add.limit', { max: MAX_ACTIONS })}</p>}
                     </div>
+                    {renameRow && (
+                      <div className="cw-rename">
+                        <label className="cw-tick">
+                          <input
+                            type="checkbox"
+                            id={`${base}-rename`}
+                            checked={form.rename !== null}
+                            aria-describedby={`${base}-rename-hint`}
+                            onChange={(e) => draft.toggleRename(e.target.checked)}
+                          />
+                          <span>{t('hub.decide.rename.label')}</span>
+                        </label>
+                        <p id={`${base}-rename-hint`} className="cw-hint">
+                          {t('hub.decide.rename.hint')}
+                        </p>
+                        {form.rename !== null && (
+                          <Field id={`${base}-rename-rule`} label={t('hub.decide.rename.rule')} hint={t('hub.decide.rename.rule.hint')} problem={shown.rename}>
+                            {(a) => (
+                              <select {...a} value={form.rename?.rule ?? ''} onChange={(e) => draft.setRenameRule(e.target.value)}>
+                                <RuleOptions rules={draft.rules} noUncovered />
+                              </select>
+                            )}
+                          </Field>
+                        )}
+                      </div>
+                    )}
+                    {renameOff && (
+                      <p className="cw-hint cw-rename-off">
+                        {draft.renamesSetting === true
+                          ? t('hub.decide.renamesOff.unsupported')
+                          : can('policy.write')
+                            ? (
+                                <>
+                                  {t('hub.decide.renamesOff.lead')} <Link to={{ name: 'settings', section: 'advanced' }}>{t('hub.decide.renamesOff.where')}</Link>.
+                                </>
+                              )
+                            : `${t('hub.decide.renamesOff.lead')} ${t('hub.decide.renamesOff.where')}.`}
+                      </p>
+                    )}
                   </>
                 )}
               </fieldset>
@@ -508,6 +560,8 @@ export function DecisionBar() {
                   )}
                 </div>
               )}
+
+              <LazyPlayerPreview op={previewOp} nameOf={parts.nameOf} reporter={parts.reporter} announce={draft.announce} />
 
               <div className="cw-submit">
                 <button id={submitId} type="button" className="cw-btn cw-btn--primary" aria-disabled={readOnly || !c.cooled} {...(!readOnly && !c.cooled ? { 'data-cooling': 'true' } : {})} {...(shortcuts ? { 'aria-keyshortcuts': 'Control+Enter Meta+Enter' } : {})} onClick={(e) => decide(true, e)}>

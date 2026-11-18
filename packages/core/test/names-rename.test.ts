@@ -40,7 +40,7 @@ async function kit(names: Record<string, unknown> = { renames: true }, over: Rec
 }
 
 const ask = (k: Awaited<ReturnType<typeof kit>>, subject: SubjectId, over: Record<string, unknown> = {}) =>
-  k.cw.names.requireRename({ subject, actor: ACTOR, reason: REASON, ...over } as never);
+  k.cw.names.requireRename({ subject, actor: ACTOR, reason: REASON, rule: 1, ...over } as never);
 
 describe('requireRename: each result', () => {
   it('off while names.renames is false: nothing written, nothing emitted, whatever the input', async () => {
@@ -59,7 +59,7 @@ describe('requireRename: each result', () => {
     w.cw.rooms.seat('room', 'p1', { clientKey: 'k1' }, 'Name');
     await w.cw.flush();
     const subject = w.cw.rooms.subjectAt('room', 'p1') as SubjectId;
-    expect(w.cw.names.requireRename({ subject, actor: ACTOR, reason: REASON })).toEqual({ ok: false, error: 'off' });
+    expect(w.cw.names.requireRename({ subject, actor: ACTOR, reason: REASON, rule: 1 })).toEqual({ ok: false, error: 'off' });
   });
 
   it('the setting is read when asked: turning it on in the policy takes effect at once', async () => {
@@ -103,8 +103,8 @@ describe('requireRename: each result', () => {
     for (const o of bad) expect(ask(k, p.subject, o), JSON.stringify(o)).toEqual({ ok: false, error: 'invalid' });
     expect(k.cw.names.requireRename(null as never)).toEqual({ ok: false, error: 'invalid' });
     expect(k.cw.names.requireRename('x' as never)).toEqual({ ok: false, error: 'invalid' });
-    expect(k.cw.names.requireRename({ actor: ACTOR, reason: REASON } as never)).toEqual({ ok: false, error: 'invalid' });
-    expect(k.cw.names.requireRename({ subject: 5, actor: ACTOR, reason: REASON } as never)).toEqual({ ok: false, error: 'invalid' });
+    expect(k.cw.names.requireRename({ actor: ACTOR, reason: REASON, rule: 1 } as never)).toEqual({ ok: false, error: 'invalid' });
+    expect(k.cw.names.requireRename({ subject: 5, actor: ACTOR, reason: REASON, rule: 1 } as never)).toEqual({ ok: false, error: 'invalid' });
     expect(k.rows()).toEqual([]);
     expect(k.events).toEqual([]);
   });
@@ -151,7 +151,7 @@ describe('requireRename: each result', () => {
     expect(k.cw.names.pendingRename({ clientKey: 'kb' })).toBe(true);
   });
 
-  it('success: one notice of kind rename_required with no excerpt, no name, no reason; the rule defaults to autoRestrictRule', async () => {
+  it('success: one notice of kind rename_required with no excerpt, no name, no reason; the rule is the one given', async () => {
     const k = await kit();
     const p = await k.seat('k1');
     const res = ask(k, p.subject);
@@ -458,13 +458,13 @@ describe('one predicate, one reason limit', () => {
     try {
       const { cw } = await kit({ renames: true });
       const before = spy.mock.calls.length;
-      cw.names.requireRename({ subject: 's_nobody_nobody_nobody_00' as SubjectId, actor: ACTOR, reason: REASON });
+      cw.names.requireRename({ subject: 's_nobody_nobody_nobody_00' as SubjectId, actor: ACTOR, reason: REASON, rule: 1 });
       expect(spy.mock.calls.length).toBeGreaterThan(before);
       // and the answer follows it: when renamesEnabled says no, nothing else is looked at
       spy.mockReturnValue(false);
-      expect(cw.names.requireRename({ subject: 's_nobody_nobody_nobody_00' as SubjectId, actor: ACTOR, reason: '' })).toEqual({ ok: false, error: 'off' });
+      expect(cw.names.requireRename({ subject: 's_nobody_nobody_nobody_00' as SubjectId, actor: ACTOR, reason: '', rule: 1 })).toEqual({ ok: false, error: 'off' });
       spy.mockReturnValue(true);
-      expect(cw.names.requireRename({ subject: 's_nobody_nobody_nobody_00' as SubjectId, actor: ACTOR, reason: '' })).toEqual({ ok: false, error: 'invalid' });
+      expect(cw.names.requireRename({ subject: 's_nobody_nobody_nobody_00' as SubjectId, actor: ACTOR, reason: '', rule: 1 })).toEqual({ ok: false, error: 'invalid' });
     } finally {
       spy.mockRestore();
     }
@@ -477,7 +477,7 @@ describe('one predicate, one reason limit', () => {
     const w = await kit({ renames: true });
     const a = await w.seat('ka');
     const b = await w.seat('kb');
-    expect(w.cw.names.requireRename({ subject: a.subject, actor: ACTOR, reason: 'x'.repeat(DECISION_REASON_MAX + 1) })).toEqual({ ok: false, error: 'invalid' });
-    expect(w.cw.names.requireRename({ subject: b.subject, actor: ACTOR, reason: 'x'.repeat(DECISION_REASON_MAX) })).toMatchObject({ ok: true });
+    expect(w.cw.names.requireRename({ subject: a.subject, actor: ACTOR, reason: 'x'.repeat(DECISION_REASON_MAX + 1), rule: 1 })).toEqual({ ok: false, error: 'invalid' });
+    expect(w.cw.names.requireRename({ subject: b.subject, actor: ACTOR, reason: 'x'.repeat(DECISION_REASON_MAX), rule: 1 })).toMatchObject({ ok: true });
   });
 });

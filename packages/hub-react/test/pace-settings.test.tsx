@@ -169,7 +169,7 @@ describe('suggested values', () => {
   it('"Use suggested values" fills the form for the profile preset and saves nothing', async () => {
     const w = await owner();
     const { user } = await open(w);
-    await user.click(screen.getByRole('button', { name: 'Use suggested values' }));
+    await user.click(within(panel()).getByRole('button', { name: 'Use suggested values' }));
     const s = PACE_SUGGESTIONS.standard;
     expect(sw(BURST).checked).toBe(true);
     expect([num(BURST_N).value, num(BURST_S).value]).toEqual([String(s.burst!.lines), String(s.burst!.windowMs / 1000)]);
@@ -186,7 +186,7 @@ describe('suggested values', () => {
   it('follows the preset: the strict profile suggests slow mode too', async () => {
     const w = await owner({ profile: 'strict' });
     const { user } = await open(w);
-    await user.click(screen.getByRole('button', { name: 'Use suggested values' }));
+    await user.click(within(panel()).getByRole('button', { name: 'Use suggested values' }));
     expect(sw(SLOW).checked).toBe(true);
     expect(num(SLOW_S).value).toBe(String(PACE_SUGGESTIONS.strict.slowModeMs! / 1000));
   });

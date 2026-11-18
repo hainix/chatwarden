@@ -32,7 +32,7 @@ async function fromReporter(w: W, key: string, count: number) {
     const rec = w.cw.reports.get(res.reportId)!;
     ids.push(res.reportId);
     targets.push(rec.targetPerson);
-    reporterRef = rec.reporterPerson;
+    reporterRef = rec.reporterPerson!;
   }
   return { ids, targets, reporter: reporterRef };
 }
@@ -74,7 +74,7 @@ describe('POST /reports/dismiss-open: person scope', () => {
     const other = await w.file();
     const res = await w.call('POST', ROUTE, { body: person(a.target) });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, dryRun: false, open: 3, dismissed: 3, replayed: 0, skipped: { claimed: 0, decided: 0 }, more: false });
+    expect(res.body).toEqual({ ok: true, dryRun: false, open: 3, dismissed: 3, replayed: 0, skipped: { claimed: 0, decided: 0, urgent: 0 }, more: false });
     for (const id of a.ids) {
       expect(w.store.loadReport(id)).toMatchObject({ status: 'dismissed', badFaith: false, actionedBy: 'ann', modNote: NO_ACTION_DEFAULT_REASON });
     }
@@ -135,7 +135,7 @@ describe('POST /reports/dismiss-open: person scope', () => {
     const quiet = w.person();
     const unknown = await w.call('POST', ROUTE, { body: person('s_nobody_here') });
     const known = await w.call('POST', ROUTE, { body: person(quiet) });
-    const zeros = { ok: true, dryRun: false, open: 0, dismissed: 0, replayed: 0, skipped: { claimed: 0, decided: 0 }, more: false };
+    const zeros = { ok: true, dryRun: false, open: 0, dismissed: 0, replayed: 0, skipped: { claimed: 0, decided: 0, urgent: 0 }, more: false };
     expect(unknown.status).toBe(200);
     expect(unknown.body).toEqual(zeros);
     expect(known.body).toEqual(zeros);
@@ -194,7 +194,7 @@ describe('POST /reports/dismiss-open: person scope', () => {
     // Even a senior's takeOver on a dry run moves nothing.
     const dry = await w.call('POST', ROUTE, { body: person(a.target, { dryRun: true, takeOver: true }), actor: 'sam', role: 'senior' });
     expect(dry.status).toBe(200);
-    expect(dry.body).toEqual({ ok: true, dryRun: true, open: 0, dismissed: 0, replayed: 0, skipped: { claimed: 3, decided: 0 }, more: false });
+    expect(dry.body).toEqual({ ok: true, dryRun: true, open: 0, dismissed: 0, replayed: 0, skipped: { claimed: 3, decided: 0, urgent: 0 }, more: false });
     expect(w.audit()).toEqual([]);
     expect(w.cw.cases.holder(a.target)).toMatchObject({ by: 'bea' });
     expect(w.cw.changes.token()).toBe(token);
@@ -249,7 +249,7 @@ describe('POST /reports/dismiss-open: reporter scope', () => {
     expect(errorOf(refused)).toBe('forbidden_key');
     expect(w.audit()).toEqual([]);
     const res = await w.call('POST', ROUTE, { body: reporter(a.reporter), actor: 'ann' });
-    expect(res.body).toMatchObject({ open: 2, dismissed: 2, skipped: { claimed: 1, decided: 0 } });
+    expect(res.body).toMatchObject({ open: 2, dismissed: 2, skipped: { claimed: 1, decided: 0, urgent: 0 } });
     expect(a.ids.map((id) => statusOf(w, id))).toEqual(['dismissed', 'open', 'dismissed']);
     expect(w.cw.cases.holder(a.targets[1] as string)).toMatchObject({ by: 'bea' });
   });
@@ -267,7 +267,7 @@ describe('POST /reports/dismiss-open: reporter scope', () => {
     const a = await fromReporter(w, 'rk-a', 3);
     w.cw.cases.claim(a.targets[0] as string, 'bea');
     const res = await w.call('POST', ROUTE, { body: reporter(a.reporter, { dryRun: true }) });
-    expect(res.body).toEqual({ ok: true, dryRun: true, open: 2, dismissed: 0, replayed: 0, skipped: { claimed: 1, decided: 0 }, more: false });
+    expect(res.body).toEqual({ ok: true, dryRun: true, open: 2, dismissed: 0, replayed: 0, skipped: { claimed: 1, decided: 0, urgent: 0 }, more: false });
     expect(w.audit()).toEqual([]);
     for (const id of a.ids) expect(statusOf(w, id)).toBe('open');
   });
@@ -366,7 +366,7 @@ describe('POST /reports/dismiss-open: permissions and bodies', () => {
     expect(text).not.toMatch(/s_[A-Za-z0-9_-]{22}/);
     for (const body of bodies) {
       const keys = [...keysDeep(body)];
-      expect(keys.every((k) => ['ok', 'dryRun', 'open', 'dismissed', 'replayed', 'skipped', 'claimed', 'decided', 'more', 'error', 'message'].includes(k))).toBe(true);
+      expect(keys.every((k) => ['ok', 'dryRun', 'open', 'dismissed', 'replayed', 'skipped', 'claimed', 'decided', 'urgent', 'more', 'error', 'message'].includes(k))).toBe(true);
     }
   });
 
@@ -418,7 +418,7 @@ describe('the figure and the sweep stay on staff channels', () => {
       clock.t += 1000;
       const res = await cw.reports.submit({ roomId: room(i), reporterSeat: 'p1', targetSeat: 'p2', category: 'harassment' });
       if (!res.ok) throw new Error('refused');
-      reporterRef = cw.reports.get(res.reportId)!.reporterPerson;
+      reporterRef = cw.reports.get(res.reportId)!.reporterPerson!;
       if (i < 6) await cw.decide({ reportId: res.reportId, verdict: 'no_action', actions: [], actor: 'ann' });
     }
     const authorize = (req: KitRequest): Authz | null => ({ actor: 'ann', role: (req.headers['x-role'] ?? 'moderator') as Role });

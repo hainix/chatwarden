@@ -118,6 +118,13 @@ export default tseslint.config(
     },
   },
   {
+    // The conformance script of the service recipe: Node scripts that use Node's and the Web's globals (fetch).
+    files: ['examples/service/*.mjs'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', URL: 'readonly', fetch: 'readonly' },
+    },
+  },
+  {
     // Plain browser scripts that ship as-is from the site's public/ folder.
     files: ['site/public/**/*.js'],
     languageOptions: { globals: { localStorage: 'readonly', document: 'readonly' } },

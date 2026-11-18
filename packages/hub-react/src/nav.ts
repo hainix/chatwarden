@@ -30,6 +30,8 @@ export function permissionFor(route: Route): PermissionKey | null {
       return 'terms.read';
     case 'blocked':
       return 'blocked.read';
+    case 'insights':
+      return 'insights.read';
     case 'gaps':
       return 'gaps.read';
     case 'audit':

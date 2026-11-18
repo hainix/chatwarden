@@ -26,7 +26,6 @@ const SANCTION_NOTICE_KINDS: readonly NoticeKind[] = ['warning', 'chat', 'area',
  * The four notices that are messages, not sanctions: a rename is required, an appeal was upheld, reduced or revoked. They have no
  * group, no end and no excerpt, show in `pending` and `announce` and never on "My record", and never need an acknowledgement. Made by
  * {@link NoticeService.createMessage}. A seen one is purged like a seen report outcome; an unseen one is kept until seen or withdrawn.
- * @experimental
  */
 export const MESSAGE_NOTICE_KINDS = ['rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'] as const;
 export type MessageNoticeKind = (typeof MESSAGE_NOTICE_KINDS)[number];
@@ -227,6 +226,11 @@ export class NoticeService {
   private readonly byGroup = new Map<string, { id: string; subject: SubjectId } | null>();
   private readonly byGroupMax: number;
 
+  /** Forget the cached notice lookups of these people (their whole alias set): used when a person is erased. */
+  forgetPeople(people: ReadonlySet<SubjectId>): void {
+    for (const [group, entry] of [...this.byGroup]) if (entry !== null && people.has(entry.subject)) this.byGroup.delete(group);
+  }
+
   constructor(deps: NoticeServiceDeps) {
     this.store = deps.store;
     this.subjects = deps.subjects;
@@ -279,7 +283,6 @@ export class NoticeService {
    * Returns the notice id. It carries the kind, an optional rule and reference code and the time, and nothing else: no excerpt, no name,
    * no reason. It has no sanction group, so `withdrawGroup` never touches it. Throws for any other kind, a malformed rule or code, or a
    * bad subject (nothing is written). Pass `{ notify: false }` inside a larger transaction, then call {@link announce} after the commit.
-   * @experimental
    */
   createMessage(subject: SubjectId, kind: MessageNoticeKind, opts: MessageNoticeOptions = {}): string {
     if (!isMessageKind(kind)) throw new Error('createMessage: invalid kind');
@@ -518,9 +521,20 @@ export class NoticeService {
       if (typeof l.raw !== 'string' || !Number.isFinite(l.ts) || Number.isNaN(new Date(l.ts).getTime())) {
         throw new ExcerptError('invalid_line');
       }
-      const text = l.blocked !== true && typeof l.delivered === 'string' ? l.delivered : this.maskRaw(l.raw);
-      return { text, day: new Date(l.ts).toISOString().slice(0, 10) };
+      return { text: this.lineText(l), day: new Date(l.ts).toISOString().slice(0, 10) };
     });
+  }
+
+  /**
+   * The text a player is shown for one excerpt line, and the very text {@link createForSanction} stores for it: the delivered form (the
+   * starring the chat filter already applied) of a line that was delivered, otherwise the raw line with only the matched terms starred, or all
+   * of it starred when the matcher cannot say where they are (no `spans`, an empty or unusable answer, a throw, a term switched off since). It is
+   * never the raw text of a blocked line. Throws `ExcerptError('invalid_line')` for a line with no raw text. Staff side: for a screen that
+   * previews a notice, so what it shows is what the player will read.
+   */
+  lineText(line: ReportExcerptLine): string {
+    if (typeof line !== 'object' || line === null || typeof line.raw !== 'string') throw new ExcerptError('invalid_line');
+    return line.blocked !== true && typeof line.delivered === 'string' ? line.delivered : this.maskRaw(line.raw);
   }
 
   /**

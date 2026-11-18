@@ -6,7 +6,8 @@ import type { ChatFrame, WireLine } from '../src/chat/wire.js';
 const L = (id: string, at: number, text = `line ${id}`, extra: Partial<WireLine> = {}): WireLine => ({ id, at, name: 'tarvo', text, ...extra });
 const hello = (over: Partial<Extract<ChatFrame, { type: 'hello' }>> = {}): ChatFrame => ({
   type: 'hello',
-  v: 1,
+  v: 2,
+  mode: { kind: 'normal', until: null },
   epoch: 'e1',
   room: 'lobby',
   you: { name: 'snerp' },
@@ -16,6 +17,7 @@ const hello = (over: Partial<Extract<ChatFrame, { type: 'hello' }>> = {}): ChatF
   restriction: null,
   lines: [],
   muted: [],
+  phrases: null,
   ...over,
 });
 const frame = (f: ChatFrame): ChatAction => ({ type: 'frame', frame: f });

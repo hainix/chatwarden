@@ -43,7 +43,6 @@ export type FetchLike = typeof globalThis extends { fetch: infer F } ? F : Minim
 /**
  * One call to the staff API, as the hub makes it. `path` is the route path with no prefix (`/reports/abc`); the transport
  * adds whatever prefix its server uses. `query` values that are `undefined` are left out. `body` is sent as JSON.
- * @experimental
  */
 export interface TransportRequest {
   method: string;
@@ -62,7 +61,6 @@ export interface TransportRequest {
 /**
  * What came back: any HTTP status is an answer, not an error. `headers` are lower-case. `body` is the parsed JSON, a string
  * for a text document, or null when there was none.
- * @experimental
  */
 export interface TransportResponse {
   status: number;
@@ -73,7 +71,6 @@ export interface TransportResponse {
 /**
  * How the hub reaches the staff API. It resolves with the response whatever the status, and rejects only when no answer
  * arrived (a dropped connection, a handler that threw); the client turns that into a `network` error.
- * @experimental
  */
 export type Transport = (req: TransportRequest) => Promise<TransportResponse>;
 
@@ -90,7 +87,6 @@ function lowerCased(headers: Record<string, string> | undefined): Record<string,
   return out;
 }
 
-/** @experimental */
 export interface RouterTransportOptions {
   /** Sent with every request, for an `authorize` hook that reads a header. */
   headers?: Record<string, string>;
@@ -100,7 +96,6 @@ export interface RouterTransportOptions {
  * A transport that calls `createRouter(adminRoutes(...))` directly, in the same process: no network. The landing-page demo
  * and the hub's tests use it, so the hub runs the real staff routes. A response body goes through JSON on the way out, so
  * the hub sees exactly what a fetch would deliver.
- * @experimental
  */
 export function routerTransport(handle: (req: KitRequest) => Promise<KitResponse>, options: RouterTransportOptions = {}): Transport {
   return async (req) => {
@@ -119,7 +114,6 @@ export function routerTransport(handle: (req: KitRequest) => Promise<KitResponse
   };
 }
 
-/** @experimental */
 export interface FetchTransportOptions {
   /** Where the staff routes are mounted: `https://host/admin` or `/admin`. No trailing slash needed. */
   baseUrl: string;
@@ -133,7 +127,6 @@ export interface FetchTransportOptions {
 
 /**
  * The default transport for a real app: `fetch` against the routes your server mounts.
- * @experimental
  */
 export function fetchTransport(options: FetchTransportOptions): Transport {
   if (typeof options?.baseUrl !== 'string') throw new TypeError('fetchTransport: baseUrl is required (for example "/admin")');

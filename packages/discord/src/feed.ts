@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { CATEGORY_TO_RULE, CONDUCT_LEVELS, DEFAULT_SEVERE_RULES, errorClass, safeWarn } from '@chatwarden/core';
-import type { Chatwarden, Clock, DiscordThreadRow, KitEvent, KitEventOf, Limits, Logger, ModerationProfile } from '@chatwarden/core';
+import type { Chatwarden, Clock, DiscordThreadRow, InsightsDigest, KitEvent, KitEventOf, Limits, Logger, ModerationProfile } from '@chatwarden/core';
 import { checkRows } from './components.js';
 import type { DiscordActionRow } from './components.js';
 import { isSnowflake, makeForumClient, parseWebhookUrl } from './forum.js';
@@ -38,7 +38,10 @@ const newLabel = (): string => `Case ${Array.from(randomBytes(5), (b) => CROCKFO
 export interface FeedKit {
   on: Chatwarden['on'];
   reports: Pick<Chatwarden['reports'], 'get'>;
-  profile: Pick<ModerationProfile, 'severeRules'>;
+  profile: Pick<ModerationProfile, 'severeRules'> & {
+    /** The chat filters in force: only the phrase rules' labels are read, to word a phrase report ("Filter: <label>"). Optional. */
+    filters?: { phrases?: ReadonlyArray<{ id: string; label: string }> };
+  };
   rules: { all(): ReadonlyArray<{ number: number; title: string }> };
   limits: { strikes: Pick<Limits['strikes'], 'firstMs' | 'repeatMs'> };
   people: Chatwarden['people'];
@@ -49,6 +52,8 @@ export interface FeedKit {
    * holds an appeal's statement (a real `Chatwarden` answers more and still satisfies it; the feed copies the two times out and drops the rest).
    */
   appeals?: { get(appealId: string): FeedAppealRead | null };
+  /** The Insights digest, for `postDigest` (`cw.insights` is one). Optional: without it `postDigest` posts nothing. */
+  insights?: { digest(days: 7 | 30 | 90): InsightsDigest | null };
 }
 
 /** What the feed reads of one appeal: its sanction's kind and times. */
@@ -67,8 +72,14 @@ export interface DiscordFeedOptions {
    * ONLY inside these links. A value that is not an http(s) URL, or a throw, drops that one link and not the post.
    */
   hubLink: (kind: 'report' | 'person', id: string) => string;
-  /** A Discord role id (digits) to ping on a severe report or a severe sanction. Nothing else ever pings anyone. */
+  /** A Discord role id (digits) to ping on a severe report or a severe sanction, and on nothing else but an urgent report (see `urgentMention`). */
   mentionRoleId?: string;
+  /**
+   * A Discord role id (digits) to ping on an URGENT report. An urgent report posts "Urgent report. Open in the hub." with this mention and a link, and nothing else: never
+   * its reason (a welfare report's most of all), category, rule, handle or note. Without it the urgent post is the same and pings nobody. An urgent report is posted even with `severeOnly`.
+   * Checked once, here (`RangeError`, never echoing it). `report.handoff` posts nothing.
+   */
+  urgentMention?: string;
   /** Post only severe reports and their outcomes. Default false. */
   severeOnly?: boolean;
   /** The `fetch` to POST with. Default: the global one. */
@@ -93,6 +104,12 @@ export interface DiscordFeedOptions {
 }
 
 export interface DiscordFeed {
+  /**
+   * Post the Insights digest of the last `days` (7, 30 or 90; default 7) to the staff channel: one message of counts and times, no names, pinging nobody. Returns true when a post was
+   * queued, false when there was nothing to post (Insights off, no `insights` on the kit, a failed read, or the feed disposed). A failed read or a failed post is logged by class and never thrown.
+   * The kit has no scheduler: call this from your own timer. `RangeError` for any other `days`.
+   */
+  postDigest(days?: 7 | 30 | 90): boolean;
   /** Unsubscribe, drop the queue, abort the request in flight and clear every timer. Safe to call more than once. */
   dispose(): void;
 }
@@ -103,6 +120,8 @@ const isString = (v: unknown): v is string => typeof v === 'string' && v !== '';
 
 /** The staff report, as far as the feed reads it. `conductLevel` arrives with the AI read (K3c). */
 interface ReportView {
+  origin?: unknown;
+  originKey?: unknown;
   category?: unknown;
   targetPerson?: unknown;
   conductLevel?: unknown;
@@ -146,7 +165,7 @@ type Job = PostJob | EditJob;
  *   appeal's sanction when `cw.appeals` can say; no length otherwise). `appeal.decided`: "Appeal decided: lighter." (`upheld`, `lighter` for a
  *   reduction, `revoked`) and the same link. Both go to the person's thread, ping no one, and never carry the statement, the reason, a handle or an
  *   id except inside the hub link. An appeal made moot announces nothing (the kit raises no event for it). `rename.required` is not posted: it is
- *   for the game, not for staff.
+ *   for the game, not for staff. `report.escalated` (a legal hold, 0.2.0) is not posted either: the kit forwards a hold to no one, and the game reads it from `cw.on` or a webhook.
  * - Severe means category `hate`, or the rule (the report's default rule, or the sanction's) is in
  *   `cw.profile.severeRules` (default Community Rule 1). Only a severe report or sanction pings `mentionRoleId`;
  *   `allowed_mentions` is `{ parse: [] }` on every other post, so no adopter or rule text can ping `@everyone`.
@@ -178,10 +197,11 @@ type Job = PostJob | EditJob;
 export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFeed {
   if (typeof options !== 'object' || options === null) throw new RangeError('discordFeed: options are required');
   // Every field is read exactly once, here.
-  const { webhookUrl, hubLink, mentionRoleId, severeOnly, logger, components } = options;
+  const { webhookUrl, hubLink, mentionRoleId, urgentMention, severeOnly, logger, components } = options;
   const base = parseWebhookUrl(webhookUrl);
   if (typeof hubLink !== 'function') throw new RangeError('discordFeed: hubLink must be a function');
   if (mentionRoleId !== undefined && !isSnowflake(mentionRoleId)) throw new RangeError('discordFeed: mentionRoleId must be a Discord role id (digits)');
+  if (urgentMention !== undefined && !isSnowflake(urgentMention)) throw new RangeError('discordFeed: urgentMention must be a Discord role id (digits)');
   if (severeOnly !== undefined && typeof severeOnly !== 'boolean') throw new RangeError('discordFeed: severeOnly must be a boolean');
   if (components !== undefined && typeof components !== 'function') throw new RangeError('discordFeed: components must be a function');
   const onlySevere = severeOnly === true;
@@ -490,10 +510,39 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
 
   // ---- the events ----
 
+  /** "Links", "Personal info", "Shouting and repeats", a phrase rule's own label, or the plain word "Phrase"/"Filter": from the counter key, never the key itself. */
+  const filterLabel = (key: unknown): string => {
+    if (!isString(key)) return 'Filter';
+    const family = key.split('.', 1)[0];
+    if (family === 'link') return 'Links';
+    if (family === 'personal_info') return 'Personal info';
+    if (family === 'ratio') return 'Shouting and repeats';
+    if (family === 'phrase') {
+      const label = cw.profile.filters?.phrases?.find((p) => `phrase.${p.id}` === key)?.label;
+      return isString(label) && label !== '' ? safeText(label, 40) : 'Phrase';
+    }
+    return 'Filter';
+  };
+
+  /** The post of an urgent report: the role mention, "Urgent report." and one link, nothing else. It names no reason and no category, whatever the report is. */
+  const onUrgentCreated = (e: KitEventOf<'report.created'>): void => {
+    const report = readReport(e.type, e.reportId);
+    const person = report === null ? null : personOf(report.targetPerson);
+    const ping = urgentMention !== undefined;
+    const content = fitMessage(ping ? `<@&${urgentMention}> **Urgent report.**` : '**Urgent report.**', [], link('report', e.reportId, 'Open in the hub') ?? '');
+    const message: ForumMessage = { content, ...(ping ? { mentionRoleId: urgentMention } : {}) };
+    const rows = buttonsFor(e.reportId);
+    toPerson(e.type, person, UNATTRIBUTED, rows === undefined ? message : { ...message, components: rows }, rows === undefined ? undefined : e.reportId);
+  };
+
   const onCreated = (e: KitEventOf<'report.created'>): void => {
+    // Urgent first and whatever `severeOnly` says: a threat or a report of someone at risk is never left out of the feed.
+    if (e.urgent === true) return onUrgentCreated(e);
     const severe = isSevereCategory(e.category);
     if (onlySevere && !severe) return;
     const report = readReport(e.type, e.reportId);
+    // A report a chat filter filed has no reporter: the post says which filter made it, and nothing about who reported.
+    const filter = e.origin === 'filter' ? `Filter: ${filterLabel(report?.originKey)}` : undefined;
     const person = report === null ? null : personOf(report.targetPerson);
     const rule = ruleOfCategory(e.category);
     const level = CONDUCT_LEVELS.find((l) => l === report?.conductLevel);
@@ -501,6 +550,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     const message = compose(
       severe ? '**Severe report**' : '**New report**',
       [
+        filter,
         category === undefined ? undefined : `Category: ${category}`,
         rule === undefined || rule === 'uncovered' ? undefined : `Rule: ${ruleText(rule)}`,
         level === undefined ? undefined : `Conduct level: ${level}`,
@@ -657,6 +707,24 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       }
     };
 
+  /** The digest as staff read it in a channel: counts, then times in words. Facts only; a figure the kit withheld (too few reports) says so. */
+  const digestMessage = (d: InsightsDigest): ForumMessage => {
+    const num = (n: unknown): string => (typeof n === 'number' && Number.isFinite(n) ? String(Math.max(0, Math.trunc(n))) : '0');
+    const span = (ms: unknown): string => humanDuration(typeof ms === 'number' && Number.isFinite(ms) ? ms : 0);
+    const decision =
+      typeof d.medianMs === 'number' && typeof d.p90Ms === 'number'
+        ? `Time to a decision: median ${span(d.medianMs)}, 90th percentile ${span(d.p90Ms)}.`
+        : 'Time to a decision: not enough decided reports for a figure.';
+    const open = Number(d.open) > 0 ? `Longest open wait: ${span(d.longestOpenMs)}.` : 'Longest open wait: none, nothing is open.';
+    const content = fitMessage(`**Insights, last ${num(d.days)} days**`, [
+      `Reports: ${num(d.filed)} filed, ${num(d.decided)} decided, ${num(d.open)} open.`,
+      `Urgent: ${num(d.urgentFiled)} filed, ${num(d.urgentOpen)} open.`,
+      decision,
+      open,
+    ], '');
+    return { content };
+  };
+
   unsubscribes.push(
     cw.on('report.created', fenced(onCreated)),
     cw.on('report.closed', fenced(onClosed)),
@@ -669,6 +737,25 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
   );
 
   return {
+    postDigest(days = 7) {
+      if (days !== 7 && days !== 30 && days !== 90) throw new RangeError('discordFeed: days must be 7, 30 or 90');
+      if (disposed || cw.insights === undefined) return false;
+      let digest: InsightsDigest | null;
+      try {
+        digest = cw.insights.digest(days);
+      } catch (err) {
+        fail('insights.digest', err);
+        return false;
+      }
+      if (digest === null || digest === undefined) return false;
+      try {
+        toPerson('insights.digest', null, UNATTRIBUTED, digestMessage(digest));
+      } catch (err) {
+        fail('insights.digest', err);
+        return false;
+      }
+      return true;
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

@@ -4,7 +4,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * The props of `Guide`: a class name.
- * @experimental
  */
 export type GuideProps = PieceProps;
 
@@ -15,7 +14,6 @@ export type GuideProps = PieceProps;
  * ```tsx
  * <Guide />
  * ```
- * @experimental
  */
 export function Guide({ className }: GuideProps) {
   return (

@@ -9,6 +9,7 @@ import { termErrorText } from '../labels.js';
 import { useToasts } from '../toasts.js';
 import { LazyReportTerm, LazyShareTerm } from '../lazyParts.js';
 import { HitsConfirm } from './HitsConfirm.js';
+import { hasUnspacedLetters, UNSPACED_LANGUAGES } from './languages.js';
 
 /** The longest word or phrase, and note, the server accepts. */
 export const WORD_MAX = 200;
@@ -24,6 +25,8 @@ export interface TermRowDraft {
   word: string;
   language: string;
   note: string | null;
+  /** How the term is matched, when it has a mode: `contains` is the one that is not the default. */
+  matchMode?: 'word' | 'segment' | 'contains' | null;
   /** The shared list added this row: it is already on the community list, so it is not offered for sharing. */
   community?: boolean;
 }
@@ -74,6 +77,9 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, showW
   const [word, setWord] = useState(row?.word ?? prefill?.word.slice(0, WORD_MAX) ?? '');
   const [language, setLanguage] = useState(row?.language ?? prefill?.language ?? defaultLanguage);
   const [note, setNote] = useState(row?.note ?? '');
+  // How a term in a script written without spaces is matched: whole words (the default) or anywhere in the text. Offered only once such a word is typed.
+  const [mode, setMode] = useState<'segment' | 'contains'>(row?.matchMode === 'contains' ? 'contains' : 'segment');
+  const unspaced = kind === 'term' && hasUnspacedLetters(word);
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState<'check' | 'save' | null>(null);
   const [error, setError] = useState<HubError | null>(null);
@@ -124,16 +130,21 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, showW
     const wordChanged = !editing || text !== row.word;
     const languageChanged = !editing || lang !== row.language;
     const noteChanged = editing ? trimmedNote !== (row.note ?? '') : trimmedNote !== '';
-    if (editing && !wordChanged && !languageChanged && !noteChanged) {
+    // The mode of the row as it stands (anything but contains reads as whole words), against the one chosen; a word that is no longer in such a script has none.
+    const wasMode = row?.matchMode === 'contains' ? 'contains' : 'segment';
+    const modeChanged = editing && kind === 'term' && (unspaced ? mode !== wasMode : row.matchMode === 'contains' || row.matchMode === 'segment');
+    const askedMode = unspaced && mode === 'contains' ? ({ matchMode: 'contains' } as const) : {};
+    if (editing && !wordChanged && !languageChanged && !noteChanged && !modeChanged) {
       setUnchanged(true);
       return;
     }
     sending.current = true;
     setError(null);
     try {
-      if (kind === 'term' && (wordChanged || languageChanged) && !confirmed) {
+      // The dry run is for a change that can only block more: a new word or language, or a mode that now matches anywhere. Going back to whole words blocks less and needs none.
+      if (kind === 'term' && (wordChanged || languageChanged || (modeChanged && askedMode.matchMode === 'contains')) && !confirmed) {
         setBusy('check');
-        const check = await client.checkTerm({ term: text, language: lang });
+        const check = await client.checkTerm({ term: text, language: lang, ...askedMode });
         if (check.hits.length > 0) {
           setHits(check.hits);
           return;
@@ -146,12 +157,14 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, showW
           ...(wordChanged ? { [wordField]: text } : {}),
           ...(languageChanged ? { language: lang } : {}),
           ...(noteChanged ? { note: trimmedNote === '' ? null : trimmedNote } : {}),
+          // Whole words is the default: choosing it again (or typing a word that has no such script) sends null, which clears the mode.
+          ...(modeChanged ? { matchMode: unspaced && mode === 'contains' ? ('contains' as const) : null } : {}),
         };
         await (kind === 'term' ? client.updateTerm(row.id, patch) : client.updateException(row.id, patch));
         toasts.push({ text: t('hub.terms.toast.saved') });
         onSaved('saved');
       } else {
-        const input = { ...(kind === 'term' ? { term: text } : { phrase: text }), language: lang, ...(trimmedNote === '' ? {} : { note: trimmedNote }) };
+        const input = { ...(kind === 'term' ? { term: text, ...askedMode } : { phrase: text }), language: lang, ...(trimmedNote === '' ? {} : { note: trimmedNote }) };
         await (kind === 'term' ? client.addTerm(input as { term: string; language: string; note?: string }) : client.addException(input as { phrase: string; language: string; note?: string }));
         toasts.push({ text: t(kind === 'term' ? 'hub.terms.toast.added.term' : 'hub.terms.toast.added.exception') });
         onSaved('added');
@@ -210,7 +223,7 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, showW
               <>
                 <input {...a} ref={languageRef} type="text" className="cw-input" autoComplete="off" spellCheck={false} list={`${base}-codes`} value={language} onChange={(e) => setLanguage(e.target.value)} />
                 <datalist id={`${base}-codes`}>
-                  {languages.map((code) => (
+                  {[...new Set(unspaced ? [...UNSPACED_LANGUAGES, ...languages] : languages)].map((code) => (
                     <option key={code} value={code} />
                   ))}
                 </datalist>
@@ -218,6 +231,20 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, showW
             )}
           </Field>
         </div>
+        {unspaced && (
+          <fieldset className="cw-field cw-match">
+            <legend>{t('hub.terms.match.label')}</legend>
+            {(['segment', 'contains'] as const).map((m) => (
+              <label key={m} className="cw-choice">
+                <input type="radio" name={`${base}-match`} checked={mode === m} aria-describedby={`${base}-match-hint`} onChange={() => setMode(m)} />
+                <span>{t(`hub.terms.match.${m}` as const)}</span>
+              </label>
+            ))}
+            <p id={`${base}-match-hint`} className="cw-hint">
+              {t(`hub.terms.match.${mode}.hint` as const)}
+            </p>
+          </fieldset>
+        )}
         <Field
           id={`${base}-note`}
           label={t('hub.terms.form.note')}

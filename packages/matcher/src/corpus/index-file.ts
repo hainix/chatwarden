@@ -6,20 +6,20 @@ import { asBytes, isBytes } from './sign.js';
 // verified, but it is strict anyway: it reads each field once, builds fresh objects, and every refusal is a CorpusError with a fixed
 // message (it never echoes the input).
 
-/** What a release carries: a term list or an eval set. @experimental */
+/** What a release carries: a term list or an eval set. */
 export type CorpusKind = 'terms' | 'eval';
 
-/** A copy of a release that is hosted somewhere else (a Zenodo record). The signature, not the host, is what is trusted. @experimental */
+/** A copy of a release that is hosted somewhere else (a Zenodo record). The signature, not the host, is what is trusted. */
 export interface CorpusMirror {
   kind: string;
   doi?: string;
   url: string;
 }
 
-/** The counts for one language in a release entry: `terms` and `exceptions` for a term list, `cases` for an eval set. @experimental */
+/** The counts for one language in a release entry: `terms` and `exceptions` for a term list, `cases` for an eval set. */
 export type CorpusLanguageCounts = Readonly<Record<string, number>>;
 
-/** One release on the index. `zip` and `sig` are paths below the base URL. @experimental */
+/** One release on the index. `zip` and `sig` are paths below the base URL. */
 export interface CorpusReleaseEntry {
   kind: CorpusKind;
   version: string;
@@ -35,17 +35,16 @@ export interface CorpusReleaseEntry {
   notes?: string;
 }
 
-/** Why a release was pulled; a closed list. @experimental */
+/** Why a release was pulled; a closed list. */
 export type CorpusRevokeReason = 'bad_release' | 'key_compromise' | 'legal';
 
-/** @experimental */
 export interface CorpusRevokedRelease {
   kind: CorpusKind;
   version: string;
   reason: CorpusRevokeReason;
 }
 
-/** A parsed, checked index. Dates are epoch ms. @experimental */
+/** A parsed, checked index. Dates are epoch ms. */
 export interface CorpusIndex {
   schema: string;
   sequence: number;
@@ -237,7 +236,6 @@ function parseIndexInner(input: unknown, now: unknown): CorpusIndex {
  * Read an index (its JSON text, the bytes of it, or an already parsed object) into a checked {@link CorpusIndex}, or throw a
  * {@link CorpusError}: `too_large` (over 256 KiB), `index_expired` (`now`, epoch ms, is at or past `expiresAt`) or `bad_index` for
  * everything else, including a getter that throws or a proxy. Call it on the bytes of an index whose signature verified.
- * @experimental
  */
 export function parseIndex(json: unknown, now: number): CorpusIndex {
   try {
@@ -252,7 +250,6 @@ export function parseIndex(json: unknown, now: number): CorpusIndex {
  * The key ids an index revokes, for `verifySignature`'s `options.revokedKeyIds`, leaving out the key that signed the index: an index
  * is believed about other keys, and a key does not get to revoke itself out of the check that just trusted it. The caller passes the
  * `keyId` that `verifySignature('index', ...)` returned.
- * @experimental
  */
 export function revokedKeyIdsOf(index: CorpusIndex, signerKeyId: string): string[] {
   return [...new Set(index.revokedKeyIds)].filter((id) => id !== signerKeyId);
@@ -273,14 +270,13 @@ const compareKit = (a: readonly number[], b: readonly number[]): number => {
   return 0;
 };
 
-/** What {@link chooseRelease} takes: one of `pin` and `follow`, and the kit's own version. @experimental */
+/** What {@link chooseRelease} takes: one of `pin` and `follow`, and the kit's own version. */
 export type ChooseOptions = { kind: CorpusKind; kit: string } & ({ pin: string; follow?: never } | { follow: 'stable'; pin?: never });
 
 /**
  * Pick the release a refresh should fetch: the pinned version, or the index's latest for `kind`. It must be on the index
  * (`no_such_version`), not revoked (`revoked_release`) and not need a newer kit than `kit` (`kit_too_old`, compared as numbers).
  * Giving both `pin` and `follow`, neither, or a `kit` that is not a version is a programming error (a `RangeError`).
- * @experimental
  */
 export function chooseRelease(index: CorpusIndex, options: ChooseOptions): CorpusReleaseEntry {
   const { kind, pin, follow, kit } = options as { kind: unknown; pin?: unknown; follow?: unknown; kit: unknown };

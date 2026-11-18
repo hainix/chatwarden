@@ -4,7 +4,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * The props of `LadderSettings`: a class name.
- * @experimental
  */
 export type LadderSettingsProps = PieceProps;
 
@@ -17,7 +16,6 @@ export type LadderSettingsProps = PieceProps;
  * ```tsx
  * <LadderSettings />
  * ```
- * @experimental
  */
 export function LadderSettings({ className }: LadderSettingsProps) {
   return (

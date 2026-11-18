@@ -3,3 +3,5 @@
 // measures (a page does not ship the chat server by default). Never shipped, never run by Node directly.
 export * from './browser-entry.js';
 export * as httpChat from '@chatwarden/http/chat';
+// The service API (`/v1`) is browser-safe too: bundled here to prove it has no Node import and runs in a bare context.
+export * as httpService from '@chatwarden/http/service';

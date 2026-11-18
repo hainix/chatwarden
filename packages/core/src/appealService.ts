@@ -25,6 +25,7 @@ import { isValidAuditActor } from './audit.js';
 import { randomId } from './crypto.js';
 import type { KitEvent } from './events.js';
 import { safeWarn } from './log.js';
+import { appealReduction } from './noticePlan.js';
 import { appliesInRecord } from './notices.js';
 import type { NoticeService } from './notices.js';
 import { parseRuleRef } from './rules.js';
@@ -33,7 +34,7 @@ import { APPEALS_START_TOKEN, MAX_SANCTION_DURATION_MS, writeSanction } from './
 import type { SanctionIndex } from './sanctions.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
 import type { SubjectIndex } from './subjects.js';
-import type { AppealRow, Clock, Logger, Matcher, RawWho, SanctionRow, Store, SubjectId } from './types.js';
+import type { AppealRow, Clock, Logger, Matcher, RawWho, Store, SubjectId } from './types.js';
 
 // The appeals service: filing (the player side) here; deciding and the staff reads are added to the same class. It holds no state of its own:
 // every fact is in the store, so two processes on one database agree.
@@ -285,7 +286,7 @@ export class AppealService {
     // The sanction is gone (retention) or was revoked by a path that did not make the appeal moot: nothing is left to rule on.
     if (group === null || group.revokedAt !== undefined) return this.mootGone(appeal, d.actor, now);
     if (!this.d.settings().allowSelfReview && !group.automated && group.actor === d.actor) return { ok: false, error: 'same_decider' };
-    const plan = d.outcome === 'reduce' ? reductionOf(group, d.to) : null;
+    const plan = d.outcome === 'reduce' ? appealReduction(group, d.to) : null;
     if (d.outcome === 'reduce' && plan === null) return INVALID;
 
     const person = subjects.canonical(appeal.subject);
@@ -315,6 +316,8 @@ export class AppealService {
               rule: appeal.rule === null ? 'uncovered' : (ruleRefOf(appeal.rule) ?? 'uncovered'),
               roomId: group.roomId,
               startsAt: group.startsAt,
+              // The same report as the original, so the replacement stays in the scoped views the original was in.
+              ...(typeof group.reportId === 'string' && group.reportId !== '' ? { reportId: group.reportId } : {}),
               startsAtToken: APPEALS_START_TOKEN,
             },
             now,
@@ -536,25 +539,6 @@ export class AppealService {
       return [];
     }
   }
-}
-
-/**
- * What a reduction becomes: the kind and length of the replacement, or null when `to` is not lighter than the sanction (a lower kind, or the
- * same kind and shorter, permanent being the longest; a warning cannot be reduced). The replacement keeps the original start and ends at
- * the earlier of the original end and `start + to.durationMs`, so it is never later than the original.
- */
-function reductionOf(group: SanctionRow, to: CheckedDecision['to']): { kind: 'warning' | 'chat' | 'area' | 'ban'; durationMs: number | null } | null {
-  if (to === null) return null;
-  const from = (SANCTION_KIND_ORDER as readonly string[]).indexOf(group.kind);
-  const target = (SANCTION_KIND_ORDER as readonly string[]).indexOf(to.kind);
-  if (from <= 0 || target < 0) return null; // not an appealable kind, or a warning (the lightest: nothing to reduce to)
-  const origLength = group.endsAt === null ? Infinity : group.endsAt - group.startsAt;
-  const newLength = to.durationMs === null ? Infinity : to.durationMs;
-  if (!(target < from || (target === from && newLength < origLength))) return null;
-  if (to.kind === 'warning') return { kind: 'warning', durationMs: null };
-  const end = to.durationMs === null ? group.endsAt : group.endsAt === null ? group.startsAt + to.durationMs : Math.min(group.endsAt, group.startsAt + to.durationMs);
-  if (end !== null && end <= group.startsAt) return null;
-  return { kind: to.kind, durationMs: end === null ? null : end - group.startsAt };
 }
 
 /** The rate and its band: null below the minimum number of sanctions; `high` from 0.30, `elevated` from 0.15. */

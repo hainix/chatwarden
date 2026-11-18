@@ -92,11 +92,11 @@ describe('SqliteStore subject methods', () => {
     store.close();
   });
 
-  it('an identifier for a subject that does not exist is rejected (foreign key)', async () => {
-    const store = openStore({ path: ':memory:' });
-    await expect(
-      store.saveIdentifier({ subjectId: 's_missing', kind: 'key', value: 'k', firstSeen: 1, lastSeen: 1 }),
-    ).rejects.toThrow();
+  it('an identifier for a subject that does not exist writes nothing and does not throw (the write is conditional on the subject row)', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    await expect(store.saveIdentifier({ subjectId: 's_missing', kind: 'key', value: 'k', firstSeen: 1, lastSeen: 1 })).resolves.toBeUndefined();
+    expect(Number(db.prepare('SELECT COUNT(*) AS n FROM kit_subject_ids').get()?.n)).toBe(0);
     store.close();
   });
 

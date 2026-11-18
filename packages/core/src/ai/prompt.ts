@@ -15,7 +15,6 @@ import type { AIExample, AIExampleInput, AIReadInput, AISignal } from './types.j
 
 /**
  * Same as {@link AI_PROMPT_VERSION}.
- * @experimental
  */
 export const PROMPT_VERSION = AI_PROMPT_VERSION;
 
@@ -106,7 +105,6 @@ function oneLine(v: string): string {
  * with their examples, and `aiContext`. No outcomes, no ladder, no ids, no times, so editing the ladder never changes it. Retired
  * rules are omitted. Each value is reduced to one line, so team-written text cannot add a line of policy. The same policy always
  * gives the same text.
- * @experimental
  */
 export function aiPolicyText(policy: DocumentPolicy): string {
   const profile: unknown = policy.profile;
@@ -192,7 +190,6 @@ function prepareExamples(examples: readonly AIExampleInput[] | undefined): Array
 /**
  * The ids of the casebook examples {@link buildAIInput} would put in the prompt for these, in order (at most two). The read stores
  * them (`AIStoredRead.exampleIds`): the examples are not part of the input hash, so this is how a read says which ones it saw.
- * @experimental
  */
 export function usedExampleIds(examples: readonly AIExampleInput[]): string[] {
   return prepareExamples(examples).map((e) => e.id);
@@ -223,7 +220,6 @@ export interface BuildAIInputArgs {
  * Render everything a provider needs for one read: the structured facts, and `prompt.stable` / `prompt.variable` / `prompt.schema`
  * ready to send as they are. The variable part is a data block of JSON-encoded strings (`<` and `>` escaped, so no text can close
  * the block); it holds no instruction.
- * @experimental
  */
 export function buildAIInput(args: BuildAIInputArgs): AIReadInput {
   const { policy, chosen } = args;

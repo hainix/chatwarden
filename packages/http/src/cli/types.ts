@@ -28,6 +28,14 @@ export interface Answers {
   lang: Lang;
 }
 
+/** The answers of `init --service`: where the data lives, which standard, and the folder. There is no framework, chat box, hub or Discord feed. */
+export interface ServiceAnswers {
+  service: true;
+  store: Store;
+  profile: ProfileChoice;
+  dir: string;
+}
+
 /** What `detect` reads from the project root (design 5.1). */
 export interface Detected {
   /** The server frameworks found in `dependencies` or `devDependencies`, from `express`, `fastify` and `next`, in that order. */
@@ -73,6 +81,8 @@ export interface TodoItem {
 /** What init would do (design 5.2): pure data, built before anything is written. */
 export interface Plan {
   answers: Answers;
+  /** Present for `init --service`: its answers, which the report prints in place of `answers` (those are placeholders then). */
+  service?: ServiceAnswers;
   /** Sorted by `path`. */
   files: FileSpec[];
   install: { manager: PackageManager; command: string; packages: string[] };

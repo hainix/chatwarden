@@ -65,6 +65,20 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'ai.act',
       'ai.acting',
       'ai.undo_all',
+      'privacy.find',
+      'privacy.export',
+      'privacy.erase',
+      'legal.hold',
+      'legal.release',
+      'legal.bundle',
+      'report.urgent',
+      'report.handoff',
+      'report.comment',
+      'report.comment_remove',
+      'report.escalate',
+      'room.mode',
+      'room.retract',
+      'insights.view',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -106,20 +120,25 @@ describe('cw.audit.record and list', () => {
       // The AI rows point at a report; ai.read is the AI's own, with no role (see ai/audit-ai.test.ts).
       const ai = action.startsWith('ai.') && action !== 'ai.acting' && action !== 'ai.undo_all' ? { target: { type: 'report', ref: 'r1' } } : {};
       const who = action === 'ai.read' || action === 'ai.act' ? { actor: 'ai:test:model', role: null } : {};
-      // appeal.decide points at an appeal and name.rename_required at a person (see vocabulary-appeals.test.ts).
+      // appeal.decide points at an appeal and name.rename_required at a person (see vocabulary-appeals.test.ts); the privacy actions at a person (privacy.find at none) and the
+      // legal ones at a report (vocabulary-privacy.test.ts).
       const own =
         action === 'appeal.decide'
           ? { target: { type: 'appeal', ref: 'ap1' } }
-          : action === 'name.rename_required' || action === 'person.automation'
+          : action === 'name.rename_required' || action === 'person.automation' || action === 'privacy.export' || action === 'privacy.erase'
             ? { target: { type: 'person', ref: 's_a1' } }
-            : {};
+            : action.startsWith('legal.') || ['report.urgent', 'report.handoff', 'report.comment', 'report.comment_remove', 'report.escalate'].includes(action)
+              ? { target: { type: 'report', ref: 'r1' } }
+              : action.startsWith('room.')
+                ? { target: { type: 'room', ref: 'lobby' } }
+                : {};
       expect(rec(cw, { action, ...detail, ...ai, ...own, ...who })).toBe(true);
     }
     for (const role of ROLES) expect(rec(cw, { role })).toBe(true);
-    for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal', 'release']) {
+    for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal', 'release', 'room']) {
       expect(rec(cw, { target: { type, ref: 'x1' } })).toBe(true);
     }
-    expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 8);
+    expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 9);
   });
 
   it('person.automation (0.1.13, appended last) needs a person target, carries no detail, and is a name of its own', async () => {

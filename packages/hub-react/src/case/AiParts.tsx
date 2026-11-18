@@ -7,7 +7,8 @@ import { AI_KEYS } from '../ai/offer.js';
 import type { AiWhy } from '../ai/offer.js';
 import { readsOf } from '../ai/rank.js';
 import { useHub } from '../context.js';
-import { personName } from '../excerpt.js';
+import { LazyPlayerPreview } from '../lazyParts.js';
+import { decideOp } from '../preview/ops.js';
 import { choiceLabel } from '../labels.js';
 import { useQuickKeys } from '../quickKeys.js';
 import type { QueueGroup } from '../queue.js';
@@ -16,6 +17,7 @@ import { UNDO_MS } from '../toasts.js';
 import { Card, Kbd } from '../ui.js';
 import { AiCase } from './AiCase.js';
 import { useCase } from './CaseContext.js';
+import { usePreviewParts } from './usePreviewParts.js';
 
 // The AI's pieces that are drawn inside parts of the hub that are always there: the queue's chip, the tick on a cited line, the decision bar's
 // header, the Simple card's suggestion, Accept button and reason, and the AI's part of the case itself (`case`, which draws nothing). One lazy
@@ -140,9 +142,8 @@ function Suggest() {
   const { c, api } = useApi();
   const id = useId();
   const from = api?.from;
+  const parts = usePreviewParts(c.detail.data?.report);
   if (from === null || from === undefined) return null;
-  const target = c.people.find((p) => p.role === 'target');
-  const name = target === undefined ? '' : personName(target, c.people, hubT);
   return (
     <div className="cw-suggest" role="group" aria-labelledby={`${id}-title`}>
       <h3 id={`${id}-title`} className="cw-sr">
@@ -152,15 +153,11 @@ function Suggest() {
         {from.choice !== null && <Card kind={from.choice.kind} />}
         <div className="cw-suggest-text">
           <p className="cw-suggest-label">{from.choice === null ? hubT('hub.simple.noAction') : choiceLabel(hubT, locale, from.choice)}</p>
-          {from.kind !== 'dismiss' && (
-            <p className="cw-hint cw-scard-fine">
-              {from.choice !== null && from.choice.kind === 'note'
-                ? hubT('hub.simple.sees.note', { name, seconds: SECONDS })
-                : hubT('hub.simple.sees', { name, rule: from.rule === '' ? 0 : from.rule, count: from.lines.length, seconds: SECONDS })}
-            </p>
-          )}
         </div>
       </div>
+      {/* What the player is sent when the suggestion is accepted: the same panel as everywhere. */}
+      <LazyPlayerPreview op={decideOp(from.form, { target: parts.target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order })} nameOf={parts.nameOf} reporter={parts.reporter} />
+      {from.kind !== 'dismiss' && <p className="cw-hint cw-scard-fine">{hubT('hub.simple.undo', { seconds: SECONDS })}</p>}
     </div>
   );
 }

@@ -41,8 +41,32 @@ describe('.github/workflows/ci.yml', () => {
     expect(run[0]).not.toMatch(/[*?{}[\]]/);
     expect(run[0]).not.toContain('.test.ts');
   });
+  it('has a service-csharp job: .NET 8, the C# sample built, the built service started with the bin, the sample run against it, then the conformance script; no secret in the file', () => {
+    const text = job('service-csharp');
+    expect(text).toContain('runs-on: ubuntu-latest');
+    expect(text).toMatch(/timeout-minutes: \d+/);
+    expect(text).toContain('actions/setup-dotnet@v4');
+    expect(text).toMatch(/dotnet-version: '?8\.0\.x'?/);
+    expect(text).toContain('npm ci');
+    expect(text).toContain('npm run build');
+    expect(text).toContain('dotnet build examples/service-csharp');
+    expect(text).toContain('node packages/http/dist/src/cli/bin.js serve');
+    expect(text).toMatch(/dotnet run --project examples\/service-csharp/);
+    expect(text).toContain('node examples/service/conformance.mjs');
+    // the keys are made on the runner, never written in the file
+    expect(text).toContain('openssl rand -base64 32');
+    expect(text).not.toMatch(/CHATWARDEN_(SECRET|SERVICE_KEYS): \S/);
+    expect(text).not.toContain('secrets.');
+    expect(text).not.toContain('permissions:');
+  });
+  it('the service-csharp job waits for /readyz before it runs anything and stops the service at the end', () => {
+    const text = job('service-csharp');
+    expect(text.indexOf('/readyz')).toBeGreaterThan(text.indexOf('serve'));
+    expect(text.indexOf('dotnet run')).toBeGreaterThan(text.indexOf('/readyz'));
+    expect(text).toMatch(/kill|trap/);
+  });
   it('the existing jobs are still there: check, site, element-browser and smoke', () => {
-    for (const name of ['check', 'site', 'element-browser', 'smoke']) expect(ci).toContain(`\n  ${name}:\n`);
+    for (const name of ['check', 'site', 'element-browser', 'smoke', 'service-csharp']) expect(ci).toContain(`\n  ${name}:\n`);
   });
   it('the Windows job uses substring filters, not globs (PowerShell passes * literally and vitest filters by substring), that match test files that exist', () => {
     expect(readdirSync(join(root, 'packages/http/test')).filter((f) => /^cli-.*\.test\.ts$/.test(f)).length).toBeGreaterThan(10);

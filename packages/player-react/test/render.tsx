@@ -26,6 +26,7 @@ export async function findStatus(): Promise<HTMLElement> {
 export const SIX_REASONS: PlayerReporting = {
   flow: 'reason_required',
   thanks: '',
+  resources: [],
   reasons: [
     ['harassment', 'Harassment'],
     ['hate', 'Hateful language'],
@@ -33,5 +34,5 @@ export const SIX_REASONS: PlayerReporting = {
     ['spam', 'Spam'],
     ['disruption', 'Disrupting the game'],
     ['other', 'Something else'],
-  ].map(([id, label]) => ({ id: id as string, label: label as string, hint: '', group: '', asksNote: true })),
+  ].map(([id, label]) => ({ id: id as string, label: label as string, hint: '', group: '', asksNote: true, thanks: null, showResources: false })),
 };

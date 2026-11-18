@@ -1,4 +1,6 @@
-import { HISTORY_LOOKBACK_MS } from './ladder.js';
+import { checkScope } from './contexts.js';
+import { HISTORY_LOOKBACK_MS, historyOf } from './ladder.js';
+import type { ActionRecord } from './ladder.js';
 import type { Limits } from './limits.js';
 import { reporterSuspendedUntil } from './reports.js';
 import { findReason } from './reporting.js';
@@ -11,7 +13,7 @@ import { SANCTION_SOURCES } from './sanctions.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
 import type { NameReason } from './names.js';
 import type { SubjectIndex } from './subjects.js';
-import type { SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
+import type { ReportRecord, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
 
 // The staff READ views behind the moderator hub: sanction groups, a reporter's record and the blocked-message list. Pure
 // functions over the store; nothing here writes. Every shape lists its fields by name, so a column added to a row can
@@ -76,6 +78,8 @@ export interface SanctionListInput {
   limit?: number;
   /** Only sanctions from this source. */
   source?: Source;
+  /** Only the sanctions made from a report filed in a room of one of these staff scopes (a direct or an automatic sanction is never one of them); an empty list lists nothing. */
+  scope?: readonly string[];
 }
 
 /** The page size when `limit` is missing or not a number. */
@@ -147,14 +151,16 @@ export function sanctionGroupView(row: SanctionRow, now: number): SanctionGroupV
  * end in the future, of any age) is always included; the rest of the window fills what is left of
  * {@link PERSON_SANCTIONS_MAX}, newest first.
  */
-export function sanctionsOfPerson(store: Store, subjects: SubjectIndex, person: SubjectId, now: number): SanctionGroupView[] {
+export function sanctionsOfPerson(store: Store, subjects: SubjectIndex, person: SubjectId, now: number, scope?: readonly string[]): SanctionGroupView[] {
   const aliases = subjects.aliasesOf(person);
-  const inForce = store.listSubjectSanctions({ subjects: aliases, activeAt: now, limit: PERSON_SANCTIONS_MAX });
+  const scoped = scope === undefined ? {} : { scope };
+  const inForce = store.listSubjectSanctions({ subjects: aliases, activeAt: now, ...scoped, limit: PERSON_SANCTIONS_MAX });
   const taken = new Set(inForce.map((r) => r.id));
   const window = store.listSubjectSanctions({
     subjects: aliases,
     since: now - HISTORY_LOOKBACK_MS,
     alsoPermanent: true,
+    ...scoped,
     limit: PERSON_SANCTIONS_MAX,
   });
   const room = Math.max(0, PERSON_SANCTIONS_MAX - inForce.length);
@@ -162,6 +168,30 @@ export function sanctionsOfPerson(store: Store, subjects: SubjectIndex, person: 
   return [...inForce, ...rest]
     .sort((a, b) => b.startsAt - a.startsAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
     .map((r) => sanctionGroupView(r, now));
+}
+
+/** What a scoped moderator sees of a person: see {@link scopedHistoryOf}. No account id, signal, link or other room's report. */
+export interface ScopedHistory {
+  /** The person's actions over the last 90 days that were made from a report in scope. */
+  history: ActionRecord[];
+  /** The reports filed against the person in scope, newest first. */
+  reports: Array<{ id: string; createdAt: number; category: ReportRecord['category'] }>;
+  /** The person's sanctions that came from a report in scope (the same window and cap as `cw.sanctions.forPerson`). */
+  sanctions: SanctionGroupView[];
+  /** The handle on the newest report in scope that recorded one, or null. */
+  handle: string | null;
+}
+
+/** The person as a moderator limited to `scope` may see them: only reports filed in a room of one of the scopes and the sanctions that came from those reports. */
+export function scopedHistoryOf(store: Store, subjects: SubjectIndex, person: SubjectId, scope: readonly string[], now: number, limit = 50): ScopedHistory {
+  const aliases = subjects.aliasesOf(person);
+  const filed = store.listReportsByPerson(aliases, limit, scope).filter((r) => r.scope !== null && scope.includes(r.scope));
+  return {
+    history: historyOf(store, subjects, person, now, scope),
+    reports: filed.map((r) => ({ id: r.id, createdAt: r.createdAt, category: r.category })),
+    sanctions: sanctionsOfPerson(store, subjects, person, now, scope),
+    handle: filed.find((r) => r.targetHandle !== '')?.targetHandle ?? null,
+  };
 }
 
 const clampPage = (limit: unknown): number => {
@@ -196,8 +226,10 @@ export function listSanctionGroups(store: Store, subjects: SubjectIndex, q: Sanc
   }
   const cursor = input.cursor === undefined || input.cursor === null ? null : decodeSanctionCursor(input.cursor);
   const limit = clampPage(input.limit);
+  const scope = input.scope === undefined ? undefined : checkScope(input.scope, 'sanctions.list: scope');
   const rows = store.listSubjectSanctions({
     ...(input.source === undefined ? {} : { source: input.source }),
+    ...(scope === undefined ? {} : { scope }),
     ...(cursor === null ? {} : { before: cursor.startsAt, beforeId: cursor.id }),
     limit,
   });
@@ -270,7 +302,6 @@ export interface ReporterRecord {
    * How their reports filed in the last 30 days turned out (see {@link ReporterAccuracy}): a ranking hint and a line on the case.
    * Null when the store cannot tell (it has no `reporterOutcomes`); otherwise always set, with `falseRate` null below the minimum
    * sample. Staff only: never send to a player.
-   * @experimental
    */
   accuracy?: ReporterAccuracy | null;
 }

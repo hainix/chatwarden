@@ -7,8 +7,8 @@ const HANDLE_REPORTS = 20;
  * The name to show for a person: the handle on the newest report filed against them that recorded one (a blank handle is no name,
  * so an older report's is used). Null when none did. Staff only.
  */
-export function latestHandle(cw: Chatwarden, person: string): string | null {
-  for (const r of cw.reports.list({ person, limit: HANDLE_REPORTS }).items) if (r.targetHandle !== '') return r.targetHandle;
+export function latestHandle(cw: Chatwarden, person: string, scope?: readonly string[]): string | null {
+  for (const r of cw.reports.list({ person, limit: HANDLE_REPORTS, ...(scope === undefined ? {} : { scope }) }).items) if (r.targetHandle !== '') return r.targetHandle;
   return null;
 }
 

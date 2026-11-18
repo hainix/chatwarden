@@ -10,7 +10,7 @@ import { REPORT_DETAIL_WINDOW_MS } from '@chatwarden/core';
 // After a send the player must hear what happened: the heading says it (a question would be stale), and the thank-you is written into a
 // status region that was already there. There is no follow-up step any more, whatever window the kit sends.
 
-const ONE_TAP: PlayerReporting = { flow: 'one_tap', thanks: 'Got it. A moderator will look.', reasons: [{ id: 'other', label: 'Something else', hint: '', group: '', asksNote: true }, { id: 'hate', label: 'Hate', hint: '', group: '', asksNote: false }] };
+const ONE_TAP: PlayerReporting = { flow: 'one_tap', thanks: 'Got it. A moderator will look.', resources: [], reasons: [{ id: 'other', label: 'Something else', hint: '', group: '', asksNote: true, thanks: null, showResources: false }, { id: 'hate', label: 'Hate', hint: '', group: '', asksNote: false, thanks: null, showResources: false }] };
 const ok = (more: Partial<Extract<ReportResult, { ok: true }>> = {}): ReportResult => ({ ok: true, reportId: 'r1', remaining: 5, ...more });
 const props = (onSubmit: ReportDialogProps['onSubmit'], more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit, onClose: () => undefined, reporting: ONE_TAP, ...FIXED, ...more });
 const press = (name: string) => screen.getByRole('button', { name });

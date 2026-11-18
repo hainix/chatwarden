@@ -16,7 +16,6 @@ const AFTER = 6;
 /**
  * One line a read will see. `lineId` is the server's key to map an answer's ref back to the real line: it is NOT handed to an
  * adapter, which gets refs only.
- * @experimental
  */
 export interface ChosenLine {
   ref: string;
@@ -40,7 +39,6 @@ export interface ChosenLine {
 
 /**
  * What {@link chooseLines} returns.
- * @experimental
  */
 export interface ChosenLines {
   lines: ChosenLine[];
@@ -199,7 +197,6 @@ function analyse(report: ReportRecord, opts: { max?: number; mask?: boolean } | 
  * pointed-at line, then the nearest others, up to `max` (default 40). Lines the reporter could not see are dropped. Text is
  * redacted and speakers are aliased; `P1` is the reported person and `P2` the reporter even when the reporter spoke first.
  * With `mask`, a line the filter touched is sent masked, not raw (see the `blockedLines` option of the AI service).
- * @experimental
  */
 export function chooseLines(report: ReportRecord, opts?: { max?: number; mask?: boolean }): ChosenLines {
   return analyse(report, opts).result;
@@ -208,7 +205,6 @@ export function chooseLines(report: ReportRecord, opts?: { max?: number; mask?: 
 /**
  * The reporter's note, redacted and cut to 300 characters (the `note` of {@link chooseLines}). Pass the same `opts` as the
  * `chooseLines` call it goes with, or prefer `chooseLines(...).note`, which cannot disagree with the lines.
- * @experimental
  */
 export function redactReportNote(report: ReportRecord, opts?: { max?: number; mask?: boolean }): string | null {
   const { handles, aliasOf } = analyse(report, opts);

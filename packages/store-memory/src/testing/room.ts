@@ -5,13 +5,11 @@ import type { FakeClock } from './clock.js';
 /**
  * What a line came to: `delivered`, `starred` (delivered with different text), or `refused:<reason>` with the kit's own reason (`length`, `rate`, `gate`,
  * `restricted`, `blocked`, `profanity`, `empty`, `slow_mode`, `flood`, `duplicate`).
- * @experimental
  */
 export type SayLabel = 'delivered' | 'starred' | `refused:${string}`;
 
 /**
  * The outcome of one line.
- * @experimental
  */
 export interface SayOutcome {
   kind: 'say';
@@ -27,12 +25,10 @@ export interface SayOutcome {
   autoRestricted?: 'first' | 'second';
 }
 
-/** @experimental */
 export type ReportLabel = 'filed' | `refused:${string}`;
 
 /**
  * The outcome of one report.
- * @experimental
  */
 export interface ReportOutcome {
   kind: 'report';
@@ -45,7 +41,6 @@ export interface ReportOutcome {
 
 /**
  * A room for a test. `say`, `report`, `mute` and `sees` seat a player on first use.
- * @experimental
  */
 export interface TestRoom {
   readonly id: string;

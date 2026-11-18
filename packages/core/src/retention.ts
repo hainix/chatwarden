@@ -1,9 +1,16 @@
+import { utcDay } from './chatCounter.js';
 import { MUTE_TTL_MS } from './mutes.js';
+
+/** The shared pacer's rows are swept after this long untouched: the longest window any pacing check can have. */
+const PACE_ROW_MAX_AGE_MS = 3_600_000;
 import { ProfileError } from './profile.js';
 import { WEBHOOK_KEY_TTL_MS } from './types.js';
 import type { Store } from './types.js';
 
 const DAY_MS = 86_400_000;
+
+/** A row of a subject that does not exist is a stray only once it is this old (a subject row can trail its first row by a moment). */
+export const STRAY_AGE_MS = 10 * 60_000;
 
 /** How long each kind of row is kept. */
 export interface RetentionPolicy {
@@ -59,6 +66,18 @@ export interface RetentionPolicy {
   appealsMs: number;
   /** A blocked name kept as evidence (`names.keepBlocked`) is deleted once it is older than this. The same clock as strikes. No floor. */
   blockedNamesMs: number;
+  /**
+   * A chat-filter hit counter row (one per UTC day, key and action: no person, room or text) is deleted once its day is wholly older than this. At
+   * least 30 days: the hub reads a 30 day window. A report a filter filed (`origin: 'filter'`) goes with the others, on `reportsMs`.
+   */
+  filterHitsMs: number;
+  /**
+   * A report whose reason is `welfare` (its excerpt, note, comments and decision row) is deleted once it is older than this: the most
+   * sensitive text the kit holds, so a shorter clock than `reportsMs`. At least 1 day (a floor, not an off switch).
+   */
+  welfareReportsMs: number;
+  /** A daily line count (`desk.insights`: a date and two counts, no player data) is deleted once its day is older than this. At least 31 days: Insights reads a 90 day window and the page says "counted from". */
+  chatCountsMs: number;
 }
 
 export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
@@ -75,12 +94,15 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   appealStatementsMs: 90 * DAY_MS,
   appealsMs: 365 * DAY_MS,
   blockedNamesMs: 30 * DAY_MS,
+  filterHitsMs: 90 * DAY_MS,
+  welfareReportsMs: 30 * DAY_MS,
+  chatCountsMs: 400 * DAY_MS,
 };
 
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
 
-const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'aiActionsMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs'] as const;
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'aiActionsMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs', 'filterHitsMs', 'welfareReportsMs', 'chatCountsMs'] as const;
 
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
@@ -94,6 +116,8 @@ const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'ba
  * - `aiActionsMs` at least 90 days: the gates read 90 days of the AI's actions
  * - `signalsMs` at least 14 days: a counting window needs at least two weeks of rows
  * - `appealsMs` at least 90 days: the per-rule appeal counts read that far back
+ * - `filterHitsMs` at least 30 days: the hub's longest window of filter counts
+ * - `welfareReportsMs` at least 1 day and `chatCountsMs` at least 31 days (neither is an off switch: 0 is refused)
  * - `appealStatementsMs` and `blockedNamesMs` at least 0 (0 keeps the text only until the next purge)
  *
  * Every field present must also be a finite number (`reportsMs` and `strikesMs` have no floor, only this).
@@ -138,6 +162,15 @@ export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWi
   if (below(policy.appealsMs, RECORD_FLOOR_MS)) {
     throw new ProfileError('retention.appealsMs', 'must be at least 90 days: the per-rule appeal counts read that far back');
   }
+  if (below(policy.filterHitsMs, 30 * DAY_MS)) {
+    throw new ProfileError('retention.filterHitsMs', 'must be at least 30 days: the hub reads a 30 day window of filter counts');
+  }
+  if (below(policy.welfareReportsMs, DAY_MS)) {
+    throw new ProfileError('retention.welfareReportsMs', 'must be at least 1 day: a welfare report is kept for a short time, not removed on sight');
+  }
+  if (below(policy.chatCountsMs, 31 * DAY_MS)) {
+    throw new ProfileError('retention.chatCountsMs', 'must be at least 31 days: the Insights page reads a month of daily line counts');
+  }
   if (below(policy.appealStatementsMs, 0)) {
     throw new ProfileError('retention.appealStatementsMs', 'must be 0 or more: 0 clears a statement as soon as its appeal is decided');
   }
@@ -178,6 +211,18 @@ export interface PurgeResult {
   blockedNames: number;
   /** Open appeals mooted because retention removed their sanction rows. 0 for a store without the appeal methods. */
   appealsClosed: number;
+  /** Chat-filter hit counter rows deleted (`retention.filterHitsMs`). */
+  filterHits: number;
+  /** Welfare reports deleted (`retention.welfareReportsMs`; their comments go with them). Not counted in `reports`. 0 for a store without the method. */
+  welfareReports: number;
+  /** Daily line-count rows deleted (`retention.chatCountsMs`). 0 for a store without the method. */
+  chatCounts: number;
+  /** The shared pacer's rows not touched for an hour, deleted (operational state; no setting). 0 for a store without the pace methods. */
+  pace: number;
+  /** Erasures that kept a remainder (a sanction in force) and were finished by this pass: the person's subject and identifier rows were deleted. */
+  erasuresFinished: number;
+  /** Strike, signal, notice and kept-name rows dropped because their subject has no subject row and they were older than ten minutes. */
+  strayRows: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -208,19 +253,28 @@ function checkWindow(name: string, ms: number): void {
  *   permanent, or timed and not yet ended before that cutoff, and not revoked (that row stops a second appeal). An open appeal is never
  *   deleted or cleared; but one whose sanction rows this pass removed (or that has none) is first mooted, so it ends up decided-like. Blocked names: `at < now - blockedNamesMs` (30 days by default).
  *   A store without the appeal or blocked-name methods has none of these.
+ * - filter hits: a counter row of a UTC day wholly before `now - filterHitsMs` (90 days by default, never less than 30). Reports a filter filed (`origin`) go on `reportsMs` with every report.
  * - links (`cw.links`): `at < now - reportsMs` (90 days by default), every system. A store without the link methods has none.
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
  *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn. The four message kinds: seen, as a report outcome;
  *   unseen, kept until the longer of `noticesMs` and `appealsMs` (appeal outcomes) or of `noticesMs` and `auditMs` (a required rename).
  *
- * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are never touched. The in-memory
- * indexes need no update: they already ignore everything this removes.
+ * - erasures: a pending erase (one that kept a remainder for a sanction in force) is finished once nothing keeps the person: their sanction rows are gone, or
+ *   the only ones left are held by a legal hold and are not in force. Finishing deletes the person's subject and identifier rows. Rows of a subject that has no
+ *   subject row (written by a process that had not heard of an erase) are swept once they are older than ten minutes, unless `sweepStrays` is false.
+ *
+ * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are otherwise never touched (only the finish of an erase and the stray sweep delete
+ * subject-keyed rows). The in-memory indexes need no update: they already ignore everything this removes.
+ *
+ * `options.sweepStrays` (default true) is false when the caller knows a person made in its own process has not been written to the store yet (the save failed): the
+ * rows of that person look like strays until the subject row exists, so the sweep waits.
  */
 export async function purge(
   store: Store,
   now: number,
   policy: Partial<RetentionPolicy> = {},
+  options: { sweepStrays?: boolean } = {},
 ): Promise<PurgeResult> {
   const p: RetentionPolicy = {
     reportsMs: policy.reportsMs ?? RETENTION_DEFAULTS.reportsMs,
@@ -236,6 +290,9 @@ export async function purge(
     appealStatementsMs: policy.appealStatementsMs ?? RETENTION_DEFAULTS.appealStatementsMs,
     appealsMs: policy.appealsMs ?? RETENTION_DEFAULTS.appealsMs,
     blockedNamesMs: policy.blockedNamesMs ?? RETENTION_DEFAULTS.blockedNamesMs,
+    filterHitsMs: policy.filterHitsMs ?? RETENTION_DEFAULTS.filterHitsMs,
+    welfareReportsMs: policy.welfareReportsMs ?? RETENTION_DEFAULTS.welfareReportsMs,
+    chatCountsMs: policy.chatCountsMs ?? RETENTION_DEFAULTS.chatCountsMs,
   };
   if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
@@ -251,12 +308,17 @@ export async function purge(
   checkWindow('appealStatementsMs', p.appealStatementsMs);
   checkWindow('appealsMs', p.appealsMs);
   checkWindow('blockedNamesMs', p.blockedNamesMs);
+  checkWindow('filterHitsMs', p.filterHitsMs);
+  checkWindow('welfareReportsMs', p.welfareReportsMs);
+  checkWindow('chatCountsMs', p.chatCountsMs);
   return store.transaction(() => {
+    // The most sensitive reports first, on their own shorter clock (a report held for legal reasons is skipped by the store); then every other report on `reportsMs`.
+    const welfareReports = store.purgeReportsByReason?.('welfare', now - p.welfareReportsMs) ?? 0;
     const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
     // Link rows (`cw.links`) are ids only and outlive the report they name by no useful time: the same clock as reports. Not counted in the result. A live row (an active EOS sanction, the EOS cursor) is kept by the store whatever its age.
     store.purgeLinks?.(now - p.reportsMs);
     const ai = store.purgeAi?.(now - p.reportsMs, now - p.aiOutcomesMs, now - p.aiExamplesMs) ?? { reads: 0, outcomes: 0 };
-    return {
+    const result: Omit<PurgeResult, 'erasuresFinished' | 'strayRows'> = {
       reports,
       sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
       strikes: store.purgeStrikes(now - p.strikesMs),
@@ -281,6 +343,20 @@ export async function purge(
       appealStatements: store.clearAppealStatements?.(now - p.appealStatementsMs) ?? 0,
       appeals: store.purgeAppeals?.(now - p.appealsMs) ?? 0,
       blockedNames: store.purgeBlockedNames?.(now - p.blockedNamesMs) ?? 0,
+      // Counter rows are keyed by UTC day: a day goes once it ended before the cutoff (strictly older than the day the cutoff falls in).
+      filterHits: store.purgeFilterHits(Math.floor((now - p.filterHitsMs) / DAY_MS)),
+      welfareReports,
+      // Daily line counts (Insights), keyed by UTC day like the filter counters: a day goes once it ended before the day the cutoff falls in.
+      chatCounts: store.purgeChatCounts?.(utcDay(now - p.chatCountsMs)) ?? 0,
+      // The shared pacer's state: rows nobody touched for an hour (the longest window any check can have). No setting.
+      pace: store.paceSweep?.(now - PACE_ROW_MAX_AGE_MS) ?? 0,
     };
+    // Last: the finish of an erase that kept a remainder (a sanction in force) needs the sanction rows above to be gone, and the sweep of stray rows (a row whose person was
+    // erased, written by a process that had not yet heard) needs the persons' rows to be gone first. A stray younger than ten minutes is kept: a subject row can trail its first
+    // strike by a moment.
+    let erasuresFinished = 0;
+    for (const pending of store.loadPendingErasures()) if (store.finishErasure(pending.id, now)) erasuresFinished += 1;
+    const strayRows = options.sweepStrays === false ? 0 : store.purgeStrayRows(now - STRAY_AGE_MS);
+    return { ...result, erasuresFinished, strayRows };
   });
 }

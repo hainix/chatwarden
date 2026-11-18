@@ -56,7 +56,7 @@ export function renderHuman(plan: Plan, result: Result): string {
   lines.push('Next steps');
   steps.forEach((step, index) => lines.push(`  ${index + 1}. ${step}`));
 
-  if (plan.answers.chat === 'none') {
+  if (plan.service === undefined && plan.answers.chat === 'none') {
     lines.push('', 'To moderate your own chat, call the check where each line arrives:');
     for (const line of CHAT_HOOK) lines.push(`  ${line}`);
   }
@@ -70,7 +70,7 @@ export function renderJson(plan: Plan, result: Result, version: string): string 
     chatwarden: version,
     ok: result.error === undefined,
     dryRun: result.dryRun,
-    answers: plan.answers,
+    answers: plan.service ?? plan.answers,
     files: result.files.map((file) => ({
       path: file.path,
       action: file.action,

@@ -97,7 +97,7 @@ describe('the inspection helpers return copies', () => {
     s.insertReport(report('r1'));
     s.insertSanctionGroup([gapRow('g1', 'M-AAAAA')]);
     s.insertStrike({ id: 'k1', at: NOW, subject: 's_a', roomId: 'R', termId: 't', rawLine: 'line' });
-    s.upsertMute({ viewer: 'v', target: 't', createdAt: NOW });
+    s.upsertMute({ viewer: 'v', target: 't', createdAt: NOW, block: false });
     s.insertNotice({ id: 'n1', subject: 's_a', groupId: 'g1', kind: 'ban', rule: '1', until: null, refCode: 'M-AAAAA', excerpt: [], createdAt: NOW, ackedAt: null, withdrawnAt: null });
     s.insertDecision('d1', 'r1', NOW, '{}');
     s.rawReports()[0]!.status = 'dismissed';

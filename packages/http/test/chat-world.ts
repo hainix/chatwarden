@@ -1,5 +1,5 @@
 import { createChatwarden } from '@chatwarden/core';
-import type { Chatwarden, ChatResult, LimitsInput, Logger, PaceSettings, ProfanityFilter, RawWho, SubjectId } from '@chatwarden/core';
+import type { Chatwarden, ChatwardenOptions, ChatResult, ContextSettings, FilterSettings, LimitsInput, Logger, PaceSettings, ProfanityFilter, RawWho, RoomsSettings, SubjectId } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { MemoryTermStore, syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { MemoryStore } from '@chatwarden/store-memory';
@@ -81,6 +81,18 @@ export interface WorldOptions {
   wrap?: (cw: Chatwarden) => Chatwarden;
   /** The kit's pace in force from the start (slow mode, burst, repeats); a room may still override it with `cw.rooms.setPace`. */
   pace?: PaceSettings;
+  /** The chat filters in force from the start (links, personal info, phrases, caps and repeats). */
+  filters?: FilterSettings;
+  /** The `rooms` settings in force from the start (emergency, probation, unknown age). */
+  rooms?: RoomsSettings;
+  /** The kit's `signals` options (the `accountAgeDays` hook). */
+  signals?: ChatwardenOptions['signals'];
+  /** Room contexts (`profile.contexts`), selected by a room's `context` tag. */
+  contexts?: Record<string, ContextSettings>;
+  /** The `names` settings in force from the start (reserved names, the rule they cite). */
+  names?: NonNullable<ChatwardenOptions['overrides']>['names'];
+  /** Phrase books for phrase-only rooms (`createChatwarden({ phrases })`). */
+  phrases?: ChatwardenOptions['phrases'];
   /** Do not build the broadcaster (a test builds its own). */
   noBroadcaster?: boolean;
 }
@@ -108,8 +120,19 @@ export async function chatWorld(over: WorldOptions = {}) {
     retention: false,
     // A filter is always installed (the kit logs once when there is none); the profile decides what it does.
     profanity: filter,
-    ...(over.profanity === 'refuse' || over.pace !== undefined
-      ? { overrides: { ...(over.profanity === 'refuse' ? { profanity: { mode: 'refuse' as const } } : {}), ...(over.pace === undefined ? {} : { pace: over.pace }) } }
+    ...(over.signals === undefined ? {} : { signals: over.signals }),
+    ...(over.phrases === undefined ? {} : { phrases: over.phrases }),
+    ...(over.profanity === 'refuse' || over.pace !== undefined || over.filters !== undefined || over.rooms !== undefined || over.contexts !== undefined || over.names !== undefined
+      ? {
+          overrides: {
+            ...(over.rooms === undefined ? {} : { rooms: over.rooms }),
+            ...(over.names === undefined ? {} : { names: over.names }),
+            ...(over.profanity === 'refuse' ? { profanity: { mode: 'refuse' as const } } : {}),
+            ...(over.pace === undefined ? {} : { pace: over.pace }),
+            ...(over.filters === undefined ? {} : { filters: over.filters }),
+            ...(over.contexts === undefined ? {} : { contexts: over.contexts }),
+          },
+        }
       : {}),
     gate: over.gate ?? (() => gateState.open),
     ...(over.limits === undefined ? {} : { limits: over.limits }),
@@ -281,7 +304,7 @@ export async function routeWorld(over: RouteWorldOptions = {}) {
     if (rawBody !== undefined && o.type !== null && headers['content-type'] === undefined) headers['content-type'] = o.type ?? 'application/json';
     return router({ method, path, query: {}, headers, body: undefined, ...(rawBody === undefined ? {} : { rawBody }) });
   };
-  const post = (room: string, route: 'lines' | 'mute' | 'report', headers: Record<string, string>, body?: unknown, extra: { raw?: string; type?: string | null } = {}) =>
+  const post = (room: string, route: 'lines' | 'mute' | 'report' | 'phrases', headers: Record<string, string>, body?: unknown, extra: { raw?: string; type?: string | null } = {}) =>
     call('POST', `/rooms/${room}/${route}`, { headers, ...(body === undefined ? {} : { body }), ...extra });
   const stream = (room: string, headers: Record<string, string>) => call('GET', `/rooms/${room}/stream`, { headers });
 

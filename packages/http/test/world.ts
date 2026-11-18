@@ -23,8 +23,12 @@ export const SECRET = 'admin-world-secret';
 export type Logged = Array<[string, Record<string, string | number | boolean> | undefined]>;
 
 export interface WorldOptions {
+  /** Change the real store before the kit starts (for example, take methods off it to stand in for a custom store written before a feature). */
+  editStore?: (store: ReturnType<typeof openStore>) => void;
   wrap?: (cw: Chatwarden) => Chatwarden;
   permissions?: Parameters<typeof adminRoutes>[1]['permissions'];
+  /** What a scoped moderator may apply (default: warning and chat, at most 7 days). */
+  scopedLimits?: Parameters<typeof adminRoutes>[1]['scopedLimits'];
   /** Build the term routes (default true). */
   terms?: boolean;
   recentLines?: () => readonly string[];
@@ -44,6 +48,10 @@ export interface WorldOptions {
   profanity?: ProfanityFilter;
   /** The Community Rules (default: the kit's starter rules). */
   rules?: CommunityRules;
+  /** The kit's signals options (for `accountAgeDays`). */
+  signals?: ChatwardenOptions['signals'];
+  /** The secret that signs evidence bundles (at least 32 characters). Default none: bundles are unsigned. */
+  bundleSecret?: string;
   /** The shared term list's admin (K7): built from the world's `LiveTerms`. Default none: no community routes. */
   community?: (live: LiveTerms) => Parameters<typeof adminRoutes>[1]['community'];
 }
@@ -51,6 +59,7 @@ export interface WorldOptions {
 export async function world(over: WorldOptions = {}) {
   const db = new DatabaseSync(':memory:');
   const store = openStore({ db });
+  over.editStore?.(store);
   const clock = { t: NOW, now: () => clock.t };
   const logged: Logged = [];
   const logger: Logger = { warn: (event, detail) => void logged.push([event, detail]) };
@@ -63,6 +72,8 @@ export async function world(over: WorldOptions = {}) {
     logger,
     retention: over.retention ?? false,
     ...(over.rules === undefined ? {} : { rules: over.rules }),
+    ...(over.signals === undefined ? {} : { signals: over.signals }),
+    ...(over.bundleSecret === undefined ? {} : { bundleSecret: over.bundleSecret }),
     ...(over.matcher === undefined ? {} : { matcher: over.matcher }),
     ...(over.profanity === undefined ? {} : { profanity: over.profanity }),
     ...(over.limits === undefined ? {} : { limits: over.limits }),
@@ -79,12 +90,20 @@ export async function world(over: WorldOptions = {}) {
   const authorize = (req: KitRequest): Authz | null => {
     const role = req.headers['x-role'];
     if (role === undefined) return null;
-    return { actor: req.headers['x-actor'] ?? 'ann', role: role as Role };
+    // `x-scope: a,b` makes the caller scoped (the labels of the staff scope); `x-scope-raw` is passed through as it is, for the malformed-authz tests.
+    const raw = req.headers['x-scope-raw'];
+    const scope = req.headers['x-scope'];
+    return {
+      actor: req.headers['x-actor'] ?? 'ann',
+      role: role as Role,
+      ...(raw !== undefined ? ({ scope: JSON.parse(raw) as string[] } as { scope: string[] }) : scope === undefined ? {} : { scope: scope.split(',') }),
+    };
   };
   const routes = adminRoutes(cw, {
     authorize,
     logger,
     ...(over.permissions === undefined ? {} : { permissions: over.permissions }),
+    ...(over.scopedLimits === undefined ? {} : { scopedLimits: over.scopedLimits }),
     ...(over.terms === false ? {} : { terms: live }),
     ...(over.recentLines === undefined ? {} : { recentLines: over.recentLines }),
     ...(over.community === undefined ? {} : { community: over.community(live) }),
@@ -96,11 +115,13 @@ export async function world(over: WorldOptions = {}) {
   const call = (
     method: string,
     path: string,
-    o: { role?: Role | null; actor?: string; query?: Record<string, string>; body?: unknown; raw?: string } = {},
+    o: { role?: Role | null; actor?: string; scope?: readonly string[]; scopeRaw?: unknown; query?: Record<string, string>; body?: unknown; raw?: string } = {},
   ): Promise<KitResponse> => {
     const headers: Record<string, string> = {};
     if (o.role !== null) headers['x-role'] = o.role ?? 'moderator';
     if (o.actor !== undefined) headers['x-actor'] = o.actor;
+    if (o.scope !== undefined) headers['x-scope'] = o.scope.join(',');
+    if (o.scopeRaw !== undefined) headers['x-scope-raw'] = JSON.stringify(o.scopeRaw);
     const rawBody = o.raw ?? (o.body === undefined ? undefined : JSON.stringify(o.body));
     return router({ method, path, query: o.query ?? {}, headers, body: undefined, ...(rawBody === undefined ? {} : { rawBody }) });
   };
@@ -150,11 +171,27 @@ export async function world(over: WorldOptions = {}) {
     if (!res.ok) throw new Error(`report refused: ${res.refused}`);
     const report = real.reports.get(res.reportId);
     if (report === null) throw new Error('report missing');
-    return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson, room, key };
+    return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson!, room, key };
+  };
+  /** `file`, in a room tagged with the staff scope `scope` (null: no tag). `targetKey` names the same person across calls. */
+  const fileIn = async (scope: string | null, o: { targetKey?: string; urgent?: boolean } = {}) => {
+    const n = ++reportN;
+    const room = `scope-room-${n}`;
+    const tags = scope === null ? undefined : { scope };
+    real.rooms.seat(room, 'p1', { clientKey: `raw-client-key-reporter-${n}`, ip: '198.51.100.23' }, 'Rep', tags);
+    real.rooms.seat(room, 'p2', { clientKey: o.targetKey ?? `${KEY_TARGET}-scoped-${n}`, ip: IP_TARGET }, 'TargetName');
+    real.chat.accept(room, 'p2', 'a line from the target');
+    clock.t += 1000;
+    const res = await real.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', category: 'harassment' });
+    if (!res.ok) throw new Error(`report refused: ${res.refused}`);
+    if (o.urgent === true) real.cases.setUrgent(res.reportId, 'ann', true);
+    const report = real.reports.get(res.reportId);
+    if (report === null) throw new Error('report missing');
+    return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson!, room };
   };
   /** A second open report against the same person as `prev`, from another reporter in another room. */
   const fileAgainst = (prev: { key: string }, _reporter: string, category: ReportCategory = 'harassment') => file(category, prev.key);
-  return { cw: real, live, routes, router, call, audit, routeAudit, clock, logged, store, db, person, gap, file, fileAgainst, adapter };
+  return { cw: real, live, routes, router, call, audit, routeAudit, clock, logged, store, db, person, gap, file, fileIn, fileAgainst, adapter };
 }
 
 export const errorOf = (res: KitResponse): string => (res.body as { error: string }).error;

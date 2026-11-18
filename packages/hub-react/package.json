@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/hub-react",
-  "version": "0.1.14",
+  "version": "0.2.0",
   "private": false,
   "description": "Moderator hub for Chatwarden: a themeable React UI over the staff HTTP API, with the report queue, decisions, sanctions, blocked terms and audit trail, plus a headless controller for other frameworks.",
   "license": "Apache-2.0",
@@ -37,12 +37,26 @@
       "default": "./dist/src/headless/index.js"
     },
     "./styles.css": "./src/styles.css",
-    "./font.css": "./font.css"
+    "./font.css": "./font.css",
+    "./locales/es": {
+      "types": "./dist/src/locales/es.d.ts",
+      "default": "./dist/src/locales/es.js"
+    },
+    "./locales/pt": {
+      "types": "./dist/src/locales/pt.d.ts",
+      "default": "./dist/src/locales/pt.js"
+    }
   },
   "typesVersions": {
     "*": {
       "headless": [
         "dist/src/headless/index.d.ts"
+      ],
+      "locales/es": [
+        "dist/src/locales/es.d.ts"
+      ],
+      "locales/pt": [
+        "dist/src/locales/pt.d.ts"
       ]
     }
   },
@@ -62,8 +76,8 @@
     "prepack": "tsc -b"
   },
   "peerDependencies": {
-    "@chatwarden/core": "^0.1.14",
-    "@chatwarden/http": "^0.1.13",
+    "@chatwarden/core": "^0.2.0",
+    "@chatwarden/http": "^0.2.0",
     "react": "^18.3.0 || ^19.0.0",
     "react-dom": "^18.3.0 || ^19.0.0"
   },
@@ -76,10 +90,10 @@
     }
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.14",
-    "@chatwarden/http": "0.1.14",
-    "@chatwarden/matcher": "0.1.14",
-    "@chatwarden/store-memory": "0.1.14",
+    "@chatwarden/core": "0.2.0",
+    "@chatwarden/http": "0.2.0",
+    "@chatwarden/matcher": "0.2.0",
+    "@chatwarden/store-memory": "0.2.0",
     "@fontsource-variable/instrument-sans": "^5.3.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",

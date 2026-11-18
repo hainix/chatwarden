@@ -175,7 +175,7 @@ describe('SqliteStore as a TermStore', () => {
     expect(s.isSeeded('p2')).toBe(false);
     s.markSeeded('p1', T0 + 1);
     expect(db.prepare("SELECT value FROM kit_meta WHERE key = 'terms_seeded:p1'").get()).toBeTruthy();
-    expect(count(db, 'kit_meta')).toBe(2); // schema_version and the marker
+    expect(count(db, 'kit_meta')).toBe(3); // schema_version, the erasure epoch and the marker
     db.close();
   });
 

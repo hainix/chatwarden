@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/http",
-  "version": "0.1.14",
+  "version": "0.2.0",
   "private": false,
   "description": "Chatwarden HTTP package: framework-free router, error mapping, auth hook and role permissions for the admin and player APIs.",
   "license": "Apache-2.0",
@@ -45,6 +45,10 @@
       "types": "./dist/src/chat/index.d.ts",
       "default": "./dist/src/chat/index.js"
     },
+    "./service": {
+      "types": "./dist/src/service/index.d.ts",
+      "default": "./dist/src/service/index.js"
+    },
     "./express": {
       "types": "./dist/src/express.d.ts",
       "default": "./dist/src/express.js"
@@ -78,6 +82,9 @@
       "chat": [
         "dist/src/chat/index.d.ts"
       ],
+      "service": [
+        "dist/src/service/index.d.ts"
+      ],
       "express": [
         "dist/src/express.d.ts"
       ],
@@ -109,7 +116,11 @@
     "prepack": "tsc -b"
   },
   "peerDependencies": {
-    "@chatwarden/core": "^0.1.14",
+    "@chatwarden/core": "^0.2.0",
+    "@chatwarden/hub-element": "^0.2.0",
+    "@chatwarden/matcher": "^0.2.0",
+    "@chatwarden/profanity": "^0.2.0",
+    "@chatwarden/store-sqlite": "^0.2.0",
     "@types/express": "^5.0.0",
     "express": "^5.0.0"
   },
@@ -119,14 +130,26 @@
     },
     "@types/express": {
       "optional": true
+    },
+    "@chatwarden/hub-element": {
+      "optional": true
+    },
+    "@chatwarden/matcher": {
+      "optional": true
+    },
+    "@chatwarden/profanity": {
+      "optional": true
+    },
+    "@chatwarden/store-sqlite": {
+      "optional": true
     }
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.14",
-    "@chatwarden/discord": "0.1.14",
-    "@chatwarden/matcher": "0.1.14",
-    "@chatwarden/profanity": "0.1.14",
-    "@chatwarden/store-sqlite": "0.1.14",
+    "@chatwarden/core": "0.2.0",
+    "@chatwarden/discord": "0.2.0",
+    "@chatwarden/matcher": "0.2.0",
+    "@chatwarden/profanity": "0.2.0",
+    "@chatwarden/store-sqlite": "0.2.0",
     "@types/express": "^5.0.3",
     "express": "^5.1.0"
   },

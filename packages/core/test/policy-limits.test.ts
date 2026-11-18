@@ -7,12 +7,12 @@ import { DAY, OWNER, world } from './reportingWorld.js';
 describe('PolicyState.limits', () => {
   it('a kit with defaults reports the built-in chat rate and the 90-day signal retention', async () => {
     const { cw } = await world();
-    expect(cw.policy.get().limits).toEqual({ chatRate: { count: 3, windowMs: 5000 }, signalsMs: 90 * DAY });
+    expect(cw.policy.get().limits).toEqual({ chatRate: { count: 3, windowMs: 5000 }, signalsMs: 90 * DAY, filters: { accountAge: false } });
   });
 
   it('follows what the adopter configured: limits.chatRate and retention.signalsMs', async () => {
     const { cw } = await world({ limits: { chatRate: { count: 10, windowMs: 8000 } }, retention: { signalsMs: 30 * DAY } });
-    expect(cw.policy.get().limits).toEqual({ chatRate: { count: 10, windowMs: 8000 }, signalsMs: 30 * DAY });
+    expect(cw.policy.get().limits).toEqual({ chatRate: { count: 10, windowMs: 8000 }, signalsMs: 30 * DAY, filters: { accountAge: false } });
   });
 
   it('a partial chatRate keeps the other half of the default', async () => {

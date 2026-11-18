@@ -215,7 +215,7 @@ describe('a mute that does nothing returns false', () => {
     const w = await chatWorld({
       wrap: (cw) => {
         const f = Object.create(cw) as typeof cw;
-        f.mutes = { ...cw.mutes, set: () => undefined };
+        f.mutes = { ...cw.mutes, set: () => 'none' as const };
         return f;
       },
     });

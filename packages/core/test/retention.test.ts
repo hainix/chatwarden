@@ -8,11 +8,20 @@ import { MemoryStore, withMemoryAppeals, withMemoryNames, withMemorySignals } fr
 import { markReportBadFaith } from './markBadFaith.js';
 
 const H = 3_600_000;
+
+/**
+ * These tests write rows for bare subject ids with no subject row. The retention pass also sweeps stray rows (a row whose subject does not exist, older than ten
+ * minutes: privacy-finish.test.ts), which would delete them, so here the sweep is switched off: this file is about the windows of the other tables.
+ */
+const noStray = <S extends MemoryStore>(s: S): S => {
+  s.purgeStrayRows = () => 0;
+  return s;
+};
 const DAY = 24 * H;
 const NOW = 1_800_000_000_000;
 
 function setup() {
-  const store = withMemorySignals(new MemoryStore());
+  const store = withMemorySignals(noStray(new MemoryStore()));
   const clock = { now: () => NOW };
   const subjects = new SubjectIndex(store, clock, { logger: { warn() {} } });
   const subject = (key: string): SubjectId => {
@@ -82,6 +91,9 @@ describe('defaults', () => {
       appealStatementsMs: 90 * DAY,
       appealsMs: 365 * DAY,
       blockedNamesMs: 30 * DAY,
+      filterHitsMs: 90 * DAY,
+      welfareReportsMs: 30 * DAY,
+      chatCountsMs: 400 * DAY,
     });
   });
 });
@@ -370,9 +382,9 @@ describe('purge: strikes', () => {
 describe('purge: mutes', () => {
   it('purges mutes past the 180-day TTL (ruling R27) and keeps the rest', async () => {
     const { store } = setup();
-    store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 180 * DAY - 1 });
-    store.upsertMute({ viewer: 'v', target: 'edge', createdAt: NOW - 180 * DAY });
-    store.upsertMute({ viewer: 'v', target: 'new', createdAt: NOW - DAY });
+    store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 180 * DAY - 1, block: false });
+    store.upsertMute({ viewer: 'v', target: 'edge', createdAt: NOW - 180 * DAY, block: false });
+    store.upsertMute({ viewer: 'v', target: 'new', createdAt: NOW - DAY, block: false });
     const res = await purge(store, NOW);
     expect(res.mutes).toBe(1);
     expect(store.rawMutes().map((m) => m.target).sort()).toEqual(['edge', 'new']);
@@ -380,8 +392,8 @@ describe('purge: mutes', () => {
 
   it('a refreshed mute (same pair muted again) is judged by its new time', async () => {
     const { store } = setup();
-    store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 400 * DAY });
-    store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - DAY });
+    store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 400 * DAY, block: false });
+    store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - DAY, block: false });
     expect((await purge(store, NOW)).mutes).toBe(0);
     expect(store.rawMutes()).toHaveLength(1);
   });
@@ -393,17 +405,17 @@ describe('purge: result, policy and scope', () => {
     t.store.insertReport(report('r1', NOW - 100 * DAY));
     t.store.insertReport(report('r2', NOW - 100 * DAY));
     t.store.insertStrike(strike('s1', NOW - 40 * DAY));
-    t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY });
+    t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY, block: false });
     await t.sanction(t.subject('k1'), NOW - 200 * DAY, DAY);
-    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
   });
 
   it('on an empty store, or run twice, deletes nothing', async () => {
     const { store } = setup();
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
     store.insertReport(report('r1', NOW - 100 * DAY));
     await purge(store, NOW);
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
   });
 
   it('a custom policy overrides the defaults, field by field', async () => {
@@ -412,9 +424,9 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 10 * DAY));
     await t.sanction(t.subject('k1'), NOW - 20 * DAY, DAY); // ended 19 d ago
     const res = await purge(t.store, NOW, { reportsMs: 5 * DAY });
-    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
     const res2 = await purge(t.store, NOW, { strikesMs: 5 * DAY, sanctionAfterEndMs: 5 * DAY });
-    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
   });
 
   it('a zero window purges everything already past', async () => {
@@ -447,7 +459,7 @@ describe('purge: result, policy and scope', () => {
 
   it('a finite now (zero, negative) is accepted (control)', async () => {
     const t = setup();
-    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
     await expect(purge(t.store, -5)).resolves.toBeDefined();
   });
 
@@ -466,7 +478,7 @@ describe('purge: result, policy and scope', () => {
     const t = setup();
     t.store.insertReport(report('r1', NOW - 100 * DAY));
     t.store.insertStrike(strike('s1', NOW - 40 * DAY));
-    t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY });
+    t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY, block: false });
     await t.sanction(t.subject('k1'), NOW - 200 * DAY, DAY);
     t.store.purgeMutes = () => {
       throw new Error('disk full');
@@ -834,7 +846,7 @@ describe('appeals and blocked-name retention', () => {
 
   it('the result of a purge always has the three fields, 0 when nothing is due', async () => {
     const { store } = appealsSetup();
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
   });
 
   it('strict cutoffs: a row exactly on the line is kept, one millisecond older goes', async () => {
@@ -919,13 +931,13 @@ describe('appeals and blocked-name retention', () => {
     const { store } = setup();
     store.insertStrike(strike('old', NOW - 60 * DAY));
     const res = await purge(store, NOW);
-    expect(res).toMatchObject({ strikes: 1, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    expect(res).toMatchObject({ strikes: 1, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
     // a store with only the appeal methods, and one with only the name methods
-    const onlyAppeals = withMemoryAppeals(new MemoryStore());
+    const onlyAppeals = withMemoryAppeals(noStray(new MemoryStore()));
     onlyAppeals.insertAppeal(appeal('a', 'g-a'));
     decide(onlyAppeals, 'a', NOW - 400 * DAY);
     expect(await purge(onlyAppeals, NOW)).toMatchObject({ appeals: 1, blockedNames: 0 });
-    const onlyNames = withMemoryNames(new MemoryStore());
+    const onlyNames = withMemoryNames(noStray(new MemoryStore()));
     onlyNames.insertBlockedName(blocked('b', NOW - 40 * DAY));
     expect(await purge(onlyNames, NOW)).toMatchObject({ appeals: 0, appealStatements: 0, blockedNames: 1 });
   });
@@ -1097,5 +1109,160 @@ describe('unseen message notices, running sanctions and orphaned appeals (review
     const plain = setup().store;
     plain.insertStrike(strike('old', NOW - 60 * DAY));
     expect(await purge(plain, NOW)).toMatchObject({ strikes: 1, appealsClosed: 0 });
+  });
+});
+
+describe('filter hits (F5)', () => {
+  const today = Math.floor(NOW / DAY);
+  const hit = (day: number, key = 'link.unlisted') => ({ day, key, action: 'count' as const, hits: 1 });
+
+  it('filterHitsMs default is 90 days; below 30 days is refused naming retention.filterHitsMs; 30 days and above pass', () => {
+    expect(RETENTION_DEFAULTS.filterHitsMs).toBe(90 * DAY);
+    expect(() => checkRetentionFloors({ filterHitsMs: 30 * DAY - 1 }, 30 * DAY)).toThrow(ProfileError);
+    try {
+      checkRetentionFloors({ filterHitsMs: 29 * DAY }, 30 * DAY);
+      throw new Error('expected a refusal');
+    } catch (e) {
+      expect((e as ProfileError).path).toBe('retention.filterHitsMs');
+      expect((e as ProfileError).message).toMatch(/30 days/);
+    }
+    expect(() => checkRetentionFloors({ filterHitsMs: 30 * DAY }, 30 * DAY)).not.toThrow();
+    expect(() => checkRetentionFloors({ filterHitsMs: 400 * DAY }, 30 * DAY)).not.toThrow();
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, '30' as never]) expect(() => checkRetentionFloors({ filterHitsMs: bad }, 30 * DAY)).toThrow(ProfileError);
+  });
+
+  it('purge deletes day rows strictly older and reports filterHits; the edge day stays', async () => {
+    const { store } = setup();
+    const cut = Math.floor((NOW - 90 * DAY) / DAY);
+    store.addFilterHits([hit(cut - 2), hit(cut - 1, 'a'), hit(cut), hit(today)]);
+    const res = await purge(store, NOW);
+    expect(res.filterHits).toBe(2);
+    expect(store.listFilterHits(0, today).map((r) => r.day)).toEqual([cut, today]);
+    expect((await purge(store, NOW)).filterHits).toBe(0);
+  });
+
+  it('filterHitsMs moves the window', async () => {
+    const { store } = setup();
+    store.addFilterHits([hit(today - 40), hit(today - 10), hit(today)]);
+    expect((await purge(store, NOW, { filterHitsMs: 30 * DAY })).filterHits).toBe(1);
+    expect(store.listFilterHits(0, today).map((r) => r.day)).toEqual([today - 10, today]);
+  });
+
+  it('a purge with no hit rows reports 0', async () => {
+    const { store } = setup();
+    expect((await purge(store, NOW)).filterHits).toBe(0);
+  });
+
+  it('reports of origin filter purge on reportsMs like any report; the counters do not touch them', async () => {
+    const { store } = setup();
+    const filed = (id: string, createdAt: number) => ({ ...report(id, createdAt), reporterSubject: `filter:${id}`, reporterSeat: '', reporterHandle: '', origin: 'filter' as const, originKey: 'link.unlisted' });
+    store.insertReport(filed('old', NOW - 91 * DAY));
+    store.insertReport(filed('new', NOW - 1 * DAY));
+    store.addFilterHits([hit(today)]);
+    const res = await purge(store, NOW);
+    expect(res.reports).toBe(1);
+    expect(store.loadReport('old')).toBeNull();
+    expect(store.loadReport('new')).not.toBeNull();
+  });
+
+  it('a purge failing in the hit table undoes the whole purge', async () => {
+    const { store } = setup();
+    store.insertReport(report('old', NOW - 120 * DAY));
+    store.purgeFilterHits = () => {
+      throw new Error('boom');
+    };
+    await expect(purge(store, NOW)).rejects.toThrow('boom');
+    expect(store.loadReport('old')).not.toBeNull();
+  });
+});
+
+describe('desk retention fields (welfareReportsMs, chatCountsMs)', () => {
+  const caught = (policy: Partial<Parameters<typeof checkRetentionFloors>[0]>): ProfileError => {
+    try {
+      checkRetentionFloors(policy, 30 * DAY);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProfileError);
+      return err as ProfileError;
+    }
+    throw new Error('expected a ProfileError');
+  };
+
+  it('defaults are 30 days of welfare reports and 400 days of chat counts', () => {
+    expect(RETENTION_DEFAULTS.welfareReportsMs).toBe(30 * DAY);
+    expect(RETENTION_DEFAULTS.chatCountsMs).toBe(400 * DAY);
+  });
+
+  it('welfareReportsMs: 1 day accepted, below it refused naming the field; 0 is a floor violation, not "off"', () => {
+    expect(() => checkRetentionFloors({ welfareReportsMs: DAY }, 30 * DAY)).not.toThrow();
+    expect(() => checkRetentionFloors({ welfareReportsMs: 400 * DAY }, 30 * DAY)).not.toThrow();
+    for (const v of [DAY - 1, 0, -1]) {
+      const err = caught({ welfareReportsMs: v });
+      expect(err.path, String(v)).toBe('retention.welfareReportsMs');
+      expect(err.message).toContain('1 day');
+    }
+  });
+
+  it('chatCountsMs: 31 days accepted, below it refused naming the field; 0 is refused', () => {
+    expect(() => checkRetentionFloors({ chatCountsMs: 31 * DAY }, 30 * DAY)).not.toThrow();
+    for (const v of [31 * DAY - 1, 30 * DAY, 0, -1]) {
+      const err = caught({ chatCountsMs: v });
+      expect(err.path, String(v)).toBe('retention.chatCountsMs');
+      expect(err.message).toContain('31 days');
+    }
+  });
+
+  it('NaN, Infinity and a non-number are refused for both as a finite-number error', () => {
+    for (const field of ['welfareReportsMs', 'chatCountsMs'] as const) {
+      for (const v of [Number.NaN, Infinity, '30', null]) {
+        const err = caught({ [field]: v } as never);
+        expect(err.path, `${field} ${String(v)}`).toBe(`retention.${field}`);
+      }
+    }
+  });
+
+  it('an absent field takes the default and satisfies the floors', () => {
+    expect(() => checkRetentionFloors({}, 30 * DAY)).not.toThrow();
+  });
+
+  it('purge accepts both fields and reports 0 for the two new counts on a store without the methods', async () => {
+    const { store } = setup();
+    const res = await purge(store, NOW, { welfareReportsMs: DAY, chatCountsMs: 31 * DAY });
+    expect(res).toMatchObject({ welfareReports: 0, chatCounts: 0 });
+  });
+
+  it('purge refuses a negative or non-finite window for them', async () => {
+    const { store } = setup();
+    await expect(purge(store, NOW, { welfareReportsMs: -1 })).rejects.toThrow('purge: invalid welfareReportsMs');
+    await expect(purge(store, NOW, { chatCountsMs: Number.NaN })).rejects.toThrow('purge: invalid chatCountsMs');
+  });
+});
+
+describe('daily line counts (retention.chatCountsMs, U7)', () => {
+  const dayOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+
+  it('purge deletes the days that ended before the cutoff day (strict) and keeps the cutoff day and later', async () => {
+    const { store } = setup();
+    const cutoff = NOW - 400 * DAY;
+    store.addChatCounts(dayOf(cutoff - 2 * DAY), 5, 1);
+    store.addChatCounts(dayOf(cutoff - DAY), 5, 1);
+    store.addChatCounts(dayOf(cutoff), 5, 1);
+    store.addChatCounts(dayOf(cutoff + DAY), 5, 1);
+    const res = await purge(store, NOW);
+    expect(res.chatCounts).toBe(2);
+    expect(store.chatCounts('2000-01-01', '2100-01-01').map((r) => r.day)).toEqual([dayOf(cutoff), dayOf(cutoff + DAY)]);
+  });
+
+  it('a shorter chatCountsMs (down to its 31-day floor) deletes sooner', async () => {
+    const { store } = setup();
+    store.addChatCounts(dayOf(NOW - 40 * DAY), 5, 1);
+    store.addChatCounts(dayOf(NOW - 20 * DAY), 5, 1);
+    expect((await purge(store, NOW, { chatCountsMs: 31 * DAY })).chatCounts).toBe(1);
+    expect(store.chatCounts('2000-01-01', '2100-01-01')).toHaveLength(1);
+  });
+
+  it('a store without purgeChatCounts reports 0 and does not throw', async () => {
+    const { store } = setup();
+    (store as unknown as { purgeChatCounts?: unknown }).purgeChatCounts = undefined;
+    expect((await purge(store, NOW)).chatCounts).toBe(0);
   });
 });

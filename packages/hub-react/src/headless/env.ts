@@ -6,7 +6,6 @@ import type { HubError } from '../client.js';
 
 /**
  * The timers, and the clock that measures them. Every member is optional in `createHubController({ schedule })`.
- * @experimental
  */
 export interface Timers {
   setTimeout(run: () => void, ms: number): unknown;
@@ -17,7 +16,6 @@ export interface Timers {
   now(): number;
 }
 
-/** @experimental */
 export const browserTimers: Timers = {
   setTimeout: (run, ms) => globalThis.setTimeout(run, ms),
   clearTimeout: (handle) => globalThis.clearTimeout(handle as Parameters<typeof clearTimeout>[0]),
@@ -28,7 +26,6 @@ export const browserTimers: Timers = {
 
 /**
  * What the page is doing: whether anyone is looking, whether there is a network, and when the page is going away.
- * @experimental
  */
 export interface PageSource {
   /** False while the tab is hidden. */
@@ -52,7 +49,6 @@ const listen = (target: 'document' | 'window', type: string, listener: () => voi
 
 /**
  * The browser's page: `document.visibilityState`, `navigator.onLine`, and their events. Outside a browser: always visible, always online.
- * @experimental
  */
 export const browserPage: PageSource = {
   visible: () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
@@ -65,6 +61,5 @@ export const browserPage: PageSource = {
 
 /**
  * How a command answers: the value, or the error. A command never throws for an outcome it expects (a 409, a 404, no network).
- * @experimental
  */
 export type ActionResult<R> = { ok: true; value: R } | { ok: false; error: HubError };

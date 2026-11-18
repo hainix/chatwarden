@@ -23,6 +23,10 @@ export interface ReasonDraft {
   rules: number[];
   asksNote: boolean;
   enabled: boolean;
+  /** Not edited on this screen, but carried through every save: a reasons list replaces the whole list, so a field left out would be reset. */
+  urgent: boolean;
+  thanks: string | null;
+  showResources: boolean;
 }
 
 export interface ReportingDraft {
@@ -30,6 +34,12 @@ export interface ReportingDraft {
   reasons: ReasonDraft[];
   thanks: string;
 }
+
+/** A text's length as the kit counts it: characters as a person sees them (an emoji is one), not UTF-16 units. */
+export const charsOf = (s: string): number => Array.from(s).length;
+
+/** The thank-you for one reason as it is kept and sent: trimmed, and blank means "use the general one" (null). */
+const thanksOf = (s: string | null): string | null => (s === null || s.trim() === '' ? null : s.trim());
 
 /** The reason that can be renamed and re-mapped but never removed or switched off. */
 export const isLocked = (r: Pick<ReasonDraft, 'id'>): boolean => r.id === OTHER_REASON_ID;
@@ -43,7 +53,7 @@ export function reportingDraftOf(reporting: ResolvedReporting | undefined): Repo
   return {
     flow: r.flow,
     thanks: r.thanks,
-    reasons: ordered.map((x, i) => ({ key: `r${i}`, id: x.id, label: x.label, hint: x.hint, group: x.group, rules: [...x.rules], asksNote: x.asksNote, enabled: x.enabled })),
+    reasons: ordered.map((x, i) => ({ key: `r${i}`, id: x.id, label: x.label, hint: x.hint, group: x.group, rules: [...x.rules], asksNote: x.asksNote, enabled: x.enabled, urgent: x.urgent, thanks: x.thanks, showResources: x.showResources })),
   };
 }
 
@@ -52,7 +62,7 @@ function sameness(d: ReportingDraft, newIds: boolean): string {
   return JSON.stringify([
     d.flow,
     d.thanks.trim(),
-    d.reasons.map((r) => [newIds ? r.id : r.id === '' ? '+' : r.id, r.label.trim(), r.hint.trim(), r.group.trim(), r.rules, r.asksNote, r.enabled]),
+    d.reasons.map((r) => [newIds ? r.id : r.id === '' ? '+' : r.id, r.label.trim(), r.hint.trim(), r.group.trim(), r.rules, r.asksNote, r.enabled, r.urgent, thanksOf(r.thanks), r.showResources]),
   ]);
 }
 
@@ -89,7 +99,7 @@ function inputsOf(d: ReportingDraft): ReportReasonInput[] {
       id = slugOf(r.label, taken);
       taken.add(id);
     }
-    return { id, label: r.label.trim(), hint: r.hint.trim(), group: r.group.trim(), rules: [...r.rules], asksNote: r.asksNote, enabled: isLocked({ id }) ? true : r.enabled };
+    return { id, label: r.label.trim(), hint: r.hint.trim(), group: r.group.trim(), rules: [...r.rules], asksNote: r.asksNote, enabled: isLocked({ id }) ? true : r.enabled, urgent: r.urgent, thanks: thanksOf(r.thanks), showResources: r.showResources };
   });
 }
 
@@ -120,6 +130,7 @@ export function reportingProblems(d: ReportingDraft): Record<string, Problem> {
     if (r.hint.trim().length > REASON_HINT_MAX) out[`reason-${r.key}-hint`] = { key: 'hub.reporting.error.long', params: { max: REASON_HINT_MAX } };
     if (r.group.trim().length > REASON_GROUP_MAX) out[`reason-${r.key}-group`] = { key: 'hub.reporting.error.long', params: { max: REASON_GROUP_MAX } };
     if (r.rules.length > MAX_REASON_RULES) out[`reason-${r.key}-rules`] = { key: 'hub.reporting.reason.error.rules', params: { max: MAX_REASON_RULES } };
+    if (charsOf(r.thanks ?? '') > THANKS_MAX) out[`reason-${r.key}-thanks`] = { key: 'hub.settings.reporting.thanks.error.long', params: { max: THANKS_MAX } };
   }
   if (!d.reasons.some((r) => r.enabled || isLocked(r))) out['reasons'] = { key: 'hub.reporting.reasons.error.none' };
   return out;
@@ -132,7 +143,7 @@ const freshKey = (): string => `n${(keys += 1)}`;
 export function addReason(d: ReportingDraft): { draft: ReportingDraft; key: string | null } {
   if (d.reasons.length >= MAX_REPORT_REASONS) return { draft: d, key: null };
   const key = freshKey();
-  const row: ReasonDraft = { key, id: '', label: '', hint: '', group: '', rules: [], asksNote: false, enabled: true };
+  const row: ReasonDraft = { key, id: '', label: '', hint: '', group: '', rules: [], asksNote: false, enabled: true, urgent: false, thanks: null, showResources: false };
   // "Something else" stays last: a new row goes before it.
   const at = d.reasons.findIndex((r) => isLocked(r));
   const reasons = at === d.reasons.length - 1 ? [...d.reasons.slice(0, at), row, d.reasons[at] as ReasonDraft] : [...d.reasons, row];
@@ -194,7 +205,7 @@ export function reportingFieldKey(path: string, d: ReportingDraft): string | nul
     const row = d.reasons[Number(m[1])];
     if (row === undefined) return 'reasons';
     const part = m[2];
-    if (part === 'hint' || part === 'group' || part === 'rules') return `reason-${row.key}-${part}`;
+    if (part === 'hint' || part === 'group' || part === 'rules' || part === 'thanks') return `reason-${row.key}-${part}`;
     return `reason-${row.key}-label`;
   }
   if (path === 'layer.reporting.reasons' || path === 'layer.reporting') return 'reasons';

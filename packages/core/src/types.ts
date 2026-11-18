@@ -6,8 +6,10 @@ import type { AiCellCounts } from './ai/gates.js';
 import type { AIExample, AIRead, AISignal } from './ai/types.js';
 import type { AppealStatus } from './appeals.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
+import type { HeldSet, HoldRow } from './legal.js';
 import type { LinkRow, LinkSystem } from './links.js';
 import type { NameReason } from './names.js';
+import type { ErasePlan, ErasureCounts, ErasureRow, SubjectExport } from './privacy.js';
 import type { PolicyLayer } from './profile.js';
 import type { RuleRef } from './rules.js';
 
@@ -221,6 +223,11 @@ export interface SanctionListQuery {
   beforeId?: string;
   /** Only the rows of this sanction group (its subject row: an IP row is never listed). Optional, additive (0.1.12). */
   groupId?: string;
+  /**
+   * Only the rows whose `reportId` names a report whose `scope` is one of these (a staff scope). A row with no report (a direct or an automatic sanction) is never matched, nor one of a report with
+   * no scope. An empty list matches nothing. Absent: every row.
+   */
+  scope?: readonly string[];
   /** Clamped to 1..200 (a fraction is floored). */
   limit: number;
 }
@@ -341,7 +348,6 @@ export interface AiReadRow {
  * One signal a game recorded about a player (flood control and signals, design 5.8). Staff-side data: it holds ids and numbers only, no
  * text, handle or seat. `sourceKey` is `b:<canonical by>`, `r:<roomId>` or `d:<UTC day>`; `(kind, subject, sourceKey, capBucket)` is unique,
  * which is the per-source cap.
- * @experimental
  */
 export interface SignalRow {
   id: string;
@@ -362,7 +368,6 @@ export interface SignalRow {
  * One appeal, as the store keeps it (appeals inbox, design 4.7). `statement` is the player's own text, capped at APPEAL_STATEMENT_MAX
  * characters: the only new player free text, kept here and nowhere else, nulled by retention. Private: a player sees `PlayerAppeal`, never
  * this. `rule` is the sanction's rule as TEXT (`'1'`.. or `'uncovered'`), like a sanction row.
- * @experimental
  */
 export interface AppealRow {
   /** Random, never derived. */
@@ -393,7 +398,6 @@ export interface AppealRow {
 /**
  * One blocked name kept as evidence (only when `names.keepBlocked` is on). `subject` is null when the check could not tie the name to a
  * person; `termId` is the matcher's term id for a `name_not_allowed` hit and null for `name_profane`. Private staff data on a short clock.
- * @experimental
  */
 export interface BlockedNameRow {
   id: string;
@@ -406,7 +410,6 @@ export interface BlockedNameRow {
 
 /**
  * What `listSignalSources` answers: one row per source of a kind about a subject. Rows are bounded by distinct sources, not by volume.
- * @experimental
  */
 export interface SignalSourceRow {
   subject: SubjectId;
@@ -507,14 +510,12 @@ export interface AiOutcomeRow extends AiOutcomeInsert {
 /**
  * Where an AI action stands (AI levels 3 and 4, design 6.5). `queued` waits for its hold and its confirming read; `shadow` is "would have acted" (nothing was written to a player);
  * `held_back` is a case the 20% holdback left to a person; `refused` carries a closed code; `active`, `confirmed` and `undone` belong to the acting release.
- * @experimental
  */
 export type AiActionState = 'queued' | 'shadow' | 'active' | 'confirmed' | 'undone' | 'refused' | 'held_back';
 
 /**
  * One row of `kit_ai_actions`: one per report, ever. Ids, a cell (the AI's rule and conduct level), a state, a closed code and times; no text but a reviewer's private undo note (at most
  * 500 characters, cleared with the report). Staff only: it names a report, so it never reaches a player.
- * @experimental
  */
 export interface AiActionRow {
   id: string;
@@ -625,6 +626,11 @@ export interface MuteRow {
   viewer: SubjectId;
   target: SubjectId;
   createdAt: number;
+  /**
+   * True for a block: a mute that is also two-way and never expires (the retention purge, the 180 day cut of `loadMutes` and the per-viewer cap all leave it alone). A mute never
+   * downgrades a block: a store keeps `block` true when a row for the pair is written again with false.
+   */
+  block: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -654,7 +660,6 @@ export interface StrikeRow {
 
 /**
  * A "do not automate" mark as stored (AI levels 3 and 4, design 6.4). `setBy` is the senior's staff ref (audit-class: staff channels only, never a player).
- * @experimental
  */
 export interface NoAutomationRow {
   subject: string;
@@ -703,6 +708,8 @@ export interface ReportExcerptLine {
   /** Seat ids that could see the line; null means the whole room. */
   audience: string[] | null;
   p: number | null;
+  /** A moderator had taken the line back for everyone when this report was filed (`cw.rooms.retract`). Present and true only then; a report filed earlier is never rewritten. */
+  retracted?: true;
 }
 
 /**
@@ -736,7 +743,65 @@ export interface StoredReport {
   lineId: string | null;
   excerpt: ReportExcerptLine[];
   people: SubjectId[];
+  /**
+   * Who made the report when it was not a player: `'filter'` (a chat filter's `flag`, `cw.reports.fileSystem`) or `'watch'` (the AI watch,
+   * later). Omitted or null for an ordinary player report. An origin report has `reporterSubject` of the form `filter:<report id>`, an empty
+   * seat and handle, and is not counted as anyone's reporting: the reporter readers (tally, outcomes, accuracy, bulk dismissal, notices on a
+   * decision, suspension, ranking) leave it out. A store refuses (`insertReport` answers false) a second OPEN `'filter'` report for one
+   * (target, room).
+   */
+  origin?: 'filter' | 'watch' | null;
+  /** For an origin report, the counter key that made it (a closed shape `[a-z0-9_.:-]{1,48}`, never text from a line); omitted or null otherwise. */
+  originKey?: string | null;
+  /**
+   * The report is urgent: a snapshot taken when it was filed (its reason is flagged urgent, or a system filter said so), changed afterwards only by a moderator
+   * (`setReportUrgent`). Omitted reads as false. A store returns it on every record.
+   */
+  urgent?: boolean;
+  /**
+   * An opaque id the game gave for the evidence of the gameplay behind the report (a match, a replay): a closed alphabet with no dot or slash, supplied by the server
+   * and never by a player. The kit never fetches it. Omitted or null reads as null. A store returns it on every record.
+   */
+  evidenceRef?: string | null;
+  /**
+   * The room's staff `scope` tag when it was filed (`^[a-z0-9][a-z0-9:_.-]{0,63}$`, for example `creator:alice`), or null/omitted when the room had none. A moderator whose `Authz` carries a
+   * scope sees only the reports whose scope is one of theirs; a report with no scope is invisible to such a caller. Stamped by the kit from the room's tag, never from a player. A store returns
+   * it on every record.
+   */
+  scope?: string | null;
+  /**
+   * The clan, guild, team, deck or other entity this report is about, as the game described it at filing: `{ kind, ref, label }`. The report is still filed against the owner's seat; the entity is what the case shows as one
+   * extra row. Omitted or null reads as null. A store returns it on every record. The label may be a name a player chose: it goes with the report when the report is erased.
+   */
+  entity?: ReportEntity | null;
   status: 'open';
+}
+
+/**
+ * What a report says it is about when it is not a player alone: a clan, guild, team, deck, pet or item. `kind` is a word of the game's (`^[a-z][a-z_]{0,23}$`), `ref` the game's opaque id for the entity (1 to 64 of `A-Za-z0-9_:-`),
+ * `label` its name as the players see it (1 to 64 characters, no control character, trimmed).
+ */
+export interface ReportEntity {
+  kind: string;
+  ref: string;
+  label: string;
+}
+
+/** The origins a report can have besides a player. */
+export type ReportOrigin = 'filter' | 'watch';
+
+/** Is this a report nobody filed (a chat filter's flag, the AI watch)? True for any origin; a record with none (or from an older custom store) is a player's report. */
+export const isOriginReport = (report: { origin?: ReportOrigin | null }): boolean => report.origin !== undefined && report.origin !== null;
+
+/**
+ * One row of the chat-filter hit counters: a UTC day number (epoch ms divided by one day, rounded down), a counter key, the action applied
+ * (`flag_capped` when the daily cap turned a flag into a count) and how many times. No person, room or text.
+ */
+export interface FilterHitRow {
+  day: number;
+  key: string;
+  action: 'count' | 'flag' | 'mask' | 'refuse' | 'flag_capped';
+  hits: number;
 }
 
 /**
@@ -745,18 +810,36 @@ export interface StoredReport {
  * until then. `badFaith` marks a dismissal as the reporter's bad faith (it counts toward their suspension).
  * Private: moderator tools only.
  */
-export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason'> {
+export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason' | 'origin' | 'originKey' | 'urgent' | 'evidenceRef' | 'scope' | 'entity'> {
+  /** Where the report came from: `'filter'`, `'watch'`, or null for a player's report. Every first-party store returns it. See {@link StoredReport.origin}. */
+  origin: ReportOrigin | null;
+  /** The counter key of an origin report; null otherwise. */
+  originKey: string | null;
   /**
    * The reason the reporter gave (a reason id), or null. Rows stored before 0.1.2 carry their old category here (`disruption` as
-   * `griefing`). Every first-party store returns it; it is optional here so a custom store's 0.1.1-shaped record still type-checks (a
-   * missing one reads as the old category, see `StaffReport`, where it is always present).
+   * `griefing`). Every store returns it (a custom `Store` must).
    */
-  reportedReason?: string | null;
+  reportedReason: string | null;
   /**
    * When the reporter added their one follow-up (`cw.reports.addDetail`), epoch ms, or null. At most one per report, and only
-   * while the report is open.
+   * while the report is open. Every store returns it.
    */
-  detailAt?: number | null;
+  detailAt: number | null;
+  /** Urgent now (see {@link StoredReport.urgent}). Every store returns it (a custom `Store` must). */
+  urgent: boolean;
+  /** The game's evidence id, or null (see {@link StoredReport.evidenceRef}). Every store returns it. */
+  evidenceRef: string | null;
+  /** The staff scope the room carried when the report was filed (see {@link StoredReport.scope}), or null. Every store returns it. */
+  scope: string | null;
+  /** The entity the report is about (see {@link StoredReport.entity}), or null. Every store returns it (a custom `Store` must). */
+  entity: ReportEntity | null;
+  /** When a moderator marked the case as passed to the game's safety team, and who: the first mark only. Null until then. Staff ids, not players. */
+  handoffAt: number | null;
+  handoffBy: string | null;
+  /** A second look was asked of this role (`'senior'` or `'owner'`), by whom and when; all three null while none is asked, and cleared when the report is decided. */
+  escalatedTo: 'senior' | 'owner' | null;
+  escalatedBy: string | null;
+  escalatedAt: number | null;
   status: 'open' | 'actioned' | 'dismissed';
   badFaith: boolean;
   actionedAt: number | null;
@@ -777,6 +860,13 @@ export interface ReportListQuery {
   beforeId?: string;
   /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. */
   reason?: string | null;
+  /** Only urgent reports when true; false or omitted keeps all. */
+  urgent?: boolean;
+  /**
+   * Only reports whose `scope` is one of these (a staff scope): applied in the query, so paging and the cursor are the unscoped ones. An empty list matches nothing and a report with no scope is
+   * never matched. Absent: every report. A store MUST apply it (the contract suite fails one that does not).
+   */
+  scope?: readonly string[];
   limit: number;
 }
 
@@ -786,11 +876,85 @@ export interface OpenReportQuery {
   category?: ReportCategory;
   /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. A store must apply it. */
   reason?: string | null;
+  /** Only urgent reports when true (the urgent pass of "take next" and `GET /reports?urgent=1`); false or omitted keeps all. */
+  urgent?: boolean;
   /** Keyset cursor: only reports newer than this (`createdAt` above it, or equal with an id above `afterId`). `afterId` without `after` is ignored. */
   after?: number;
   afterId?: string;
+  /** Only reports whose `scope` is one of these: see {@link ReportListQuery.scope}. */
+  scope?: readonly string[];
   /** Clamped to 1..200 (a fraction is floored). */
   limit: number;
+}
+
+/**
+ * One entry of the staff thread on a report: a comment, an ask for a second look (`ask`), an escalation to the owner (`escalate`) or the note that a look was done
+ * (`clear`). Staff only: `actor` is a staff ref, never a player. `text` is null for an entry with no note. Deleted with its report.
+ */
+export interface CommentRow {
+  id: string;
+  reportId: string;
+  /** Epoch ms. */
+  at: number;
+  actor: string;
+  role: 'moderator' | 'senior' | 'owner';
+  kind: 'comment' | 'ask' | 'escalate' | 'clear';
+  text: string | null;
+}
+
+/**
+ * One entry of the staff thread as the staff API shows it: `author` is a staff ref, `kind` says what it is (`comment`, `ask` for a senior, `escalate` for the owner, `clear` for "looked at")
+ * and `text` is null for an entry with no note. Staff only.
+ */
+export interface ReportComment {
+  id: string;
+  reportId: string;
+  at: number;
+  author: string;
+  role: 'moderator' | 'senior' | 'owner';
+  kind: 'comment' | 'ask' | 'escalate' | 'clear';
+  text: string | null;
+}
+
+/** The most entries one report's thread holds: the store refuses the next. */
+export const COMMENTS_PER_REPORT_MAX = 50;
+
+/**
+ * The shared pacer's state for one player in one room (`createChatwarden({ sharedPacing: true })`): the same things the in-memory pacer keeps, so two processes can judge one player's
+ * lines. Times and fingerprints only; never a line's text. `who` is the canonical subject id, or `seat:<seatId>` for a guest.
+ */
+export interface PaceStateRow {
+  roomId: string;
+  who: string;
+  /** The time of the last committed line, epoch ms. */
+  lastAt: number;
+  /** The times of the last committed lines (at most the burst's `lines`), oldest first. */
+  stamps: number[];
+  /** The 16-hex-character fingerprints of the last 8 committed lines with their times, oldest first. */
+  recent: Array<{ h: string; at: number }>;
+  /** When a flood signal was last sent for this player in this room, or null. */
+  floodSignalAt: number | null;
+  /** When the row was last written: the sweep deletes rows not touched for an hour. */
+  touchedAt: number;
+}
+
+/** One day of line counts (`desk.insights`): the UTC date as `YYYY-MM-DD` and two counts. No player, room or text. */
+export interface ChatDayRow {
+  day: string;
+  delivered: number;
+  refused: number;
+}
+
+/**
+ * One report as Insights reads it: times, status, the reason id the reporter gave and two flags. No text, no subject, no handle, no actor.
+ */
+export interface InsightRow {
+  createdAt: number;
+  actionedAt: number | null;
+  status: 'open' | 'actioned' | 'dismissed';
+  reportedReason: string | null;
+  urgent: boolean;
+  badFaith: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -944,8 +1108,9 @@ export interface Store {
 
   /**
    * Upsert one identifier row (keyed by subject, kind and value): `firstSeen`
-   * is kept from the first write, `lastSeen` only moves forward. The subject
-   * must already exist.
+   * is kept from the first write, `lastSeen` only moves forward. A subject that
+   * does not exist (erased, perhaps by another process) writes nothing and does not
+   * throw, so a stale writer can never recreate an identifier.
    */
   saveIdentifier(record: SubjectIdRecord): Promise<void>;
 
@@ -979,7 +1144,7 @@ export interface Store {
   sanctionRefCode(groupId: string): string | null;
 
   /**
-   * OPTIONAL (0.1.12, `@experimental`). The sanction group that holds this exact ref code (`M-` plus five characters, already
+   * OPTIONAL (0.1.12). The sanction group that holds this exact ref code (`M-` plus five characters, already
    * normalised: upper case), or null. Revoked and ended groups are found: the code never changes. A store that implements it MUST also honour
    * `SanctionListQuery.groupId` (`cw.sanctions.byRef` reads the group's rows with it; a store that ignores the filter returns other groups'
    * rows and the code is silently missed). A store without it makes
@@ -1024,19 +1189,19 @@ export interface Store {
   // Mutes. SYNCHRONOUS on purpose (like sanctions): `MuteService.set` writes inside
   // `transaction`, then updates its in-memory index in the same tick.
 
-  /** Insert the (viewer, target) mute, or set its `createdAt` when it already exists. */
+  /** Insert the (viewer, target) mute or block, or set its `createdAt` when it already exists. `block` becomes true when either the stored row or this one has it (a mute never downgrades a block). */
   upsertMute(row: MuteRow): void;
 
   /** Delete the (viewer, target) mute exactly as stored. Returns whether a row was removed. */
   deleteMute(viewer: SubjectId, target: SubjectId): boolean;
 
-  /** Every mute created at or after `since` (epoch ms): the live ones, for rebuilding the index. */
+  /** Every mute created at or after `since` (epoch ms) and every block whatever its age: the live ones, for rebuilding the index. */
   loadMutes(since: number): MuteRow[];
 
   /**
-   * Keep only the `keep` newest mutes of this stored viewer id (by `createdAt`; on a
-   * tie the one written last survives) and delete the rest. Returns the target ids of
-   * the deleted rows, oldest first.
+   * Keep only the `keep` newest rows of this stored viewer id (by `createdAt`; on a
+   * tie the one written last survives) and delete the rest, but never a block: only mutes are dropped (oldest first), so more than `keep`
+   * rows can remain when blocks fill the list. Returns the target ids of the deleted rows, oldest first.
    */
   pruneMutes(viewer: SubjectId, keep: number): SubjectId[];
 
@@ -1070,13 +1235,35 @@ export interface Store {
 
   /**
    * Insert one report. Returns false, having written nothing, when a report by the same reporter subject
-   * against the same target subject in the same room already exists (the UNIQUE backstop); any other
-   * failure throws.
+   * against the same target subject in the same room already exists (the UNIQUE backstop), or when the row has
+   * `origin: 'filter'` and an OPEN `'filter'` report against the same target in the same room already exists (one
+   * open filter report for a person and room); any other failure throws.
    */
   insertReport(row: StoredReport): boolean;
 
   /** One report with its decision columns, or null when there is none by that id. */
   loadReport(id: string): ReportRecord | null;
+
+  /** {@link Store.loadReport}, but null unless the report's `scope` is one of `scope` (an empty list matches nothing; a report with no scope is never matched). The read behind a scoped moderator's case. */
+  loadReportInScope(id: string, scope: readonly string[]): ReportRecord | null;
+
+  /**
+   * How many reports with this origin were filed (`createdAt`) at or after `since`, whatever their status. The read behind the filters' daily
+   * cap, so processes sharing one store share the count.
+   */
+  countOriginReports(origin: ReportOrigin, since: number): number;
+
+  /**
+   * Add to the chat-filter hit counters: each row's `hits` is added to the stored row for its (day, key, action), made when there is none. A
+   * list that holds the same (day, key, action) twice adds both. Synchronous, one transaction.
+   */
+  addFilterHits(rows: readonly FilterHitRow[]): void;
+
+  /** The counter rows for the UTC days `sinceDay` to `untilDay` inclusive, ordered by day, key, then action. Copies. */
+  listFilterHits(sinceDay: number, untilDay: number): FilterHitRow[];
+
+  /** Delete the counter rows of days strictly before `beforeDay`. Returns how many rows were deleted. */
+  purgeFilterHits(beforeDay: number): number;
 
   /**
    * Reports newest first (`created_at` descending, then `id` descending, so a tie is stable), whole records. `status`
@@ -1089,9 +1276,9 @@ export interface Store {
   /**
    * Reports filed AGAINST any of the given subjects (`targetSubject` as stored: pass the person's canonical id and every
    * alias merged into it), newest first (`created_at` descending, then `id` descending), whole records. `limit` is
-   * clamped to 1..200 (a fraction is floored). An empty list matches nothing.
+   * clamped to 1..200 (a fraction is floored). An empty list matches nothing. With `scope`, only reports whose scope is one of these (an empty scope list matches nothing).
    */
-  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[];
 
   /**
    * Reports that are still `open`, OLDEST first (`createdAt` ascending, then `id` ascending, so a tie is stable), whole
@@ -1105,9 +1292,9 @@ export interface Store {
    * The OPEN reports filed AGAINST any of the given subjects (`targetSubject` as stored: pass the person's canonical id
    * and every alias merged into it), newest first (`createdAt` descending, then `id` descending), whole records. `limit` is
    * clamped to 1..201 (a fraction is floored; 201 so a caller can ask for 200 and one more to learn whether there is more, as
-   * `dismissMany` does: a custom store that clamps at 200 only makes it under-report `more`). An empty list matches nothing.
+   * `dismissMany` does: a custom store that clamps at 200 only makes it under-report `more`). An empty list matches nothing. With `scope`, only reports whose scope is one of these.
    */
-  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[];
 
   /**
    * OPTIONAL. The OPEN reports FILED BY any of the given subjects (`reporterSubject` as stored: pass the person's canonical id
@@ -1586,20 +1773,20 @@ export interface Store {
   // refuses it at construction. SYNCHRONOUS (like notices); they run inside `transaction` and are undone with it. They take a row the
   // facade has already validated, keep it as it is and return copies. A link write is not a queue change: it does not move the change token.
 
-  /** OPTIONAL (`@experimental`). The row for `(system, ref)`, a copy, or null. */
+  /** OPTIONAL . The row for `(system, ref)`, a copy, or null. */
   getLink?(system: LinkSystem, ref: string): LinkRow | null;
 
-  /** OPTIONAL (`@experimental`). Insert the row, or replace the one with the same `(system, ref)`. */
+  /** OPTIONAL . Insert the row, or replace the one with the same `(system, ref)`. */
   putLink?(row: LinkRow): void;
 
   /**
-   * OPTIONAL (`@experimental`). The `system`'s rows, oldest `at` first and then by `ref` (code point order), only this `state` when given,
+   * OPTIONAL . The `system`'s rows, oldest `at` first and then by `ref` (code point order), only this `state` when given,
    * at most `limit` (floored, clamped to 1..500; NaN is 1). The state filter applies before the limit. Copies.
    */
   listLinks?(system: LinkSystem, q: { state?: string; limit: number }): LinkRow[];
 
   /**
-   * OPTIONAL (`@experimental`). Delete rows with `at < before` (a row exactly on the line is kept); returns how many. A row that says it is live
+   * OPTIONAL . Delete rows with `at < before` (a row exactly on the line is kept); returns how many. A row that says it is live
    * is never deleted by age: an `eos-sanction` row in state `active` (a lift long after the push must still find it) and every `eos-cursor`
    * row. Once such a row is marked `removed` (or `failed`) its `at` is new and it ages out like any other.
    */
@@ -1637,7 +1824,7 @@ export interface Store {
   /**
    * Delete reports with `createdAt < before`, except a bad-faith dismissal still inside its window
    * (`bad_faith = 1` and `actionedAt >= keepBadFaithSince`): the reporter's suspension reads it. Also deletes the
-   * recorded decisions of reports that no longer exist, and the AI reads of the reports it deletes (not their casebook outcomes: those
+   * recorded decisions of reports that no longer exist, the staff comments of the reports it deletes, and the AI reads of the reports it deletes (not their casebook outcomes: those
    * have their own clock, see `purgeAi`). Returns how many reports it deleted.
    */
   purgeReports(before: number, keepBadFaithSince: number): number;
@@ -1737,6 +1924,145 @@ export interface Store {
   findNoticeForGroup(
     groupId: string,
   ): { id: string; subject: SubjectId; ackedAt: number | null; withdrawnAt: number | null } | null;
+
+  // Privacy requests (0.2.0). REQUIRED: a custom store implements them too. `cw.privacy` and `cw.legal` are the only callers.
+
+  /**
+   * One person's data, read for an export: `subjects` is the canonical subject and every alias merged into it. Reads only; returns copies. Never a hash, a
+   * raw key, an address, another player's id, handle or line, a reporter identity or a staff ref (see {@link SubjectExport}); each section is capped at
+   * 5 000 rows and the cut sections are named in `truncated`. `found` is false when none of the subjects exists.
+   */
+  exportSubjects(subjects: readonly SubjectId[]): SubjectExport;
+
+  /**
+   * Erase one person as ONE transaction (see the registry in `privacy.ts` for what each category does in each mode). Synchronous. `plan.subjects` is expanded to every
+   * subject merged into any of them. It never touches a row of a held report (`plan.heldReportIds`) or anything a hold protects, sets `sanction.report_id` NULL where its
+   * report was deleted, replaces an erased reporter by `erased:<report id>` and the person's lines in other players' reports by a marker, rewrites the person's audit
+   * refs to `plan.receiptId` when nothing keeps the subject, and moves the erasure epoch (only when something was erased and not on a dry run). With `mode: 'safety'` and a
+   * restricting sanction in force it keeps exactly the subject, identifier and in-force sanction rows (and that notice, its lines cleared). `dryRun` returns the counts a
+   * real run would and writes nothing. An unknown subject erases nothing (`found: false`).
+   */
+  eraseSubjects(plan: ErasePlan): ErasureCounts;
+
+  /** Write a receipt row. `pendingSubject` is set only while a remainder is kept. A duplicate id throws. */
+  insertErasure(row: ErasureRow): void;
+
+  /** Every receipt whose `pendingSubject` is set (the erases waiting for their sanctions to go), oldest first. */
+  loadPendingErasures(): ErasureRow[];
+
+  /**
+   * Finish a pending erase when nothing keeps the person any more: no sanction row of theirs is left, except rows a legal hold keeps that are not in force at `at`
+   * (a held row that has ended or was revoked stays, and does not hold the erase back; one still in force does). Then delete the subject and identifier rows,
+   * rewrite the audit refs to the receipt id, clear `pendingSubject` and move the erasure epoch. Returns true when this call finished it; false (nothing changed)
+   * for an unknown or already finished receipt or while a sanction row keeps the person.
+   */
+  finishErasure(id: string, at: number): boolean;
+
+  /**
+   * Delete the strike, signal, notice and kept-name rows whose subject has no subject row (written by a process that had not yet learned the person was erased, or in
+   * the moment between a row and its subject): those with a time before `before`, or, with `only`, those of exactly those subjects at any age. A row of a subject that
+   * exists is never touched, nor the notice of a sanction group a hold protects. Returns how many rows went. One transaction; journaled.
+   */
+  purgeStrayRows(before: number, only?: readonly SubjectId[]): number;
+
+  /** A counter that moves on every erase (and the finish of one) and on nothing else; persists with the store and is shared by every process on the database. Starts at 0. */
+  erasureEpoch(): number;
+
+  // Legal hold (0.2.0). REQUIRED. `cw.legal` is the only caller. A hold protects one report and what hangs on it (see {@link HeldSet}): while it is open, EVERY purge
+  // (`purgeReports`, `purgeSanctions`, `purgeNotices`, `purgeAppeals`, `clearAppealStatements`, `purgeAi`, `purgeAiActions`, `purgeAudit`) and `eraseSubjects` leave its rows alone,
+  // whatever their age and whatever the caller passed: the store consults its own holds, so no caller can forget one.
+
+  /**
+   * Place a hold. Returns true when this call placed it; false (nothing changed) while the report is already held. A report whose earlier hold was released can be held
+   * again (the released row is replaced). The store does not check that the report exists: the caller does.
+   */
+  placeHold(row: HoldRow): boolean;
+
+  /** Release the open hold of a report at `at`, by `by`. True only when this call released one. The row stays, with its release. */
+  releaseHold(reportId: string, by: string, at: number): boolean;
+
+  /** The hold row of a report (open or released), or null when it was never held. A copy. */
+  loadHold(reportId: string): HoldRow | null;
+
+  /** The open holds, oldest first (`heldAt`, then report id). Copies. */
+  listHolds(): HoldRow[];
+
+  /** The report ids and sanction groups the open holds protect (see {@link HeldSet}). */
+  heldSet(): HeldSet;
+
+  /** The sanction groups whose rows cite this report (`report_id`), oldest first by first write: what a decision of the report wrote. Empty for an unknown report. */
+  sanctionGroupsOfReport(reportId: string): string[];
+
+  // The urgent lane, the staff workflow and Insights (0.2.0). OPTIONAL: a store without them cannot run `desk.workflow` (`createChatwarden` says so) and the urgent lane
+  // and Insights degrade to nothing. All SYNCHRONOUS, in `transaction` like every report write. A write that changes the open count, the urgent count, an escalation, a
+  // hand-off or a comment moves `changeToken()` inside the same transaction; an undone transaction leaves it as it was. Counts of lines (`addChatCounts`) never move it.
+  // Both first-party stores implement them.
+
+  /** Set an OPEN report's urgent flag. True when this call changed it; false (nothing changed) for an unknown or decided report or when it already had that value. */
+  setReportUrgent?(id: string, on: boolean): boolean;
+
+  /** Record the hand-off of a report (any status). The FIRST call wins: true when it recorded `by` and `at`, false (nothing changed) afterwards or for an unknown report. */
+  setHandoff?(id: string, by: string, at: number): boolean;
+
+  /**
+   * Ask for a second look at an OPEN report (`patch`), replacing an earlier ask, or clear it (`null`). True when this call changed it; false for an unknown or decided report
+   * or when there was nothing to change. `to` must be `'senior'` or `'owner'`: anything else throws and writes nothing.
+   */
+  setEscalation?(id: string, patch: { to: 'senior' | 'owner'; by: string; at: number } | null): boolean;
+
+  /** How many reports are open and urgent; with `scope`, only those whose scope is one of these (an empty list counts none). */
+  countOpenUrgent?(scope?: readonly string[]): number;
+
+  /** How many open reports are escalated, by the role asked. */
+  countOpenEscalated?(): Record<'senior' | 'owner', number>;
+
+  /**
+   * Add an entry to a report's thread. False (nothing written) when the report does not exist or already holds {@link COMMENTS_PER_REPORT_MAX} entries; a clashing id or an
+   * unknown `kind` or `role` throws. The report may be decided: a thread outlives the decision.
+   */
+  insertComment?(row: CommentRow): boolean;
+
+  /** A report's thread, oldest first (`at`, then `id`). Copies. Empty for an unknown report. */
+  listComments?(reportId: string): CommentRow[];
+
+  /** Delete one entry. True when it removed one. */
+  deleteComment?(id: string): boolean;
+
+  /** How many entries a report's thread holds. */
+  countComments?(reportId: string): number;
+
+  /**
+   * Delete reports whose `reportedReason` is `reason` and whose `createdAt < before` (strict), with their staff comments, recorded decisions and AI reads, in one
+   * transaction; a report held for legal reasons is skipped. The welfare retention clock. Returns how many reports it deleted.
+   */
+  purgeReportsByReason?(reason: string, before: number): number;
+
+  /** Add to the line counts of a UTC day (`YYYY-MM-DD`), made when there is none: additive, so two connections add correctly. Never moves the change token. */
+  addChatCounts?(day: string, delivered: number, refused: number): void;
+
+  /** The line counts of the days `fromDay` to `toDay` inclusive, ordered by day. Copies. */
+  chatCounts?(fromDay: string, toDay: string): ChatDayRow[];
+
+  /** Delete the line counts of days strictly before `beforeDay`. Returns how many rows went. */
+  purgeChatCounts?(beforeDay: string): number;
+
+  /** The shared pacer's row for (`roomId`, `who`), or null for none. A copy. */
+  paceLoad?(roomId: string, who: string): PaceStateRow | null;
+
+  /**
+   * Read the row (null for none), run `fn(prev)` exactly once, store what it returns for this (`roomId`, `who`) and return it, as one atomic step: two processes updating one key
+   * serialise (SQLite: one `BEGIN IMMEDIATE` transaction) and none of the two updates is lost. A throw from `fn` stores nothing and rethrows. `fn` is synchronous and must not call the store.
+   */
+  paceUpdate?(roomId: string, who: string, fn: (prev: PaceStateRow | null) => PaceStateRow): PaceStateRow;
+
+  /** Delete one room's rows. Returns how many went. */
+  paceDropRoom?(roomId: string): number;
+
+  /** Delete the rows whose `touchedAt` is strictly before `before`. Returns how many went. */
+  paceSweep?(before: number): number;
+
+  /** The reports created at or after `since`, newest first, at most `limit` (clamped to at least 1), as {@link InsightRow}s: no text, subject, handle or actor. */
+  insightRows?(since: number, limit: number): InsightRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -1773,6 +2099,11 @@ export interface Matcher {
    * it `names.check` falls back to `match`.
    */
   matchName?(name: string): { termId: string } | null;
+  /**
+   * Is this NAME one of the protected `entries` (`names.reserved`)? Read as whole words by skeleton (look-alikes and leetspeak folded, a space, underscore, hump or digit run a word break); a name whose whole skeleton is
+   * one of `allow` is never a match. Optional: without it `names.reserved` does nothing and the kit says so once (`chatwarden.names_reserved_unsupported`). The kit hands over the same frozen arrays until the settings change.
+   */
+  matchReserved?(name: string, entries: readonly string[], allow: readonly string[]): boolean;
 }
 
 // ---------------------------------------------------------------------------

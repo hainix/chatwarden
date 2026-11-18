@@ -1,11 +1,10 @@
 import { REPORTER_RANK_LAPSE_MS } from '@chatwarden/core';
-import { liveClaim } from './claims.js';
+import { holderOf, liveClaim } from './claims.js';
 import type { AiBrief, Claim, ReportCategory, ReportSummary } from './types.js';
 
 /**
  * Everything waiting on one reported person. The unit of work in the queue is a person, not a report: the kit's queue is a flat,
  * paged list of reports, and this is the view the hub builds from it.
- * @experimental
  */
 export interface QueueGroup {
   /** The reported person's staff ref (opaque). Show {@link personTag}, never this. */
@@ -30,6 +29,8 @@ export interface QueueGroup {
   rooms: string[];
   /** Distinct people who reported. */
   reporters: number;
+  /** The distinct filters that filed a report in the group (a report nobody wrote: no reporter), newest first. `label` is a phrase rule's name when the server sent one. Empty for a player's reports. */
+  origins?: Array<{ key: string; label?: string }>;
   /** Their staff refs (show the short tag, never the ref), newest report first. */
   reporterPersons: string[];
   /** The newest handle a report recorded for each of those reporters; a reporter none recorded one for has no entry (name them by their tag). */
@@ -67,12 +68,25 @@ export interface QueueGroup {
    * capped half point (`signals.conduct`); nothing is hidden, and no other order or chip reads it.
    */
   boosted?: true;
+  /**
+   * Set (true) when an open report of the person is urgent (its reason is flagged urgent, or a moderator marked it). `groupQueue` pins such a group above every other one in every sort,
+   * and the habitual-reporter mark never applies to it. Absent when none is, so a queue with no urgent report has groups as they were.
+   */
+  urgent?: true;
+  /** With `urgent`: how many open reports of the person are urgent. */
+  urgentOpen?: number;
+  /** With `urgent`: when the oldest open urgent report was filed. */
+  oldestUrgentAt?: number;
+  /**
+   * With `desk.workflow` on: the role someone asked for a second look at an open report of the person (`senior` or `owner`; the higher when there are several). It only marks the row and feeds
+   * a filter: it never reorders the queue. Absent when none is asked, and with the workflow off.
+   */
+  asked?: 'senior' | 'owner';
 }
 
 /**
  * Pure functions that add to the `priority` score. They take a group and answer a number; one that answers NaN, Infinity, anything but a number, or
  * throws is ignored. The answer is clamped to plus or minus half a point, so it can reorder close calls but never override severity.
- * @experimental
  */
 export interface RankSignals {
   reporter?: (g: QueueGroup) => number;
@@ -116,7 +130,6 @@ export const loadRanker = (): Promise<unknown> =>
 /**
  * The AI's queue ranking: `priorityScore`, `RANK_WEIGHTS` and `reporterSignal`, and, once loaded, the `priority` sort of `groupQueue`. Both hubs (React and
  * headless) load it by themselves when their queue holds a read; this is for code that calls `groupQueue(items, { sort: 'priority' })` on its own.
- * @experimental
  */
 export const loadAiRank = (): Promise<AiRank> =>
   import('./ai/rank.js').then(({ installRanker, priorityScore, RANK_WEIGHTS, reporterSignal }) => {
@@ -130,7 +143,6 @@ export interface ReportedReason {
   label: string | null;
 }
 
-/** @experimental */
 export type QueueSort = 'latest' | 'oldest' | 'reports';
 
 /** A case with more open reports than this is never ranked lower: a mass report is not buried (core's take-next draws the same line). */
@@ -151,7 +163,6 @@ const newestFirst = (a: ReportSummary, b: ReportSummary): number => b.createdAt 
  * With `rankDown: { now }` a case is listed after the others (each part keeping the chosen sort) when it has an open report, EVERY open
  * report on it carries `reporterAccuracy.habitual`, none has waited `REPORTER_RANK_LAPSE_MS` (24 hours, at `now`) and it has at most
  * 200 open reports. Nothing is removed. A server that sends no accuracy ranks nobody lower. The same rule as core's take-next.
- * @experimental
  */
 export function groupQueue(
   items: readonly ReportSummary[],
@@ -175,6 +186,7 @@ export function groupQueue(
     const rooms = new Set<string>();
     const reporters = new Set<string>();
     const reporterPersons: string[] = [];
+    const origins: Array<{ key: string; label?: string }> = [];
     // No prototype: a reporter's ref is an opaque string, and `__proto__` or `constructor` must be a key like any other.
     const reporterHandles: Record<string, string> = Object.create(null) as Record<string, string>;
     const flaggedHandles: string[] = [];
@@ -185,6 +197,9 @@ export function groupQueue(
     let oldestOpenAt: number | null = null;
     let habitualOpen = 0;
     let boosted = false;
+    let urgentOpen = 0;
+    let asked: 'senior' | 'owner' | null = null;
+    let oldestUrgentAt: number | null = null;
     let claim: Claim | null = null;
     const viewing = new Set<string>();
     for (const r of list) {
@@ -200,16 +215,27 @@ export function groupQueue(
       const reason = r.reportedReason ?? null;
       if (!reasons.some((x) => x.id === reason)) reasons.push({ id: reason, label: reason === null ? null : (r.reportedReasonLabel ?? reason) });
       if (r.roomId !== '') rooms.add(r.roomId);
-      reporters.add(r.reporterPerson);
-      if (!reporterPersons.includes(r.reporterPerson)) reporterPersons.push(r.reporterPerson);
-      // Newest first, so the first handle seen for a reporter is their latest. An older server sends none at all.
-      const reporterHandle = r.reporterHandle ?? null;
-      if (reporterHandle !== null && !Object.hasOwn(reporterHandles, r.reporterPerson)) {
-        reporterHandles[r.reporterPerson] = reporterHandle;
-        if (r.reporterHandleFlagged === true) reporterFlagged[r.reporterPerson] = true;
+      // A report nobody filed (a chat filter's flag) has no reporter to count or name; it is shown by the filter that made it.
+      if (r.origin === 'filter' && typeof r.originKey === 'string' && !origins.some((o) => o.key === r.originKey)) {
+        origins.push({ key: r.originKey, ...(typeof r.originLabel === 'string' ? { label: r.originLabel } : {}) });
+      }
+      if (r.reporterPerson !== null) {
+        reporters.add(r.reporterPerson);
+        if (!reporterPersons.includes(r.reporterPerson)) reporterPersons.push(r.reporterPerson);
+        // Newest first, so the first handle seen for a reporter is their latest. An older server sends none at all.
+        const reporterHandle = r.reporterHandle ?? null;
+        if (reporterHandle !== null && !Object.hasOwn(reporterHandles, r.reporterPerson)) {
+          reporterHandles[r.reporterPerson] = reporterHandle;
+          if (r.reporterHandleFlagged === true) reporterFlagged[r.reporterPerson] = true;
+        }
       }
       if (r.status === 'open') {
         if (r.boosted === true) boosted = true;
+        if (r.escalatedTo !== undefined && (asked === null || r.escalatedTo === 'owner')) asked = r.escalatedTo;
+        if (r.urgent === true) {
+          urgentOpen += 1;
+          oldestUrgentAt = oldestUrgentAt === null ? r.createdAt : Math.min(oldestUrgentAt, r.createdAt);
+        }
         open += 1;
         if (r.reporterAccuracy?.habitual === true) habitualOpen += 1;
         oldestOpenAt = oldestOpenAt === null ? r.createdAt : Math.min(oldestOpenAt, r.createdAt);
@@ -230,6 +256,7 @@ export function groupQueue(
       dismissed,
       rooms: [...rooms],
       reporters: reporters.size,
+      origins,
       reporterPersons,
       reporterHandles,
       ...(Object.keys(reporterFlagged).length > 0 ? { reporterHandlesFlagged: { ...reporterFlagged } } : {}),
@@ -242,9 +269,12 @@ export function groupQueue(
       viewing: [...viewing].sort(),
       summaries: list,
       ...(boosted ? { boosted: true as const } : {}),
+      ...(asked === null ? {} : { asked }),
+      ...(urgentOpen > 0 ? { urgent: true as const, urgentOpen, oldestUrgentAt: oldestUrgentAt as number } : {}),
+      // An urgent case is never ranked lower: a threat from a habitual false reporter is still read first.
       ...(rankDown === undefined
         ? {}
-        : { rankedLow: open > 0 && open <= RANK_DOWN_OPEN_MAX && habitualOpen === open && rankDown.now - (oldestOpenAt as number) < REPORTER_RANK_LAPSE_MS }),
+        : { rankedLow: urgentOpen === 0 && open > 0 && open <= RANK_DOWN_OPEN_MAX && habitualOpen === open && rankDown.now - (oldestOpenAt as number) < REPORTER_RANK_LAPSE_MS }),
     });
   }
 
@@ -257,17 +287,16 @@ export function groupQueue(
   };
   if (sort === 'priority' && ranker !== null) ranker(groups, options);
   else groups.sort((a, b) => order[sort === 'priority' ? 'oldest' : sort](a, b) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
-  const sorted = groups;
-  if (rankDown === undefined) return sorted;
   // A stable partition of the chosen order: ordinary cases first, ranked-low ones after, each part keeping its order.
-  return [...sorted.filter((g) => g.rankedLow !== true), ...sorted.filter((g) => g.rankedLow === true)];
+  const sorted = rankDown === undefined ? groups : [...groups.filter((g) => g.rankedLow !== true), ...groups.filter((g) => g.rankedLow === true)];
+  // Urgent cases are pinned above everything else, after every sort (design 5.2), each part keeping its order.
+  return sorted.some((g) => g.urgent === true) ? [...sorted.filter((g) => g.urgent === true), ...sorted.filter((g) => g.urgent !== true)] : sorted;
 }
 
 const NONE: ReadonlySet<string> = new Set();
 
 /**
  * The next report to open about a person once `exceptId` is decided: the oldest other open one, and how many are left.
- * @experimental
  */
 export interface NextReport {
   id: string;
@@ -281,7 +310,6 @@ export interface NextReport {
  * One case per person: the report to go on to after deciding `exceptId`, from the live queue (which holds open reports only). The
  * oldest other open report of the same person, or null when it was their last. Entries are newest first, so the oldest is the last.
  * This is the one place the rule lives: the notice, "Decide and take next" and Ctrl+Enter all ask it.
- * @experimental
  */
 export function nextOpenReport(groups: readonly QueueGroup[], person: string, exceptId: string, decided: ReadonlySet<string> = NONE): NextReport | null {
   const group = groups.find((g) => g.person === person);
@@ -292,25 +320,28 @@ export function nextOpenReport(groups: readonly QueueGroup[], person: string, ex
   return oldest === undefined ? null : { ...oldest, left: others.length };
 }
 
-/** @experimental */
 export interface QueueFilter {
   claim: 'all' | 'unclaimed' | 'mine';
   /** @deprecated The hub no longer offers it (the reason a reporter chose is the filter); kept for embedders, and still applied and sent to take next. */
   category: ReportCategory | 'all';
   /** A reason id, `none` for reports that gave no reason, or `all` (also when left out). */
   reason?: string;
+  /**
+   * Only the cases someone asked a second look of one of these roles (the hub sets the roles at or below the caller's, so a senior sees what was asked of a senior). Absent: no such filter.
+   */
+  asked?: ReadonlyArray<'senior' | 'owner'> | undefined;
 }
 
 /**
  * The cases a moderator has asked to see: by who holds them (a lapsed claim is nobody) and by category and by reason (a person with any report
  * in it). Order is kept; the input is not changed.
- * @experimental
  */
 export function filterGroups(groups: readonly QueueGroup[], filter: QueueFilter, me: string, now: number): QueueGroup[] {
   return groups.filter((g) => {
     if (filter.category !== 'all' && !g.categories.includes(filter.category)) return false;
     const reason = filter.reason ?? 'all';
     if (reason !== 'all' && !g.reasons.some((x) => (reason === 'none' ? x.id === null : x.id === reason))) return false;
+    if (filter.asked !== undefined && (g.asked === undefined || !filter.asked.includes(g.asked))) return false;
     const held = liveClaim(g.claim, now);
     if (filter.claim === 'unclaimed') return held === null;
     if (filter.claim === 'mine') return held !== null && held.by === me;
@@ -318,7 +349,45 @@ export function filterGroups(groups: readonly QueueGroup[], filter: QueueFilter,
   });
 }
 
-/** @experimental */
+/**
+ * What the urgent chip says and opens (design 5.2): how many open urgent reports the groups hold, how long the oldest has waited, and the report to open: the oldest urgent
+ * report of a case nobody else holds (a lapsed claim, or yours, is free), else of the oldest case when every urgent case is held (`heldBy` is then who holds it).
+ * Pure: the clock and the caller come in.
+ */
+export interface UrgentSummary {
+  count: number;
+  oldestAt: number | null;
+  /** The report the chip opens, or null with nothing urgent. */
+  open: { reportId: string; person: string } | null;
+  /** Who holds the case the chip opens, when someone else does. */
+  heldBy: string | null;
+}
+
+export function urgentSummary(groups: readonly QueueGroup[], me: string, now: number): UrgentSummary {
+  let count = 0;
+  let oldestAt: number | null = null;
+  const urgent: QueueGroup[] = [];
+  for (const g of groups) {
+    if (g.urgent !== true) continue;
+    urgent.push(g);
+    count += g.urgentOpen ?? 0;
+    const at = g.oldestUrgentAt ?? null;
+    if (at !== null && (oldestAt === null || at < oldestAt)) oldestAt = at;
+  }
+  const byAge = (a: QueueGroup, b: QueueGroup): number => (a.oldestUrgentAt ?? 0) - (b.oldestUrgentAt ?? 0) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0);
+  const free = urgent.filter((g) => holderOf(g.claim, me, now).kind !== 'other').sort(byAge)[0];
+  const target = free ?? [...urgent].sort(byAge)[0];
+  if (target === undefined) return { count, oldestAt, open: null, heldBy: null };
+  const wanted = (target.summaries ?? []).filter((r) => r.status === 'open' && r.urgent === true).sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1))[0];
+  const holder = holderOf(target.claim, me, now);
+  return {
+    count,
+    oldestAt,
+    open: { reportId: wanted?.id ?? (target.reportIds[0] as string), person: target.person },
+    heldBy: free === undefined && holder.kind === 'other' ? holder.by : null,
+  };
+}
+
 export interface QueueStats {
   /** People with something open. */
   people: number;
@@ -332,7 +401,6 @@ export interface QueueStats {
 
 /**
  * The Overview's numbers, from groups built from the open queue.
- * @experimental
  */
 export function queueStats(groups: readonly QueueGroup[], now: number): QueueStats {
   let people = 0;

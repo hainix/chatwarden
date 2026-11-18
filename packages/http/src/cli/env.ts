@@ -49,6 +49,11 @@ export interface CliWritable {
 /** Runs a command and resolves with its exit code. `shell` is only ever set by install.ts, for a fixed argument list. */
 export type Spawner = (command: string, args: string[], options: { cwd: string; shell?: boolean }) => Promise<{ code: number }>;
 
+/** Where a stop signal comes from (`SIGTERM`, `SIGINT`): the process, or a test. `on` returns what takes the handler off again. Only `chatwarden serve` listens. */
+export interface SignalSource {
+  on(handler: (signal: string) => void): () => void;
+}
+
 export interface CliEnv {
   /** The project root: where the CLI was run from. It never looks in a parent folder. */
   cwd: string;
@@ -65,6 +70,8 @@ export interface CliEnv {
   /** Both stdin and stdout are a terminal: a prompt makes sense. */
   isTTY: boolean;
   spawn: Spawner;
+  /** The stop signals; absent in a test world that sends none. */
+  signals?: SignalSource;
 }
 
 const noSpawner: Spawner = () => Promise.reject(new Error('no process spawner is configured (only --install runs one)'));
@@ -96,5 +103,18 @@ export function nodeEnv(spawn: Spawner = noSpawner): CliEnv {
     execPath: nodeProcess.execPath,
     isTTY: Boolean(nodeProcess.stdin.isTTY && nodeProcess.stdout.isTTY),
     spawn,
+    signals: {
+      on(handler) {
+        const names = ['SIGTERM', 'SIGINT'] as const;
+        const listeners = names.map((name) => {
+          const listener = (): void => handler(name);
+          nodeProcess.on(name, listener);
+          return [name, listener] as const;
+        });
+        return () => {
+          for (const [name, listener] of listeners) nodeProcess.off(name, listener);
+        };
+      },
+    },
   };
 }

@@ -97,6 +97,58 @@ class MemorySignals extends MemoryStore {
     }
     return n;
   }
+
+  // Privacy (0.2.0): `MemoryStore.eraseSubjects` and `exportSubjects` call these when the wrapper is present. Not part of the Store interface.
+
+  /** Delete every row about the set or caused by it (`subject` or `bySubject` in the set). Returns how many. */
+  privacyEraseSignals(set: ReadonlySet<string>): number {
+    if (this.sig === undefined) return 0;
+    const s = this.sig;
+    const keep = [...s.rows].filter(([, row]) => !set.has(row.subject) && !(row.bySubject !== null && set.has(row.bySubject)));
+    const n = s.rows.size - keep.length;
+    if (n === 0) return 0;
+    const next: SignalState = { rows: new Map(keep), ids: new Set(keep.map(([, r]) => r.id)), bySubject: new Map() };
+    for (const [key, row] of keep) {
+      let mine = next.bySubject.get(row.subject);
+      if (mine === undefined) next.bySubject.set(row.subject, (mine = new Set()));
+      mine.add(key);
+    }
+    const before = this.sig;
+    this.sig = next;
+    this.undoWith(() => {
+      this.sig = before;
+    });
+    return n;
+  }
+
+  /** Delete the rows whose subject does not exist and `matches` (the store's stray rule). Returns how many. */
+  privacyPurgeStraySignals(_exists: (id: string) => boolean, matches: (subject: string, at: number) => boolean): number {
+    if (this.sig === undefined) return 0;
+    const s = this.sig;
+    const keep = [...s.rows].filter(([, row]) => !matches(row.subject, row.at));
+    const n = s.rows.size - keep.length;
+    if (n === 0) return 0;
+    const next: SignalState = { rows: new Map(keep), ids: new Set(keep.map(([, r]) => r.id)), bySubject: new Map() };
+    for (const [key, row] of keep) {
+      let mine = next.bySubject.get(row.subject);
+      if (mine === undefined) next.bySubject.set(row.subject, (mine = new Set()));
+      mine.add(key);
+    }
+    const before = this.sig;
+    this.sig = next;
+    this.undoWith(() => {
+      this.sig = before;
+    });
+    return n;
+  }
+
+  /** The rows ABOUT the set, newest first (time, then id, descending): the export's signals. */
+  privacyExportSignals(set: ReadonlySet<string>): Array<{ at: number; kind: string }> {
+    return [...(this.sig?.rows.values() ?? [])]
+      .filter((r) => set.has(r.subject))
+      .sort((a, b) => b.at - a.at || compare(b.id, a.id))
+      .map((r) => ({ at: r.at, kind: r.kind }));
+  }
 }
 
 /**
@@ -104,7 +156,6 @@ class MemorySignals extends MemoryStore {
  * signal kinds or feeds can use it, and `flood_triggered` is recorded. Returns the same store. `createMemoryStore()` does not carry them, so
  * an app that never records a signal does not bundle them. A method the store already has (a subclass's override) is left as it is, and
  * calling this twice changes nothing.
- * @experimental
  */
 export function withMemorySignals<S extends MemoryStore>(store: S): S & MemorySignalMethods {
   const target = store as unknown as Record<string, unknown>;

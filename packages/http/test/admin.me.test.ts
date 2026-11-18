@@ -21,7 +21,9 @@ describe('GET /me', () => {
       expect(body.role).toBe(role);
       expect(Object.keys(body.can).sort()).toEqual([...PERMISSION_KEYS].sort());
       expect(body.can).toEqual(expectedCan(role));
-      expect(Object.keys(body).sort()).toEqual(['actor', 'can', 'role']);
+      expect(Object.keys(body).sort()).toEqual(['actor', 'can', 'features', 'role']);
+      // the always-on staff features (0.2.0): the room tools, and the desk switches as read now
+      expect((res.body as { features: unknown }).features).toEqual({ appeals: false, renames: false, keepBlocked: false, rooms: true, workflow: false, insights: false });
     });
   }
 
@@ -166,7 +168,7 @@ describe('GET /me', () => {
     const w = await world({ terms: false });
     const res = await w.call('GET', '/me', { role: 'senior', actor: 'ann' });
     expect(res.status).toBe(200);
-    expect([...keysDeep(res.body)].sort()).toEqual(['actor', 'can', 'role', ...PERMISSION_KEYS].sort());
+    expect([...keysDeep(res.body)].sort()).toEqual(['actor', 'can', 'role', 'features', 'appeals', 'renames', 'keepBlocked', 'rooms', 'workflow', 'insights', ...PERMISSION_KEYS].sort());
     expect(Object.values((res.body as { can: Record<string, unknown> }).can).every((v) => typeof v === 'boolean')).toBe(true);
   });
 

@@ -48,8 +48,8 @@ describe('GET /rules gives the dialog its reporting payload', () => {
     const r = await payload();
     expect(r?.flow).toBe('one_tap');
     expect(r?.thanks).toBe("Thanks for the report. We'll look into it.");
-    expect(r?.reasons.map((x) => x.id)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'cheating', 'griefing', 'afk', 'other']);
-    expect(r?.reasons[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', asksNote: false });
+    expect(r?.reasons.map((x) => x.id)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'other']);
+    expect(r?.reasons[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', asksNote: false, thanks: null, showResources: false });
   });
 
   it('an older server with no reporting key reads as undefined, and the rest of the answer is unchanged', async () => {
@@ -78,7 +78,7 @@ describe('GET /rules gives the dialog its reporting payload', () => {
       body: { summary: 's', rules: [], reporting: { flow: 'reason_first', thanks: 'T', reasons: [{ id: 'a', label: 'A', hint: 'h', group: 'G', asksNote: true, rules: [1, 2], enabled: true, actor: 'ann@example.test' }] } },
     });
     const r = (await w.client.rules()).reporting;
-    expect(r?.reasons[0]).toEqual({ id: 'a', label: 'A', hint: 'h', group: 'G', asksNote: true });
+    expect(r?.reasons[0]).toEqual({ id: 'a', label: 'A', hint: 'h', group: 'G', asksNote: true, thanks: null, showResources: false });
   });
 
   it('drops a reason with no id or label, fills a missing hint, group and asksNote, and reads an unknown flow as one tap', async () => {
@@ -88,7 +88,7 @@ describe('GET /rules gives the dialog its reporting payload', () => {
       body: { summary: 's', rules: [], reporting: { flow: 'bogus', thanks: 5, reasons: [{ id: 'a', label: 'A' }, { id: 7, label: 'B' }, { id: 'c' }, null, 'x'] } },
     });
     const r = (await w.client.rules()).reporting;
-    expect(r).toEqual({ flow: 'one_tap', thanks: '', reasons: [{ id: 'a', label: 'A', hint: '', group: '', asksNote: false }] });
+    expect(r).toEqual({ flow: 'one_tap', thanks: '', resources: [], reasons: [{ id: 'a', label: 'A', hint: '', group: '', asksNote: false, thanks: null, showResources: false }] });
   });
 });
 
@@ -211,7 +211,7 @@ describe('one_tap: the reason is part of the one step (real kit)', () => {
     const { dialog } = await setup();
     const { user } = renderUi(<ReportDialog {...await dialog({ line: 'a line' })} />);
     const options = [...select().querySelectorAll('option')];
-    expect(options).toHaveLength(11);
+    expect(options).toHaveLength(12);
     expect(options[0]).toHaveTextContent('Choose a reason (optional)');
     expect(options.at(-1)).toHaveTextContent('Something else');
     expect([...select().querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Chat', 'Gameplay']);
@@ -247,7 +247,7 @@ describe('one_tap: the reason is part of the one step (real kit)', () => {
   it('every reason the studio lists can be chosen and is sent as its id', async () => {
     const { dialog } = await setup();
     const ids = ((await dialog()).reporting?.reasons ?? []).map((r) => r.id);
-    expect(ids).toHaveLength(10);
+    expect(ids).toHaveLength(11);
     for (const id of ids) {
       const submit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve({ ok: true, reportId: 'r', remaining: 1 }));
       const view = renderUi(<ReportDialog {...await dialog({ onSubmit: submit })} />);
@@ -336,7 +336,7 @@ describe('reason_first', () => {
     const d = screen.getByRole('dialog');
     expect(d).toHaveAccessibleName('Report Bob?');
     const group = (label: string) => [...select().querySelectorAll<HTMLOptGroupElement>('optgroup')].find((g) => g.label === label) as HTMLOptGroupElement;
-    expect([...group('Chat').querySelectorAll('option')].map((o) => o.value)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info']);
+    expect([...group('Chat').querySelectorAll('option')].map((o) => o.value)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name']);
     expect([...group('Gameplay').querySelectorAll('option')].map((o) => o.value)).toEqual(['cheating', 'griefing', 'afk']);
     expect(select().lastElementChild).toHaveTextContent('Something else');
     expect(within(d).queryAllByRole('radio')).toHaveLength(0);
@@ -474,7 +474,7 @@ describe('reason_required', () => {
     const s = await setup(REQUIRED);
     renderUi(<ReportDialog {...await s.dialog()} />);
     expect(select()).toBeRequired();
-    expect(select().querySelectorAll('option')).toHaveLength(11);
+    expect(select().querySelectorAll('option')).toHaveLength(12);
     expect(screen.queryByRole('button', { name: 'Skip and report' })).toBeNull();
     expect(btn('Report')).toBeInTheDocument();
   });
@@ -534,7 +534,7 @@ describe('with no reporting payload the dialog is one tap with the default words
     const s = await setup();
     const { user } = renderUi(<ReportDialog {...await s.dialog(none)} />);
     await user.click(btn('Report'));
-    expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
+    expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it. You can send 9 more reports today.");
     expect(s.submit).toHaveBeenCalledTimes(1);
     expect(s.submit.mock.calls[0]?.[0]).toEqual({});
     expect(Object.keys(s.submit.mock.calls[0]?.[0] ?? {})).not.toContain('category');
@@ -555,7 +555,7 @@ describe('with no reporting payload the dialog is one tap with the default words
     const ids = (html: string) => html.replace(/_r_[a-z0-9]+_/g, 'ID');
     const without = ids(a.container.innerHTML);
     a.unmount();
-    const b = renderUi(<ReportDialog {...await s.dialog({ reporting: { flow: 'one_tap', thanks: '', reasons: [] } })} />);
+    const b = renderUi(<ReportDialog {...await s.dialog({ reporting: { flow: 'one_tap', thanks: '', reasons: [], resources: [] } })} />);
     expect(ids(b.container.innerHTML)).toBe(without);
   });
 
@@ -569,7 +569,7 @@ describe('with no reporting payload the dialog is one tap with the default words
   it('when the studio payload is given it is used as it is', async () => {
     const s = await setup({ flow: 'reason_first' });
     renderUi(<ReportDialog {...await s.dialog()} />);
-    expect(screen.getByRole('combobox').querySelectorAll('option')).toHaveLength(11);
+    expect(screen.getByRole('combobox').querySelectorAll('option')).toHaveLength(12);
   });
 });
 
@@ -615,7 +615,7 @@ describe('a payload the dialog cannot trust', () => {
     const s = await setup();
     const { user } = renderUi(<ReportDialog {...await s.dialog(bad({ flow: 'one_tap', thanks: '   ', reasons: [] }))} />);
     await user.click(btn('Report'));
-    expect(await findStatus()).toHaveTextContent('Thanks. We got your report.');
+    expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it.");
   });
 
   it('a staff field in the payload (rule numbers, enabled) is never shown', async () => {
@@ -695,7 +695,7 @@ describe('words', () => {
   it('every word of the new screens is a key in the catalog, so a translation can replace it', async () => {
     const t = createT({ ...en, 'player.report.oneTap.send': 'Melden', 'player.report.addNote': 'Notiz', 'player.report.why': 'Warum?', 'player.report.thanks': 'Danke' }, 'de');
     const s = await setup();
-    const { user } = renderUi(<ReportDialog {...await s.dialog({ t, locale: 'de', reporting: { flow: 'one_tap', thanks: '', reasons: [{ id: 'other', label: 'Anderes', hint: '', group: '', asksNote: true }] } })} />);
+    const { user } = renderUi(<ReportDialog {...await s.dialog({ t, locale: 'de', reporting: { flow: 'one_tap', thanks: '', resources: [], reasons: [{ id: 'other', label: 'Anderes', hint: '', group: '', asksNote: true, thanks: null, showResources: false }] } })} />);
     await user.click(btn('Melden'));
     expect(await findStatus()).toHaveTextContent('Danke');
   });

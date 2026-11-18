@@ -1,5 +1,5 @@
 import type { ChatClosedWhy, ChatStatus } from './status.js';
-import type { ChatFrame, WireLine, WireMuted, WireRestriction } from './wire.js';
+import type { ChatFrame, WireLine, WireMode, WireMuted, WirePhrase, WireReadOnly, WireRestriction } from './wire.js';
 
 /** Lines kept when nothing else is asked for (the box's `maxLines` default). */
 export const DEFAULT_MAX_LINES = 200;
@@ -9,6 +9,16 @@ export const MAX_MAX_LINES = 5000;
 /** A usable cap: a whole number from 1; above the bound it is the bound; anything else is the default. */
 function capOf(n: number): number {
   return Number.isInteger(n) && n >= 1 ? Math.min(n, MAX_MAX_LINES) : DEFAULT_MAX_LINES;
+}
+
+/** The most retracted ids the state remembers, so a line that arrives after its retraction is still never shown. */
+const REMEMBER_REMOVED = 500;
+
+/**
+ * A line as the box holds it. A line a moderator took back is kept as a placeholder, `removed: true`: its place (`id`, `at`) and nothing else, no name and no text.
+ */
+export interface StateLine extends WireLine {
+  removed?: true;
 }
 
 /** Why a stream ended for good. `until` is a ban's end (`bye` with `banned`): epoch ms, or null when it has none. */
@@ -30,7 +40,17 @@ export interface ChatState {
   summary: string;
   restriction: WireRestriction | null;
   /** Oldest first: by `at`, then by numeric `id`. At most `maxLines`. */
-  lines: WireLine[];
+  lines: StateLine[];
+  /** The room's mode (`hello`, then `mode` frames): `normal` until the server says otherwise. */
+  mode: WireMode;
+  /** Why the viewer cannot post because of the mode, or null when they can. */
+  readOnly: WireReadOnly | null;
+  /** The room's phrase book from `hello` when it is phrase-only (the box shows a picker), else null. */
+  phrases: WirePhrase[] | null;
+  /** The ids of lines taken back (this epoch): a line with one of these ids is never held. */
+  removedIds: readonly string[];
+  /** The last retraction that took a line out of view: a counter (so the same text is a new event) and how many lines it was. */
+  retractNote: { n: number; count: number } | null;
   muted: WireMuted[];
   /** Set when the stream ended for good. */
   closed: ChatClosed | null;
@@ -61,6 +81,11 @@ export function createChatState(maxLines: number = DEFAULT_MAX_LINES): ChatState
     summary: '',
     restriction: null,
     lines: [],
+    mode: { kind: 'normal', until: null },
+    readOnly: null,
+    phrases: null,
+    removedIds: [],
+    retractNote: null,
     muted: [],
     closed: null,
     ready: false,
@@ -92,19 +117,21 @@ function compareLines(a: WireLine, b: WireLine): number {
 }
 
 /** Sorted, cut to the newest `max`. */
-function settle(lines: WireLine[], max: number): WireLine[] {
+function settle(lines: StateLine[], max: number): StateLine[] {
   const sorted = [...lines].sort(compareLines);
   return sorted.length > max ? sorted.slice(sorted.length - max) : sorted;
 }
 
-const sameLine = (a: WireLine, b: WireLine): boolean => a.id === b.id && a.at === b.at && a.name === b.name && a.text === b.text && a.mine === b.mine;
+const sameLine = (a: WireLine, b: WireLine): boolean => a.id === b.id && a.at === b.at && a.name === b.name && a.text === b.text && a.phrase === b.phrase && a.mine === b.mine;
 
 /** Lines in by id; a line already held is replaced by the incoming copy, and stays `mine` if it was. */
-function merge(held: WireLine[], incoming: WireLine[], max: number): WireLine[] {
-  const byId = new Map<string, WireLine>();
+function merge(held: StateLine[], incoming: WireLine[], max: number): StateLine[] {
+  const byId = new Map<string, StateLine>();
   for (const l of held) byId.set(l.id, l);
   for (const l of incoming) {
     const old = byId.get(l.id);
+    // A line taken back stays a placeholder: the server's copy of it (if any reaches us) is not shown.
+    if (old?.removed === true) continue;
     byId.set(l.id, old?.mine === true && l.mine !== true ? { ...l, mine: true } : l);
   }
   return settle([...byId.values()], max);
@@ -112,6 +139,8 @@ function merge(held: WireLine[], incoming: WireLine[], max: number): WireLine[] 
 
 /** One line in: replaced in place when its id is held, else inserted where it belongs. No sort; the common case is an append. */
 function addLine(state: ChatState, line: WireLine): ChatState {
+  // Taken back before it was ever held (or after): never shown.
+  if (state.removedIds.includes(line.id)) return state;
   const held = state.lines;
   const at = held.findIndex((l) => l.id === line.id);
   if (at !== -1) {
@@ -125,7 +154,7 @@ function addLine(state: ChatState, line: WireLine): ChatState {
   return withLine(state, held, line);
 }
 
-function withLine(state: ChatState, others: WireLine[], line: WireLine): ChatState {
+function withLine(state: ChatState, others: StateLine[], line: WireLine): ChatState {
   let i = others.length;
   while (i > 0 && compareLines(others[i - 1] as WireLine, line) > 0) i -= 1;
   if (i === 0 && others.length >= state.maxLines) return others === state.lines ? state : { ...state, lines: others };
@@ -134,28 +163,35 @@ function withLine(state: ChatState, others: WireLine[], line: WireLine): ChatSta
 }
 
 function onHello(state: ChatState, f: Extract<ChatFrame, { type: 'hello' }>): ChatState {
-  let lines: WireLine[];
-  if (state.epoch !== f.epoch) lines = settle(f.lines, state.maxLines);
+  let lines: StateLine[];
+  // A new epoch is a new room as far as line numbers go: nothing taken back before it is remembered.
+  const removedIds = state.epoch === f.epoch ? state.removedIds : [];
+  const fresh = f.lines.filter((l) => !removedIds.includes(l.id));
+  if (state.epoch !== f.epoch) lines = settle(fresh, state.maxLines);
   else {
     // Same epoch (a reconnect): merge by id. A held line inside the snapshot's window that the snapshot lacks was hidden while the
     // viewer was away (its author muted), so it goes; lines before the window stay.
-    const sorted = [...f.lines].sort(compareLines);
+    const sorted = [...fresh].sort(compareLines);
     const oldest = sorted[0];
     const newest = sorted[sorted.length - 1];
-    const inSnapshot = new Set(f.lines.map((l) => l.id));
+    const inSnapshot = new Set(fresh.map((l) => l.id));
     // Only a line inside the snapshot's window, not mine, is judged: older ones may have aged out, newer ones (a late delivery, the
     // answer to a send) the snapshot simply predates, and my own lines are never hidden from me.
     const kept =
       oldest === undefined || newest === undefined
         ? state.lines
-        : state.lines.filter((l) => l.mine === true || inSnapshot.has(l.id) || compareLines(l, oldest) < 0 || compareLines(l, newest) > 0);
-    lines = merge(kept, f.lines, state.maxLines);
+        : state.lines.filter((l) => l.removed === true || l.mine === true || inSnapshot.has(l.id) || compareLines(l, oldest) < 0 || compareLines(l, newest) > 0);
+    lines = merge(kept, fresh, state.maxLines);
   }
   return {
     ...state,
     status: 'open',
     epoch: f.epoch,
-    you: f.you,
+    you: { name: f.you.name },
+    mode: f.mode,
+    readOnly: f.you.readOnly ?? null,
+    phrases: f.phrases === null ? null : f.phrases.book,
+    removedIds,
     maxLength: f.maxLength,
     summary: f.summary,
     restriction: f.restriction,
@@ -206,6 +242,24 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         }
         case 'state':
           return { ...state, restriction: f.restriction, muted: f.muted };
+        case 'mode': {
+          const readOnly = f.mode.kind === 'normal' ? null : (f.readOnly ?? null);
+          return state.mode.kind === f.mode.kind && state.mode.until === f.mode.until && state.readOnly === readOnly ? state : { ...state, mode: f.mode, readOnly };
+        }
+        case 'retract': {
+          const fresh = f.ids.filter((id) => !state.removedIds.includes(id));
+          if (fresh.length === 0) return state;
+          const gone = new Set(fresh);
+          let held = 0;
+          const lines = state.lines.map((l): StateLine => {
+            if (!gone.has(l.id) || l.removed === true) return l;
+            held += 1;
+            // The placeholder keeps the place and nothing of the line: not the text, not the name.
+            return { id: l.id, at: l.at, name: '', text: '', removed: true };
+          });
+          const removedIds = [...state.removedIds, ...fresh].slice(-REMEMBER_REMOVED);
+          return { ...state, lines, removedIds, retractNote: held === 0 ? state.retractNote : { n: (state.retractNote?.n ?? 0) + 1, count: held } };
+        }
         default:
           return state;
       }

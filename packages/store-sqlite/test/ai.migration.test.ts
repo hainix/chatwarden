@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { StoredReport } from '@chatwarden/core';
 import { MIGRATIONS, openStore } from '../src/index.js';
 import type { SqliteStore } from '../src/index.js';
+import { insertOldReport } from './oldRows.js';
 
 // Migration 20: the AI read rows and the casebook (AI levels 1 and 2). One-way: two new tables and their indexes, no change to any
 // existing table or row.
@@ -78,7 +79,8 @@ const report = (i: number): StoredReport => ({
 function openAt(db: DatabaseSync, version: number, reports = 25): SqliteStore {
   const store = openStore({ db, migrations: MIGRATIONS.slice(0, version) });
   expect(store.schemaVersion()).toBe(version);
-  for (let i = 0; i < reports; i++) store.insertReport(report(i));
+  // Written the way the pinned version wrote it (the current insert names the origin columns of migration 26).
+  for (let i = 0; i < reports; i++) insertOldReport(db, report(i));
   store.closeReport('m0001', 'actioned', false, 'mod', NOW, 'n');
   store.insertReason({ id: 'rs1', label: 'L', text: 'T', active: true });
   store.claimCase('s_tgt1', 'mod', NOW, NOW + DAY, 'free');

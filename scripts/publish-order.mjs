@@ -1,5 +1,6 @@
 // The order in which the release workflow publishes the packages, derived from the manifests. A package is published after
-// every @chatwarden package it needs when an adopter installs it (peerDependencies and dependencies). devDependencies are
+// every @chatwarden package it needs when an adopter installs it (peerDependencies and dependencies; a peer marked optional in peerDependenciesMeta is not
+// needed, so it does not order anything: http names hub-element as one, for `chatwarden serve`). devDependencies are
 // left out on purpose: npm does not strip them from the published manifest, but it never installs a dependency's
 // devDependencies for a consumer, so they are harmless there, and http's devDependency on discord (for its tests) is not a
 // reason to publish discord first. Where the edges leave a choice, PUBLISH_ORDER decides, so the list stays stable.
@@ -30,7 +31,7 @@ const byRankThenName = (a, b) => rankOf(a) - rankOf(b) || (a < b ? -1 : a > b ? 
 
 /**
  * Package names in publish order (dependencies first). Private packages are left out; a cycle throws.
- * @param {Array<{ name: string, private?: boolean, dependencies?: Record<string, string>, peerDependencies?: Record<string, string> }>} manifests
+ * @param {Array<{ name: string, private?: boolean, dependencies?: Record<string, string>, peerDependencies?: Record<string, string>, peerDependenciesMeta?: Record<string, { optional?: boolean }> }>} manifests
  * @returns {string[]}
  */
 export function publishOrder(manifests) {
@@ -41,7 +42,7 @@ export function publishOrder(manifests) {
     nodes.map((p) => [
       p.name,
       new Set(
-        [...Object.keys(p.dependencies ?? {}), ...Object.keys(p.peerDependencies ?? {})].filter(
+        [...Object.keys(p.dependencies ?? {}), ...Object.keys(p.peerDependencies ?? {}).filter((d) => p.peerDependenciesMeta?.[d]?.optional !== true)].filter(
           (d) => d.startsWith('@chatwarden/') && names.has(d) && d !== p.name,
         ),
       ),

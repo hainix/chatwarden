@@ -8,7 +8,6 @@ const DAY = 24 * H;
 
 /**
  * What `ai.act.caps` may set. Times are milliseconds.
- * @experimental
  */
 export interface AiActCaps {
   /** The most AI actions an hour for the whole instance. */
@@ -31,7 +30,6 @@ export interface AiActCaps {
 
 /**
  * The defaults of design 5.4. Frozen.
- * @experimental
  */
 export const AI_ACT_CAPS_DEFAULTS: Readonly<AiActCaps> = Object.freeze({
   perHour: AI_ACT_CAP_DEFAULTS.perHour,
@@ -46,7 +44,6 @@ export const AI_ACT_CAPS_DEFAULTS: Readonly<AiActCaps> = Object.freeze({
 
 /**
  * The inclusive band of each number (design 5.4). Frozen.
- * @experimental
  */
 export const AI_ACT_CAPS_BANDS: Readonly<Record<keyof AiActCaps, Readonly<{ min: number; max: number }>>> = Object.freeze({
   perHour: Object.freeze({ min: 1, max: 60 }),
@@ -65,7 +62,6 @@ const WHOLE: ReadonlySet<keyof AiActCaps> = new Set(['perHour', 'perDay', 'revie
  * Check a partial set of caps against the bands and fill it from the defaults. Throws a plain `RangeError` naming the field (never the value) for an
  * unknown field, a value that is not a finite number, a fraction in a whole-number field, or a number outside its band. An `undefined` field is the
  * default. The result is frozen and shares nothing with the input.
- * @experimental
  */
 export function checkActCaps(partial?: Partial<AiActCaps>): AiActCaps {
   const out: AiActCaps = { ...AI_ACT_CAPS_DEFAULTS };

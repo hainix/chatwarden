@@ -26,7 +26,7 @@ async function fileWith(w: W, o: Partial<ReportInput> = {}, reporterKey = `rk-${
   if (!res.ok) throw new Error(`refused: ${res.refused}`);
   const report = w.cw.reports.get(res.reportId);
   if (report === null) throw new Error('missing');
-  return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson, room };
+  return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson!, room };
 }
 
 const items = (res: { body: unknown }) => (res.body as { items: Array<Record<string, unknown>> }).items;
@@ -107,6 +107,18 @@ describe('GET /reports?reason=', () => {
     expect(idsOf(await w.call('GET', '/reports', { query: { reason: 'spam' } }))).toEqual([ids.s1]);
   });
 
+  it('a report with reason name is accepted and stored as reportedReason name; the filter finds it', async () => {
+    const w = await world();
+    const a = await fileWith(w, { reason: 'name' });
+    const b = await fileWith(w, { reason: 'hate' });
+    const c = await fileWith(w, { reason: 'name' });
+    expect(w.cw.reports.get(a.id)?.reportedReason).toBe('name');
+    const all = items(await w.call('GET', '/reports')).find((i) => i.id === a.id);
+    expect(all).toMatchObject({ reportedReason: 'name', reportedReasonLabel: 'Inappropriate name', category: 'other' });
+    expect(idsOf(await w.call('GET', '/reports', { query: { reason: 'name' } }))).toEqual([c.id, a.id]);
+    expect(idsOf(await w.call('GET', '/reports', { query: { reason: 'hate' } }))).toEqual([b.id]);
+  });
+
   it('none keeps the reports with no reason given', async () => {
     const { w, ids } = await seeded();
     expect(idsOf(await w.call('GET', '/reports', { query: { reason: 'none' } }))).toEqual([ids.n2, ids.n1]);
@@ -171,7 +183,7 @@ describe('GET /reports/:id: the report, its reason and the suggested rule', () =
   it('suggests the first rule of the reason, for every default reason', async () => {
     const w = await world();
     const expected: Record<string, number | string> = {
-      harassment: 2, hate: 1, sexual: 3, threat: 2, spam: 4, personal_info: 2, cheating: 5, griefing: 6, afk: 6, other: 'uncovered',
+      harassment: 2, hate: 1, sexual: 3, threat: 2, spam: 4, personal_info: 2, name: 7, cheating: 5, griefing: 6, afk: 6, other: 'uncovered',
     };
     for (const [reason, rule] of Object.entries(expected)) {
       const f = await fileWith(w, { reason });
@@ -263,7 +275,7 @@ describe('GET/PUT/DELETE /policy/profile and the reporting section', () => {
     const w = await world();
     const body = (await w.call('GET', '/policy/profile')).body as { effective: { reporting: { flow: string; reasons: unknown[]; thanks: string } }; base: { reporting: unknown }; layer: Record<string, unknown> };
     expect(body.effective.reporting.flow).toBe('one_tap');
-    expect(body.effective.reporting.reasons).toHaveLength(10);
+    expect(body.effective.reporting.reasons).toHaveLength(13);
     expect(body.effective.reporting.thanks).toBe("Thanks for the report. We'll look into it.");
     expect(body.base.reporting).toEqual(body.effective.reporting);
     expect(body.layer).toEqual({});
@@ -322,7 +334,7 @@ describe('GET/PUT/DELETE /policy/profile and the reporting section', () => {
     const res = await w.call('DELETE', '/policy/profile', { role: 'owner', actor: 'owner_ann', query: { section: 'reporting' }, body: { reason: 'back to defaults' } });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ ok: true, changed: ['reporting'] });
-    expect(w.cw.profile.reporting.reasons).toHaveLength(10);
+    expect(w.cw.profile.reporting.reasons).toHaveLength(13);
     expect(w.cw.profile.customDuration).toBe(false);
     expect(w.routeAudit().find((r) => r.action === 'policy.reset')?.detail).toEqual({ sections: ['reporting'], reason: 'back to defaults' });
   });

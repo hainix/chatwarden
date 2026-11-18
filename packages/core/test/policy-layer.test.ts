@@ -119,8 +119,9 @@ describe('validating durations and customDuration', () => {
 });
 
 describe('the layer: what may be edited', () => {
-  it('has exactly the fourteen editable sections', () => {
-    expect([...POLICY_SECTIONS]).toEqual(['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names']);
+  it('has the editable sections in append-only order (later releases add after names)', () => {
+    expect([...POLICY_SECTIONS].slice(0, 14)).toEqual(['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names']);
+    expect(POLICY_SECTIONS).toContain('filters');
   });
 
   it('an empty layer changes nothing but is a fresh frozen copy', () => {

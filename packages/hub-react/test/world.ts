@@ -26,6 +26,10 @@ export const DAY = 24 * HOUR;
 export interface WorldOptions {
   role?: Role | null;
   actor?: string;
+  /** Make the caller a scoped moderator (`Authz.scope`): they see only the reports of rooms tagged with one of these labels. */
+  scope?: string[];
+  /** What a scoped moderator may apply (the kit's `scopedLimits`; default warning and chat, at most 7 days). */
+  scopedLimits?: Parameters<typeof adminRoutes>[1]['scopedLimits'];
   permissions?: Partial<Record<PermissionKey, Role>>;
   /** Mount the term routes (default true). */
   terms?: boolean;
@@ -48,6 +52,10 @@ export interface WorldOptions {
   signalsMs?: number;
   /** Wire the shared term list (K7): a fake loader and share over the real routes. Default: not wired, so there are no community routes. */
   community?: CommunityOptions;
+  /** The recent chat lines `POST /filters/check` runs a candidate over (the adopter's `recentLines`). Default none. */
+  recentLines?: () => readonly string[];
+  /** The kit's signals options (for `accountAgeDays`, which the new-account link rule needs). */
+  signals?: Parameters<typeof createChatwarden>[0]['signals'];
 }
 
 export interface FileOptions {
@@ -77,6 +85,8 @@ export interface RichOptions extends FileOptions {
   note?: string;
   /** Tags on the room when the report is filed. */
   tags?: Record<string, string>;
+  /** The clan, guild or team the report is about. */
+  entity?: { kind: string; ref: string; label: string };
 }
 
 export async function hubWorld(opts: WorldOptions = {}) {
@@ -114,11 +124,12 @@ export async function hubWorld(opts: WorldOptions = {}) {
     ...(adapter === undefined ? {} : { ai: { adapter, ...(opts.ai?.options ?? {}) } }),
     retention: opts.signalsMs === undefined ? false : { signalsMs: opts.signalsMs },
     ...(opts.limits === undefined ? {} : { limits: opts.limits }),
+    ...(opts.signals === undefined ? {} : { signals: opts.signals }),
   });
   const community = opts.community === undefined ? undefined : makeCommunity(live, opts.community);
   // The caller is whoever `session` says: tests change it to see a role, or nobody (401).
-  const session: { who: { actor: string; role: Role } | null } = {
-    who: opts.role === null ? null : { actor: opts.actor ?? 'ann@example.test', role: opts.role ?? 'moderator' },
+  const session: { who: { actor: string; role: Role; scope?: string[] } | null } = {
+    who: opts.role === null ? null : { actor: opts.actor ?? 'ann@example.test', role: opts.role ?? 'moderator', ...(opts.scope === undefined ? {} : { scope: opts.scope }) },
   };
   // A second moderator: a client made by `clientFor` sends who it is in a header, so two people can act at once on one server.
   const routes: RouteTable = adminRoutes(cw, {
@@ -129,8 +140,10 @@ export async function hubWorld(opts: WorldOptions = {}) {
       return session.who;
     },
     ...(opts.permissions === undefined ? {} : { permissions: opts.permissions }),
+    ...(opts.scopedLimits === undefined ? {} : { scopedLimits: opts.scopedLimits }),
     ...(opts.terms === false ? {} : { terms: live }),
     ...(community === undefined ? {} : { community: community.admin }),
+    ...(opts.recentLines === undefined ? {} : { recentLines: opts.recentLines }),
     gameName: opts.gameName ?? 'Test Game',
   });
   const handle = createRouter(routes);
@@ -168,7 +181,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     if (!res.ok) throw new Error(`report refused: ${res.refused}`);
     const report = cw.reports.get(res.reportId);
     if (report === null) throw new Error('report missing');
-    return { id: res.reportId, person: report.targetPerson, reporter: report.reporterPerson, room };
+    return { id: res.reportId, person: report.targetPerson, reporter: report.reporterPerson!, room };
   };
 
   /**
@@ -204,6 +217,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
       targetSeat: 'p2',
       ...(o.reason === undefined ? { category: o.category ?? 'harassment' } : { reason: o.reason }),
       ...(o.note === undefined ? {} : { note: o.note }),
+      ...(o.entity === undefined ? {} : { entity: o.entity }),
       ...(cite === null || cite < 0 ? {} : { lineId: lineIds[cite] as string }),
     });
     if (!res.ok) throw new Error(`report refused: ${res.refused}`);
@@ -217,11 +231,33 @@ export async function hubWorld(opts: WorldOptions = {}) {
     return {
       id: res.reportId,
       person: report.targetPerson,
-      reporter: report.reporterPerson,
+      reporter: report.reporterPerson!,
       bystander: byHandle(bystander),
       room,
       lineIds,
     };
+  };
+
+  /** One report a chat filter filed (no reporter) about a person who said a line in a room of their own; returns its id and the person's staff ref. */
+  const flagged = async (o: { target?: string; originKey?: string; reason?: 'spam' | 'personal_info'; room?: string; text?: string } = {}) => {
+    const target = o.target ?? 'Mallory';
+    const room = o.room ?? `flag-room-${++n}`;
+    cw.rooms.seat(room, 'p1', { clientKey: `key-target-${target}` }, target);
+    const said = cw.chat.accept(room, 'p1', o.text ?? 'see blorf.com now');
+    clock.t += 1000;
+    const person = cw.rooms.subjectAt(room, 'p1') as string;
+    const res = await cw.reports.fileSystem({
+      origin: 'filter',
+      originKey: o.originKey ?? 'link.unlisted',
+      roomId: room,
+      target: person,
+      lineId: 'deliver' in said ? said.deliver.lineId : null,
+      reportedReason: o.reason ?? 'spam',
+    });
+    if (res !== 'filed') throw new Error(`not filed: ${res}`);
+    const report = cw.reports.list({ person }).items[0];
+    if (report === undefined) throw new Error('report missing');
+    return { id: report.id, person, room };
   };
 
   /** A direct sanction as the first moderator, so Recent actions has something to show. */
@@ -306,7 +342,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     for (let i = 0; i < 5; i += 1) await cw.ai.idle();
   };
 
-  return { cw, clock, adapter, aiIdle, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, aiSanction, blockLine, raw, live, community, now: () => clock.t };
+  return { cw, store, clock, adapter, aiIdle, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, flagged, sanction, aiSanction, blockLine, raw, live, community, now: () => clock.t };
 }
 
 export type HubWorld = Awaited<ReturnType<typeof hubWorld>>;

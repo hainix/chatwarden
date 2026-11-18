@@ -1,4 +1,4 @@
-export const VERSION = '0.1.14';
+export const VERSION = '0.2.0';
 
 export { NoticeQueue } from './NoticeQueue.js';
 export type { NoticeQueueProps } from './NoticeQueue.js';
@@ -29,6 +29,10 @@ export type {
 
 export { createT, en } from './i18n.js';
 export type { PlayerCatalog, PlayerParams, PlayerT, PlayerText } from './i18n.js';
+export { matchLocale } from './locales/match.js';
+export type { ShippedLocale } from './locales/match.js';
+export { loadPlayerT } from './locales/load.js';
+export type { LocaleMeta } from './locales/meta.js';
 export type { PlayerUiProps } from './ui.js';
 export { dayText, secondsLeft, timeLeft, untilText } from './format.js';
 

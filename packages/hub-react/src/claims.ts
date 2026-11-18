@@ -9,18 +9,15 @@ export const CLAIM_TTL_MS = 10 * 60_000;
 /**
  * The claim if it has not lapsed. The kit's rule: a claim is live strictly before `until`. A lapse moves no change token, so the
  * screen reads `until` itself.
- * @experimental
  */
 export function liveClaim(claim: Claim | null | undefined, now: number): Claim | null {
   return claim !== null && claim !== undefined && claim.until > now ? claim : null;
 }
 
-/** @experimental */
 export type Holder = { kind: 'none' } | { kind: 'you'; by: string } | { kind: 'other'; by: string };
 
 /**
  * Whether a case is free, yours, or somebody else's. Actors are compared whole and exactly.
- * @experimental
  */
 export function holderOf(claim: Claim | null | undefined, me: string, now: number): Holder {
   const live = liveClaim(claim, now);
@@ -30,7 +27,6 @@ export function holderOf(claim: Claim | null | undefined, me: string, now: numbe
 
 /**
  * How a staff actor is shown: an email as the part before the `@`, anything else as written.
- * @experimental
  */
 export function actorName(actor: string): string {
   const trimmed = actor.trim();
@@ -40,7 +36,6 @@ export function actorName(actor: string): string {
 
 /**
  * The one character for an avatar: the first letter of the shown name, upper-cased.
- * @experimental
  */
 export function actorInitial(actor: string): string {
   const first = Array.from(actorName(actor))[0];
@@ -49,7 +44,6 @@ export function actorInitial(actor: string): string {
 
 /**
  * One person on shift: what they hold, and how many cases they have open.
- * @experimental
  */
 export interface TeamMember {
   actor: string;
@@ -61,7 +55,6 @@ export interface TeamMember {
 /**
  * Who is on, from what the queue shows: anyone holding or viewing a case, and you. Load, not speed: the list is ordered you
  * first, then by how much each holds, then by name, and carries no count of decisions.
- * @experimental
  */
 export function teamOf(groups: readonly QueueGroup[], me: string, now: number): TeamMember[] {
   const byActor = new Map<string, TeamMember>();

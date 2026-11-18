@@ -1,5 +1,7 @@
+import { scopeOfTags } from './contexts.js';
 import { randomId } from './crypto.js';
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
+import { FILTER_LIMITS } from './filters.js';
 import type { Limits } from './limits.js';
 import { safeWarn } from './log.js';
 import { defaultReporting, findReason, legacyCategoryOf, OTHER_REASON_ID } from './reporting.js';
@@ -9,6 +11,7 @@ import type {
   Clock,
   Logger,
   ReportCategory,
+  ReportEntity,
   ReportExcerptLine,
   Store,
   StoredReport,
@@ -49,6 +52,8 @@ export type ReportRefusal =
   | 'reason_required'
   /** A reason that is not an enabled id in the profile's reporting reasons (in every flow). */
   | 'reason_unknown'
+  /** `entity` is not `{ kind, ref, label }` as described by {@link ReportInput.entity}. Checked right after the reason, before anything is spent or stored. */
+  | 'entity_invalid'
   | 'not_player'
   | 'self'
   | 'suspended'
@@ -68,6 +73,20 @@ export interface ReportDetailInput {
 export type ReportDetailRefusal = 'off' | 'not_found' | 'not_reporter' | 'too_late' | 'already_added' | 'reason_unknown';
 
 export type ReportDetailResult = { ok: true } | { ok: false; refused: ReportDetailRefusal };
+
+/**
+ * What only the kit's own callers may add to a report at intake. The public {@link ReportInput} has no field for them, and the facade's `cw.reports.submit` takes none, so a
+ * player's body can never set them: `urgent` (a system rule that files an urgent report) and `evidenceRef` (the game's own id for the evidence behind it, read from its server
+ * side, a closed alphabet with no dot or slash). A reason flagged urgent makes the report urgent whatever this says.
+ * @internal
+ */
+export interface ReportIntakeExtras {
+  urgent?: boolean;
+  evidenceRef?: string | null;
+}
+
+/** An evidence ref the kit will store: 1 to 128 of `A-Z a-z 0-9 _ : -` (no dot, no slash). Anything else is dropped, never stored. */
+export const EVIDENCE_REF_RE = /^[A-Za-z0-9_:-]{1,128}$/;
 
 export interface ReportInput {
   roomId: string;
@@ -89,6 +108,66 @@ export interface ReportInput {
   category?: string | null;
   note?: string;
   lineId?: string;
+  /**
+   * The game's own id for the evidence behind this report (a match, a replay): an opaque string of 1 to 128 of `A-Z a-z 0-9 _ : -` (no dot, no slash), given by the game's SERVER and never
+   * read from a player's request (the chat route takes it from `ChatMember.evidenceRef`, set in the `join` hook). An invalid value is dropped and logged by class, and the report is
+   * still taken. The kit never fetches it; staff see it as `evidence` with a link built from `reporting.evidenceUrl`. It is in no event, queue summary, webhook or Discord post.
+   */
+  evidenceRef?: string | null;
+  /**
+   * The clan, guild, team, deck or other entity the report is about: `{ kind, ref, label }`, `kind` a word of the game's (`^[a-z][a-z_]{0,23}$`), `ref` its opaque id (1 to 64 of `A-Za-z0-9_:-`), `label` its name as players see it
+   * (1 to 64 characters, no control, direction or zero-width character, except a ZWNJ or ZWJ between two letters; trimmed). The report is filed against the owner's seat (`targetSeat` or the line's author) as always, so the person is the case; the entity is stored with the report and shown as one extra
+   * row. Anything else (a missing key, an extra key, a bad value) is refused `entity_invalid` before the budget is touched. Omitted or null: none. No event, log line or webhook carries it.
+   */
+  entity?: ReportEntity | null;
+}
+
+/** The kinds, refs and labels `ReportInput.entity` may hold. */
+const ENTITY_KIND_RE = /^[a-z][a-z_]{0,23}$/;
+const ENTITY_REF_RE = /^[A-Za-z0-9_:-]{1,64}$/;
+// eslint-disable-next-line no-control-regex
+const ENTITY_LABEL_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+// Direction controls and zero-width or soft-hyphen characters: they reorder or hide what a moderator reads in the case row (as `phrases` refuses them), so a label holding one anywhere is refused, edges included.
+const ENTITY_LABEL_INVISIBLE = /[\u00ad\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
+// The two joiners are the exception, only between letters: Persian writes a ZWNJ between two letters, and Indic scripts put a ZWJ after a virama (a mark that belongs to the letter before it). A joiner at an edge, beside a space, a digit or another joiner is refused.
+const ENTITY_LABEL_JOINER = /[\u200c\u200d]/;
+const ENTITY_LABEL_JOINER_BETWEEN_LETTERS = /(?<=[\p{L}\p{M}])[\u200c\u200d](?=\p{L})/gu;
+const ENTITY_LABEL_MAX = 64;
+
+/**
+ * A report's entity as the kit stores it (a new object, the label trimmed), `null` for none (`undefined` and `null`), or `'invalid'`. Exactly the own keys kind, ref and label; never echoes a value.
+ * @internal
+ */
+export function readEntity(raw: unknown): ReportEntity | null | 'invalid' {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return 'invalid';
+  const proto: unknown = Object.getPrototypeOf(raw);
+  if (proto !== Object.prototype && proto !== null) return 'invalid';
+  const keys = Object.keys(raw);
+  if (keys.length !== 3 || !['kind', 'ref', 'label'].every((k) => keys.includes(k))) return 'invalid';
+  const { kind, ref, label } = raw as Record<string, unknown>;
+  if (typeof kind !== 'string' || !ENTITY_KIND_RE.test(kind)) return 'invalid';
+  if (typeof ref !== 'string' || !ENTITY_REF_RE.test(ref)) return 'invalid';
+  if (typeof label !== 'string') return 'invalid';
+  const name = label.trim();
+  if (name === '' || name.length > ENTITY_LABEL_MAX || ENTITY_LABEL_CONTROL.test(name) || ENTITY_LABEL_INVISIBLE.test(label) || ENTITY_LABEL_JOINER.test(label.replace(ENTITY_LABEL_JOINER_BETWEEN_LETTERS, ''))) return 'invalid';
+  return { kind, ref, label: name };
+}
+
+/**
+ * The `{ kind, ref }` of an entity a rename is about (a label is never part of it), `null` for none, or `'invalid'`.
+ * @internal
+ */
+export function readEntityRef(raw: unknown): { kind: string; ref: string } | null | 'invalid' {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return 'invalid';
+  const proto: unknown = Object.getPrototypeOf(raw);
+  if (proto !== Object.prototype && proto !== null) return 'invalid';
+  const keys = Object.keys(raw);
+  if (keys.length !== 2 || !['kind', 'ref'].every((k) => keys.includes(k))) return 'invalid';
+  const { kind, ref } = raw as Record<string, unknown>;
+  if (typeof kind !== 'string' || !ENTITY_KIND_RE.test(kind) || typeof ref !== 'string' || !ENTITY_REF_RE.test(ref)) return 'invalid';
+  return { kind, ref };
 }
 
 export type ReportResult =
@@ -109,6 +188,32 @@ export interface ReportCounts {
   /** Distinct automatic chat restrictions (source `auto_filter`) placed on the person in the last 7 days. */
   auto7d: number;
 }
+
+/**
+ * What a chat filter's `flag` files: a report nobody wrote. `originKey` is the counter key that made it (`[a-z0-9_.:-]{1,48}`, never text from a
+ * line); `target` is the speaker's canonical subject (a guest has none and cannot be reported); `reportedReason` is `spam` for a link, phrase or
+ * ratio hit and `personal_info` for a personal-info hit.
+ */
+export interface SystemReportInput {
+  origin: 'filter';
+  originKey: string;
+  roomId: string;
+  target: SubjectId;
+  lineId: string | null;
+  reportedReason: 'spam' | 'personal_info';
+  /** The rule that files the report says it is urgent (a boolean `true`; anything else is not). Only this internal caller can: no player body reaches it. @internal */
+  urgent?: boolean;
+}
+
+/**
+ * What {@link ReportService.fileSystem} answered: `filed` (one open report now exists), `open_exists` (one is already open for this person and
+ * room, nothing filed), `capped` (the instance already filed `flagCapPerDay` filter reports today), `no_subject` (a guest: nobody to report),
+ * `off` (moderation is off, the input is malformed or the store failed).
+ */
+export type SystemReportResult = 'filed' | 'open_exists' | 'capped' | 'no_subject' | 'off';
+
+const ORIGIN_KEY = /^[a-z0-9_.:-]{1,48}$/;
+const SYSTEM_REASONS: readonly string[] = ['spam', 'personal_info'];
 
 export interface ReportServiceDeps {
   roster: RoomRoster;
@@ -132,6 +237,10 @@ export interface ReportServiceDeps {
    * dismissals that suspend a reporter, and how long a dismissal weighs. Default: 10, 3 and 30 days.
    */
   limits?: Limits['reports'];
+  /** The most reports a filter may file in one UTC day, read per call. Defaults to the filters' default (50). */
+  flagCap?: () => number;
+  /** Told once with the id of each report `fileSystem` filed, after it is stored (the facade announces `report.created`). Fenced. */
+  onSystemReport?: (reportId: string) => void;
 }
 
 const newId = (): string => randomId(16);
@@ -195,8 +304,12 @@ export class ReportService {
   private readonly onReport: ReportServiceDeps['onReport'];
   private readonly logger: Logger | undefined;
   private readonly limits: Limits['reports'];
+  private readonly flagCap: () => number;
+  private readonly onSystemReport: ReportServiceDeps['onSystemReport'];
 
   constructor(deps: ReportServiceDeps) {
+    this.flagCap = deps.flagCap ?? (() => FILTER_LIMITS.flagCapDefault);
+    this.onSystemReport = deps.onSystemReport;
     this.roster = deps.roster;
     this.buffer = deps.buffer;
     this.subjects = deps.subjects;
@@ -234,9 +347,9 @@ export class ReportService {
    * the reporter's seat out is ignored), otherwise the seat's current occupant. The excerpt is the room's evidence
    * snapshot: each line stores `p`, its writer's index in the report's `people` list, and no identity.
    */
-  async submit(input: ReportInput): Promise<ReportResult> {
+  async submit(input: ReportInput, extras?: ReportIntakeExtras): Promise<ReportResult> {
     try {
-      return this.run(input);
+      return this.run(input, extras);
     } catch (err) {
       this.warn('reports.submit_failed', { error: errName(err) });
       return refuse('off');
@@ -270,7 +383,128 @@ export class ReportService {
     }
   }
 
+  /**
+   * File the report of a chat filter's `flag`: a report with no reporter (`reporterSubject` is `filter:<report id>`, the seat and handle are empty,
+   * no note), the room's evidence snapshot as its excerpt, status open, `origin: 'filter'` and the counter key. Nothing happens to the speaker until a
+   * person decides it. Never rejects. Answers, in this order:
+   *
+   * - `off`: moderation is disabled, the input is malformed (an origin other than `filter`, a key outside `[a-z0-9_.:-]{1,48}`, no room, a reason
+   *   other than `spam` or `personal_info`), or the store failed (logged by event and error class only).
+   * - `no_subject`: `target` is empty (a guest).
+   * - `capped`: the instance already filed `flagCapPerDay` filter reports since the start of this UTC day (counted from the store, so every process
+   *   sharing it shares the count).
+   * - `open_exists`: this person already has an OPEN filter report in this room (a partial unique index backs the check).
+   * - `filed`.
+   *
+   * The report is announced like any other (`onReport`, then `onSystemReport`).
+   */
+  async fileSystem(input: SystemReportInput): Promise<SystemReportResult> {
+    try {
+      return this.runSystem(input);
+    } catch (err) {
+      if (isUniqueViolation(err)) return 'open_exists';
+      this.warn('reports.system_failed', { error: errName(err) });
+      return 'off';
+    }
+  }
+
   // --- internals -----------------------------------------------------------
+
+  private runSystem(input: SystemReportInput): SystemReportResult {
+    if (!this.enabled()) return 'off';
+    if (typeof input !== 'object' || input === null) return 'off';
+    if (input.origin !== 'filter' || typeof input.originKey !== 'string' || !ORIGIN_KEY.test(input.originKey)) return 'off';
+    if (typeof input.roomId !== 'string' || input.roomId === '') return 'off';
+    if (typeof input.reportedReason !== 'string' || !SYSTEM_REASONS.includes(input.reportedReason)) return 'off';
+    if (!present(input.target)) return 'no_subject';
+    const person = this.subjects.canonical(input.target);
+    const now = this.clock.now();
+    const { roomId } = input;
+
+    const { excerpt, people } = this.snapshotOf(roomId);
+    const tags = this.roster.tags(roomId);
+    const line = typeof input.lineId === 'string' ? this.buffer.get(roomId, input.lineId) : undefined;
+    // The seat and handle the person last spoke from in this room, when the buffer still shows one: for the staff view, never for a player.
+    let seen: { seatId: string; handle: string } | undefined = line === undefined ? undefined : { seatId: line.seatId, handle: line.handle };
+    if (seen === undefined) {
+      for (const l of this.buffer.snapshot(roomId)) {
+        if (present(l.subject) && this.subjects.canonical(l.subject) === person) seen = { seatId: l.seatId, handle: l.handle };
+      }
+    }
+    const id = newId();
+    const row: StoredReport = {
+      id,
+      createdAt: now,
+      roomId,
+      tags,
+      reporterSubject: `filter:${id}`,
+      reporterSeat: '',
+      reporterHandle: '',
+      targetSubject: person,
+      targetSeat: seen?.seatId ?? '',
+      targetHandle: seen?.handle ?? '',
+      category: legacyCategoryOf(input.reportedReason),
+      reportedReason: input.reportedReason,
+      note: null,
+      lineId: line === undefined ? null : line.lineId,
+      excerpt,
+      people,
+      status: 'open',
+      origin: 'filter',
+      originKey: input.originKey,
+      urgent: input.urgent === true,
+      evidenceRef: null,
+      scope: scopeOfTags(tags),
+    };
+    const dayStart = Math.floor(now / DAY_MS) * DAY_MS;
+    const cap = this.flagCap();
+    const outcome = this.store.transaction((): SystemReportResult => {
+      if (this.store.countOriginReports('filter', dayStart) >= cap) return 'capped';
+      return this.store.insertReport(row) ? 'filed' : 'open_exists';
+    });
+    if (outcome !== 'filed') return outcome;
+    this.notify(row, person, now);
+    this.systemFiled(id);
+    return 'filed';
+  }
+
+  /** The room's evidence snapshot as a report excerpt, and the distinct canonical people who wrote in it (first seen first). */
+  private snapshotOf(roomId: string): { excerpt: ReportExcerptLine[]; people: SubjectId[] } {
+    const people: SubjectId[] = [];
+    const index = new Map<SubjectId, number>();
+    const excerpt: ReportExcerptLine[] = this.buffer.snapshot(roomId).map((l) => {
+      let p: number | null = null;
+      if (present(l.subject)) {
+        const person = this.subjects.canonical(l.subject);
+        const seen = index.get(person);
+        if (seen === undefined) {
+          p = people.length;
+          index.set(person, p);
+          people.push(person);
+        } else {
+          p = seen;
+        }
+      }
+      return { lineId: l.lineId, ts: l.ts, seatId: l.seatId, handle: l.handle, raw: l.raw, delivered: l.delivered, blocked: l.blocked, audience: l.audience, p, ...(l.retracted === true ? { retracted: true as const } : {}) };
+    });
+    return { excerpt, people };
+  }
+
+  /** Tell the facade a system report is stored. Fenced: nothing here can change the answer. */
+  private systemFiled(reportId: string): void {
+    const hook = this.onSystemReport;
+    if (hook === undefined) return;
+    try {
+      const told: unknown = hook(reportId);
+      if (isThenable(told)) {
+        told.then(undefined, (err: unknown) => {
+          this.warn('reports.on_report_failed', { error: errName(err) });
+        });
+      }
+    } catch (err) {
+      this.warn('reports.on_report_failed', { error: errName(err) });
+    }
+  }
 
   /**
    * The reason a report names: `{ id }` (an enabled one; null for none), or why it cannot be taken. A blank reason is none; the
@@ -328,7 +562,7 @@ export class ReportService {
     return written === true ? { ok: true } : { ok: false, refused: 'already_added' };
   }
 
-  private run(input: ReportInput): ReportResult {
+  private run(input: ReportInput, extras?: ReportIntakeExtras): ReportResult {
     if (!this.enabled()) return refuse('off');
 
     const { roomId } = input;
@@ -339,6 +573,9 @@ export class ReportService {
     const given = this.readReason(input);
     if (given === 'required') return refuse('reason_required');
     if (given === 'unknown') return refuse('reason_unknown');
+    // The entity is checked before anything is read, spent or stored: a malformed one is the game's bug, and the report is not taken.
+    const entity = readEntity(input.entity);
+    if (entity === 'invalid') return refuse('entity_invalid');
 
     let line = typeof input.lineId === 'string' ? this.buffer.get(roomId, input.lineId) : undefined;
     // A reporter cannot cite a line they never saw: one sent to a limited audience that left their seat out is
@@ -364,40 +601,14 @@ export class ReportService {
       if ('refusal' in limits) return limits.refusal;
       remaining = Math.max(0, this.limits.perDay - limits.used - 1);
 
-      const snapshot = this.buffer.snapshot(roomId);
-      const people: SubjectId[] = [];
-      const index = new Map<SubjectId, number>();
-      const excerpt: ReportExcerptLine[] = snapshot.map((l) => {
-        let p: number | null = null;
-        if (present(l.subject)) {
-          const person = this.subjects.canonical(l.subject);
-          const seen = index.get(person);
-          if (seen === undefined) {
-            p = people.length;
-            index.set(person, p);
-            people.push(person);
-          } else {
-            p = seen;
-          }
-        }
-        return {
-          lineId: l.lineId,
-          ts: l.ts,
-          seatId: l.seatId,
-          handle: l.handle,
-          raw: l.raw,
-          delivered: l.delivered,
-          blocked: l.blocked,
-          audience: l.audience,
-          p,
-        };
-      });
+      const { excerpt, people } = this.snapshotOf(roomId);
+      const tags = this.roster.tags(roomId);
 
       row = {
         id: newId(),
         createdAt: now,
         roomId,
-        tags: this.roster.tags(roomId),
+        tags,
         reporterSubject: reporter,
         reporterSeat: input.reporterSeat,
         reporterHandle: reporterOcc.handle,
@@ -411,6 +622,11 @@ export class ReportService {
         excerpt,
         people,
         status: 'open',
+        // A snapshot: the reason's flag as it is now, or the kit's own caller said so. Never from the player's input.
+        urgent: (given.id !== null && findReason(this.reporting().reasons, given.id)?.urgent === true) || extras?.urgent === true,
+        evidenceRef: this.cleanEvidenceRef(extras?.evidenceRef ?? input.evidenceRef),
+        scope: scopeOfTags(tags),
+        entity,
       };
       const toStore = row;
       const written = this.store.transaction(() => this.store.insertReport(toStore));
@@ -495,6 +711,14 @@ export class ReportService {
     } catch (err) {
       this.warn('reports.on_report_failed', { error: errName(err) });
     }
+  }
+
+  /** The evidence ref to store: a valid one as it is, else null (a bad one, not a string, is logged by class only and never echoed). */
+  private cleanEvidenceRef(value: unknown): string | null {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'string' && EVIDENCE_REF_RE.test(value)) return value;
+    this.warn('reports.evidence_ref_dropped', { reason: 'invalid' });
+    return null;
   }
 
   private warn(event: string, detail: Record<string, string | number | boolean>): void {

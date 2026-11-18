@@ -490,3 +490,107 @@ describe('the 0.1.13 notes (the AI gate dashboard and the do-not-automate mark),
     expect(readdirSync(join(root, '.changeset')).sort()).toEqual(['config.json']);
   });
 });
+
+describe('the 0.2.0 notes (the release with breaking changes), in all ten CHANGELOGs', () => {
+  const section0200 = (dir: string): string => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    const at = text.indexOf('## 0.2.0');
+    const end = text.indexOf('\n## 0.1.14', at);
+    return text.slice(at, end < 0 ? undefined : end);
+  };
+  const breaking = (dir: string): string => {
+    const s = section0200(dir);
+    const at = s.indexOf('**Breaking changes for adopters**');
+    return s.slice(at, s.indexOf('**What is new**', at));
+  };
+  const features = (dir: string): string => {
+    const s = section0200(dir);
+    return s.slice(s.indexOf('**What is new**'));
+  };
+
+  it.each(dirs)('%s: has a 0.2.0 section above 0.1.14, as a minor change', (dir) => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    expect(text.indexOf('## 0.2.0'), dir).toBeGreaterThan(-1);
+    expect(text.indexOf('## 0.2.0'), dir).toBeLessThan(text.indexOf('## 0.1.14'));
+    expect(section0200(dir), dir).toMatch(/### Minor Changes/);
+  });
+
+  it('all ten carry exactly the same text', () => {
+    const first = section0200(dirs[0] as string);
+    expect(first.length).toBeGreaterThan(3000);
+    for (const dir of dirs) expect(section0200(dir), dir).toBe(first);
+  });
+
+  it.each(dirs)('%s: has a "Breaking changes for adopters" section that lists what an adopter must change', (dir) => {
+    const s = breaking(dir);
+    expect(s.length, dir).toBeGreaterThan(1500);
+    for (const needle of [
+      '`finishErasure(id, at)`', '`ErasureCounts`', '`closure`', '`SubjectExport`', '`holds`', '{ sweepStrays }', '`ReportRecord.scope` is required', '`PurgeResult`', '`pace`',
+      'optional methods', '`paceLoad`', '`setReportUrgent`', '`insightRows`', '`matchReserved(name, entries, allow)`', '`Session.safety()` and `Session.rules`', '`HubClient`', '`rules`', '`reportBundle`',
+      '`PolicyDocs.notices` is required', '`PlayerReporting`', '`thanks`', '`showResources`', '`resources`', 'Chat wire version 2', '`phrases`', '`GET /me` always carries `features`',
+      '`^0.2.0`', 'Secure by default', 'CHATWARDEN_INSECURE_STAFF_COOKIE=1', 'migration 26 is one-way', 'Back up the database file', '`evidenceRef` is public on `ReportInput`',
+    ]) expect(s.toLowerCase(), needle).toContain(needle.toLowerCase());
+  });
+
+  it.each(dirs)('%s: lists the widened unions, the nullable reporterPerson and the welfare default', (dir) => {
+    const s = breaking(dir);
+    for (const needle of [
+      'Widened unions and new defaults', '`AuditAction` gains 14 names', '`AuditTargetType` gains `room`', '`PermissionKey` gains nine keys', '`rooms.manage`', '`KitEvent` gains six types', '`report.escalated`', '`case.escalated`',
+      '`ErrorCode` gains six codes', '`request_timeout`', '`StaffReport.reporterPerson` is now `SubjectId | null`', 'deleted after 30 days', '`retention.welfareReportsMs`',
+    ]) expect(s, needle).toContain(needle);
+    // and it says only http dropped the dev-dependency (hub-element still dev-depends on http)
+    expect(features(dir)).toContain('`@chatwarden/http` no longer dev-depends on `@chatwarden/hub-element`');
+    expect(features(dir)).not.toContain('no longer dev-depend on each other');
+    expect(features(dir)).toContain('duplicate column name');
+  });
+
+  it('the counts in the widened-unions bullet are the real ones (read from the source)', () => {
+    const arrayOf = (file: string, name: string): string[] => {
+      const src = readFileSync(join(root, file), 'utf8');
+      const m = new RegExp('const ' + name + '\\b[^=]*=\\s*\\[(.*?)\\]\\s*as const', 's').exec(src);
+      return [...(m?.[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] as string);
+    };
+    const s = breaking('core');
+    const named = (label: string): string[] => [...(new RegExp(label + '[^.]*?\\(([^)]*)\\)').exec(s)?.[1] ?? '').matchAll(/`([^`]+)`/g)].map((x) => x[1] as string);
+    const actions = arrayOf('packages/core/src/audit.ts', 'AUDIT_ACTIONS');
+    const keys = arrayOf('packages/http/src/permissions.ts', 'PERMISSION_KEYS');
+    for (const name of named('`AuditAction` gains 14 names')) expect(actions, name).toContain(name);
+    expect(named('`AuditAction` gains 14 names')).toHaveLength(14);
+    for (const name of named('`PermissionKey` gains nine keys')) expect(keys, name).toContain(name);
+    expect(named('`PermissionKey` gains nine keys')).toHaveLength(9);
+    const errors = readFileSync(join(root, 'packages', 'http', 'src', 'errors.ts'), 'utf8');
+    for (const name of named('`ErrorCode` gains six codes')) expect(errors, name).toContain(`  ${name}: {`);
+    expect(named('`ErrorCode` gains six codes')).toHaveLength(6);
+    const events = readFileSync(join(root, 'packages', 'core', 'src', 'events.ts'), 'utf8');
+    for (const name of named('`KitEvent` gains six types')) expect(events, name).toContain(`type: '${name}'`);
+    expect(named('`KitEvent` gains six types')).toHaveLength(6);
+  });
+
+  it('every Store method the notes name is really on the Store interface, required or optional as claimed', () => {
+    const { required, optional } = storeMethods();
+    const s = breaking('core');
+    const required0200 = [...(/Store` gains required methods: ([^.]*)\./.exec(s)?.[1] ?? '').matchAll(/`([a-zA-Z]+)(?:\([^`]*\))?`/g)].map((m) => m[1] as string);
+    const optional0200 = [...(/New optional methods: ([^.]*)\./.exec(s)?.[1] ?? '').matchAll(/`([a-zA-Z]+)`/g)].map((m) => m[1] as string);
+    expect(required0200.length).toBeGreaterThanOrEqual(15);
+    expect(optional0200.length).toBeGreaterThanOrEqual(15);
+    for (const name of required0200) expect(required, name).toContain(name);
+    for (const name of optional0200) expect(optional, name).toContain(name);
+  });
+
+  it.each(dirs)('%s: lists the features, and says the Spanish and Portuguese words are machine drafts', (dir) => {
+    const s = features(dir).toLowerCase();
+    for (const needle of ['urgent desk', 'welfare', 'second look', 'insights', 'rooms', 'contexts', 'staff scope', 'blocks', 'phrase-only', 'names', 'service mode', 'shared pacing', 'spanish and portuguese', 'machine drafts']) {
+      expect(s, needle).toContain(needle);
+    }
+  });
+
+  it('says what is still experimental and does not use an em dash or a real term', () => {
+    const s = section0200('core');
+    expect(s).toMatch(/except the Coop, EOS and Discord bot integrations/);
+    expect(s).not.toContain('\u2014');
+  });
+
+  it('no consumed changeset is left behind but the config', () => {
+    expect(readdirSync(join(root, '.changeset')).sort()).toEqual(['config.json']);
+  });
+});

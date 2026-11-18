@@ -182,10 +182,10 @@ describe('packages/http/README.md', () => {
     expect(find('POST /sanctions`')).toMatch(/\{ subject, kind, durationMs, rule, reason\?, gapNote\?, includeIp\? \}/);
     expect(find('/revoke')).toMatch(/\{ reason \}/);
     expect(find('/revoke')).toMatch(/non-empty/);
-    expect(find('/decide')).toMatch(/\{ verdict, actions, reason\?, evidence\? \}/);
+    expect(find('/decide')).toMatch(/\{ verdict, actions, reason\?, evidence\?(, rename\?)? \}/);
     expect(find('/suggest')).toMatch(/\{ level, rule\?, person\? \}/);
     expect(find('/gaps/:groupId/close')).toMatch(/\{ status, ref \}/);
-    expect(find('POST /terms`')).toMatch(/\{ term, language, note\? \}/);
+    expect(find('POST /terms`')).toMatch(/\{ term, language, note\?, matchMode\? \}/);
     expect(find('POST /exceptions`')).toMatch(/\{ phrase, language, note\? \}/);
   });
 
@@ -327,9 +327,9 @@ describe('packages/http/README.md, Chat', () => {
     expect(chat).toContain('chat.close()');
   });
 
-  it('lists the four routes with their answers, and the JSON-only and silent-mute rules', () => {
-    for (const route of ['GET /rooms/:room/stream', 'POST /rooms/:room/lines', 'POST /rooms/:room/mute', 'POST /rooms/:room/report']) expect(chat, route).toContain(`\`${route}\``);
-    expect(chat).toContain('{ ok, hiddenIds }');
+  it('lists the five routes with their answers, and the JSON-only and silent-mute rules', () => {
+    for (const route of ['GET /rooms/:room/stream', 'POST /rooms/:room/lines', 'POST /rooms/:room/mute', 'POST /rooms/:room/phrases', 'POST /rooms/:room/report']) expect(chat, route).toContain(`\`${route}\``);
+    expect(chat).toContain('{ ok, hiddenIds, limit? }');
     expect(chat).toMatch(/must be `application\/json`/);
     expect(chat).toMatch(/A mute is silent/);
     expect(chat).toMatch(/A refused line is never echoed to anyone but its author/);
@@ -434,8 +434,9 @@ describe('packages/http/README.md, the init command', () => {
     }
   });
 
-  it('lists the @experimental names: runCli and CliEnv', () => {
-    expect(flat(init)).toMatch(/`runCli`, `CliEnv`\) are `@experimental` until 0\.2/);
+  it('names runCli and CliEnv, and no longer calls them experimental', () => {
+    expect(flat(init)).toMatch(/Its names are `runCli` and `CliEnv`/);
+    expect(flat(init)).not.toMatch(/@experimental/);
     expect(read('../src/cli/index.ts')).toMatch(/export async function runCli/);
     expect(read('../src/cli/index.ts')).toMatch(/export type \{ CliEnv \}/);
   });
@@ -445,11 +446,11 @@ describe('packages/http/README.md, Other servers: toFetch', () => {
   const doc = section(http, 'Other servers: `toFetch`');
   const fetchSource = read('../src/fetch.ts');
 
-  it('lists the @experimental names, every one the entry exports', () => {
+  it('lists the names, every one the entry exports, and does not call them experimental', () => {
     const exported = [...fetchSource.matchAll(/^export (?:function|type|interface) (\w+)/gm)].map((m) => m[1] as string);
     expect(new Set(exported)).toEqual(new Set(['toFetch', 'Mounts', 'FetchOptions', 'FetchHandler']));
     for (const name of new Set(exported)) expect(doc, name).toContain(`\`${name}\``);
-    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+    expect(flat(doc)).not.toMatch(/@experimental/);
   });
 
   it('documents every field of FetchOptions as a row of its options table', () => {
@@ -517,7 +518,7 @@ describe('packages/http/README.md, Discord bot', () => {
       new Set(['discordBot', 'DiscordBotOptions', 'DiscordActionRow', 'DiscordBot', 'DiscordButton', 'DiscordCommand', 'DiscordCommandOption', 'registerCommands', 'RegisterCommandsOptions', 'RegisterCommandsResult', 'verifyInteraction']),
     );
     for (const name of exported) expect(doc, name).toContain(`\`${name}\``);
-    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+    expect(flat(doc)).toMatch(/@experimental/);
     // The feed's side.
     const feed = flat(discord);
     for (const needle of ['`components`', '@experimental', 'application-owned', '`chatwarden.discord_components_ignored`', '`bot.components`', 'Buttons']) expect(feed, needle).toContain(needle);
@@ -673,7 +674,7 @@ describe('packages/http/README.md, Coop', () => {
     ];
     expect(new Set(exported)).toEqual(new Set(['coop', 'CoopAdapter', 'CoopOptions', 'CoopDecision', 'SweepResult', 'CoopChecklist', 'CoopChecklistItemType', 'CoopVerification']));
     for (const name of exported) expect(doc, name).toContain(`\`${name}\``);
-    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+    expect(flat(doc)).toMatch(/@experimental/);
   });
 
   it('says the entry is not in the root, needs links, and sets up in order: run Coop, create by hand, copy ids, wire it, verify, file a test report', () => {
@@ -851,7 +852,7 @@ describe('packages/http/README.md, Epic Online Services', () => {
     ];
     expect(new Set(exported)).toEqual(new Set(['eos', 'EosAdapter', 'EosOptions', 'EosKind', 'EosSeat', 'PollResult']));
     for (const name of exported) expect(doc, name).toContain(`\`${name}\``);
-    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+    expect(flat(doc)).toMatch(/@experimental/);
   });
 
   it('says what EOS can and cannot do, that the entry is not in the root, and needs links', () => {

@@ -1,0 +1,23 @@
+{
+  "about": "What each step of the conversation must answer: strings its JSON answer contains. conformance.mjs and the C# sample (examples/service-csharp) read this one file, so the two clients are held to the same words.",
+  "steps": [
+    { "name": "handshake", "expect": ["\"api\":1", "\"mode\":\"service\""] },
+    { "name": "seat alice", "expect": ["\"ok\":true", "\"restriction\":null"] },
+    { "name": "seat bob", "expect": ["\"ok\":true", "\"restriction\":null"] },
+    { "name": "clean line", "expect": ["\"ok\":true", "good luck, have fun", "\"hiddenFor\":[]"] },
+    { "name": "slur refused", "expect": ["\"ok\":false", "\"reason\":\"blocked\""] },
+    { "name": "slur retried", "expect": ["\"ok\":false", "\"reason\":\"blocked\""], "headers": ["idempotent-replay"] },
+    { "name": "report", "expect": ["\"ok\":true", "\"remaining\":"] },
+    { "name": "pending notices", "expect": ["{\"notices\":[]}"] },
+    { "name": "ack unknown notice", "expect": ["{\"ok\":false}"] },
+    { "name": "record", "expect": ["{\"record\":[]}"] },
+    { "name": "restriction", "expect": ["\"restricted\":false", "\"kind\":null"] },
+    { "name": "doors check", "expect": ["{\"ok\":true}"] },
+    { "name": "name check", "expect": ["{\"ok\":true}"] },
+    { "name": "name refused", "expect": ["\"ok\":false", "\"reason\":\"name_not_allowed\""] },
+    { "name": "mute", "expect": ["{\"ok\":true}"] },
+    { "name": "mutes list", "expect": ["\"muted\":[\"alice\"]", "\"blocked\":[]"] },
+    { "name": "unseat", "expect": ["{\"ok\":true}"] },
+    { "name": "close room", "expect": ["{\"ok\":true}"] }
+  ]
+}

@@ -90,6 +90,25 @@ export function refusalMessage(r: Refusal, lineMax: number, at: (ms: number) => 
       return 'Too many lines at once. Wait a moment, then send again.';
     case 'duplicate':
       return 'You just sent that. Say something new.';
+    // The reasons the demo profile never turns on (0.2.0): worded so the switch stays exhaustive, never a default sentence.
+    case 'probation':
+      return 'New players can send only a few lines at first. Wait a moment, then send again.';
+    case 'link':
+      return 'Links are not allowed in this lobby. Take the link out and send again.';
+    case 'personal_info':
+      return 'That line looks like it shares private details. Take them out and send again.';
+    case 'filter':
+      return 'A filter in this lobby stopped that line. Change it and send again.';
+    case 'locked':
+      return 'Chat in this lobby is paused right now. Try again later.';
+    case 'new_account':
+      return 'Chat in this lobby is read-only for new accounts right now.';
+    case 'account_too_new':
+      return 'Your account is too new to chat in this lobby yet.';
+    case 'phrases_only':
+      return 'This lobby allows only the quick phrases. Pick one instead of typing.';
+    case 'phrase_unknown':
+      return 'That quick phrase is not in this lobby. Pick another one.';
     default:
       return assertNever(r.reason);
   }

@@ -1,14 +1,23 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { AiReadSlot } from '../case/AiRead.js';
+import { AskedLine } from '../case/AskedLine.js';
+import { BreakNote } from '../case/BreakNote.js';
+import { EvidenceRow } from '../case/EvidenceRow.js';
+import { SurgeLine } from '../case/SurgeLine.js';
+import { HiddenExcerpt } from '../case/HiddenExcerpt.js';
+import { CaseMenu } from '../case/CaseMenu.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
-import { useCase } from '../case/CaseContext.js';
+import { ContextChip, EntityRow, useCase } from '../case/CaseContext.js';
 import { DecisionBar } from '../case/DecisionBar.js';
 import { isWaiting } from '../decisions.js';
 import { RecordItem } from '../case/Record.js';
 import { Transcript } from '../case/Transcript.js';
+import { UrgentStrip } from '../case/UrgentStrip.js';
 import type { LinePicks } from '../case/Transcript.js';
 import { useHub } from '../context.js';
+import { useFeatures } from '../features.js';
+import { LazyCaseHold, LazyCommentThread } from '../lazyParts.js';
 import { LINES_MAX } from '../decision.js';
 import { NameToggle, NameValue } from '../names.js';
 import { personName } from '../excerpt.js';
@@ -20,12 +29,15 @@ import { Empty, Fetched, Link, PersonChip, Tag, Time } from '../ui.js';
 // The case pane: who the case is about, who is handling it, the evidence in tabs (the transcript first), and the decision bar
 // docked under it. The person's record and who reported live in the pane beside it (`shell/CasePanel.tsx`).
 
-type TabId = 'evidence' | 'reports' | 'history';
+type TabId = 'evidence' | 'reports' | 'history' | 'comments';
 
 function Header({ detail }: { detail: ReportDetail }) {
-  const { t, locale, now } = useHub();
-  const { people, group } = useCase();
+  const { t, locale, now, can, me } = useHub();
+  const { people, group, detail: read } = useCase();
   const { report } = detail;
+  // Legal hold: a quiet line while the report is held (for everyone who can read it), and `...` items for a senior (hold) and the owner (release). Its own chunk.
+  const held = report.hold ?? null;
+  const showHold = held !== null || can('legal.hold');
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
   const label = report.reportedReason === null || report.reportedReason === undefined ? null : (report.reportedReasonLabel ?? report.reportedReason);
@@ -46,10 +58,18 @@ function Header({ detail }: { detail: ReportDetail }) {
           {reasons.map((r) => (
             <Tag key={r.id ?? 'none'}>{reasonSaid(t, r.label)}</Tag>
           ))}
+          <ContextChip />
         </span>
         <span className="cw-casehead-gap" />
         <Viewing />
+        <CaseMenu />
       </div>
+      <EntityRow />
+      <UrgentStrip />
+      <AskedLine />
+      <BreakNote />
+      <SurgeLine />
+      {showHold && <LazyCaseHold reportId={report.id} hold={held} canHold={can('legal.hold')} canRelease={me.role === 'owner'} onChanged={read.reload} />}
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
         <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>
         {report.badFaith && <Tag tone="warn">{t('hub.report.tag.badFaith')}</Tag>}
@@ -62,6 +82,7 @@ function Header({ detail }: { detail: ReportDetail }) {
           {t('hub.report.back')}
         </Link>
       </div>
+      <EvidenceRow />
     </header>
   );
 }
@@ -87,11 +108,26 @@ function Evidence({ detail }: { detail: ReportDetail }) {
   return (
     <>
       <AiReadSlot read={ai} />
-      <div className="cw-note">
-        <h3>{t('hub.report.note.label')}</h3>
-        {report.note === null || report.note.trim() === '' ? <p className="cw-hint">{t('hub.report.note.none')}</p> : <p className="cw-note-text">{report.note}</p>}
-      </div>
-      <Transcript report={report} people={people} picks={picks} />
+      {report.note === null || report.note.trim() === '' ? (
+        <div className="cw-note">
+          <h3>{t('hub.report.note.label')}</h3>
+          <p className="cw-hint">{t('hub.report.note.none')}</p>
+        </div>
+      ) : (
+        <HiddenExcerpt what="note">
+          <div className="cw-note">
+            <h3>{t('hub.report.note.label')}</h3>
+            <p className="cw-note-text">{report.note}</p>
+          </div>
+        </HiddenExcerpt>
+      )}
+      {report.excerpt.length === 0 ? (
+        <Transcript report={report} people={people} picks={picks} />
+      ) : (
+        <HiddenExcerpt what="chat" lines={report.excerpt.length}>
+          <Transcript report={report} people={people} picks={picks} />
+        </HiddenExcerpt>
+      )}
     </>
   );
 }
@@ -152,6 +188,7 @@ function History() {
 function Tabs({ detail }: { detail: ReportDetail }) {
   const { t, can } = useHub();
   const { group } = useCase();
+  const { workflow } = useFeatures();
   const id = useId();
   const [tab, setTab] = useState<TabId>('evidence');
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -159,6 +196,7 @@ function Tabs({ detail }: { detail: ReportDetail }) {
     { id: 'evidence', label: t('hub.case.tab.evidence') },
     { id: 'reports', label: t('hub.case.tab.reports', { count: group === null ? 1 : group.reports }) },
     ...(can('history.read') ? [{ id: 'history' as const, label: t('hub.case.tab.history') }] : []),
+    ...(workflow ? [{ id: 'comments' as const, label: t('hub.desk.tab', { count: detail.report.comments?.length ?? 0 }) }] : []),
   ];
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
     const at = tabs.findIndex((x) => x.id === tab);
@@ -196,6 +234,7 @@ function Tabs({ detail }: { detail: ReportDetail }) {
           {tab === 'evidence' && <Evidence detail={detail} />}
           {tab === 'reports' && <Reports detail={detail} />}
           {tab === 'history' && <History />}
+          {tab === 'comments' && <LazyCommentThread />}
         </div>
       </div>
     </>

@@ -6,7 +6,7 @@ import type { PolicySection, PolicyState } from '../types.js';
 import { SECTION_ORDER } from './model.js';
 import type { Pending } from './useSaveFlow.js';
 
-export type ResetKey = 'lengths' | 'ladder' | 'first' | 'repeat' | 'rules' | 'guidelines' | 'reporting' | 'pace' | 'signals' | 'appeals' | 'names' | 'all';
+export type ResetKey = 'lengths' | 'ladder' | 'first' | 'repeat' | 'rules' | 'guidelines' | 'reporting' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'safety' | 'desk' | 'all';
 
 /** What each Reset covers: the kit's sections (a panel can hold two), and the words for its button and its toast. */
 export const RESETS: Record<ResetKey, { sections: readonly PolicySection[]; what: HubText; done: HubText }> = {
@@ -21,6 +21,9 @@ export const RESETS: Record<ResetKey, { sections: readonly PolicySection[]; what
   signals: { sections: ['signals'], what: 'hub.settings.signals.what', done: 'hub.settings.signals.done' },
   appeals: { sections: ['appeals'], what: 'hub.settings.appeals.what', done: 'hub.settings.appeals.done' },
   names: { sections: ['names'], what: 'hub.settings.names.what', done: 'hub.settings.names.done' },
+  filters: { sections: ['filters'], what: 'hub.settings.filters.what', done: 'hub.settings.filters.done' },
+  safety: { sections: ['safety'], what: 'hub.settings.safety.what', done: 'hub.settings.safety.done' },
+  desk: { sections: ['desk'], what: 'hub.settings.desk.what', done: 'hub.settings.desk.done' },
   // Everything on the Steps and ladder screen. Reporting has its own screen and its own reset, so this leaves it alone.
   all: { sections: SECTION_ORDER, what: 'hub.settings.reset.all', done: 'hub.settings.reset.all.done' },
 };

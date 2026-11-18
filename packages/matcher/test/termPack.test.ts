@@ -149,7 +149,7 @@ describe('loadTermPack: rejects', () => {
 
   it('two terms that read as the same word (case, accent, collapsed double)', () => {
     const t = (id: string, term: string) => ({ id, term, language: 'en', positive: [], negative: [] });
-    expect(errorOf(json({ terms: [t('a', 'vlemmo'), t('b', 'VLÉMO')] }))).toMatch(/terms\[1\] .* terms\[0\]|same word/);
+    expect(errorOf(json({ terms: [t('a', 'vlemmo'), t('b', 'VL\u00c9MO')] }))).toMatch(/terms\[1\] .* terms\[0\]|same word/);
   });
 
   it('a term the matcher cannot build, naming the row id', () => {
@@ -222,5 +222,46 @@ describe('loadTermPack: positiveCorpus (optional flat canary)', () => {
     delete raw.positiveCorpus;
     delete raw.knownLosses;
     expect(() => loadTermPack(raw)).toThrow(/knownLosses/);
+  });
+});
+
+// L2: `matchMode` on a pack row, and rows in scripts written without spaces. Invented strings only.
+describe('loadTermPack: matchMode and unspaced rows', () => {
+  const HAN = '\u4f50\u5c14\u5df4\u514b';
+  const KATA = '\u30be\u30eb\u30d0\u30af';
+  const HIRA = '\u305e\u308b\u3070\u304f';
+  const row = (over: Record<string, unknown>) => ({ id: 'a', term: 'zorbak', language: 'en', positive: [], negative: [], ...over });
+  const packOf = (...terms: Array<Record<string, unknown>>) => ({ id: 'p', version: '1', terms, exceptions: [], negativeCorpus: [], knownLosses: [] });
+
+  it('a pack and a store round-trip matchMode: the loaded row has exactly what was written, and a row without one has no key', () => {
+    const loaded = loadTermPack(packOf(row({ id: 'a', term: HAN, language: 'zh', matchMode: 'contains' }), row({ id: 'b', term: KATA, language: 'ja', matchMode: 'segment' }), row({ id: 'c' }), row({ id: 'd', term: 'glarn', matchMode: 'word' })));
+    expect(loaded.terms.map((t) => t.matchMode ?? null)).toEqual(['contains', 'segment', null, 'word']);
+    expect(Object.hasOwn(loaded.terms[2] as object, 'matchMode')).toBe(false);
+    expect(loadTermPack(JSON.parse(JSON.stringify(loaded)))).toEqual(loaded);
+  });
+
+  it('null is read as no mode, and a pack row with an unknown mode is refused at load naming the path and never the term', () => {
+    expect(Object.hasOwn(loadTermPack(packOf(row({ matchMode: null }))).terms[0] as object, 'matchMode')).toBe(false);
+    for (const bad of ['fuzzy', '', 'Contains', 5, {}, true, ['word']]) {
+      const message = errorOf(packOf(row({ term: HAN, language: 'zh', matchMode: bad })));
+      expect(message, JSON.stringify(bad)).toMatch(/terms\[0\]\.matchMode/);
+      expect(message).not.toContain(HAN);
+    }
+  });
+
+  it('a mode that does not fit the term is refused by the build, naming the row id', () => {
+    expect(errorOf(packOf(row({ id: 'han-row', term: HAN, language: 'zh', matchMode: 'word' })))).toContain('han-row');
+    expect(errorOf(packOf(row({ id: 'lat-row', matchMode: 'contains' })))).toContain('lat-row');
+  });
+
+  it('hiragana and katakana of one word read as the same word, and Thai words that differ by a mark do not', () => {
+    expect(errorOf(packOf(row({ id: 'a', term: KATA, language: 'ja' }), row({ id: 'b', term: HIRA, language: 'ja' })))).toMatch(/reads as the same word/);
+    expect(() => loadTermPack(packOf(row({ id: 'a', term: '\u0e01\u0e31\u0e1a', language: 'th' }), row({ id: 'b', term: '\u0e01\u0e1a', language: 'th' })))).not.toThrow();
+  });
+
+  it('the loaded pack builds a matcher that honours the mode', () => {
+    const pack = loadTermPack(packOf(row({ id: 'a', term: '\u5c14\u5df4\u5c3c', language: 'zh', matchMode: 'contains' })));
+    const m = buildMatcher(pack.terms, pack.exceptions);
+    expect(m.match('\u6211\u53bb\u8fc7\u963f\u5c14\u5df4\u5c3c\u4e9a\u65c5\u6e38')).toEqual({ termId: 'a' });
   });
 });

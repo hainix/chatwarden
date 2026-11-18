@@ -15,17 +15,27 @@ import { UNDO_MS } from '../toasts.js';
 import type { QueueGroup } from '../queue.js';
 import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
-import { useCase } from './CaseContext.js';
+import { ContextChip, EntityRow, useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
-import { LazyAiParts } from '../lazyParts.js';
+import { useFeatures } from '../features.js';
+import { LazyAiParts, LazyCommentThread, LazyPlayerPreview } from '../lazyParts.js';
+import { decideOp } from '../preview/ops.js';
 import { NameToggle, NameValue } from '../names.js';
 import { useQuickKeys } from '../quickKeys.js';
 import { QuickKeys } from './QuickKeys.js';
+import { usePreviewParts } from './usePreviewParts.js';
 import { reporterRate } from './ReporterStanding.js';
 import { AiReadSlot } from './AiRead.js';
 import { RuleField } from './RuleField.js';
 import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { Line } from './Transcript.js';
+import { AskedLine } from './AskedLine.js';
+import { BreakNote } from './BreakNote.js';
+import { EvidenceRow } from './EvidenceRow.js';
+import { SurgeLine } from './SurgeLine.js';
+import { HiddenExcerpt } from './HiddenExcerpt.js';
+import { CaseMenu } from './CaseMenu.js';
+import { UrgentStrip } from './UrgentStrip.js';
 
 // The Simple case view: one card per case. Who, why, what they said, their record, the ladder's suggestion and three ways to
 // answer it. Everything underneath is the Detailed workbench's: the same case read, the same claim, the same decision hold (the five
@@ -64,9 +74,8 @@ function Said({ report, target, people }: { report: StaffReport; target: ReportP
   const mine = ownLinesOf(all, target.ref);
   const more = all.length - mine.length;
   const shown = whole ? all : mine;
-  return (
-    <section className="cw-scard-said" aria-labelledby={id}>
-      <h3 id={id}>{t('hub.simple.said.title')}</h3>
+  const body = (
+    <>
       {mine.length === 0 && <p className="cw-hint">{t('hub.report.excerpt.silent', { name: personName(target, people, t) })}</p>}
       {shown.length > 0 && (
         <div className="cw-transcript cw-scard-lines">
@@ -92,7 +101,41 @@ function Said({ report, target, people }: { report: StaffReport; target: ReportP
           {whole ? t('hub.simple.chat.hide') : t('hub.simple.chat.show', { count: more })}
         </button>
       )}
+    </>
+  );
+  return (
+    <section className="cw-scard-said" aria-labelledby={id}>
+      <h3 id={id}>{t('hub.simple.said.title')}</h3>
+      {all.length === 0 ? (
+        body
+      ) : (
+        <HiddenExcerpt what="chat" lines={all.length}>
+          {body}
+        </HiddenExcerpt>
+      )}
     </section>
+  );
+}
+
+/** With the staff workflow on: the staff thread behind one button on the card ("Staff comments (n)"). Off: nothing is drawn. */
+function CommentsDisclosure() {
+  const { t } = useHub();
+  const { workflow } = useFeatures();
+  const { detail } = useCase();
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  if (!workflow || detail.data === undefined) return null;
+  return (
+    <div className="cw-scard-comments">
+      <button type="button" className="cw-linkbtn" aria-expanded={open} aria-controls={`${id}-thread`} onClick={() => setOpen(!open)}>
+        {t('hub.desk.tab', { count: detail.data.report.comments?.length ?? 0 })}
+      </button>
+      {open && (
+        <div id={`${id}-thread`}>
+          <LazyCommentThread />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -115,8 +158,9 @@ function RecordSection() {
 /** Only when most of the reporter's past reports were not upheld. Plain, and about the numbers, not the person. */
 function ReporterWarning({ report, people }: { report: StaffReport; people: ReportPerson[] }) {
   const { t, can, session } = useHub();
-  const wants = can('history.read');
+  // A report nobody filed (a chat filter's flag) has no reporter and so no record to warn about.
   const ref = report.reporterPerson;
+  const wants = can('history.read') && ref !== null;
   const state = useHubData<ReporterRecord | null>(wants ? `reporter:${ref}` : 'reporter:idle', () => (wants ? session.reporter(ref) : Promise.resolve(null)));
   const record = state.data;
   if (!wants || record === undefined || record === null) return null;
@@ -171,6 +215,7 @@ export function CaseCard() {
   // What the card offers as one tap, and when it may be sent (the case is open, read, fresh, and nothing is waiting). The same rule the
   // Detailed bar uses; the card sends each through the hold and goes on to the next case.
   const q = useQuickActions({ paused: elseOpen, refresh: true });
+  const parts = usePreviewParts(report);
   // Simple's digits act at once unless the moderator turned Quick keys off (Ctrl+Enter stays the suggested step either way).
   const digits = useQuickKeys('simple').on;
   const keyed = shortcuts && digits;
@@ -351,12 +396,12 @@ export function CaseCard() {
                 {kbd('1')}
               </button>
             )}
-            <button ref={noActionRef} type="button" className="cw-btn" aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '2' } : {})} onClick={(e) => q.sendDismiss(e)}>
+            <button ref={noActionRef} type="button" className="cw-btn" aria-describedby={`${base}-none-hint`} aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '2' } : {})} onClick={(e) => q.sendDismiss(e)}>
               <span>{t('hub.simple.noAction')}</span>
               {kbd('2')}
             </button>
             {quick !== null && (
-              <button ref={quickRef} type="button" className="cw-btn" aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '3' } : {})} onClick={(e) => q.sendWarning(e)}>
+              <button ref={quickRef} type="button" className="cw-btn" aria-describedby={`${base}-warn-hint`} aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '3' } : {})} onClick={(e) => q.sendWarning(e)}>
                 <span>{stepLabel(t, locale, quick.choice)}</span>
                 {kbd('3')}
               </button>
@@ -364,15 +409,22 @@ export function CaseCard() {
             <button ref={elseRef} type="button" className={one === null ? 'cw-btn cw-btn--primary' : 'cw-btn'} onClick={openElse}>
               {t('hub.simple.else')}
             </button>
+            <p id={`${base}-none-hint`} className="cw-sr">
+              {t('hub.quick.dismiss.hint')}
+            </p>
+            {quick !== null && (
+              <p id={`${base}-warn-hint`} className="cw-sr">
+                {t('hub.quick.warning.hint', { rule: quick.rule })}
+              </p>
+            )}
           </div>
         )}
         {c.aiCase?.from != null && !aiOk && draft.status === 'ready' && <LazyAiParts part="why" />}
         {!aiOk && one !== null && (
-          <p className="cw-hint cw-scard-fine">
-            {one.choice.kind === 'note'
-              ? t('hub.simple.sees.note', { name, seconds: SECONDS })
-              : t('hub.simple.sees', { name, rule: one.rule, count: one.lineCount, seconds: SECONDS })}
-          </p>
+          <>
+            <LazyPlayerPreview op={decideOp(one.form, { target: parts.target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order })} nameOf={parts.nameOf} reporter={parts.reporter} />
+            <p className="cw-hint cw-scard-fine">{t('hub.simple.undo', { seconds: SECONDS })}</p>
+          </>
         )}
       </section>
     );
@@ -388,10 +440,19 @@ export function CaseCard() {
               <NameValue text={personName(target, people, t, true)} flagged={target.handleFlagged} place="head" />
             </h2>
             <NameToggle flagged={target.handleFlagged} place="head" />
+            <CaseMenu />
             <p className="cw-scard-sub">
+              <ContextChip />{' '}
               {reportedLine(t, locale, report, people, now(), group === null ? null : { reports: group.reports, reasons: group.reasons })}
             </p>
           </header>
+          <EntityRow />
+          <UrgentStrip />
+          <AskedLine />
+          <BreakNote />
+          <SurgeLine />
+          <EvidenceRow />
+          <CommentsDisclosure />
           <ReporterWarning report={report} people={people} />
           <AiReadSlot read={c.aiRead} />
           <Said report={report} target={target} people={people} />

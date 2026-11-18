@@ -3,6 +3,7 @@ import { DECISION_REASON_MAX } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
 import type { SubjectIndex } from './subjects.js';
 import type { CaseClaim } from './team.js';
+import { isOriginReport } from './types.js';
 import type { ReportRecord, Store, SubjectId } from './types.js';
 
 // Bulk dismissal: "nothing wrong here" for every open report about one person (their case) or from one reporter, in one call.
@@ -10,20 +11,18 @@ import type { ReportRecord, Store, SubjectId } from './types.js';
 // transaction, so every invariant of `decide` holds and each report gets its `report.closed` event. A bulk never uses `bad_faith`:
 // that needs written evidence and counts toward a reporting suspension. The staff layer writes the audit trail around this call.
 
-/** The most reports one {@link dismissMany} call closes; the answer says `more: true` past it. @experimental */
+/** The most reports one {@link dismissMany} call closes; the answer says `more: true` past it. */
 export const BULK_DISMISS_MAX = 200;
 
 /**
  * Reports read when a store cannot list a reporter's open reports (no `listOpenReportsByReporter`) and the scan fallback is used.
  * With more open reports than this in the whole store, a reporter's sweep from such a store may find only some of theirs.
- * @experimental
  */
 export const BULK_REPORTER_SCAN_MAX = 5_000;
 
-/** What to dismiss: every open report about a person, or every open report from a reporter. A staff ref; aliases are folded. @experimental */
+/** What to dismiss: every open report about a person, or every open report from a reporter. A staff ref; aliases are folded. */
 export type DismissScope = { person: SubjectId } | { reporter: SubjectId };
 
-/** @experimental */
 export interface DismissManyInput {
   scope: DismissScope;
   /** The audit trail's actor rule (`RangeError` otherwise, as `cases.*`). */
@@ -40,14 +39,12 @@ export interface DismissManyInput {
    * Called right after each report is closed (`replay` true when an identical dismissal had already closed it), in order, never for
    * a skip or a dry run. The staff layer writes its per-report audit row here, so the trail has a row for every report closed even
    * when a later one fails and the call rejects. A throw is swallowed: it never stops the sweep.
-   * @experimental
    */
   onClosed?: (reportId: string, replay: boolean) => void;
 }
 
 /**
  * The answer to `dismissMany`. Carries subject ids: staff channels only, never send to a player.
- * @experimental
  */
 export type DismissManyResult =
   | {
@@ -59,8 +56,11 @@ export type DismissManyResult =
       dismissed: number;
       /** Already closed by an identical earlier dismissal. */
       replayed: number;
-      /** `claimed`: held by another moderator; `decided`: closed meanwhile by a different decision. */
-      skipped: { claimed: number; decided: number };
+      /**
+       * `claimed`: held by another moderator; `decided`: closed meanwhile by a different decision; `urgent`: an urgent report, which a bulk dismissal never closes (it stays open for a
+       * person to read; a single dismissal of it is allowed).
+       */
+      skipped: { claimed: number; decided: number; urgent: number };
       /** More open reports in scope than `limit`. */
       more: boolean;
       /** Dismissed plus replayed, for the staff layer's audit rows. */
@@ -98,7 +98,7 @@ function scanForReporter(store: Store, subjects: SubjectIndex, root: SubjectId, 
       ...(after === undefined ? {} : { after }),
       ...(afterId === undefined ? {} : { afterId }),
     });
-    for (const r of page) if (subjects.canonical(r.reporterSubject) === root) found.push(r);
+    for (const r of page) if (!isOriginReport(r) && subjects.canonical(r.reporterSubject) === root) found.push(r);
     read += page.length;
     const last = page[page.length - 1];
     if (last === undefined || page.length < asked) break;
@@ -159,12 +159,14 @@ export async function dismissMany(deps: DismissManyDeps, input: DismissManyInput
   const more = rows.length > limit;
   const candidates = rows.slice(0, limit);
 
+  // An urgent report is never closed by a bulk: it is a person's to read. Counted, so the caller can say so.
+  let todo = candidates.filter((r) => r.urgent !== true);
+  const urgent = candidates.length - todo.length;
   // Another moderator's live claim keeps that case out of the sweep, counted so the caller can say so.
   let claimed = 0;
-  let todo = candidates;
-  if (input.ignoreClaims !== true && candidates.length > 0) {
-    const held = deps.holders([...new Set(candidates.map((r) => subjects.canonical(r.targetSubject)))]);
-    todo = candidates.filter((r) => {
+  if (input.ignoreClaims !== true && todo.length > 0) {
+    const held = deps.holders([...new Set(todo.map((r) => subjects.canonical(r.targetSubject)))]);
+    todo = todo.filter((r) => {
       const claim = held.get(subjects.canonical(r.targetSubject));
       if (claim !== undefined && claim.by !== actor) {
         claimed += 1;
@@ -180,7 +182,7 @@ export async function dismissMany(deps: DismissManyDeps, input: DismissManyInput
     open: todo.length,
     dismissed: 0,
     replayed: 0,
-    skipped: { claimed, decided: 0 },
+    skipped: { claimed, decided: 0, urgent },
     more,
     reportIds: [] as string[],
     targets: [] as SubjectId[],

@@ -99,7 +99,7 @@ export const ADD_IT = {
   /** The setup command, first in the section: the two lines are copied from the @chatwarden/http README (test/content.test.ts checks them). */
   init: {
     title: 'Start with the setup command',
-    body: `It writes the wiring for Express, Fastify, Next.js or anything on Web Request and Response, and asks only what it cannot detect. It never overwrites a file, and it is experimental until 0.2. With nothing installed yet, run ${INIT_ALTERNATIVE}. Or write it by hand, in the steps below.`,
+    body: `It writes the wiring for Express, Fastify, Next.js or anything on Web Request and Response, and asks only what it cannot detect. It never overwrites a file. With nothing installed yet, run ${INIT_ALTERNATIVE}. Or write it by hand, in the steps below.`,
     lang: 'sh',
     file: 'terminal',
     copyLabel: 'Copy the setup command',
@@ -292,7 +292,7 @@ export const ModeratorPage = () => <Hub client={client} />;`,
           lang: 'text',
           file: 'moderator.html',
           copyLabel: 'Copy the one-script-tag hub',
-          code: `<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.1/dist/hub-element.js"></script>
+          code: `<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.2/dist/hub-element.js"></script>
 <chatwarden-hub base-url="/admin"></chatwarden-hub>`,
         },
       ],
@@ -310,7 +310,7 @@ export const PLAYER_STEP = {
 
 export const OPEN_SOURCE = {
   title: 'Free and open source',
-  body: 'Apache-2.0, with no paid tier and nothing hosted. It runs on your server and keeps its data in your database file. Chatwarden is pre-release (version 0.1): ready to try, with no support promise yet. Issues and pull requests are welcome.',
+  body: 'Apache-2.0, with no paid tier and nothing hosted. It runs on your server and keeps its data in your database file. Chatwarden is pre-release (version 0.2): ready to try, with no support promise yet. Issues and pull requests are welcome.',
   small: 'Published to npm with provenance.',
 } as const;
 
@@ -325,7 +325,7 @@ const FAQ_BASE: FaqItem[] = [
   {
     id: 'chat',
     q: 'Does Chatwarden give my game a chat?',
-    a: 'Not by default. It moderates the chat you already have: your server still sends the messages, and asks Chatwarden first. A game with no chat can add the moderated chat box from @chatwarden/player-react (experimental).',
+    a: 'Not by default. It moderates the chat you already have: your server still sends the messages, and asks Chatwarden first. A game with no chat can add the moderated chat box from @chatwarden/player-react.',
   },
   {
     id: 'server',
@@ -336,7 +336,7 @@ const FAQ_BASE: FaqItem[] = [
     id: 'words',
     q: 'Which words does it block?',
     links: [{ label: '@chatwarden/profanity', href: PROFANITY_URL }],
-    a: "Slurs from a word list you provide. There's no shared list yet, so you bring your own, and moderators can edit it from the hub while the game runs. The kit can load a signed community list once one is published (experimental); nothing is on by default. Ordinary swearing uses the optional @chatwarden/profanity package, with a built-in English list that you can allow, star or block. Words with spaces between the letters are not caught, on purpose, because that would block innocent messages. Players can report those.",
+    a: "Slurs from a word list you provide. There's no shared list yet, so you bring your own, and moderators can edit it from the hub while the game runs. The kit can load a signed community list once one is published; nothing is on by default. Ordinary swearing uses the optional @chatwarden/profanity package, with a built-in English list that you can allow, star or block. Words with spaces between the letters are not caught, on purpose, because that would block innocent messages. Players can report those.",
   },
   {
     id: 'signin',

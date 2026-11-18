@@ -131,7 +131,7 @@ describe('a report that is taken', () => {
     const { user } = renderUi(<ReportDialog {...props(realSubmit(w), { targetName: 'Bob' })} />);
     await pick(user, 'Harassment');
     await send(user);
-    expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
+    expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it. You can send 9 more reports today.");
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Report' })).toBeNull();
@@ -154,7 +154,7 @@ describe('a report that is taken', () => {
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve({ ok: true, reportId: 'r' } as unknown as ReportResult))} />);
     await pick(user, 'Spam');
     await send(user);
-    expect(await findStatus()).toHaveTextContent(/^Thanks\. We got your report\.$/);
+    expect(await findStatus()).toHaveTextContent(/^Thanks for the report. We'll look into it.$/);
   });
 
   it('moves focus to the heading once the form is gone, and Close calls onClose', async () => {
@@ -187,11 +187,12 @@ describe('every refusal has its own plain message', () => {
     suspended: 'You cannot send reports from this account for now.',
     reason_required: 'This report needs a reason. Close this and report again to choose one.',
     reason_unknown: 'That reason is not available any more. Close this and report again.',
+    entity_invalid: 'This report is missing some details, so we could not take it.',
   };
 
   it('covers every refusal the kit has, with no two alike', () => {
-    expect(Object.keys(MESSAGES).sort()).toEqual(['duplicate', 'not_player', 'off', 'rate', 'reason_required', 'reason_unknown', 'self', 'suspended']);
-    expect(new Set(Object.values(MESSAGES)).size).toBe(8);
+    expect(Object.keys(MESSAGES).sort()).toEqual(['duplicate', 'entity_invalid', 'not_player', 'off', 'rate', 'reason_required', 'reason_unknown', 'self', 'suspended']);
+    expect(new Set(Object.values(MESSAGES)).size).toBe(9);
   });
 
   it.each(Object.entries(MESSAGES) as Array<[ReportRefusal, string]>)('%s', async (refusal, text) => {
@@ -208,7 +209,7 @@ describe('every refusal has its own plain message', () => {
   });
 
   it('shows a refusal in the words of its own key only: the catalog has one key per refusal', () => {
-    for (const r of ['duplicate', 'rate', 'self', 'not_player', 'off', 'suspended', 'reason_required', 'reason_unknown']) expect(en).toHaveProperty(`player.report.refused.${r}`);
+    for (const r of ['duplicate', 'rate', 'self', 'not_player', 'off', 'suspended', 'reason_required', 'reason_unknown', 'entity_invalid']) expect(en).toHaveProperty(`player.report.refused.${r}`);
   });
 
   describe('from the real kit', () => {
@@ -294,7 +295,7 @@ describe('when sending fails', () => {
     expect(screen.getByRole('button', { name: 'Report' })).not.toHaveAttribute('aria-busy');
     fail = false;
     await send(user);
-    expect(await findStatus()).toHaveTextContent('Thanks.');
+    expect(await findStatus()).toHaveTextContent('Thanks for the report.');
     expect(onSubmit).toHaveBeenCalledTimes(2);
     expect(onSubmit.mock.calls[1]?.[0]).toEqual({ reason: 'hate', note: 'what they said' });
   });

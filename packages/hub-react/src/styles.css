@@ -3902,3 +3902,623 @@
   gap: var(--cw-space-2, var(--cwd-space-2));
   min-width: 0;
 }
+
+/* "What the player sees": one quiet panel inside an action. A hairline box for the notice (the Notice's look without a tone), the player's own scale, no new colour. */
+.cw-hub .cw-pv {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-pv p,
+.cw-hub .cw-pv ul,
+.cw-hub .cw-pv dl {
+  margin: 0;
+}
+.cw-hub .cw-pv-heading {
+  margin: 0;
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-caption,
+.cw-hub .cw-pv-hold {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-pv-hold {
+  margin: 0;
+}
+.cw-hub .cw-pv-who,
+.cw-hub .cw-pv-pos {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-pv-person {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-pv-one {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-pv-notice {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink, var(--cwd-ink));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-pv-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-pv-title {
+  margin: 0;
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+}
+.cw-hub .cw-pv-facts {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-pv-fact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-pv-fact dt {
+  min-width: 7rem;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-fact dd {
+  margin: 0;
+}
+.cw-hub .cw-pv-hint,
+.cw-hub .cw-pv-lines-label {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-lines {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-pv-line-day {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-actions,
+.cw-hub .cw-pv-appeal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+/* A button drawn as words: it is never a control, so it takes no focus and has no pointer. */
+.cw-hub .cw-pv-btn {
+  display: inline-block;
+  padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-pv-chatline {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-pv-effects {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: 0;
+  list-style: none;
+}
+
+/* "Ask for a new name" in the decision bar: one quiet row after the actions, and its off-hint and result line. */
+.cw-hub .cw-rename {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-rename .cw-hint,
+.cw-hub .cw-rename-off,
+.cw-hub .cw-result-rename {
+  margin: 0;
+}
+
+/* Chat filters (0.2.0): Settings > Advanced > Chat filters. Counts are plain numbers and a chip is the neutral tag: no colour of its own. */
+.cw-hub .cw-fcard,
+.cw-hub .cw-fphrase {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin: 0 0 var(--cw-space-4, var(--cwd-space-4));
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  min-width: 0;
+}
+.cw-hub .cw-fcard-body {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+  min-width: 0;
+}
+.cw-hub .cw-fchoice {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.cw-hub .cw-fchoice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-fcard input[type='number'],
+.cw-hub .cw-fcard select,
+.cw-hub .cw-fphrase input[type='number'] {
+  max-width: 16rem;
+}
+.cw-hub .cw-fcard textarea,
+.cw-hub .cw-fmore textarea,
+.cw-hub .cw-ftool textarea {
+  width: 100%;
+  max-width: 100%;
+}
+.cw-hub .cw-fsub {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+}
+.cw-hub .cw-fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  max-width: 100%;
+  padding: 0 var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: 999px;
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-fadd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-fadd input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.cw-hub .cw-flabel {
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-ftool,
+.cw-hub .cw-fmore,
+.cw-hub .cw-fhits {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin-block-start: var(--cw-space-4, var(--cwd-space-4));
+  min-width: 0;
+}
+.cw-hub .cw-ftool h3 {
+  margin: 0;
+}
+.cw-hub .cw-ftool mark {
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: inherit;
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  text-decoration: underline;
+}
+.cw-hub .cw-fhits .cw-table-wrap {
+  overflow-x: auto;
+}
+/* Privacy requests (the Settings panel, the erase dialog's counts and the statement table). */
+.cw-hub .cw-privacy-counts {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin: 0;
+}
+.cw-hub .cw-privacy-counts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-privacy-counts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.cw-hub .cw-privacy-kept {
+  margin: 0;
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+}
+.cw-hub .cw-privacy-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.cw-hub .cw-privacy-table table {
+  border-collapse: collapse;
+  /* The table scrolls inside its own box (the rule above); the floor is spelled min() so the layout gate reads it as a deliberate one. */
+  min-width: min(36rem, 1000px);
+}
+.cw-hub .cw-privacy-table th,
+.cw-hub .cw-privacy-table td {
+  padding: var(--cw-space-2, var(--cwd-space-2));
+  text-align: start;
+  vertical-align: top;
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+
+/* The urgent lane (0.2.0): one chip in the queue header, a strip on the case, the "What to do" panel and the case's "..." menu. No colour of their own: the words say "Urgent". */
+.cw-hub .cw-urgent-chip {
+  display: block;
+  min-width: 0;
+  min-height: var(--cw-control-height, var(--cwd-control-height));
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface, var(--cwd-surface));
+  color: var(--cw-ink, var(--cwd-ink));
+  font: inherit;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.cw-hub .cw-urgent-strip {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-urgent-strip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-urgent-strip-line,
+.cw-hub .cw-urgent-strip-done {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-urgent-strip-toggle {
+  margin-inline-start: auto;
+}
+.cw-hub .cw-whattodo {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-whattodo-body {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-whattodo-body p,
+.cw-hub .cw-whattodo > p {
+  margin: 0;
+}
+.cw-hub .cw-whattodo-text {
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.cw-hub .cw-whattodo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-case-menu {
+  display: contents;
+  min-width: 0;
+}
+.cw-hub .cw-case-menu-button {
+  min-height: 0;
+  padding-block: 0;
+  line-height: 1.5;
+}
+.cw-hub .cw-case-menu-panel {
+  display: flex;
+  flex-wrap: wrap;
+  flex-basis: 100%;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-case-menu-panel > .cw-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* Reporting reasons: the urgent lane's fields behind each reason's "More". Safety panel: the disclosure, the resource list. */
+.cw-hub .cw-reason-more {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-reason-more p {
+  margin: 0;
+}
+.cw-hub .cw-pv-box {
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.cw-hub .cw-section-toggle {
+  justify-self: start;
+}
+.cw-hub .cw-section-body {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-safety-resources {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-safety-list {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-safety-resource {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-safety-resource .cw-field {
+  width: 100%;
+  min-width: 0;
+}
+
+/* The desk (0.2.0): the staff thread, the "Asked for a look" line, the ask form, the Overview line and the Insights tables. Words, not colour. */
+.cw-hub .cw-thread {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-thread-list {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-thread-entry {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+  padding-bottom: var(--cw-space-2, var(--cwd-space-2));
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-thread-head,
+.cw-hub .cw-thread-text {
+  margin: 0;
+}
+.cw-hub .cw-thread-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.cw-hub .cw-thread-entry > .cw-linkbtn {
+  justify-self: start;
+}
+.cw-hub .cw-thread-form {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+}
+.cw-hub .cw-thread-form .cw-field {
+  width: 100%;
+}
+.cw-hub .cw-thread-form p {
+  margin: 0;
+}
+.cw-hub .cw-asked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-asked-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-case-menu-form {
+  display: grid;
+  flex-basis: 100%;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-case-menu-form .cw-field {
+  width: 100%;
+}
+.cw-hub .cw-queue-asked {
+  min-width: 0;
+}
+.cw-hub .cw-overview-desk {
+  margin: 0;
+}
+.cw-hub .cw-insights-tables {
+  display: grid;
+  gap: var(--cw-space-4, var(--cwd-space-4));
+  min-width: 0;
+}
+.cw-hub .cw-insights-tables p {
+  margin: 0;
+}
+.cw-hub .cw-insights-table {
+  max-width: 100%;
+  border-collapse: collapse;
+}
+.cw-hub .cw-insights-table caption {
+  margin-bottom: var(--cw-space-1, var(--cwd-space-1));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  text-align: start;
+}
+.cw-hub .cw-insights-table th,
+.cw-hub .cw-insights-table td {
+  padding: var(--cw-space-2, var(--cwd-space-2));
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  text-align: start;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-insights-window {
+  max-width: 16rem;
+}
+
+/* The careful view: the one button that stands in for a hidden excerpt, the opened content, the break note and the panel's count. A button and plain words: no colour of their own. */
+.cw-hub .cw-hidden-excerpt {
+  min-width: 0;
+  padding-block: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-hidden-excerpt .cw-btn {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-revealed {
+  min-width: 0;
+}
+.cw-hub .cw-revealed:focus {
+  outline: none;
+}
+.cw-hub .cw-break-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-break-note p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-care-count {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rooms (0.2.0): the panel's list, a case's surge and evidence lines, a line's own menu, and the Person page's menu. Words and plain tokens: no colour of their own. */
+.cw-hub .cw-rooms-list {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-room {
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-room p {
+  margin: 0;
+}
+.cw-hub .cw-room-modes {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-room-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-room-confirm {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+}
+.cw-hub .cw-surge,
+.cw-hub .cw-evidence {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-surge p,
+.cw-hub .cw-evidence {
+  margin: 0;
+}
+.cw-hub .cw-context {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-contexts-list {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-line-menu {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-line-menu-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-person-menu {
+  display: contents;
+  min-width: 0;
+}
+.cw-hub .cw-person-menu-panel {
+  display: grid;
+  flex-basis: 100%;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-person-links p {
+  margin: 0;
+}

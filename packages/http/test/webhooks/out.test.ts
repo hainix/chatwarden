@@ -77,7 +77,7 @@ function fakeKit(get: Chatwarden['reports']['get'] = () => null) {
   };
 }
 const closed = (n: number): KitEvent => ({ type: 'report.closed', reportId: `r${n}`, verdict: 'upheld', at: NOW + n });
-const created = (id = 'r1'): KitEvent => ({ type: 'report.created', reportId: id, createdAt: NOW, category: 'harassment', roomTags: { mode: 'ranked' } });
+const created = (id = 'r1'): KitEvent => ({ type: 'report.created', reportId: id, createdAt: NOW, category: 'harassment', reportedReason: null, urgent: false, roomTags: { mode: 'ranked' } });
 
 const endpointA = (over: Partial<WebhookEndpoint> = {}): WebhookEndpoint => ({ url: URL_A, secret: SECRET, events: '*', ...over });
 

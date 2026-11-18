@@ -102,7 +102,7 @@ describe('the steps, panels and questions', () => {
     expect(FAQ.find((f) => f.id === 'cost')?.a).toBe("Nothing. It's open source under Apache-2.0, with no paid tier.");
     expect(JSON.stringify([FAQ, OPEN_SOURCE])).not.toMatch(/forever|no strings/i);
     expect(OPEN_SOURCE.body).toBe(
-      'Apache-2.0, with no paid tier and nothing hosted. It runs on your server and keeps its data in your database file. Chatwarden is pre-release (version 0.1): ready to try, with no support promise yet. Issues and pull requests are welcome.',
+      'Apache-2.0, with no paid tier and nothing hosted. It runs on your server and keeps its data in your database file. Chatwarden is pre-release (version 0.2): ready to try, with no support promise yet. Issues and pull requests are welcome.',
     );
   });
   it('the FAQ is the nine questions developers ask, in order', () => {
@@ -121,7 +121,7 @@ describe('the steps, panels and questions', () => {
   it('the FAQ is honest about the limits: the chat box is optional, Node only, bring your own word list, spaced letters, the AI advises', () => {
     const a = (id: string) => FAQ.find((f) => f.id === id)?.a ?? '';
     expect(a('chat')).toMatch(/^Not by default\. It moderates the chat you already have/);
-    expect(a('chat')).toMatch(/experimental/);
+    expect(a('chat')).not.toMatch(/experimental/);
     expect(a('server')).toMatch(/Node 22\.13 or newer/);
     expect(a('words')).toMatch(/There's no shared list yet, so you bring your own/);
     expect(a('words')).toMatch(/nothing is on by default/);
@@ -202,11 +202,11 @@ describe('the init command in the lead', () => {
     expect(httpReadme()).toContain(ADD_IT.init.alternative);
     expect(ADD_IT.init.alternative).toBe('npx -p @chatwarden/http chatwarden init');
   });
-  it('the words around it say what it writes, that it never overwrites, that it is experimental, and offer the by-hand path', () => {
+  it('the words around it say what it writes, that it never overwrites, and offer the by-hand path', () => {
     expect(ADD_IT.init.title).toBe('Start with the setup command');
     expect(ADD_IT.init.body).toMatch(/Express, Fastify, Next\.js/);
     expect(ADD_IT.init.body).toMatch(/never overwrites/);
-    expect(ADD_IT.init.body).toMatch(/experimental/);
+    expect(ADD_IT.init.body).not.toMatch(/experimental/);
     expect(ADD_IT.init.body).toMatch(/by hand/);
     expect(ADD_IT.init.body).not.toMatch(/minutes?|seconds?|\bfast(er|est)?\b|quick|instant|\beasy/i);
   });

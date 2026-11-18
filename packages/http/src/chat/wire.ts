@@ -1,16 +1,14 @@
 // The wire types of the chat box (design 6.1). The client has a copy (packages/player-react/src/chat/wire.ts); a test keeps the
 // two assignable. Pure types and one pure function: no state, no `node:` import, browser-safe.
-import type { ReportRefusal } from '@chatwarden/core';
+import type { ReportRefusal, RoomMode } from '@chatwarden/core';
 
 /**
  * The version of the frames below. A change that breaks a reader raises it.
- * @experimental
  */
-export const CHAT_WIRE_VERSION = 1;
+export const CHAT_WIRE_VERSION = 2;
 
 /**
  * One delivered line, as a viewer sees it. No seat, no person, no hash.
- * @experimental
  */
 export interface WireLine {
   /** The room's line number (the kit's evidence line id). Unique within one `epoch`. */
@@ -23,11 +21,31 @@ export interface WireLine {
   text: string;
   /** Present and true on the viewer's own lines. */
   mine?: true;
+  /**
+   * Version 2: the id of the phrase, when the line was sent from a phrase book (a phrase-only room). `text` is then the phrase's canonical text (the game's default language, and what a client that ignores this field should show);
+   * a client with its own words for the id (`t('phrase.' + id)`) shows those. Absent on a typed line.
+   */
+  phrase?: string;
+}
+
+/**
+ * One phrase of a phrase-only room's book, as `hello.phrases` carries it: the id to send, the canonical text and an optional group that heads a section in the picker.
+ */
+export interface WirePhrase {
+  id: string;
+  text: string;
+  group?: string;
+}
+
+/**
+ * The phrases of a phrase-only room (version 2): `{ book }` is the room's list in picker order. The kit ships no phrases and no translations: the game's own catalogue translates by id.
+ */
+export interface WirePhrases {
+  book: WirePhrase[];
 }
 
 /**
  * The restriction on the viewer's own chat, or null. Same meaning as `RestrictedChatLineProps`.
- * @experimental
  */
 export interface WireRestriction {
   /** Epoch ms it ends, or null when it does not end on its own. */
@@ -41,34 +59,49 @@ export interface WireRestriction {
 }
 
 /**
- * A player the viewer muted, by an opaque token only the viewer can use to undo it.
- * @experimental
+ * A player the viewer muted or blocked, by an opaque token only the viewer can use to undo it. `block` is true for a block (the viewer and that player see none of each other's lines); a mute
+ * has no key. A player is never told they were blocked: this list is the blocker's own.
  */
 export interface WireMuted {
   ref: string;
   name: string;
+  block?: true;
 }
 
 /**
  * Why a line was not sent, for its author. `reason` is one of: `length`, `rate`, `gate`, `restricted`, `blocked`, `profanity`, `banned`,
- * `empty`, and, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`). A reader treats any other string as unknown.
+ * `empty`, `link`, `personal_info` and `filter` (the chat filters, `profile.filters`: a link, personal details, a phrase rule or caps and repeats;
+ * with `rule`, the Community Rule the owner chose for it, and never what matched), when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`),
+ * and, new in version 2, `locked` and `new_account` (the room's mode, `cw.rooms.setMode`: they carry `until`, when it ends), `probation` (a new account's pause, `rooms.probation`: it carries `retryAfterMs`), `account_too_new` (a context's
+ * least account age, `chat.minAccountAgeDays`) and, for phrase-only rooms, `phrases_only` (typed text in one) and `phrase_unknown` (an id the room's book lacks). A reader treats any other string as unknown.
  * Never carries text, a handle, an id or a moderator's note.
- * @experimental
  */
 export interface WireRefusal {
   reason: string;
-  /** `restricted` and `banned`: epoch ms it ends, or null. */
+  /** `restricted`, `banned`, `locked` and `new_account`: epoch ms it ends, or null. */
   until?: number | null;
   byModerator?: boolean;
   /** The Community Rule number to show as "Community Rule N". */
   rule?: number;
   /** The player's own notice that explains it (look it up with the player routes). */
   noticeId?: string;
-  /** `slow_mode`, `flood`, `duplicate`: when to try again, ms from the answer (a whole number, 1 or more). */
+  /** `slow_mode`, `flood`, `duplicate`, `probation`: when to try again, ms from the answer (a whole number, 1 or more). */
   retryAfterMs?: number;
 }
 
-/** @experimental */
+/**
+ * A room's mode as the chat box is told it: `kind` and when it ends (epoch ms, null for `normal`). Never who set it or why.
+ */
+export interface WireMode {
+  kind: RoomMode;
+  until: number | null;
+}
+
+/**
+ * Why a viewer cannot post right now, when it is the room's mode and not their own restriction: `locked` (the room takes staff only) or `new_account` (an emergency, and an account too young). Absent when they can post.
+ */
+export type WireReadOnly = 'locked' | 'new_account';
+
 export type ChatFrame =
   | {
       type: 'hello';
@@ -76,7 +109,10 @@ export type ChatFrame =
       /** Changes when the server restarts or the room is closed and reopened. */
       epoch: string;
       room: string;
-      you: { name: string };
+      /** `readOnly`: the viewer cannot post because of the room's mode (version 2); absent when they can. */
+      you: { name: string; readOnly?: WireReadOnly };
+      /** The room's mode now (version 2): `normal`, `locked` or `emergency` and when it ends. */
+      mode: WireMode;
       /** The line length limit (`cw.limits.chatMaxLength`), for the input. */
       maxLength: number;
       /** How often the server sends a heartbeat comment while a stream is idle (the broadcaster's `heartbeatMs`), so a client can size its liveness watchdog from it. */
@@ -89,32 +125,38 @@ export type ChatFrame =
       /** Recent lines the viewer may see, oldest first. */
       lines: WireLine[];
       muted: WireMuted[];
+      /** The room's phrase book (version 2) when it is phrase-only: the chat box then shows a picker instead of the input. `null` for a free-text room. */
+      phrases: WirePhrases | null;
     }
   | { type: 'line'; line: WireLine }
-  /** Lines to remove from view (the viewer muted their author). */
+  /** Lines to remove from view (the viewer muted their author, or a player who blocked the viewer: it carries ids only and never says which). */
   | { type: 'hide'; ids: string[] }
   /** The viewer's own state changed (a sanction landed, a mute was made from another tab). */
   | { type: 'state'; restriction: WireRestriction | null; muted: WireMuted[] }
   /** A notice is waiting for this player: ask the player routes for it. Carries nothing else. */
   | { type: 'notices' }
   /**
+   * The room's mode changed or ended (version 2). `readOnly` is computed for THIS viewer (a staff member's is absent, a new account's is `new_account` in an emergency): the same room tells two viewers
+   * two things. Carries no actor and no reason.
+   */
+  | { type: 'mode'; mode: WireMode; readOnly?: WireReadOnly }
+  /** Lines were taken back for everyone (version 2): remove each id from view and drop its text. Sent to every stream, the author's too. */
+  | { type: 'retract'; ids: string[] }
+  /**
    * The server is ending this stream. `banned` carries when the ban ends. `replaced`: this player opened more streams than `maxStreamsPerMember`
    * allows and this was the oldest, so a client treats it as closed and does not reconnect by itself (a flap loop between tabs otherwise).
    */
   | { type: 'bye'; reason: 'banned' | 'room_closed' | 'shutdown' | 'replaced'; until?: number | null };
 
-/** @experimental */
 export type SendResult = { ok: true; line: WireLine } | { ok: false; refused: WireRefusal };
-/** @experimental */
 export type MuteTarget = { lineId: string } | { ref: string };
 /**
- * The answer to a mute. `ok`: the kit holds the mute (or the unmute) now. `hiddenIds`: when it muted, the ids of the muted player's lines that are
+ * The answer to a mute or a block. `ok`: the kit holds the mute or block (or the unmute) now. `hiddenIds`: when it muted, the ids of the muted player's lines that are
  * still in the room's history, oldest first (the same ids as the `hide` frame), so a client can hide exactly those without waiting for the
- * stream; empty for an unmute and for anything that did nothing. At most the history size.
- * @experimental
+ * stream; empty for an unmute and for anything that did nothing. At most the history size. `limit: true` (with `ok` false): the viewer's list holds as many blocks
+ * as is allowed, so nothing more can be muted or blocked until one is undone.
  */
-export type MuteResult = { ok: boolean; hiddenIds: string[] };
-/** @experimental */
+export type MuteResult = { ok: boolean; hiddenIds: string[]; limit?: true };
 export type ReportOutcome =
   | { ok: true; remaining: number }
   | { ok: false; refused: ReportRefusal | 'not_found'; remaining?: number };
@@ -140,7 +182,6 @@ function ownField(source: object, key: string): unknown {
  * and `retryAfterMs` by name, each only when it has the right shape; every other key is dropped, so text, a seat, a subject or a handle
  * that rode along on the core refusal can never reach the wire. Never throws: anything that is not an object, or a field that cannot be
  * read, is simply absent, and a missing, non-string or over-long (more than 64 characters) `reason` is `"unknown"`.
- * @experimental
  */
 export function refusalOf(refuse: unknown): WireRefusal {
   if (typeof refuse !== 'object' || refuse === null) return { reason: 'unknown' };

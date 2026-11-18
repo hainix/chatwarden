@@ -5,27 +5,35 @@
 // Every failure is contained: a sink that throws loses only its own stream, a kit call that throws is an answer, never an exception.
 // Every log line is an event name and an error class (through `safeWarn`): never a line, a name, a room, a seat or a credential.
 import { errorClass, EVIDENCE_MAX_AGE_MS, makeHasher, safeWarn } from '@chatwarden/core';
-import type { Chatwarden, Logger, RawWho, RestrictedAnswer, SubjectId } from '@chatwarden/core';
+import type { Chatwarden, KitEventOf, Logger, RawWho, RestrictedAnswer, SubjectId } from '@chatwarden/core';
 import { createRing, HISTORY_LINES_DEFAULT, resolveHistory } from './history.js';
 import type { Ring } from './history.js';
 import { randomHex, randomToken } from './random.js';
 import { CHAT_WIRE_VERSION, refusalOf } from './wire.js';
-import type { ChatFrame, MuteResult, MuteTarget, ReportOutcome, SendResult, WireLine, WireMuted, WireRefusal, WireRestriction } from './wire.js';
+import type { ChatFrame, MuteResult, MuteTarget, ReportOutcome, SendResult, WireLine, WirePhrases, WireMode, WireMuted, WireReadOnly, WireRefusal, WireRestriction } from './wire.js';
 
 /**
  * The game's description of a player in a room.
- * @experimental
  */
 export interface ChatMember {
   /** The display name other players see. 1 to 32 characters; control characters are removed. Checked with `cw.names.check` (see `nameCheck`). */
   name: string;
   /** Room tags passed to `cw.rooms.seat` (for example `{ mode: 'ranked' }`). */
   tags?: Record<string, string>;
+  /**
+   * This player is staff in the game's own sense (a moderator or an admin): in a locked room they may still talk, and an emergency never makes them read-only. Only `true` counts. It comes from this
+   * hook and nowhere else: the chat routes never read it from a request. Read again on every call, so a change applies at once.
+   */
+  staff?: boolean;
+  /**
+   * The game's own id for the evidence behind this player's reports (a match or replay id): 1 to 128 of `A-Z a-z 0-9 _ : -`. A report this player files from the chat box carries it (staff see it as
+   * the case's evidence, with a link built from `reporting.evidenceUrl`). From this hook only, never from a request; an invalid one is dropped by the kit, the report is still taken.
+   */
+  evidenceRef?: string;
 }
 
 /**
  * Where frames go: an SSE response, a socket, a test.
- * @experimental
  */
 export interface ChatSink {
   /** Deliver one frame. Return `false` when the receiver is backed up; the broadcaster drops a stream that stays backed up. */
@@ -44,7 +52,6 @@ export interface ChatSink {
 
 /**
  * A live stream.
- * @experimental
  */
 export interface ChatStream {
   /** Stop sending and release the seat reference. Safe to call twice. */
@@ -57,7 +64,6 @@ export interface ChatStream {
  * A session holds no credential. While the player is seated it refreshes the seat's grace on every call; once the seat is released (the grace ran
  * out, the room was closed, the broadcaster closed) it has nothing to seat the player with again and answers like an unseated player: `send` is
  * refused `gate`, `open` is refused, `mute` is `false`. Make a new session from the next request (the routes do, per request).
- * @experimental
  */
 export interface ChatSession {
   readonly name: string;
@@ -71,15 +77,19 @@ export interface ChatSession {
   canOpen(): boolean;
   /** Check a line with the kit and, if it passes, deliver it to the room. Never throws. */
   send(input: { text: string }): SendResult;
-  /** Mute or unmute a player, named by one of their lines or by the token from `muted`. `false`: nothing to do. */
-  mute(input: MuteTarget & { on: boolean }): boolean;
+  /**
+   * Send one phrase of the room's book (a phrase-only room) by id. The kit checks it as it checks a line (`cw.chat.acceptPhrase`) and, if it passes, delivers the phrase's canonical text with `phrase` set. A refusal is the author's
+   * answer only: `gate` for a room that is not phrase-only, `phrase_unknown` for an id the book lacks (typed text in a phrase room is `send`'s `phrases_only`). Never throws.
+   */
+  sendPhrase(input: { phrase: string }): SendResult;
+  /** Mute or unmute a player, named by one of their lines or by the token from `muted`. `false`: nothing to do. With `block` (and `on`) it is a block: two-way, lasting. */
+  mute(input: MuteTarget & { on: boolean; block?: boolean }): boolean;
   /** `mute`, with the ids of the lines it hid from this player (see `MuteResult`). The routes answer a mute with this. */
-  muteResult(input: MuteTarget & { on: boolean }): MuteResult;
+  muteResult(input: MuteTarget & { on: boolean; block?: boolean }): MuteResult;
   /** Report a line. The reporter is this session; the person is the line's author. Never rejects for a kit refusal. */
   report(input: { lineId: string; reason?: string; note?: string }): Promise<ReportOutcome>;
 }
 
-/** @experimental */
 export interface RoomBroadcasterOptions {
   /** History kept per room for late joiners. `lines` 1 to 100 (default 50); `maxAgeMs` 1 000 to `EVIDENCE_MAX_AGE_MS` (default `EVIDENCE_MAX_AGE_MS`). */
   history?: { lines?: number; maxAgeMs?: number };
@@ -112,7 +122,6 @@ export interface RoomBroadcasterOptions {
   logger?: Logger;
 }
 
-/** @experimental */
 export interface RoomBroadcaster {
   /**
    * A session for this player in this room, seating them if needed. `{ refused }` when the door is shut to them (a ban: `reason`
@@ -139,7 +148,6 @@ export interface RoomBroadcaster {
 
 /**
  * The values in force when an option is left out.
- * @experimental
  */
 export const ROOM_BROADCASTER_DEFAULTS = {
   historyLines: HISTORY_LINES_DEFAULT,
@@ -214,6 +222,10 @@ interface MemberRec {
   /** The opaque tokens this player was given for the players they muted (token <-> the other player's seat). */
   readonly refByTarget: Map<string, string>;
   readonly targetByRef: Map<string, string>;
+  /** The game's word that this player is staff (the `join` hook's `staff: true`), refreshed on every join. */
+  staff: boolean;
+  /** The game's evidence id for this player's reports, refreshed on every join. */
+  evidenceRef: string | undefined;
 }
 
 interface RoomRec {
@@ -225,6 +237,8 @@ interface RoomRec {
   readonly ghosts: Map<string, string>;
   /** target seat -> the seats of the present players who muted them. */
   readonly holders: Map<string, Set<string>>;
+  /** Cancels the timer that tells the room its mode ended; null when none is set. */
+  cancelModeTimer: (() => void) | null;
   joins: number;
   /** Only for a line the kit gave no id (its evidence buffer failed): the wire id still has to be unique. */
   anonymous: number;
@@ -235,7 +249,6 @@ const bye = (reason: 'banned' | 'room_closed' | 'shutdown'): ChatFrame => ({ typ
 /**
  * Build the broadcaster. `cw` is the kit; it must have `rooms`, `chat`, `mutes`, `reports`, `doors` and `names` (the facade). Every option
  * is validated here (`RangeError`, never echoing a value), like `playerRoutes`.
- * @experimental
  */
 export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOptions = {}): RoomBroadcaster {
   if (typeof options !== 'object' || options === null || Array.isArray(options)) {
@@ -284,6 +297,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
   let epochs = 0;
   let closed = false;
   let heartbeat: (() => void) | null = null;
+  const unsubscribes: Array<() => void> = [];
 
   // ---- logging: event and error class only, at most one line a minute per event ---------------------------------------------------
 
@@ -480,6 +494,15 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     }
   }
 
+  function blockedSeatsOf(room: RoomRec, member: MemberRec): string[] {
+    try {
+      return cw.mutes.blockedSeats(room.id, member.seat);
+    } catch (err) {
+      warn('chatwarden.chat_mutes_failed', err);
+      return [];
+    }
+  }
+
   /** Note that `viewerSeat` mutes `targetSeat`, so that seat is kept for them if its player leaves. */
   function hold(room: RoomRec, viewerSeat: string, targetSeat: string): void {
     let set = room.holders.get(targetSeat);
@@ -528,19 +551,111 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     // A token for a seat the kit no longer lists (undone in another tab, or expired) is dropped: the maps stay as small as the mute list.
     const still = new Set(listed);
     for (const target of [...member.refByTarget.keys()]) if (!still.has(target)) dropRef(member, target);
+    const blocked = new Set(blockedSeatsOf(room, member));
     for (const seat of listed) {
       const name = room.members.get(seat)?.name ?? room.ghosts.get(seat);
       if (name === undefined) continue;
       hold(room, member.seat, seat);
-      out.push({ ref: refFor(member, seat), name });
+      out.push({ ref: refFor(member, seat), name, ...(blocked.has(seat) ? { block: true as const } : {}) });
     }
     return out;
   }
 
-  function wireLine(line: { id: string; at: number; name: string; text: string }, mine: boolean): WireLine {
+  // ---- the room's mode and retractions (version 2) ------------------------------------------------------------------------------
+
+  /** Why this viewer cannot post because of the room's mode, or undefined. Staff (the game's word) never can be read-only. */
+  function readOnlyOf(room: RoomRec, member: MemberRec): WireReadOnly | undefined {
+    if (member.staff) return undefined;
+    try {
+      const state = cw.rooms.postingState(room.id, member.seat);
+      return state === 'locked' || state === 'new_account' ? state : undefined;
+    } catch (err) {
+      warn('chatwarden.chat_mode_failed', err);
+      return undefined;
+    }
+  }
+
+  /** The room's mode as the kit says it now (an expiry is applied there). */
+  function modeOf(room: RoomRec): WireMode {
+    try {
+      const state = cw.rooms.mode(room.id);
+      return { kind: state.mode, until: state.until };
+    } catch (err) {
+      warn('chatwarden.chat_mode_failed', err);
+      return { kind: 'normal', until: null };
+    }
+  }
+
+  /** One viewer's mode frame. */
+  function modeFrame(room: RoomRec, member: MemberRec, mode: WireMode): ChatFrame {
+    const readOnly = mode.kind === 'normal' ? undefined : readOnlyOf(room, member);
+    return readOnly === undefined ? { type: 'mode', mode } : { type: 'mode', mode, readOnly };
+  }
+
+  /**
+   * The mode of a room changed (or ended): tell every stream, each its own read-only state, and set the one timer that says it ended. The timer only sends a frame: whether a line is allowed is the
+   * kit's answer and it reads the clock itself, so a late timer is never what makes a refusal wrong.
+   */
+  function onRoomMode(e: KitEventOf<'room.mode'>): void {
+    if (closed) return;
+    const room = rooms.get(e.roomId);
+    if (room === undefined) return;
+    room.cancelModeTimer?.();
+    room.cancelModeTimer = null;
+    const mode: WireMode = { kind: e.mode, until: e.until };
+    for (const member of [...room.members.values()]) {
+      try {
+        writeAll(member, () => modeFrame(room, member, mode));
+      } catch (err) {
+        warn('chatwarden.chat_mode_failed', err);
+      }
+    }
+    if (e.mode !== 'normal' && e.until !== null) armModeTimer(room, e.until);
+  }
+
+  function armModeTimer(room: RoomRec, until: number): void {
+    const wait = Math.max(0, until - now());
+    room.cancelModeTimer = schedule(() => {
+      room.cancelModeTimer = null;
+      if (closed || rooms.get(room.id) !== room) return;
+      // Reading the mode applies the expiry in the kit, which announces it (and that is what writes the frame). A mode that is still on (the kit's clock is behind ours) is waited for a second at a time.
+      const state = modeOf(room);
+      if (state.kind !== 'normal' && state.until !== null) armModeTimer(room, Math.max(state.until, now() + 1000));
+    }, wait);
+  }
+
+  /** Lines were taken back for everyone: they leave the ring, so no later hello has them, and every stream hears it once. */
+  function onLineRetracted(e: KitEventOf<'line.retracted'>): void {
+    if (closed) return;
+    const room = rooms.get(e.roomId);
+    if (room === undefined) return;
+    room.ring.remove(e.lineIds);
+    const ids = [...e.lineIds];
+    for (const member of [...room.members.values()]) {
+      try {
+        writeAll(member, () => ({ type: 'retract', ids }));
+      } catch (err) {
+        warn('chatwarden.chat_retract_failed', err);
+      }
+    }
+  }
+
+  function wireLine(line: { id: string; at: number; name: string; text: string; phrase?: string }, mine: boolean): WireLine {
     const out: WireLine = { id: line.id, at: line.at, name: line.name, text: line.text };
+    if (line.phrase !== undefined) out.phrase = line.phrase;
     if (mine) out.mine = true;
     return out;
+  }
+
+  /** The room's phrase book as the hello carries it (a copy), or null for a free-text room. A kit with no phrase lookup, or one that throws, makes a free-text room. */
+  function phrasesOf(room: RoomRec): WirePhrases | null {
+    try {
+      const book = cw.phrases.book(room.id);
+      if (book === null || book === undefined) return null;
+      return { book: book.map((p) => (p.group === undefined ? { id: p.id, text: p.text } : { id: p.id, text: p.text, group: p.group })) };
+    } catch {
+      return null;
+    }
   }
 
   function helloFor(room: RoomRec, member: MemberRec): ChatFrame {
@@ -549,12 +664,14 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       if (!visible(room.id, member.seat, line.seat)) continue;
       lines.push(wireLine(line, line.seat === member.seat));
     }
+    const readOnly = readOnlyOf(room, member);
     const frame: ChatFrame = {
       type: 'hello',
       v: CHAT_WIRE_VERSION,
       epoch: room.epoch,
       room: room.id,
-      you: { name: member.name },
+      you: readOnly === undefined ? { name: member.name } : { name: member.name, readOnly },
+      mode: modeOf(room),
       maxLength: cw.limits.chatMaxLength,
       heartbeatMs,
       now: now(),
@@ -562,6 +679,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       restriction: restrictionOf(room, member),
       lines,
       muted: mutedOf(room, member),
+      phrases: phrasesOf(room),
     };
     // A client drops any frame over 64 KiB, and then never gets a hello at all. A long line limit can make a full ring that big: keep the
     // newest lines that fit, oldest dropped first.
@@ -604,6 +722,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       for (const seat of room.ghosts.keys()) unseatSeat(room, seat);
       room.ghosts.clear();
       room.holders.clear();
+      room.cancelModeTimer?.();
+      room.cancelModeTimer = null;
       if (rooms.get(room.id) === room) rooms.delete(room.id);
     }
   }
@@ -612,7 +732,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
    * Find or make the room and the member, seat them in the kit, and refresh the grace of a member with no stream. `null` when the room is
    * full. `given` is the cleaned name the game chose, or null.
    */
-  function upsert(roomId: string, seat: string, who: RawWho, given: string | null, tags: Record<string, string> | undefined): { room: RoomRec; member: MemberRec } | 'full' | 'rooms_full' | 'internal' {
+  function upsert(roomId: string, seat: string, who: RawWho, given: string | null, tags: Record<string, string> | undefined, staff: boolean, evidenceRef: string | undefined): { room: RoomRec; member: MemberRec } | 'full' | 'rooms_full' | 'internal' {
     let room = rooms.get(roomId);
     let member = room?.members.get(seat);
     if (room === undefined && rooms.size >= maxRooms) return 'rooms_full';
@@ -627,6 +747,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         members: new Map(),
         ghosts: new Map(),
         holders: new Map(),
+        cancelModeTimer: null,
         joins: 0,
         anonymous: 0,
       };
@@ -641,9 +762,13 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         cancelGrace: null,
         refByTarget: new Map(),
         targetByRef: new Map(),
+        staff,
+        evidenceRef,
       };
-    } else if (given !== null) {
-      member.name = given;
+    } else {
+      if (given !== null) member.name = given;
+      member.staff = staff;
+      member.evidenceRef = evidenceRef;
     }
     try {
       cw.rooms.seat(roomId, seat, who, member.name, tags);
@@ -676,6 +801,41 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       if (member.streams.size === 0) armGrace(room, member);
       return { room, member };
     };
+    /** Ask the kit about a line (`decide`) and, if it was delivered, put it in the ring and on every stream that may see it. Never throws; a refusal is the author's answer only. */
+    const deliver = (decide: (room: RoomRec, member: MemberRec) => unknown): SendResult => {
+      const found = live();
+      if (found === null) return { ok: false, refused: { reason: 'gate' } };
+      const { room, member } = found;
+      let result: unknown;
+      try {
+        result = decide(room, member);
+      } catch (err) {
+        warn('chatwarden.chat_accept_failed', err);
+        return { ok: false, refused: { reason: 'unknown' } };
+      }
+      const verdict = result as { deliver?: { lineId?: unknown; text?: unknown; phrase?: unknown }; refuse?: unknown } | null;
+      const delivered = verdict?.deliver;
+      if (typeof delivered !== 'object' || delivered === null || typeof delivered.text !== 'string') {
+        // A refusal is the author's answer only: nothing is stored, written to a stream or logged.
+        return { ok: false, refused: refusalOf(verdict?.refuse) };
+      }
+      const id = hasText(delivered.lineId) ? delivered.lineId : `x${(room.anonymous += 1)}`;
+      const at = now();
+      const phrase = hasText(delivered.phrase) ? delivered.phrase : undefined;
+      room.ring.append({ id, at, seat: member.seat, name: member.name, text: delivered.text, ...(phrase === undefined ? {} : { phrase }) });
+      const base = { id, at, name: member.name, text: delivered.text, ...(phrase === undefined ? {} : { phrase }) };
+      // One frame object for every stream that is not the author's, so a sink can encode it once. A sink must not change a frame it is given.
+      const shared: ChatFrame = { type: 'line', line: wireLine(base, false) };
+      for (const other of [...room.members.values()]) {
+        if (other.streams.size === 0) continue;
+        const mine = other.seat === member.seat;
+        if (!mine && !visible(room.id, other.seat, member.seat)) continue;
+        if (mine) writeAll(other, () => ({ type: 'line', line: wireLine(base, true) }));
+        else writeAll(other, () => shared);
+      }
+      return { ok: true, line: { ...wireLine(base, true), mine: true } };
+    };
+
     const session: ChatSession = {
       name,
 
@@ -703,6 +863,11 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         member.cancelGrace = null;
         armHeartbeat();
         push(rec, helloFor(room, member));
+        // A room that came up after its mode was set has no timer for it yet: set it now, so the box is told when it ends.
+        if (room.cancelModeTimer === null) {
+          const mode = modeOf(room);
+          if (mode.kind !== 'normal' && mode.until !== null) armModeTimer(room, mode.until);
+        }
         return {
           close: () => dropStream(rec, true),
         };
@@ -711,36 +876,14 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       send(input): SendResult {
         const text: unknown = typeof input === 'object' && input !== null ? input.text : undefined;
         if (typeof text !== 'string') return { ok: false, refused: { reason: 'empty' } };
-        const found = live();
-        if (found === null) return { ok: false, refused: { reason: 'gate' } };
-        const { room, member } = found;
-        let result: unknown;
-        try {
-          result = cw.chat.accept(room.id, member.seat, text);
-        } catch (err) {
-          warn('chatwarden.chat_accept_failed', err);
-          return { ok: false, refused: { reason: 'unknown' } };
-        }
-        const verdict = result as { deliver?: { lineId?: unknown; text?: unknown }; refuse?: unknown } | null;
-        const delivered = verdict?.deliver;
-        if (typeof delivered !== 'object' || delivered === null || typeof delivered.text !== 'string') {
-          // A refusal is the author's answer only: nothing is stored, written to a stream or logged.
-          return { ok: false, refused: refusalOf(verdict?.refuse) };
-        }
-        const id = hasText(delivered.lineId) ? delivered.lineId : `x${(room.anonymous += 1)}`;
-        const at = now();
-        room.ring.append({ id, at, seat: member.seat, name: member.name, text: delivered.text });
-        const base = { id, at, name: member.name, text: delivered.text };
-        // One frame object for every stream that is not the author's, so a sink can encode it once. A sink must not change a frame it is given.
-        const shared: ChatFrame = { type: 'line', line: wireLine(base, false) };
-        for (const other of [...room.members.values()]) {
-          if (other.streams.size === 0) continue;
-          const mine = other.seat === member.seat;
-          if (!mine && !visible(room.id, other.seat, member.seat)) continue;
-          if (mine) writeAll(other, () => ({ type: 'line', line: wireLine(base, true) }));
-          else writeAll(other, () => shared);
-        }
-        return { ok: true, line: { ...wireLine(base, true), mine: true } };
+        // Staff is the game's word from the join hook, read when the player joined: never anything in the request.
+        return deliver((room, member) => cw.chat.accept(room.id, member.seat, text, member.staff ? { staff: true } : undefined));
+      },
+
+      sendPhrase(input): SendResult {
+        const phrase: unknown = typeof input === 'object' && input !== null ? input.phrase : undefined;
+        if (typeof phrase !== 'string' || phrase === '') return { ok: false, refused: { reason: 'phrase_unknown' } };
+        return deliver((room, member) => cw.chat.acceptPhrase(room.id, member.seat, phrase, member.staff ? { staff: true } : undefined));
       },
 
       mute(input): boolean {
@@ -753,6 +896,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         if (found === null || typeof input !== 'object' || input === null || typeof input.on !== 'boolean') return none;
         const { room, member } = found;
         const on = input.on;
+        const asBlock = on && input.block === true;
         let target: string | undefined;
         if ('lineId' in input && typeof input.lineId === 'string') {
           target = room.ring.byId(input.lineId)?.seat;
@@ -763,23 +907,34 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         }
         if (target === undefined || target === member.seat || !(room.members.has(target) || room.ghosts.has(target))) return none;
         const before = mutedSeatsOf(room, member).includes(target);
+        const blockedBefore = blockedSeatsOf(room, member).includes(target);
         try {
-          cw.mutes.set(room.id, member.seat, target, on);
+          const outcome = asBlock ? cw.blocks.set(room.id, member.seat, target, true) : cw.mutes.set(room.id, member.seat, target, on);
+          // The viewer's list holds as many blocks as is allowed: nothing was written, and the client is told in words.
+          if (outcome === 'limit') return { ok: false, hiddenIds: [], limit: true };
         } catch (err) {
           warn('chatwarden.chat_mute_failed', err);
           return none;
         }
         const after = mutedSeatsOf(room, member).includes(target);
-        if (after !== on) return none; // the kit did nothing (a seat with no person, or the viewer's list is full)
+        const blockedAfter = blockedSeatsOf(room, member).includes(target);
+        if (after !== on) return none; // the kit did nothing (a seat with no person)
         if (on) hold(room, member.seat, target);
         else {
           release(room, member.seat, target);
           dropRef(member, target);
         }
         const ids = on ? room.ring.bySeat(target).map((l) => l.id) : [];
-        if (before !== after) {
-          if (ids.length > 0) writeAll(member, () => ({ type: 'hide', ids: [...ids] }));
+        if (before !== after || blockedBefore !== blockedAfter) {
+          if (before !== after && ids.length > 0) writeAll(member, () => ({ type: 'hide', ids: [...ids] }));
           writeAll(member, () => stateFor(room, member));
+        }
+        // A new block also hides the blocker's lines already in the room from the blocked player's streams (ids only: no name, no token, no state), so history on their screen goes too.
+        // They are told nothing else; later lines in both directions are filtered by `visibleTo`.
+        if (!blockedBefore && blockedAfter) {
+          const mine = room.ring.bySeat(member.seat).map((l) => l.id);
+          const blockedMember = room.members.get(target);
+          if (mine.length > 0 && blockedMember !== undefined) writeAll(blockedMember, () => ({ type: 'hide', ids: [...mine] }));
         }
         return { ok: true, hiddenIds: [...ids] };
       },
@@ -798,6 +953,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
             reporterSeat: member.seat,
             targetSeat: line.seat,
             lineId,
+            // The evidence id is the game's (the join hook's), never the request's.
+            ...(member.evidenceRef === undefined ? {} : { evidenceRef: member.evidenceRef }),
             ...(typeof input.reason === 'string' ? { reason: input.reason } : {}),
             ...(typeof input.note === 'string' ? { note: input.note } : {}),
           });
@@ -822,7 +979,10 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         if (door !== null) return { refused: refusalOf({ reason: 'banned', until: door.until, noticeId: door.noticeId }) };
         const given = resolveName(typeof member === 'object' && member !== null ? member.name : undefined);
         const tags = typeof member === 'object' && member !== null ? member.tags : undefined;
-        const found = upsert(roomId, seat, who, given, tags);
+        // Only a real `true` is staff, and only a well-formed text is an evidence id: the hook is the game's, but a stray value must not become either.
+        const staff = typeof member === 'object' && member !== null && member.staff === true;
+        const evidenceRef = typeof member === 'object' && member !== null && typeof member.evidenceRef === 'string' && member.evidenceRef !== '' ? member.evidenceRef : undefined;
+        const found = upsert(roomId, seat, who, given, tags, staff, evidenceRef);
         if (typeof found === 'string') return { refused: { reason: found } };
         return makeSession(roomId, seat, found.member.name);
       } catch (err) {
@@ -860,6 +1020,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       const room = rooms.get(roomId);
       if (room !== undefined) {
         rooms.delete(roomId);
+        room.cancelModeTimer?.();
+        room.cancelModeTimer = null;
         for (const member of [...room.members.values()]) {
           member.cancelGrace?.();
           member.cancelGrace = null;
@@ -882,7 +1044,16 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     close() {
       if (closed) return;
       closed = true;
+      for (const off of unsubscribes.splice(0)) {
+        try {
+          off();
+        } catch (err) {
+          warn('chatwarden.chat_unsubscribe_failed', err);
+        }
+      }
       for (const room of [...rooms.values()]) {
+        room.cancelModeTimer?.();
+        room.cancelModeTimer = null;
         for (const member of [...room.members.values()]) {
           for (const rec of [...member.streams]) {
             endStream(rec, bye('shutdown'));
@@ -900,6 +1071,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       return { rooms: rooms.size, members, streams: streamCount };
     },
   };
+  // The room's mode and a retraction reach the open streams through the kit's own events (a game with its own socket listens to the same ones); both are let go when the broadcaster closes.
+  unsubscribes.push(cw.on('room.mode', onRoomMode), cw.on('line.retracted', onLineRetracted));
   inspectors.set(api, () => ({ rooms, lastLogged }));
   return api;
 }

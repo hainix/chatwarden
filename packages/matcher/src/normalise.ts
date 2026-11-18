@@ -1,4 +1,4 @@
-import { KEEP_TWO } from './vendored/wordEngine.js';
+import { KEEP_TWO, transformLikePreset } from './vendored/wordEngine.js';
 
 // Text normalisation for the matcher: everything that turns what a person typed, or what a moderator
 // entered, into the form the matcher compares. Pure functions, no state.
@@ -31,6 +31,40 @@ const BLANK_FILLERS = /[\u3164\uFFA0\u115F\u1160\u2800\u034F\uFE00-\uFE0F]/g;
  *  "z o r b a k") are NOT removed on purpose: that precision-first residual is a report away. */
 export function stripInvisible(text: string): string {
   return text.normalize('NFKD').replace(/[\p{M}\p{Cf}]/gu, '').replace(BLANK_FILLERS, '');
+}
+
+/**
+ * A text as a bare key: `stripInvisible` (marks and format characters off), then the engine's own reading (look-alike characters and leetspeak to letters, ASCII case folded, runs of one letter cut), then
+ * everything that is not `a-z` or `0-9` removed. `M0d_Anna`, `Mod_Anna`, `m.o.d anna` and `MODDD anna` have one skeleton. It is for comparing names (reserved names), never for chat: it throws away every word break.
+ */
+export function skeleton(text: string): string {
+  return transformLikePreset(stripInvisible(text)).text.replace(/[^a-z0-9]/g, '');
+}
+
+// eslint-disable-next-line no-misleading-character-class -- the combining grapheme joiner and the variation selectors are listed on purpose
+const HIDDEN_UNSPACED = /[\p{Cf}\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u3164\uFFA0\u115F\u1160\u2800\u034F]/gu;
+
+/**
+ * Text for the scripts written without spaces (Han, kana, Thai, Lao, Khmer, Myanmar), step one: NFKC, with the characters that render as nothing removed (format characters, the blank fillers, variation selectors). NFKC and
+ * not NFKD, which `stripInvisible` uses for Latin: decomposing would turn a voiced Japanese kana (ga) into its unvoiced one (ka) and a mark and then drop the mark, and Thai vowel signs and tone marks are marks that carry the word.
+ */
+export function nfkcVisible(text: string): string {
+  return text.normalize('NFKC').replace(HIDDEN_UNSPACED, '');
+}
+
+/** Hiragana read as katakana, one character for one (so lengths and ranges are kept): the hiragana block and the two iteration marks. Everything else is left alone. */
+export function foldKana(text: string): string {
+  let out = '';
+  for (const ch of text) {
+    const c = ch.codePointAt(0) as number;
+    out += (c >= 0x3041 && c <= 0x3096) || c === 0x309d || c === 0x309e ? String.fromCodePoint(c + 0x60) : ch;
+  }
+  return out;
+}
+
+/** A term or a text as the unspaced path compares it: {@link nfkcVisible}, then {@link foldKana}. Both sides are read this way. */
+export function normaliseUnspaced(text: string): string {
+  return foldKana(nfkcVisible(text));
 }
 
 /** The text of a term as the matcher reads it before collapsing: accents stripped, trimmed, lowercase.

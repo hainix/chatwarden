@@ -119,8 +119,8 @@ describe('reporting in the README is one step', () => {
     expect(row).toContain('one-step');
     expect(row).not.toContain('"Add a reason"');
   });
-  it('documents the experimental extra prop with a small example, and the Tab order', () => {
-    expect(quick).toContain('`extra`, experimental');
+  it('documents the extra prop with a small example, and the Tab order', () => {
+    expect(quick).toContain('(`extra`)');
     expect(quick).toContain('Also mute this player');
     expect(quick).toContain('reason, note, yours, Report, Cancel');
     expect(readme.split(String.fromCharCode(10)).find((l) => l.startsWith('| `ReportDialog` |'))).toContain('`extra`');
@@ -166,7 +166,7 @@ describe('the chat box', () => {
   });
 
   it('the mount example renders: the box over sseTransport, a hello from a server, a line, the input', async () => {
-    const hello = { type: 'hello', v: 1, epoch: 'e', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, heartbeatMs: 20_000, summary: 'Be kind.', restriction: null, lines: [{ id: '1', at: 1, name: 'tarvo', text: 'anyone for a round?' }], muted: [] };
+    const hello = { type: 'hello', v: 2, mode: { kind: 'normal', until: null }, epoch: 'e', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, heartbeatMs: 20_000, summary: 'Be kind.', restriction: null, lines: [{ id: '1', at: 1, name: 'tarvo', text: 'anyone for a round?' }], muted: [] };
     const body = new ReadableStream<Uint8Array>({
       start: (c) => {
         c.enqueue(new TextEncoder().encode(`event: hello\ndata: ${JSON.stringify(hello)}\n\n`));

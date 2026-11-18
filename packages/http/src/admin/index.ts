@@ -6,28 +6,36 @@ import { auditRoutes } from './audit.js';
 import { blockedRoutes } from './blocked.js';
 import { communityRoutes } from './community.js';
 import type { CommunityAdmin } from './community.js';
+import { contextRoutes } from './contexts.js';
 import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
+import { filterRoutes } from './filters.js';
+import { insightRoutes } from './insights.js';
+import { legalRoutes } from './legal.js';
 import { gapRoutes } from './gaps.js';
 import { meRoutes } from './me.js';
 import { nameRoutes } from './names.js';
 import { personRoutes } from './people.js';
+import { privacyRoutes } from './privacy.js';
 import { policyRoutes } from './policy.js';
 import { policyProfileRoutes } from './policyProfile.js';
 import type { PolicyOptions } from './policy.js';
 import { reportRoutes } from './reports.js';
+import { roomRoutes } from './rooms.js';
 import { sanctionRoutes } from './sanctions.js';
 import { teamRoutes } from './team.js';
 import { termRoutes } from './terms.js';
+import { workflowRoutes } from './workflow.js';
 import type { TermsAdmin } from './terms.js';
 
-export { AuditFailedError, BadActorError, createAdminContext } from './context.js';
-export type { AdminCall, AdminContext, AdminOptions } from './context.js';
+export { AuditFailedError, BadActorError, createAdminContext, SCOPED_DEFAULT_LIMITS } from './context.js';
+export type { AdminCall, AdminContext, AdminOptions, ScopedLimits } from './context.js';
 export { aiRoutes } from './ai.js';
 export { appealRoutes } from './appeals.js';
 export type { AiReadAgainBody, AiUnavailableBody } from './ai.js';
 export { auditRoutes } from './audit.js';
 export { blockedRoutes } from './blocked.js';
+export { insightRoutes } from './insights.js';
 export { communityRoutes } from './community.js';
 export type {
   CommunityAdmin,
@@ -44,15 +52,20 @@ export { gapRoutes } from './gaps.js';
 export { meRoutes } from './me.js';
 export { nameRoutes } from './names.js';
 export { personRoutes } from './people.js';
+export { privacyRoutes } from './privacy.js';
+export { legalRoutes } from './legal.js';
 export type { Me, MeFeatures } from './me.js';
+export { contextRoutes } from './contexts.js';
 export { DEFAULT_GAME_NAME, policyRoutes } from './policy.js';
 export type { PolicyOptions } from './policy.js';
 export { reportRoutes } from './reports.js';
+export { roomRoutes } from './rooms.js';
+export { workflowRoutes } from './workflow.js';
 export type { ReporterAccuracySummary, ReportSummary } from './reports.js';
 export { sanctionRoutes } from './sanctions.js';
 export { teamRoutes } from './team.js';
 export { termRoutes } from './terms.js';
-export type { ExceptionListRow, TermListRow, TermMetadata, TermsAdmin, TermsEditor } from './terms.js';
+export type { ExceptionListRow, TermListRow, TermMatchMode, TermMetadata, TermsAdmin, TermsEditor } from './terms.js';
 
 /** What the adopter gives the whole staff API: the auth hook and permissions, plus what the term and policy routes need. */
 export interface AdminRoutesOptions extends AdminOptions, PolicyOptions {
@@ -93,6 +106,11 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
     ...appealRoutes(ctx),
     ...nameRoutes(ctx),
     ...personRoutes(ctx),
+    ...privacyRoutes(ctx),
+    ...legalRoutes(ctx),
+    ...workflowRoutes(ctx),
+    ...insightRoutes(ctx),
+    ...roomRoutes(ctx),
     ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),
     ...(terms === undefined
@@ -104,6 +122,8 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
       ...(options.contactUrl === undefined ? {} : { contactUrl: options.contactUrl }),
     }),
     ...policyProfileRoutes(ctx),
+    ...contextRoutes(ctx),
+    ...filterRoutes(ctx, options.recentLines ?? (() => [])),
     ...aiRoutes(ctx),
     ...auditRoutes(ctx),
   };

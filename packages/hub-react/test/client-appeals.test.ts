@@ -32,13 +32,13 @@ describe('the wire shapes', () => {
     await c.appeal('a/b c');
     await c.appealStats();
     await c.appealStats({ days: 365 });
-    await c.rename('s_ref', { reason: 'a name against the rules' });
+    await c.rename('s_ref', { reason: 'a name against the rules', rule: 7 });
     await c.rename('s_ref', { reason: 'r', rule: 2, takeOver: true });
     expect(sent.map((r) => [r.method, r.path, queryOf(r), r.body ?? null])).toEqual([
       ['GET', '/appeals/a%2Fb%20c', null, null],
       ['GET', '/appeals/stats', null, null],
       ['GET', '/appeals/stats', { days: 365 }, null],
-      ['POST', '/people/s_ref/rename', null, { reason: 'a name against the rules' }],
+      ['POST', '/people/s_ref/rename', null, { reason: 'a name against the rules', rule: 7 }],
       ['POST', '/people/s_ref/rename', null, { reason: 'r', rule: 2, takeOver: true }],
     ]);
   });
@@ -66,15 +66,15 @@ describe('the wire shapes', () => {
 });
 
 describe('against the real routes', () => {
-  it('me carries features only when appeals, renames or keepBlocked is on', async () => {
+  it('me always carries features: appeals, renames and keepBlocked follow the settings, and are false when off', async () => {
     const off = await hubWorld({ role: 'owner' });
-    expect(Object.keys(await off.client.me())).not.toContain('features');
+    expect((await off.client.me()).features).toMatchObject({ appeals: false, renames: false, keepBlocked: false });
     const on = await appealsHub({ role: 'owner', names: { renames: true } });
-    expect((await on.client.me()).features).toEqual({ appeals: true, renames: true, keepBlocked: false });
+    expect((await on.client.me()).features).toMatchObject({ appeals: true, renames: true, keepBlocked: false });
     const appealsOnly = await appealsHub({ role: 'owner' });
-    expect((await appealsOnly.client.me()).features).toEqual({ appeals: true, renames: false, keepBlocked: false });
+    expect((await appealsOnly.client.me()).features).toMatchObject({ appeals: true, renames: false, keepBlocked: false });
     const keeping = await appealsHub({ role: 'owner', names: { keepBlocked: true } });
-    expect((await keeping.client.me()).features).toEqual({ appeals: true, renames: false, keepBlocked: true });
+    expect((await keeping.client.me()).features).toMatchObject({ appeals: true, renames: false, keepBlocked: true });
   });
 
   it('changes carries the number of open appeals for a caller who may read them', async () => {
@@ -124,8 +124,8 @@ describe('against the real routes', () => {
   it('rename asks a player for a new name; a second is a pending_rename refusal', async () => {
     const w = await appealsHub({ role: 'moderator', names: { renames: true } });
     const f = await w.file({ target: 'zorbakKid' });
-    expect(await w.client.rename(f.person, { reason: 'a name against the rules' })).toEqual({ ok: true });
-    expect(await w.client.rename(f.person, { reason: 'again' }).catch((e: unknown) => e)).toMatchObject({ status: 409, code: 'pending_rename' });
+    expect(await w.client.rename(f.person, { reason: 'a name against the rules', rule: 7 })).toEqual({ ok: true });
+    expect(await w.client.rename(f.person, { reason: 'again', rule: 7 }).catch((e: unknown) => e)).toMatchObject({ status: 409, code: 'pending_rename' });
     expect((await w.client.personHistory(f.person)).renames).toEqual([{ at: expect.any(Number), pending: true }]);
   });
 

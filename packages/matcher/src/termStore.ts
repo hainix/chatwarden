@@ -2,6 +2,8 @@ import type { ExceptionRow, TermRow } from './matcher.js';
 
 /** A stored term: the matcher's row plus who added or last changed it, and when. */
 export interface TermRecord extends TermRow {
+  /** How the term is matched (see {@link TermRow.matchMode}): `null` or absent means by script. A store keeps it as given and may leave the key out when it is null. */
+  matchMode?: 'word' | 'segment' | 'contains' | null;
   note: string | null;
   addedBy: string;
   addedAt: number;
@@ -22,6 +24,8 @@ export interface ExceptionRecord extends ExceptionRow {
 export interface TermPatch {
   term?: string;
   language?: string;
+  /** `null` clears the mode (by script); absent leaves it as it is. */
+  matchMode?: 'word' | 'segment' | 'contains' | null;
   note?: string | null;
   updatedBy: string;
   updatedAt: number;

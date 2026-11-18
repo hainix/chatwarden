@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { aiEn } from '../src/ai/i18n.js';
+import { privacyEn } from '../src/privacy/i18n.js';
 import { en } from '../src/i18n.js';
 import { UNDO_MS } from '../src/toasts.js';
 
@@ -20,7 +21,8 @@ function walk(dir: string): string[] {
 const files = walk(src);
 const code = files.filter((f) => /\.tsx?$/.test(f));
 // The catalog itself and its comments name keys on purpose.
-const appCode = code.filter((f) => !f.endsWith('i18n.ts'));
+// The catalogues are data, not screens: i18n.ts (English) and the es and pt translations (checked by locales.*.test.ts against the English keys and placeholders).
+const appCode = code.filter((f) => !f.endsWith('i18n.ts') && !/[\\/]locales[\\/](es|pt)\.ts$/.test(f));
 const read = (f: string): string => readFileSync(f, 'utf8');
 const rel = (f: string): string => f.slice(pkg.length).replaceAll('\\', '/');
 /** The public name of a private default: `--cwd-bg` is what `--cw-bg` falls back to. */
@@ -68,7 +70,7 @@ describe('no words outside the catalog', () => {
 
   it('every t("...") key written out in the source is in the English catalog', () => {
     // The AI's parts keep their words apart (src/ai/i18n.ts), so the first load does not carry them: their keys are known too.
-    const keys = new Set([...Object.keys(en), ...Object.keys(aiEn)].map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')));
+    const keys = new Set([...Object.keys(en), ...Object.keys(aiEn), ...Object.keys(privacyEn)].map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')));
     const used: Array<[string, string]> = [];
     for (const f of appCode) for (const m of read(f).matchAll(/\bt\(\s*'(hub\.[A-Za-z0-9_.]+)'/g)) used.push([rel(f), m[1] as string]);
     expect(used.length).toBeGreaterThan(40);
@@ -77,7 +79,7 @@ describe('no words outside the catalog', () => {
   });
 
   it('every key in a label table (nav, labels, screens) is in the catalog', () => {
-    const keys = new Set([...Object.keys(en), ...Object.keys(aiEn)].map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')));
+    const keys = new Set([...Object.keys(en), ...Object.keys(aiEn), ...Object.keys(privacyEn)].map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')));
     const used: Array<[string, string]> = [];
     for (const f of appCode) for (const m of read(f).matchAll(/'(hub\.[A-Za-z0-9_.]+)'/g)) used.push([rel(f), m[1] as string]);
     const unknown = used.filter(([, k]) => !keys.has(k));
@@ -247,8 +249,10 @@ describe('the stylesheet is a complete token contract', () => {
   // settings forms and the Person page's signal lines add about 2 KB raw. The gzipped limit (the size test) is unchanged and holds.
   // 128 KB at 0.1.13 (AI levels 3 and 4, release 1): the gate table and the Person page's "do not automate" mark add about 2 KB raw; the AI, appeals and names
   // screens of 0.1.7 to 0.1.9 had already brought the file to the old cap. Raised generously, as every release does; the gzipped limit (the size test) is what counts.
-  it('is under 128 KB raw (the size test holds it to 18 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(128 * 1024);
+  // 160 KB at 0.2.0 (urgent lane, desk, careful view and rooms): the chip, strip, panels and menus of the urgent-desk-and-rooms theme add about 10 KB raw, on top of the
+  // names, filters and privacy themes of the same release. Raised generously by the release's rule; the gzipped limit (the size test) is what counts.
+  it('is under 160 KB raw (the size test holds it to its gzipped budget)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(160 * 1024);
   });
 });
 
@@ -579,7 +583,7 @@ describe('fix round 1: hygiene', () => {
     const literals = new Set([...text.matchAll(/'(hub\.[A-Za-z0-9_.]+)'/g)].map((m) => m[1] as string));
     const prefixes = [...text.matchAll(/`(hub\.[A-Za-z0-9_.]*\.)\$\{/g)].map((m) => m[1] as string);
     // The AI's own catalog (src/ai/i18n.ts) is held to the same rule: no word nobody asks for.
-    const bases = [...new Set([...Object.keys(en), ...Object.keys(aiEn)].map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
+    const bases = [...new Set([...Object.keys(en), ...Object.keys(aiEn), ...Object.keys(privacyEn)].map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
     const dead = bases.filter((k) => !literals.has(k) && !prefixes.some((p) => k.startsWith(p)));
     // The words the screens stopped using stay in the exported catalogue for a patch release, marked `@deprecated unused since 0.1.3`
     // (see 'words kept for compatibility'). The dead words are exactly the marked ones.

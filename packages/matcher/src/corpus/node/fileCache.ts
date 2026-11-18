@@ -45,7 +45,6 @@ async function renameOver(from: string, to: string): Promise<void> {
  * `releases/` (the loader's layout); anything else (a separator elsewhere, `..`, NUL, an absolute path) is refused with a
  * `TypeError` that does not repeat it. `write` is atomic. `read` is null for a file that is not there, is not a file, or is larger than
  * any release can be.
- * @experimental
  */
 export function fileCache(dir: string): CorpusCache {
   if (typeof dir !== 'string' || dir === '' || dir.includes(String.fromCharCode(0))) throw new TypeError('corpus cache: dir must be a folder path');

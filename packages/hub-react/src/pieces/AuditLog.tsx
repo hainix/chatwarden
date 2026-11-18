@@ -4,7 +4,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * The props of `AuditLog`.
- * @experimental
  */
 export interface AuditLogProps extends PieceProps {
   /** A person an entry is about was chosen. Without it they are a plain tag. */
@@ -20,7 +19,6 @@ export interface AuditLogProps extends PieceProps {
  * ```tsx
  * <AuditLog />
  * ```
- * @experimental
  */
 export function AuditLog({ className, onOpenPerson, onOpenReport }: AuditLogProps) {
   return (

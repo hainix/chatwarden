@@ -12,7 +12,6 @@ import type { AIReadInput } from './types.js';
  * someone muted someone; the row is a snapshot taken when the read is made, and so is the row of appeal cautions (`Caution on appeal history: ...`). The fields are framed as a
  * JSON array, so no part can slide into the next. Object key order in `input` cannot matter: only those values are read. A hex
  * string of 64 characters.
- * @experimental
  */
 export function inputHash(input: AIReadInput, adapterId: string): string {
   const caseInputs = input.prompt.variable

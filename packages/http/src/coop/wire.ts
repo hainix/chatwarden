@@ -27,7 +27,8 @@ export interface CoopReportData {
 
 /** The body of `POST {baseUrl}/api/v1/report`. `csam` is never set: the kit does not detect it. */
 export interface CoopReportBody {
-  reporter: { kind: 'user'; id: string; typeId: string };
+  /** Absent for a report nobody filed (a chat filter's flag). */
+  reporter?: { kind: 'user'; id: string; typeId: string };
   reportedAt: string;
   reportedItem: { id: string; typeId: string; data: CoopReportData };
   reportedForReason?: { policyId?: string; reason?: string };
@@ -153,7 +154,7 @@ export function buildReport(report: StaffReport, opts: ResolvedCoopOptions, kit:
   const reportedLine = thread !== undefined && report.lineId !== null && report.excerpt.some((l) => l.lineId === report.lineId) ? lineItemId(report.id, report.lineId) : undefined;
 
   return {
-    reporter: { kind: 'user', id: report.reporterPerson, typeId: opts.itemTypes.user },
+    ...(report.reporterPerson === null ? {} : { reporter: { kind: 'user' as const, id: report.reporterPerson, typeId: opts.itemTypes.user } }),
     reportedAt: isoOf(report.createdAt, 0),
     reportedItem: { id: report.id, typeId: opts.itemTypes.report, data },
     ...(Object.keys(why).length === 0 ? {} : { reportedForReason: why }),

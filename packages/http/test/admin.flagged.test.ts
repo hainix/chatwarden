@@ -27,7 +27,7 @@ async function fileNamed(w: W, target = BAD, reporter = FINE) {
   if (!res.ok) throw new Error(`report refused: ${res.refused}`);
   const report = w.cw.reports.get(res.reportId);
   if (report === null) throw new Error('report missing');
-  return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson, key: `raw-client-key-flag-target-${n}` };
+  return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson!, key: `raw-client-key-flag-target-${n}` };
 }
 
 /** One appeal on a sanction whose target went by `handle`, filed the real way. */

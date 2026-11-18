@@ -1,22 +1,29 @@
 # Chatwarden
 
-> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one case per player by default). It moderates the chat you already have, and has an optional moderated chat box for a game with none. TypeScript for Node 22.13 or newer. Pre-release (0.1.x), Apache-2.0, provided as-is. Not a child-safety tool.
+> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one case per player by default). It moderates the chat you already have, and has an optional moderated chat box for a game with none. TypeScript for Node 22.13 or newer. Pre-release (0.2.x), Apache-2.0, provided as-is. Not a child-safety tool.
 
 The packages are small and independent. Start with the repository README, then install `@chatwarden/core`, `@chatwarden/store-sqlite` and `@chatwarden/matcher`. For a moderator screen add `@chatwarden/hub-react` (or `@chatwarden/hub-element`) and `@chatwarden/http` for the routes it reads, and `@chatwarden/player-react` for what players see. Every code sample on https://chatwarden.dev/ is copied from these READMEs.
 
 ## Adopt fast
 
-In your project folder, run `npm install @chatwarden/http @chatwarden/core`, then `npx chatwarden init`. With nothing installed yet, `npx -p @chatwarden/http chatwarden init` runs the same command. It asks only what it cannot detect, then writes the kit (engine, store and matcher), the mount for Express, Fastify, Next.js route handlers or anything on Web `Request` and `Response` (`toFetch`), three starter hooks and a synthetic term pack. It can also write the chat box, the moderator hub and a Discord feed. It never overwrites a file and never writes a secret. The starter hooks carry `TODO(auth)`, `TODO(identity)` and `TODO(terms)` markers, and `npx chatwarden init --check` lists what is left. The command and its result are experimental until 0.2. A service API for a game server in another language is planned and not built.
+In your project folder, run `npm install @chatwarden/http @chatwarden/core`, then `npx chatwarden init`. With nothing installed yet, `npx -p @chatwarden/http chatwarden init` runs the same command. It asks only what it cannot detect, then writes the kit (engine, store and matcher), the mount for Express, Fastify, Next.js route handlers or anything on Web `Request` and `Response` (`toFetch`), three starter hooks and a synthetic term pack. It can also write the chat box, the moderator hub and a Discord feed. It never overwrites a file and never writes a secret. The starter hooks carry `TODO(auth)`, `TODO(identity)` and `TODO(terms)` markers, and `npx chatwarden init --check` lists what is left. A game server in another language uses the service API instead: `@chatwarden/http/service` is a `/v1` API over the kit, `chatwarden serve` runs it as a process and `chatwarden init --service` writes a Docker recipe folder.
 
 - [Recipe: Express](https://github.com/hainix/chatwarden/blob/main/docs/recipes/express.md): the files init writes for an Express server, and the one line you add.
 - [Recipe: Fastify](https://github.com/hainix/chatwarden/blob/main/docs/recipes/fastify.md): the files init writes for a Fastify server.
 - [Recipe: Next.js](https://github.com/hainix/chatwarden/blob/main/docs/recipes/nextjs.md): the route handlers init writes for Next.js, and how any server on Web `Request` uses them.
 - [Recipe: Socket.IO](https://github.com/hainix/chatwarden/blob/main/docs/recipes/socketio.md): the chat box on a Socket.IO server, with every line still going through the chat check.
 - [Recipe: Colyseus](https://github.com/hainix/chatwarden/blob/main/docs/recipes/colyseus.md): a recipe written by hand for a Colyseus room; init does not write it.
+- [Recipe: Urgent reports and welfare](https://github.com/hainix/chatwarden/blob/main/docs/recipes/urgent-and-welfare.md): the urgent lane, the welfare reason, and what the kit does and does not do about a player in trouble.
+- [Recipe: Rooms under attack](https://github.com/hainix/chatwarden/blob/main/docs/recipes/raids.md): lock a room, start an emergency, take lines back, and probation for new accounts.
+- [Recipe: The weekly digest](https://github.com/hainix/chatwarden/blob/main/docs/recipes/digest.md): Insights and the digest you send from your own timer.
+- [Recipe: Rooms for children](https://github.com/hainix/chatwarden/blob/main/docs/recipes/kids-rooms.md): a stricter context for a room, phrase-only chat and blocks.
+- [Recipe: Creator channels](https://github.com/hainix/chatwarden/blob/main/docs/recipes/creator-channels.md): staff scope, so a creator's moderators see only that creator's rooms.
+- [Recipe: Service mode](https://github.com/hainix/chatwarden/blob/main/docs/recipes/service-mode.md): the `/v1` service API for a game server in any language, with the Docker recipe.
+- [Recipe: Translations](https://github.com/hainix/chatwarden/blob/main/docs/recipes/translations.md): the Spanish and Portuguese catalogues, which are machine drafts, and how to add a language.
 
 ## What is in it
 
-Everything below is optional, and the new names are experimental until 0.2.
+Everything below is optional. The names are settled at 0.2.0, except that the Discord bot, Coop and EOS integrations are experimental: they were written from the services' documents and have not run against the live services.
 
 - Chat box: for a game with no chat, `<ChatBox>` from `@chatwarden/player-react/chat` is a moderated chat for one room, served by `createRoomBroadcaster` and `chatRoutes` in `@chatwarden/http`.
 - Pacing: slow mode, a burst limit and a repeat limit for each room and player, off until you set them. Signals are facts your game records about a player, shown where a profile rule says so; a signal never acts on its own.
@@ -25,6 +32,16 @@ Everything below is optional, and the new names are experimental until 0.2.
 - AI gate dashboard and shadow mode: a read-only table in the hub shows the numbers that would decide whether the AI may act. Shadow mode lets it decide what it would have done and records that in a table of its own; nothing is written to a player.
 - Community term list: a loader for a signed, versioned list that servers can opt in to (`@chatwarden/matcher/corpus`). The package ships no terms and nothing is on by default.
 - Integrations: a Discord bot for lookups and, after a confirm step, decisions (`@chatwarden/http/discord`); Coop review jobs (`@chatwarden/http/coop`); Epic Online Services sanctions and reports (`@chatwarden/http/eos`).
+- Urgent desk and welfare: a report is urgent from its reason or when a moderator marks it; urgent cases sort first and a moderator can note that the case was passed to the game's safety team. The kit decides nothing and contacts no one (`desk`, `safety` and `rooms` profile sections).
+- Second look and Insights: staff comments and escalation (`desk.workflow`), and team numbers with an optional digest (`desk.insights`, `cw.insights`). Both are off until you turn them on.
+- Rooms under attack: lock a room or start an emergency (`cw.rooms.setMode`, always expiring), take lines back for everyone, probation for new accounts and a report-surge hint.
+- Chat filters: links, personal information, phrases, and caps, repeats, emoji and mentions, each with an action and a Community Rule, with a test box and a dry run in the hub. Off until set.
+- Privacy requests and legal hold: `cw.privacy` finds, exports and erases one person's data, and `cw.legal` holds a report with a signed evidence bundle; the owner's routes and the hub's "Data requests" screen use them. It describes what the kit stores and is not legal advice.
+- Contexts and staff scope: rules per room (`profile.contexts`), and staff who see only some rooms (`scope`), default-deny, with limited sanctions.
+- Blocks and phrase-only chat: a two-way block (`cw.blocks`), and rooms where players pick from phrases you declare (`cw.chat.acceptPhrase`).
+- Reserved names: `names.reserved` keeps names such as staff titles for you; a report, a name check and a rename can be about an entity (a clan, guild or team). Terms without spaces: matching for Chinese, Japanese, Thai, Lao, Khmer and Burmese.
+- Service mode and shared pacing: `@chatwarden/http/service` (service keys, rate limits, idempotency, an OpenAPI description, `createServiceClient`), `chatwarden serve`, and `createChatwarden({ sharedPacing: true })` so several processes judge one player's lines together.
+- Spanish and Portuguese: `@chatwarden/player-react/locales/es` and `/pt`, `@chatwarden/hub-react/locales/es` and `/pt`. They are machine drafts and no person has read them: have a native speaker read the notice and refusal words first. The shared notice words are in `@chatwarden/core/notice-copy`.
 - Test kit: `@chatwarden/store-memory/testing` has a fake clock and a scripted chat simulator to test your own rules, for tests only.
 
 ## Docs (README per package)

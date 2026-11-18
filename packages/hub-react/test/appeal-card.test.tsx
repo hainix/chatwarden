@@ -21,9 +21,11 @@ async function open(w: AppealsHub, appealId: string, options: Parameters<typeof 
 }
 const decision = (): HTMLElement => screen.getByRole('region', { name: 'Your decision on this appeal' });
 const reason = (): HTMLTextAreaElement => within(decision()).getByLabelText('Why (private)');
-const keep = (): HTMLElement => within(decision()).getByRole('button', { name: 'Keep the decision' });
-const lighter = (): HTMLElement => within(decision()).getByRole('button', { name: 'Make it lighter...' });
-const remove = (): HTMLElement => within(decision()).getByRole('button', { name: 'Remove it' });
+// The three outcomes are a radio group; nothing is sent until "Send decision".
+const keep = (): HTMLElement => within(decision()).getByRole('radio', { name: 'Keep the decision' });
+const lighter = (): HTMLElement => within(decision()).getByRole('radio', { name: 'Make it lighter' });
+const remove = (): HTMLElement => within(decision()).getByRole('radio', { name: 'Remove it' });
+const send = (): HTMLElement => within(decision()).getByRole('button', { name: 'Send decision' });
 const statement = (): HTMLElement => screen.getByRole('region', { name: 'What the player said' });
 
 describe('what the card says', () => {
@@ -215,8 +217,9 @@ describe('the reason is required, with the decision bar\'s length rules', () => 
     const w = await appealsHub(SENIOR);
     const a = await w.appeal();
     const { user } = await open(w, a.appealId);
-    for (const button of [keep, remove]) {
-      await user.click(button());
+    for (const choice of [keep, remove]) {
+      await user.click(choice());
+      await user.click(send());
       expect(within(decision()).getByText('Write a reason. Only staff see it.')).toBeInTheDocument();
       expect(reason()).toHaveAttribute('aria-invalid', 'true');
       expect(reason()).toHaveFocus();
@@ -230,13 +233,16 @@ describe('the reason is required, with the decision bar\'s length rules', () => 
     const { user } = await open(w, a.appealId);
     await user.type(reason(), '    ');
     await user.click(keep());
+    await user.click(send());
     expect(within(decision()).getByText('Write a reason. Only staff see it.')).toBeInTheDocument();
     fireEvent.change(reason(), { target: { value: 'x'.repeat(501) } });
     await user.click(keep());
+    await user.click(send());
     expect(within(decision()).getByText('The reason is over 500 characters. Shorten it.')).toBeInTheDocument();
     expect(decides(w)).toEqual([]);
     fireEvent.change(reason(), { target: { value: 'x'.repeat(500) } });
     await user.click(keep());
+    await user.click(send());
     await waitFor(() => expect(decides(w)).toHaveLength(1));
   });
 
@@ -268,6 +274,7 @@ describe('Keep the decision, Remove it', () => {
     const { user, router } = await open(w, a.appealId);
     await user.type(reason(), 'The chat log is clear.');
     await user.click(keep());
+    await user.click(send());
     await waitFor(() => expect(router.path).toBe('/appeals'));
     expect(decides(w).map((r) => r.body)).toEqual([{ outcome: 'uphold', reason: 'The chat log is clear.' }]);
     expect((await w.client.appeals({ status: 'decided' })).items.map((i) => i.status)).toEqual(['upheld']);
@@ -282,6 +289,7 @@ describe('Keep the decision, Remove it', () => {
     const { user, router } = await open(w, a.appealId);
     await user.type(reason(), 'A mistake: it was not aimed at anyone.');
     await user.click(remove());
+    await user.click(send());
     await waitFor(() => expect(router.path).toBe('/appeals'));
     expect(decides(w).map((r) => r.body)).toEqual([{ outcome: 'revoke', reason: 'A mistake: it was not aimed at anyone.' }]);
     const history = await w.client.personHistory(a.person);
@@ -294,13 +302,14 @@ describe('Keep the decision, Remove it', () => {
     const a = await w.appeal();
     const { user } = await open(w, a.appealId);
     await user.type(reason(), 'Fine as it is.');
-    await user.dblClick(keep());
+    await user.click(keep());
+    await user.dblClick(send());
     await waitFor(() => expect(decides(w).length).toBeGreaterThan(0));
     expect(decides(w)).toHaveLength(1);
   });
 });
 
-describe('Make it lighter...', () => {
+describe('Make it lighter', () => {
   it('is disabled for a warning, and says why', async () => {
     const w = await appealsHub(SENIOR);
     const a = await w.appeal({ kind: 'warning' });
@@ -360,7 +369,7 @@ describe('Make it lighter...', () => {
     await user.click(lighter());
     const picker = screen.getByRole('group', { name: 'Make it lighter' });
     await user.selectOptions(within(picker).getByLabelText('How long'), '1h');
-    await user.click(within(picker).getByRole('button', { name: 'Make it lighter' }));
+    await user.click(send());
     await waitFor(() => expect(router.path).toBe('/appeals'));
     expect(decides(w).map((r) => r.body)).toEqual([{ outcome: 'reduce', reason: 'Too long for a first offence.', to: { kind: 'chat', durationMs: HOUR } }]);
     const history = await w.client.personHistory(a.person);
@@ -376,21 +385,22 @@ describe('Make it lighter...', () => {
     await user.click(lighter());
     const picker = screen.getByRole('group', { name: 'Make it lighter' });
     await user.selectOptions(within(picker).getByLabelText('What it becomes'), 'warning');
-    await user.click(within(picker).getByRole('button', { name: 'Make it lighter' }));
+    await user.click(send());
     await waitFor(() => expect(decides(w)).toHaveLength(1));
     expect(decides(w)[0]?.body).toEqual({ outcome: 'reduce', reason: 'A warning is enough.', to: { kind: 'warning', durationMs: null } });
   });
 
-  it('the picker needs the reason too, and closes again', async () => {
+  it('the picker needs the reason too, and goes when another choice is made', async () => {
     const w = await appealsHub(SENIOR);
     const a = await w.appeal({ kind: 'chat', durationMs: 24 * HOUR });
     const { user } = await open(w, a.appealId);
     await user.click(lighter());
-    expect(lighter()).toHaveAttribute('aria-expanded', 'true');
-    await user.click(within(screen.getByRole('group', { name: 'Make it lighter' })).getByRole('button', { name: 'Make it lighter' }));
+    expect(lighter()).toBeChecked();
+    expect(screen.getByRole('group', { name: 'Make it lighter' })).toBeInTheDocument();
+    await user.click(send());
     expect(within(decision()).getByText('Write a reason. Only staff see it.')).toBeInTheDocument();
     expect(decides(w)).toEqual([]);
-    await user.click(lighter());
+    await user.click(keep());
     expect(screen.queryByRole('group', { name: 'Make it lighter' })).toBeNull();
   });
 });
@@ -402,6 +412,7 @@ describe('a refusal comes back in words, with everything typed kept, and nothing
     const { user, router } = await open(w, a.appealId);
     await user.type(reason(), 'I stand by it.');
     await user.click(keep());
+    await user.click(send());
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('You made the original decision, so someone else has to decide this appeal.');
     expect(reason()).toHaveValue('I stand by it.');
@@ -416,6 +427,7 @@ describe('a refusal comes back in words, with everything typed kept, and nothing
     await w.clientFor('cy@example.test', 'senior').decideAppeal(a.appealId, { outcome: 'uphold', reason: 'first' });
     await user.type(reason(), 'second');
     await user.click(remove());
+    await user.click(send());
     expect(await screen.findByRole('alert')).toHaveTextContent('Someone else has already decided this appeal.');
     expect(reason()).toHaveValue('second');
   });
@@ -432,10 +444,12 @@ describe('a refusal comes back in words, with everything typed kept, and nothing
     const changes = (): number => w.sent.filter((r) => r.method === 'GET' && r.path === '/changes').length;
     const before = changes();
     await user.click(keep());
+    await user.click(send());
     expect(await screen.findByRole('alert')).toHaveTextContent(words);
-    expect(screen.queryByRole('button', { name: 'Keep the decision' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Make it lighter...' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Remove it' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: 'Keep the decision' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: 'Make it lighter' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: 'Remove it' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Send decision' })).toBeNull();
     expect(reason()).toHaveValue('my reason');
     expect(reason()).toHaveAttribute('readonly');
     // The queue reads again (its change token), so the list stops showing the appeal.
@@ -444,12 +458,13 @@ describe('a refusal comes back in words, with everything typed kept, and nothing
     expect(router.path).toBe('/appeals');
   });
 
-  it('after same_decider the three controls stay (only a settled appeal loses them)', async () => {
+  it('after same_decider the three choices stay (only a settled appeal loses them)', async () => {
     const w = await appealsHub(SENIOR);
     const a = await w.appeal({ actor: 'bea@example.test' });
     const { user } = await open(w, a.appealId);
     await user.type(reason(), 'x');
     await user.click(keep());
+    await user.click(send());
     await screen.findByRole('alert');
     expect(keep()).toBeInTheDocument();
     expect(remove()).toBeInTheDocument();
@@ -465,6 +480,7 @@ describe('a refusal comes back in words, with everything typed kept, and nothing
     w.intercept.fn = (req) => (req.method === 'POST' && /\/decide$/.test(req.path) ? { status: 409, body: { error: 'gone', message: 'The sanction is gone.' } } : undefined);
     await user.type(reason(), 'whatever');
     await user.click(keep());
+    await user.click(send());
     expect(await screen.findByRole('alert')).toHaveTextContent('The sanction is gone, so this appeal is closed.');
     expect(reason()).toHaveValue('whatever');
   });
@@ -482,6 +498,7 @@ describe('a refusal comes back in words, with everything typed kept, and nothing
     for (const [status, error, words] of answers) {
       w.intercept.fn = (req) => (req.method === 'POST' && /\/decide$/.test(req.path) ? { status, body: { error, message: 'x' } } : undefined);
       await user.click(keep());
+      await user.click(send());
       expect(await screen.findByRole('alert')).toHaveTextContent(words);
       expect(reason()).toHaveValue('keep me');
     }
@@ -489,6 +506,7 @@ describe('a refusal comes back in words, with everything typed kept, and nothing
       throw new Error('offline');
     };
     await user.click(keep());
+    await user.click(send());
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
     expect(reason()).toHaveValue('keep me');
   });
@@ -501,9 +519,11 @@ describe('a refusal comes back in words, with everything typed kept, and nothing
     w.intercept.fn = (req) => (fail && req.method === 'POST' && /\/decide$/.test(req.path) ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
     await user.type(reason(), 'first try');
     await user.click(keep());
+    await user.click(send());
     await screen.findByRole('alert');
     fail = false;
     await user.click(keep());
+    await user.click(send());
     await waitFor(() => expect(router.path).toBe('/appeals'));
   });
 });
@@ -513,7 +533,7 @@ describe('who may decide', () => {
     const w = await appealsHub({ role: 'moderator', actor: 'ann@example.test' });
     const a = await w.appeal();
     await open(w, a.appealId);
-    expect(screen.queryByRole('button', { name: 'Keep the decision' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: 'Keep the decision' })).toBeNull();
     expect(screen.queryByLabelText('Why (private)')).toBeNull();
     expect(screen.getByText('A senior moderator decides appeals.')).toBeInTheDocument();
   });
@@ -524,6 +544,7 @@ describe('who may decide', () => {
     const { user, router } = await open(w, a.appealId);
     await user.type(reason(), 'ok');
     await user.click(keep());
+    await user.click(send());
     await waitFor(() => expect(router.path).toBe('/appeals'));
   });
 
@@ -532,7 +553,7 @@ describe('who may decide', () => {
     const a = await w.appeal();
     await w.clientFor('cy@example.test', 'senior').decideAppeal(a.appealId, { outcome: 'revoke', reason: 'Clearly a joke.' });
     await open(w, a.appealId);
-    expect(screen.queryByRole('button', { name: 'Keep the decision' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: 'Keep the decision' })).toBeNull();
     expect(screen.getByText('Decided: the sanction was removed.')).toBeInTheDocument();
     expect(screen.getByText('Clearly a joke.')).toBeInTheDocument();
   });

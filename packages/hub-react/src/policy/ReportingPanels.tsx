@@ -8,7 +8,7 @@ import type { CommunityRule } from '../types.js';
 import { Panel } from '../ui.js';
 import { RulePicker } from './panels.js';
 import type { Problems } from './panels.js';
-import { MAX_REPORT_REASONS, addReason, canMove, groupsOf, isLocked, moveReason, patchReason, playerGroups, positionOf, removeReason } from './reporting.js';
+import { MAX_REPORT_REASONS, THANKS_MAX, addReason, canMove, charsOf, groupsOf, isLocked, moveReason, patchReason, playerGroups, positionOf, removeReason } from './reporting.js';
 import type { ReasonDraft, ReportingDraft } from './reporting.js';
 
 // The panels of the Reporting screen. Each edits the local draft; none of them sends anything. A field carries `data-field`, the key the
@@ -63,12 +63,71 @@ export function FlowPanel({ draft, set, problems }: { draft: ReportingDraft; set
 
 // ---- Reasons ---------------------------------------------------------------------------------------------------------------
 
+/**
+ * The urgent lane's three fields for one reason, behind the row's own disclosure (design 4): Urgent, the thank-you for this reason (at most 300 characters; blank means the general
+ * one), and whether the owner's help resources are shown after it. Below them, a plain read-only box with what a player reads after reporting this reason. Switching Urgent off says
+ * that reports already filed stay urgent. Nothing here is sent: it edits the draft.
+ */
+function UrgentFields({ r, draft, saved, patch, problem }: { r: ReasonDraft; draft: ReportingDraft; saved: boolean | undefined; patch: (p: Partial<Omit<ReasonDraft, 'key' | 'id'>>) => void; problem: Problem | undefined }) {
+  const { t } = useHub();
+  const id = useId();
+  const name = r.label.trim() === '' ? t('hub.reporting.reason.new') : r.label.trim();
+  const own = r.thanks ?? '';
+  const count = charsOf(own);
+  const shown = own.trim() === '' ? draft.thanks.trim() : own.trim();
+  return (
+    <div className="cw-reason-more" role="group" aria-label={t('hub.settings.reporting.after', { name })}>
+      <label className="cw-tick">
+        <input type="checkbox" checked={r.urgent} aria-describedby={`${id}-urgent-hint`} onChange={(e) => patch({ urgent: e.target.checked })} />
+        <span>{t('hub.settings.reporting.urgent')}</span>
+      </label>
+      <p id={`${id}-urgent-hint`} className="cw-hint">
+        {t('hub.settings.reporting.urgent.hint')}
+      </p>
+      <p role="status" className="cw-hint">
+        {saved === true && !r.urgent ? t('hub.settings.reporting.urgent.stays') : ''}
+      </p>
+      <div className="cw-field">
+        <label htmlFor={`${id}-thanks`}>{t('hub.settings.reporting.thanks')}</label>
+        <textarea
+          id={`${id}-thanks`}
+          rows={2}
+          data-field={`reason-${r.key}-thanks`}
+          value={own}
+          aria-describedby={`${id}-thanks-count${problem === undefined ? '' : ` ${id}-thanks-err`}`}
+          {...(problem === undefined ? {} : { 'aria-invalid': true as const })}
+          onChange={(e) => patch({ thanks: e.target.value === '' ? null : e.target.value })}
+        />
+        <p id={`${id}-thanks-count`} className="cw-hint">
+          {t('hub.settings.reporting.thanks.count', { count, max: THANKS_MAX })}
+        </p>
+        <FieldError id={`${id}-thanks-err`} problem={problem} />
+      </div>
+      <label className="cw-tick">
+        <input type="checkbox" checked={r.showResources} aria-describedby={`${id}-res-hint`} onChange={(e) => patch({ showResources: e.target.checked })} />
+        <span>{t('hub.settings.reporting.resources')}</span>
+      </label>
+      <p id={`${id}-res-hint`} className="cw-hint">
+        {t('hub.settings.reporting.resources.hint')}
+      </p>
+      <p id={`${id}-shown-t`} className="cw-hint">
+        {t('hub.settings.reporting.shown')}
+      </p>
+      <p role="note" aria-labelledby={`${id}-shown-t`} className="cw-pv-box">
+        {shown}
+      </p>
+    </div>
+  );
+}
+
 function ReasonRow({
   r,
   draft,
   set,
   problems,
   rules,
+  saved,
+  readOnly,
   onMoved,
   onRemoved,
 }: {
@@ -77,12 +136,17 @@ function ReasonRow({
   set: SetReporting;
   problems: Problems;
   rules: readonly CommunityRule[];
+  /** Whether the reason is urgent in the settings in force (so switching it off can say that filed reports stay urgent). */
+  saved: boolean | undefined;
+  /** The viewer cannot edit: the urgent fields are shown, with nothing to open. */
+  readOnly: boolean;
   onMoved: (key: string, dir: 'up' | 'down') => void;
   onRemoved: () => void;
 }) {
   const { t } = useHub();
   const id = useId();
   const [showRules, setShowRules] = useState(false);
+  const [more, setMore] = useState(false);
   const name = r.label.trim() === '' ? t('hub.reporting.reason.new') : r.label.trim();
   const locked = isLocked(r);
   const field = (part: 'label' | 'hint' | 'group'): string => `reason-${r.key}-${part}`;
@@ -92,6 +156,9 @@ function ReasonRow({
   };
   const patch = (p: Partial<Omit<ReasonDraft, 'key' | 'id'>>): void => set((d) => patchReason(d, r.key, p));
   const rulesProblem = problems[`reason-${r.key}-rules`];
+  const thanksProblem = problems[`reason-${r.key}-thanks`];
+  // A refused thank-you opens its own disclosure, so the field the screen puts the focus on is there.
+  const moreOpen = more || readOnly || thanksProblem !== undefined;
   const groupList = `${id}-groups`;
   return (
     <li className="cw-reason">
@@ -130,6 +197,11 @@ function ReasonRow({
           <button type="button" className="cw-btn" aria-expanded={showRules} onClick={() => setShowRules(!showRules)}>
             {t('hub.reporting.reason.rules', { count: r.rules.length })}
           </button>
+          {!readOnly && (
+            <button type="button" className="cw-btn" aria-expanded={moreOpen} aria-label={t('hub.settings.reporting.more', { name })} onClick={() => setMore(!moreOpen)}>
+              {t('hub.settings.reporting.more.short')}
+            </button>
+          )}
           <span className="cw-reason-moves">
             {!locked && (
               <>
@@ -179,6 +251,8 @@ function ReasonRow({
           </span>
         </div>
         {locked && <p className="cw-hint">{t('hub.reporting.reason.locked')}</p>}
+        {r.id === 'welfare' && <p className="cw-hint">{t(r.enabled ? 'hub.settings.reporting.welfare.on' : 'hub.settings.reporting.welfare.off')}</p>}
+        {moreOpen && <UrgentFields r={r} draft={draft} saved={saved} patch={patch} problem={thanksProblem} />}
         {showRules && (
           <div className="cw-reason-rules">
             <p className="cw-hint">{t('hub.reporting.reason.rules.hint')}</p>
@@ -190,7 +264,7 @@ function ReasonRow({
   );
 }
 
-export function ReasonsPanel({ draft, set, problems, rules }: { draft: ReportingDraft; set: SetReporting; problems: Problems; rules: readonly CommunityRule[] }) {
+export function ReasonsPanel({ draft, set, problems, rules, saved, readOnly = false }: { draft: ReportingDraft; set: SetReporting; problems: Problems; rules: readonly CommunityRule[]; saved?: ReadonlyMap<string, boolean>; readOnly?: boolean }) {
   const { t } = useHub();
   const list = useRef<HTMLUListElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
@@ -222,6 +296,8 @@ export function ReasonsPanel({ draft, set, problems, rules }: { draft: Reporting
               set={set}
               problems={problems}
               rules={rules}
+              saved={saved?.get(r.id)}
+              readOnly={readOnly}
               onMoved={(key, dir) => {
                 setAfter({ kind: 'moved', key, dir });
                 const at = positionOf(moveReason(draft, key, dir === 'up' ? -1 : 1), key);

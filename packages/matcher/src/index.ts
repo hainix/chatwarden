@@ -1,10 +1,12 @@
-export const VERSION = '0.1.14';
+export const VERSION = '0.2.0';
 
 export type { TermRow, ExceptionRow, Matcher, Span } from './matcher.js';
 export { MatcherBuildError, buildMatcher } from './matcher.js';
-export { stripInvisible, foldTerm, foldPhrase, collapseLikePreset } from './normalise.js';
+export { stripInvisible, foldTerm, foldPhrase, collapseLikePreset, skeleton, foldKana, normaliseUnspaced } from './normalise.js';
+export { isUnspacedTerm, UNSPACED_SCRIPTS, UNSPACED_LANGUAGES } from './unspaced.js';
+export type { UnspacedLanguage, UnspacedScript } from './unspaced.js';
 export { stripWithMap, toOriginal, mergeSpans, type StrippedView } from './spans.js';
-export { nameViews, matchName } from './names.js';
+export { nameViews, matchName, matchReserved } from './names.js';
 export { loadTermPack, type TermPack } from './termPack.js';
 export type {
   AuditEntry,

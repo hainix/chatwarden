@@ -670,9 +670,9 @@ describe('construction', () => {
     expect(() => chatRoutes(w.cw, w.chat, { ...ok, now: 5 as never })).toThrow(TypeError);
   });
 
-  it('has exactly the four routes', async () => {
+  it('has exactly the five routes', async () => {
     const w = await routeWorld();
-    expect(Object.keys(w.routes).sort()).toEqual(['GET /rooms/:room/stream', 'POST /rooms/:room/lines', 'POST /rooms/:room/mute', 'POST /rooms/:room/report']);
+    expect(Object.keys(w.routes).sort()).toEqual(['GET /rooms/:room/stream', 'POST /rooms/:room/lines', 'POST /rooms/:room/mute', 'POST /rooms/:room/phrases', 'POST /rooms/:room/report']);
   });
 
   it('an unknown path, a wrong method and a bad room id are the router\'s 404 and 405', async () => {

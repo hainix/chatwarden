@@ -31,7 +31,6 @@ function compile(words: readonly string[]): Compiled | null {
 /**
  * A matcher that blocks whole words, case-insensitively, with spans for masking. The words are yours (invented ones in the docs). A hit carries a stable
  * id for its word (`test:1`, `test:2`...), never the word. Not the real matcher: it does not resist evasion.
- * @experimental
  */
 export function wordMatcher(words: readonly string[]): Matcher {
   const compiled = compile(words);
@@ -50,7 +49,6 @@ export function wordMatcher(words: readonly string[]): Matcher {
 
 /**
  * A profanity filter that stars whole words, one star for each character (`hit` is true when any matched). Not the real filter.
- * @experimental
  */
 export function wordFilter(words: readonly string[]): ProfanityFilter {
   const compiled = compile(words);

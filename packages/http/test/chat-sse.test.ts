@@ -81,7 +81,7 @@ describe('the stream over real HTTP', () => {
     await until(() => c.events().length >= 1, 'hello');
     const first = c.events()[0];
     expect(first?.event).toBe('hello');
-    expect(first?.data).toMatchObject({ type: 'hello', v: 1, room: ROOM, you: { name: 'plenk' }, maxLength: 200, restriction: null, lines: [], muted: [] });
+    expect(first?.data).toMatchObject({ type: 'hello', v: 2, room: ROOM, you: { name: 'plenk' }, maxLength: 200, restriction: null, lines: [], muted: [] });
     c.ctl.abort();
   });
 

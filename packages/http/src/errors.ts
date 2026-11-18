@@ -9,6 +9,7 @@ import {
   safeWarn,
   SanctionError,
   SanctionQueryError,
+  StoreCapabilityError,
 } from '@chatwarden/core';
 import type { Logger } from '@chatwarden/core';
 import type { KitResponse } from './types.js';
@@ -21,11 +22,14 @@ const TABLE = {
   invalid_query: { status: 400, message: 'The query is not valid.' },
   invalid_value: { status: 400, message: 'A value is out of range.' },
   invalid_profile: { status: 400, message: 'The moderation profile is not valid.' },
+  invalid_filters: { status: 400, message: 'The chat filter settings are not valid.' },
   invalid_sanction: { status: 400, message: 'The sanction is not valid.' },
   invalid_rules: { status: 400, message: 'The rules are not valid.' },
   invalid_excerpt: { status: 400, message: 'The excerpt is not valid.' },
+  invalid_mode: { status: 400, message: 'The room mode is not valid.' },
   invalid_term: { status: 400, message: 'The term change was refused.' },
   invalid_gap_ref: { status: 400, message: 'The rule reference for this gap is not valid.' },
+  confirm_mismatch: { status: 400, message: 'The confirmation does not match the person.' },
   invalid_idempotency_key: { status: 400, message: 'The idempotency key is missing or not valid.' },
   invalid_statement: { status: 400, message: 'The statement is not valid.' },
   duration_not_offered: { status: 400, message: 'That length is not one of the lengths offered.' },
@@ -33,7 +37,10 @@ const TABLE = {
   forbidden: { status: 403, message: 'You do not have permission to do this.' },
   not_found: { status: 404, message: 'Not found.' },
   method_not_allowed: { status: 405, message: 'Method not allowed.' },
+  request_timeout: { status: 408, message: 'The request body did not arrive in time.' },
   already_decided: { status: 409, message: 'The report has already been decided.' },
+  already_held: { status: 409, message: 'This report is already held.' },
+  comment_limit: { status: 409, message: 'This report already holds as many comments as it can.' },
   already_appealed: { status: 409, message: 'This has already been appealed.' },
   same_decider: { status: 409, message: 'The person who made the decision cannot decide its appeal.' },
   gone: { status: 409, message: 'The sanction this appeal was about is gone.' },
@@ -57,7 +64,7 @@ const TABLE = {
   share_refused: { status: 422, message: 'The community list did not take this term.' },
   rate_limited: { status: 429, message: 'Too many requests. Try again later.' },
   ai_budget: { status: 429, message: 'The AI has reached its limit for today.' },
-  not_supported: { status: 501, message: 'This store cannot save settings.' },
+  not_supported: { status: 501, message: 'The store behind this server does not support this.' },
   share_unavailable: { status: 502, message: 'The community list could not be reached.' },
   ai_unavailable: { status: 503, message: 'The AI cannot be called right now.' },
 } as const;
@@ -96,6 +103,19 @@ export class LayerInvalidError extends HttpError {
   constructor(path: string) {
     super('invalid_profile');
     this.name = 'LayerInvalidError';
+    this.path = path;
+  }
+}
+
+/**
+ * Chat filter settings the kit refuses (a `candidate` of `POST /filters/test` or `/filters/check`). 400 `invalid_filters`, and the body also carries
+ * `path`, the field in the candidate that is not acceptable (`candidate.links.action`): a path in what the client sent, never a value.
+ */
+export class FiltersInvalidError extends HttpError {
+  readonly path: string;
+  constructor(path: string) {
+    super('invalid_filters');
+    this.name = 'FiltersInvalidError';
     this.path = path;
   }
 }
@@ -155,6 +175,8 @@ const codeFor = (err: unknown): ErrorCode | null => {
   if (err instanceof ExcerptError) return 'invalid_excerpt';
   if (err instanceof ReasonError) return err.field === 'limit' ? 'invalid_value' : 'invalid_request';
   if (err instanceof RangeError) return 'invalid_value';
+  // A call that needs an optional store method the store lacks (the urgent lane over an older custom store): the store cannot do it, which is not a bug in the request or the kit.
+  if (err instanceof StoreCapabilityError) return 'not_supported';
   return null;
 };
 
@@ -162,6 +184,7 @@ const codeFor = (err: unknown): ErrorCode | null => {
  * Wrap a handler so that nothing it throws (or rejects with) escapes:
  * - a validation-type error (`ReportQueryError`, `AuditQueryError`, `SanctionQueryError`, `RangeError`, `ProfileError`, `SanctionError`,
  *   `RulesError`, `ExcerptError`, `ReasonError`, `ValidationError`) -> 400
+ * - `StoreCapabilityError` -> 501 `not_supported` (a store without the methods the call needs; the missing names are in the startup warning, not the body)
  * - `ClaimedError` -> 409 `claimed`, whose body also names the holder (`by`) and when the claim lapses (`until`)
  * - `NotFoundError` -> 404; `HttpError` -> its own status and headers (401, 403, 413, ...); a `RangeError` is
  *   also logged, class only
@@ -179,6 +202,7 @@ export function withErrors<A extends unknown[]>(
       const code = codeFor(err);
       if (err instanceof ClaimedError) return errorResponse('claimed', undefined, { by: err.by, until: err.until });
       if (err instanceof LayerInvalidError) return errorResponse('invalid_profile', undefined, { path: err.path });
+      if (err instanceof FiltersInvalidError) return errorResponse('invalid_filters', undefined, { path: err.path });
       if (err instanceof AiUnavailableError) {
         return errorResponse('ai_unavailable', { 'retry-after': String(Math.max(1, Math.ceil(err.retryAfterMs / 1000))) }, { retryAfterMs: err.retryAfterMs });
       }

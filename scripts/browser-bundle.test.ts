@@ -44,7 +44,19 @@ const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.
 // Raised to 140 KB for K4b: `@chatwarden/store-memory/testing` (the test kit, a dev-only module a page does not ship) is in this entry so the same bundle proves it
 // is browser-safe and runs in the bare context; it measured 126.6 KB gzip with it (about 7 KB of it the kit, the scripted chat and the word stubs). The guard still
 // catches large accidental growth, not small features.
-const SIZE_BUDGET_GZIP = 140 * 1024;
+// Raised to 160 KB at 0.2.0: the chat filters (the link, personal-info, ratio and phrase scanners, the engine and the settings) are imported statically
+// by the chat path and add about 13 KB gzip (design note on filters, Ruling 25). If this guard trips again because of them, the engine can be split
+// behind an `import()` loaded when `filters` is first set (the signals precedent); that was not needed to stay under this budget.
+// Raised to 176 KB at 0.2.0 (privacy and legal hold): the store contract grows by the export, the erase and the hold in the in-memory store (about 2 KB gzip),
+// and core carries the privacy registry, the canonical JSON and the bundle (about 4 KB). With the dist rebuilt, the hub's own strings (the Chat filters panel
+// words) already put the entry near 161 KB, so this is the generous raise the release asks for; the guard still catches large accidental growth. The bundle
+// builder and the registry could load behind an `import()` the way the signal service does, if a later theme needs the room.
+// Raised to 192 KB at 0.2.0 (the urgent lane and the desk): the memory store gains the urgent, hand-off, comment and day-count methods, and core carries the desk, safety and room
+// settings, the case workflow and the comment service (about 4 KB gzip together; the bundle measured 180.5 KB just before this raise). Still a guard against large accidental growth.
+// Raised to 224 KB at 0.2.0 (rooms, names and languages): the chat path gains phrase books and the phrase-only room, the names path gains reserved names (the skeleton and the whole-word comparison)
+// and report entities, and the matcher gains the unspaced-script path (the runs, the clusters and the segmenter glue, about 3 KB gzip); the bundle measured 197.3 KB gzip just before this raise.
+// Still a guard against large accidental growth, not small features.
+const SIZE_BUDGET_GZIP = 224 * 1024;
 
 /**
  * The browser build without the server-only AI module, as a bundler that splits at `import()` gives a page that never passes an adapter:
@@ -198,6 +210,14 @@ describe('browser bundle: static scan', () => {
     }
   });
 
+  it('bundles @chatwarden/http/service too (the /v1 routes, keys, idempotency), and neither the Node bridge nor the process', () => {
+    const inputs = Object.keys(chatMetafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    for (const file of ['service/index', 'service/wrap', 'service/auth', 'service/contract', 'service/idempotency', 'service/digest', 'service/routes', 'service/openapi', 'service/refusal', 'service/client']) {
+      expect(inputs, file).toContain(`packages/http/dist/src/${file}.js`);
+    }
+    for (const nodeSide of ['service/node', 'service/serve', 'cli/serve']) expect(inputs, nodeSide).not.toContain(`packages/http/dist/src/${nodeSide}.js`);
+  });
+
   it('chat entry: has no node: import or export specifier', () => {
     expect(chatEsm).not.toMatch(/\b(?:from|import)\s*\(?\s*["']node:/);
     expect(chatEsm).not.toMatch(/\bexport\s*\*?\s*(?:\{[^}]*\}\s*)?from\s*["']node:/);
@@ -319,7 +339,10 @@ describe('browser bundle: size', () => {
         .sort((x, y) => y[1] - x[1])
         .slice(0, 12)
         .map(([f, n]) => `${n} ${f}`);
-      throw new Error(`bundle is ${gz} bytes gzip, over ${SIZE_BUDGET_GZIP}. Top contributors:\n${top.join('\n')}`);
+      throw new Error(
+        `bundle is ${gz} bytes gzip, over ${SIZE_BUDGET_GZIP}. If the chat filter engine is what tipped it, split it behind a dynamic import() loaded when filters is first set ` +
+          `(Ruling 25 of the filters design); otherwise a large module leaked in. Top contributors:\n${top.join('\n')}`,
+      );
     }
     expect(gz).toBeLessThanOrEqual(SIZE_BUDGET_GZIP);
   });

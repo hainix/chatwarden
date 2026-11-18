@@ -68,7 +68,6 @@ export const asBytes = (view: Uint8Array): Uint8Array => new Uint8Array(view.buf
 /**
  * The message a signature covers: `UTF8('chatwarden-corpus/1') 0x00 UTF8(kind) 0x00 bytes`. The kind separates the artifacts, so a
  * valid signature over an index can never be replayed as a zip, a submission or a report.
- * @experimental
  */
 export function signedMessage(kind: 'index' | 'zip' | 'submission' | 'report', bytes: Uint8Array): Uint8Array {
   if (typeof kind !== 'string' || !KINDS.includes(kind)) throw new RangeError('signedMessage: kind must be index, zip, submission or report');
@@ -164,7 +163,6 @@ async function verifyInner(kind: unknown, bytes: unknown, sigFile: unknown, keys
  * `no_trusted_keys` (the list is empty), `revoked_key`, `unknown_key`, or `bad_signature` for every other failure, however hostile the input.
  * `options.revokedKeyIds` are ids an index that verified under a different key has revoked (see `revokedKeyIdsOf`); the kit's own
  * `CORPUS_REVOKED_KEY_IDS` always apply.
- * @experimental
  */
 export async function verifySignature(
   kind: 'index' | 'zip',

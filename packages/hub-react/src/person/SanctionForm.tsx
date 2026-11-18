@@ -4,15 +4,18 @@ import { actorName } from '../claims.js';
 import { useHub } from '../context.js';
 import { byId, rootOf } from '../dom.js';
 import { GAP_NOTE_MAX, REASON_MAX, hasLength } from '../decision.js';
-import { useFeatures } from '../features.js';
+import { useFeatures, useScopedLimits } from '../features.js';
+import { LazyPlayerPreview } from '../lazyParts.js';
 import { useHubAction, useHubData } from '../hooks.js';
-import { choiceLabel, errorText, kindLabel } from '../labels.js';
+import { entityWord } from '../case/CaseContext.js';
+import { choiceLabel, displayName, errorText, kindLabel } from '../labels.js';
 import { LengthField } from '../policy/LengthField.js';
 import { lengthsOf, menuOf, snapLength } from '../policy/lengths.js';
 import { useToasts } from '../toasts.js';
-import type { PolicyDocs, SanctionKind } from '../types.js';
+import type { PersonHistory, PolicyDocs, SanctionKind } from '../types.js';
 import { ErrorBlock, Panel } from '../ui.js';
-import { emptySanction, renameProblems, sanctionProblems, toRenameInput, toSanctionInput } from './sanctionDraft.js';
+import { renameOp, sanctionOp } from '../preview/ops.js';
+import { emptySanction, renameProblems, sanctionChoice, sanctionProblems, toRenameInput, toSanctionInput } from './sanctionDraft.js';
 import type { SanctionDraft, SanctionMode, SanctionProblems } from './sanctionDraft.js';
 
 const NO_PROBLEMS: SanctionProblems = { count: 0 };
@@ -25,7 +28,7 @@ const KINDS: readonly SanctionKind[] = ['warning', 'chat', 'area', 'ban'];
  * "include their IP for 24 hours" for the timed kinds. Nothing is sent until the form passes the same checks a decision does; a
  * refusal from the server is shown with everything typed kept. A senior can take over another moderator's claim from here.
  */
-export function SanctionForm({ person, name, mode, onDone, onCancel }: { person: string; name: string; mode: SanctionMode; onDone: () => void; onCancel: () => void }) {
+export function SanctionForm({ person, name, mode, entities = [], onDone, onCancel }: { person: string; name: string; mode: SanctionMode; entities?: NonNullable<PersonHistory['entities']>; onDone: () => void; onCancel: () => void }) {
   const { t, locale, can, client, session } = useHub();
   const toasts = useToasts();
   const base = useId();
@@ -35,6 +38,9 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   // "Ask for a new name (no sanction)": the last choice of "What happens", only with renames on and sanctions.apply. It sends no sanction, so no length, no IP.
   const [renaming, setRenaming] = useState(false);
   const canRename = useFeatures().renames && mode === 'sanction';
+  // Which of the entities open reports name the rename is about: '' is the player's own name (the default), else an index into `entities`.
+  const [entityPick, setEntityPick] = useState('');
+  const entity = renaming && entityPick !== '' ? entities[Number(entityPick)] : undefined;
 
   // The rules are read when the form opens (once per session: `session.policy()` remembers them), never when the page opens.
   const wantsRules = can('policy.read');
@@ -47,13 +53,17 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   // The lengths are the profile's. A form starts on 24 hours, which the profile may not list: it moves to a length that is.
   const lengths = useMemo(() => lengthsOf(policy.data?.profile), [policy.data]);
   const timedKind = !renaming && draft.kind !== '' && hasLength(draft.kind);
-  const menu = menuOf(lengths, draft.kind, canPermanent);
+  const limits = useScopedLimits();
+  const menu = menuOf(lengths, draft.kind, canPermanent, limits);
   const snapped = snapLength(draft.duration, menu);
   useEffect(() => {
     if (timedKind && snapped !== draft.duration) setDraft((d) => ({ ...d, duration: snapped }));
   }, [timedKind, snapped, draft.duration]);
   const problems = renaming ? renameProblems(draft) : sanctionProblems(draft, mode, { rules: rules.map((r) => r.number), canApply: can('sanctions.apply'), canPermanent });
   const shown = attempted ? problems : NO_PROBLEMS;
+  // "What the player sees": a pure picture of the choice so far. Nothing until a kind is chosen (a rename: until a rule is); a problem elsewhere never blanks it.
+  const previewOp = mode === 'note' ? sanctionOp({ kind: 'note', durationMs: null }) : renaming ? renameOp(draft.rule) : sanctionOp(sanctionChoice(draft, mode));
+  const previewIp = !renaming && timedKind && draft.includeIp && previewOp !== null ? [t('hub.preview.effect.ip')] : [];
 
   // The first field takes focus when the form opens: the kind of a sanction, the note itself for a note.
   const whatRef = useRef<HTMLSelectElement>(null);
@@ -67,7 +77,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   const sending = useRef(false);
   const apply = useHubAction(async (takeOver: boolean) => {
     if (renaming) {
-      await client.rename(person, toRenameInput(draft, takeOver ? { takeOver: true } : {}));
+      await client.rename(person, toRenameInput(draft, { ...(takeOver ? { takeOver: true } : {}), ...(entity === undefined ? {} : { entity }) }));
       return { renamed: true as const };
     }
     const input = toSanctionInput(person, draft, mode, takeOver ? { takeOver: true } : {});
@@ -145,12 +155,13 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
                     onChange={(e) => {
                       if (e.target.value === 'rename') {
                         setRenaming(true);
-                        setDraft((d) => ({ ...d, kind: '', includeIp: false }));
+                        // A rename always cites a numbered rule: "No rule covers this" is not one.
+                        setDraft((d) => ({ ...d, kind: '', includeIp: false, rule: d.rule === 'uncovered' ? '' : d.rule }));
                       } else setKind(e.target.value as SanctionKind | '');
                     }}
                   >
                     <option value="">{t('hub.decide.action.what.choose')}</option>
-                    {KINDS.map((k) => (
+                    {KINDS.filter((k) => limits === undefined || limits.kinds.includes(k)).map((k) => (
                       <option key={k} value={k}>
                         {kindLabel(t, k)}
                       </option>
@@ -178,7 +189,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
             <Field id={id('rule')} label={t('hub.decide.action.rule')} problem={shown.rule}>
               {(a) => (
                 <select {...a} value={draft.rule} onChange={(e) => set({ rule: e.target.value })}>
-                  <RuleOptions rules={rules} />
+                  <RuleOptions rules={rules} noUncovered={renaming} />
                 </select>
               )}
             </Field>
@@ -211,7 +222,8 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
               />
             )}
           </Field>
-          {timedKind && (
+          {/* A scoped caller never places an IP sanction: it would land on people outside their scope (the server refuses it). */}
+          {timedKind && limits === undefined && (
             <div className="cw-field">
               <label className="cw-tick">
                 <input type="checkbox" checked={draft.includeIp} aria-describedby={id('ip-hint')} onChange={(e) => set({ includeIp: e.target.checked })} />
@@ -222,7 +234,22 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
               </p>
             </div>
           )}
-          {mode === 'sanction' && <p className="cw-hint">{t(renaming ? 'hub.person.form.rename.hint' : 'hub.person.form.noNotice')}</p>}
+          {renaming && entities.length > 0 && (
+            <Field id={id('entity')} label={t('hub.person.form.rename.entity')}>
+              {(a) => (
+                <select {...a} value={entityPick} onChange={(e) => setEntityPick(e.target.value)}>
+                  <option value="">{t('hub.person.form.rename.entity.player')}</option>
+                  {entities.map((e, i) => (
+                    <option key={`${e.kind}:${e.ref}`} value={String(i)}>
+                      {entityWord(t, e.kind)} {displayName(t, { handle: e.label, flagged: e.labelFlagged })}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          )}
+          {renaming && <p className="cw-hint">{t('hub.person.form.rename.hint')}</p>}
+          <LazyPlayerPreview op={previewOp} nameOf={() => name} extraEffects={previewIp} prompt={renaming ? 'chooseRule' : 'choose'} />
           {failed !== null && (
             <div className="cw-error" role="alert">
               <p>{failure()}</p>

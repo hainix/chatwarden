@@ -105,7 +105,7 @@ describe('the public exports an adapter author needs', () => {
   });
 
   it('exports: the chat wire types, the broadcaster and the chat routes are on the root', () => {
-    expect(http.CHAT_WIRE_VERSION).toBe(1);
+    expect(http.CHAT_WIRE_VERSION).toBe(2);
     expect(http.CHAT_WIRE_VERSION).toBe(wire.CHAT_WIRE_VERSION);
     expectTypeOf<http.ChatFrame>().toEqualTypeOf<wire.ChatFrame>();
     expectTypeOf<http.WireLine>().toEqualTypeOf<wire.WireLine>();
@@ -115,7 +115,7 @@ describe('the public exports an adapter author needs', () => {
     expectTypeOf<http.SendResult>().toEqualTypeOf<wire.SendResult>();
     expectTypeOf<http.MuteTarget>().toEqualTypeOf<wire.MuteTarget>();
     expectTypeOf<http.MuteResult>().toEqualTypeOf<wire.MuteResult>();
-    expectTypeOf<wire.MuteResult>().toEqualTypeOf<{ ok: boolean; hiddenIds: string[] }>();
+    expectTypeOf<wire.MuteResult>().toEqualTypeOf<{ ok: boolean; hiddenIds: string[]; limit?: true }>();
     expectTypeOf<http.ReportOutcome>().toEqualTypeOf<wire.ReportOutcome>();
     // types have no run-time binding
     for (const name of ['ChatFrame', 'WireLine', 'WireRestriction', 'WireMuted', 'WireRefusal', 'SendResult', 'MuteTarget', 'MuteResult', 'ReportOutcome']) {
@@ -235,13 +235,13 @@ describe('the EOS subpath (K5 E1)', () => {
 });
 
 describe('the subpaths of the package (K5 X1)', () => {
-  it('the map holds the nine entries and typesVersions names every one but the root; the root entry is the plain index', () => {
+  it('the map holds the ten entries and typesVersions names every one but the root; the root entry is the plain index', () => {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       exports: Record<string, { types: string; default: string }>;
       typesVersions: { '*': Record<string, string[]> };
     };
-    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './admin', './chat', './cli', './coop', './discord', './eos', './express', './fetch']);
-    expect(Object.keys(pkg.typesVersions['*']).sort()).toEqual(['admin', 'chat', 'cli', 'coop', 'discord', 'eos', 'express', 'fetch']);
+    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './admin', './chat', './cli', './coop', './discord', './eos', './express', './fetch', './service']);
+    expect(Object.keys(pkg.typesVersions['*']).sort()).toEqual(['admin', 'chat', 'cli', 'coop', 'discord', 'eos', 'express', 'fetch', 'service']);
     expect(pkg.exports['.']).toEqual({ types: './dist/src/index.d.ts', default: './dist/src/index.js' });
     // Every entry the map names has the same shape: types and default, under dist/src.
     for (const [name, entry] of Object.entries(pkg.exports)) {

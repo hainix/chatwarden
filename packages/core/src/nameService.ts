@@ -5,8 +5,9 @@ import { hashWho } from './hasher.js';
 import { safeWarn, ThrottledWarn } from './log.js';
 import { DECISION_REASON_MAX } from './decide.js';
 import { evidenceName, NameEvidenceLimiter, profanityView } from './names.js';
-import type { NameCheckResult, NameReason, ResolvedNames } from './names.js';
+import type { NameCheckResult, NameKind, NameReason, ResolvedNames } from './names.js';
 import type { NoticeService } from './notices.js';
+import { readEntityRef } from './reports.js';
 import type { CommunityRules } from './rules.js';
 import type { SubjectIndex } from './subjects.js';
 import type { Clock, Hasher, Logger, Matcher, ProfanityFilter, RawWho, Store, SubjectId } from './types.js';
@@ -39,12 +40,14 @@ export interface NameServiceDeps {
 }
 
 /** What `requireRename` answers. */
-export type RenameResult = { ok: true; noticeId: string } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
+export type RenameResult = { ok: true; noticeId: string | null } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
 
 /** The shape of a rename request, once checked. */
 interface CheckedRename {
   subject: SubjectId;
   rule: number;
+  /** The entity (a clan, guild, team) the rename is about, when it is not the player's own name. */
+  entity: { kind: string; ref: string } | null;
 }
 
 /**
@@ -64,23 +67,38 @@ interface Verdict {
   termId: string | null;
 }
 
+const NO_ALLOW: readonly string[] = Object.freeze([]);
+
 export class NameService {
   private readonly d: NameServiceDeps;
   private readonly limiter = new NameEvidenceLimiter();
   private readonly flaggedWarn: ThrottledWarn;
   private readonly evidenceWarn: ThrottledWarn;
+  private readonly reservedWarn: ThrottledWarn;
+  /** The unsupported matcher is said once, not once a minute: a matcher does not grow the method later. */
+  private unsupportedSaid = false;
+  /** The reserved list last probed for entries that protect nothing (by identity: a changed list is probed again). */
+  private probed: readonly string[] | null = null;
 
   constructor(deps: NameServiceDeps) {
     this.d = deps;
     this.flaggedWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.evidenceWarn = new ThrottledWarn(deps.logger, deps.clock);
+    this.reservedWarn = new ThrottledWarn(deps.logger, deps.clock);
   }
 
-  check(text: string, opts?: { who?: RawWho }): NameCheckResult {
+  check(text: string, opts?: { who?: RawWho; kind?: NameKind; skipReserved?: boolean }): NameCheckResult {
     if (typeof text !== 'string') throw new TypeError('names.check: the name must be a string');
-    const verdict = this.verdict(text);
+    // The options are the game's code, so a wrong one is a bug to hear about, not a name to refuse.
+    if (typeof opts === 'object' && opts !== null) {
+      if (opts.kind !== undefined && opts.kind !== 'player' && opts.kind !== 'entity') throw new TypeError("names.check: kind must be 'player' or 'entity'");
+      if (opts.skipReserved !== undefined && typeof opts.skipReserved !== 'boolean') throw new TypeError('names.check: skipReserved must be true or false');
+    }
+    const verdict = this.verdict(text, opts?.skipReserved === true);
     if (verdict === null) return { ok: true };
-    this.keep(text, verdict, opts);
+    // A reserved name is not a slur and not evidence of anything: it cites its own rule and nothing is kept.
+    if (verdict.reason === 'name_reserved') return { ok: false, reason: 'name_reserved', rule: this.d.settings().reservedRule };
+    this.keep(text, verdict, opts, opts?.kind === 'entity');
     return { ok: false, reason: verdict.reason, rule: this.d.rule };
   }
 
@@ -104,30 +122,78 @@ export class NameService {
     return { termId: typeof hit.termId === 'string' ? hit.termId : null };
   }
 
-  private verdict(text: string): Verdict | null {
+  private verdict(text: string, skipReserved: boolean): Verdict | null {
     try {
       const hit = this.matched(text);
       if (hit !== null) return { reason: 'name_not_allowed', termId: hit.termId };
     } catch (err) {
       safeWarn(this.d.logger, 'chatwarden.names_matcher_failed', { error: errName(err) });
     }
-    if (!this.d.settings().profanity) return null;
-    try {
-      const filter = this.d.filter();
-      if (filter === undefined) return null;
-      if (filter.apply(text).hit) return { reason: 'name_profane', termId: null };
-      const spaced = profanityView(text);
-      if (spaced !== text && filter.apply(spaced).hit) return { reason: 'name_profane', termId: null };
-    } catch (err) {
-      safeWarn(this.d.logger, 'chatwarden.names_filter_failed', { error: errName(err) });
+    const settings = this.d.settings();
+    if (settings.profanity) {
+      try {
+        const filter = this.d.filter();
+        if (filter !== undefined) {
+          if (filter.apply(text).hit) return { reason: 'name_profane', termId: null };
+          const spaced = profanityView(text);
+          if (spaced !== text && filter.apply(spaced).hit) return { reason: 'name_profane', termId: null };
+        }
+      } catch (err) {
+        safeWarn(this.d.logger, 'chatwarden.names_filter_failed', { error: errName(err) });
+      }
     }
-    return null;
+    return !skipReserved && this.reserved(text, settings) ? { reason: 'name_reserved', termId: null } : null;
+  }
+
+  /** Is this name protected (`names.reserved`)? Never asks without a list. A matcher with no `matchReserved` is said once; one that throws lets the name through (logged by class, at most once a minute). */
+  private reserved(text: string, settings: ResolvedNames): boolean {
+    if (settings.reserved.length === 0) return false;
+    const m = this.d.matcher;
+    if (m === undefined) return false;
+    if (typeof m.matchReserved !== 'function') {
+      if (!this.unsupportedSaid) {
+        this.unsupportedSaid = true;
+        safeWarn(this.d.logger, 'chatwarden.names_reserved_unsupported');
+      }
+      return false;
+    }
+    this.probeInert(m, settings.reserved);
+    try {
+      return m.matchReserved(text, settings.reserved, settings.reservedAllow) === true;
+    } catch (err) {
+      this.reservedWarn.warn('chatwarden.names_reserved_failed', { error: errName(err) });
+      return false;
+    }
+  }
+
+  /**
+   * Say once per list which entries protect nothing: an entry the matcher cannot even match to itself (a script with no Latin skeleton, in 0.2.0) is silently inert, so the owner is told how many and where the first is
+   * (the position, never the entry). Fenced: a matcher that throws is the real check's to log.
+   */
+  // (the entries are the settings' own array, so a matcher that compiles each list once compiles it once)
+  private probeInert(m: Matcher, entries: readonly string[]): void {
+    if (this.probed === entries) return;
+    this.probed = entries;
+    try {
+      let count = 0;
+      let first = -1;
+      for (const [i, entry] of entries.entries()) {
+        if (m.matchReserved?.(entry, entries, NO_ALLOW) === true) continue;
+        count += 1;
+        if (first === -1) first = i;
+      }
+      if (count > 0) safeWarn(this.d.logger, 'chatwarden.names_reserved_inert', { count, first });
+    } catch {
+      /* the real check below logs a failing matcher */
+    }
   }
 
   /** Keep a blocked name as evidence, when the adopter opted in and the hourly caps allow. Fenced: nothing in here reaches the caller. */
-  private keep(text: string, verdict: Verdict, opts: { who?: RawWho } | undefined): void {
+  private keep(text: string, verdict: Verdict, opts: { who?: RawWho } | undefined, entity: boolean): void {
     try {
       if (!this.d.settings().keepBlocked) return;
+      // A blocked entity name (a clan, guild, team) is evidence only for a caller who says who asked.
+      if (entity && this.whoOf(opts) === undefined) return;
       const store = this.d.store;
       if (typeof store.insertBlockedName !== 'function') {
         this.evidenceWarn.warn('chatwarden.names_evidence_unavailable', {});
@@ -168,32 +234,35 @@ export class NameService {
   /**
    * Ask a player to choose a new name: one `rename_required` notice (no name, no excerpt, no reason) and, after the write, the player's
    * client is told and `rename.required` goes out. Answers, in this order: `off` (`names.renames` is false, or the store cannot release a
-   * rename), `invalid` (a malformed input, a reason that is not 1 to 500 characters once trimmed, a rule that is not an active integer rule),
+   * rename), `invalid` (a malformed input, a reason that is not 1 to 500 characters once trimmed, a rule that is missing or is not an active integer rule),
    * `not_found` (a person the kit does not hold), `pending` (an unreleased request exists, seen or not). A store failure is logged by class
-   * and thrown, with nothing written. The reason and the actor are validated here and kept by the staff layer's audit row, not by the notice.
+   * and thrown, with nothing written. A rename always cites a rule: `rule` is required, and no default (not the slur filter's) stands in. The reason and the actor are validated here and kept by the staff layer's audit row, not by the notice.
    */
-  requireRename(input: { subject: SubjectId; actor: string; reason: string; rule?: number }): RenameResult {
+  requireRename(input: { subject: SubjectId; actor: string; reason: string; rule: number }): RenameResult {
     const d = this.d;
     if (!this.renamesEnabled()) return { ok: false, error: 'off' };
     const checked = this.checkRename(input);
     if (checked === null) return { ok: false, error: 'invalid' };
-    let noticeId: string;
+    let noticeId: string | null = null;
     let person: SubjectId;
     let at: number;
     try {
       person = d.subjects.canonical(checked.subject);
       if (!d.subjects.knows(person)) return { ok: false, error: 'not_found' };
-      if (d.notices.renamePending(person)) return { ok: false, error: 'pending' };
       at = d.clock.now();
-      noticeId = d.notices.createMessage(person, 'rename_required', { rule: checked.rule, notify: false });
+      // An entity (a clan, guild, team) has no screen of the kit's and is never "pending": no notice is made and the player's own rename request is untouched. The game tells the owner.
+      if (checked.entity === null) {
+        if (d.notices.renamePending(person)) return { ok: false, error: 'pending' };
+        noticeId = d.notices.createMessage(person, 'rename_required', { rule: checked.rule, notify: false });
+      }
     } catch (err) {
       safeWarn(d.logger, 'chatwarden.rename_failed', { error: errName(err) });
       throw err;
     }
     // After the write: the client is told (fenced inside `announce`), then the event (a listener that throws is not the caller's problem).
-    d.notices.announce(person);
+    if (checked.entity === null) d.notices.announce(person);
     try {
-      d.emit({ type: 'rename.required', at, target: person, rule: checked.rule });
+      d.emit({ type: 'rename.required', at, target: person, rule: checked.rule, ...(checked.entity === null ? {} : { entity: checked.entity }) });
     } catch (err) {
       safeWarn(d.logger, 'chatwarden.event_failed', { error: errName(err) });
     }
@@ -242,14 +311,16 @@ export class NameService {
 
   private checkRename(input: unknown): CheckedRename | null {
     if (typeof input !== 'object' || input === null) return null;
-    const { subject, actor, reason, rule } = input as Record<string, unknown>;
+    const { subject, actor, reason, rule, entity } = input as Record<string, unknown>;
     if (typeof subject !== 'string' || subject === '') return null;
     if (!isValidAuditActor(actor)) return null;
     if (typeof reason !== 'string') return null;
     const why = reason.trim();
     if (why === '' || why.length > RENAME_REASON_MAX) return null;
-    if (rule === undefined) return { subject, rule: this.d.rule };
     if (typeof rule !== 'number' || !Number.isSafeInteger(rule) || !this.d.rules.isCitable(rule)) return null;
-    return { subject, rule };
+    // Exactly { kind, ref }: a label is never part of a rename (it would reach the event).
+    const about = readEntityRef(entity);
+    if (about === 'invalid') return null;
+    return { subject, rule, entity: about };
   }
 }

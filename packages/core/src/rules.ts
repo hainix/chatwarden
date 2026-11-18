@@ -1,3 +1,4 @@
+import { communityRuleLabel } from './noticeCopy.js';
 import type { RulesFlavour } from './profile.js';
 import type { ReportCategory } from './types.js';
 
@@ -75,9 +76,7 @@ export class CommunityRules {
 
   /** The player-facing name of a rule. A retired rule keeps its title; an unknown number has none. */
   label(ref: RuleRef): string {
-    if (ref === 'uncovered') return 'Not covered by a rule yet';
-    const rule = this.byNumber.get(ref);
-    return rule === undefined ? `Community Rule ${ref}` : `Community Rule ${rule.number}: ${rule.title}`;
+    return communityRuleLabel(ref, ref === 'uncovered' ? undefined : this.byNumber.get(ref)?.title);
   }
 }
 

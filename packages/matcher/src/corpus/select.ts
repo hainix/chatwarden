@@ -5,7 +5,7 @@ import type { ExceptionRow6, TermRow6, TermsRelease } from './release.js';
 // From a verified release to the pack a game loads (design 6.5 to 6.7, 13). Pure. The release is not changed; the result is a
 // `TermPack` with the id `chatwarden-corpus`, passed through `loadTermPack` before it is returned. A refusal never quotes a term.
 
-/** What a game takes from a release. Only `languages` has no default. @experimental */
+/** What a game takes from a release. Only `languages` has no default. */
 export interface PackSelection {
   /** Required, at least one tag, e.g. `['en', 'es']`. `pt-BR` and `pt-PT` select `pt`. */
   languages: readonly string[];
@@ -85,7 +85,7 @@ const firstSelected = (rowLanguages: readonly string[], selected: readonly strin
 function selectTerm(row: TermRow6, o: Normalised): TermPack['terms'][number] | null {
   const language = firstSelected(row.languages, o.languages);
   if (language === null) return null;
-  const pass = { id: row.id, term: row.term, language, positive: [...row.positive], negative: [...row.negative] };
+  const pass = { id: row.id, term: row.term, language, ...(row.matchMode === undefined ? {} : { matchMode: row.matchMode }), positive: [...row.positive], negative: [...row.negative] };
   // A disputed or withdrawn row is carried so a later sync can switch off a copy a store already has; it is never on.
   if (row.status === 'disputed' || row.status === 'withdrawn') return { ...pass, active: false };
   if (!o.statuses.has(row.status) || !o.categories.has(row.category) || (SEVERITY_RANK[row.severity] as number) < o.minRank) return null;
@@ -110,7 +110,6 @@ const unique = (lines: readonly string[]): string[] => [...new Set(lines)];
  * switches a row on that the release did not. The negative corpus and known losses are merged for the selected languages, in the
  * order they were asked for. An empty or invalid selection is a `RangeError` naming the option; a result that does not load is
  * `CorpusError('bad_pack', 'validate')`.
- * @experimental
  */
 export function releaseToPack(release: TermsRelease, select: PackSelection): TermPack {
   const o = normalise(select);

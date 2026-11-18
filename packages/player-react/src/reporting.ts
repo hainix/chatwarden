@@ -1,9 +1,41 @@
 import type { PlayerReporting, ReportFlow } from '@chatwarden/core';
+import { en } from './i18n.js';
+import type { PlayerT, PlayerText } from './i18n.js';
+import { isSafeHref } from './safeHref.js';
 
 const FLOWS: readonly ReportFlow[] = ['one_tap', 'reason_first', 'reason_required'];
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown): v is string => typeof v === 'string';
+
+/** The most help resources shown after a report, and the longest label or detail read (the server's own limits are 5, 60 and 200). */
+const MAX_RESOURCES = 5;
+const MAX_RESOURCE_TEXT = 200;
+
+/** One help resource, or undefined when it has no label. The url is kept as it came (the dialog decides whether it is a link); a url that is not text is none. */
+function resourceOf(raw: unknown): { label: string; detail: string; url: string | null } | undefined {
+  if (!isObject(raw) || !text(raw.label) || raw.label.trim() === '') return undefined;
+  return {
+    label: raw.label.slice(0, MAX_RESOURCE_TEXT),
+    detail: text(raw.detail) ? raw.detail.slice(0, MAX_RESOURCE_TEXT) : '',
+    url: text(raw.url) && raw.url !== '' ? raw.url : null,
+  };
+}
+
+/**
+ * Whether a resource's url may become a link: an `https` address with a host and no credentials that also passes the package's `isSafeHref`. Anything else (`javascript:`, `http:`, `data:`, a relative path) is
+ * shown as plain text.
+ */
+export function isResourceHref(url: string): boolean {
+  if (!isSafeHref(url)) return false;
+  try {
+    // A relative path and a protocol-relative address do not parse on their own: only a full address with a secure scheme gets here.
+    const parsed = new URL(url.trim());
+    return parsed.protocol === 'https:' && parsed.hostname !== '' && parsed.username === '' && parsed.password === '';
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The reporting payload of `GET /rules` as the dialog may rely on it. Anything that is not the documented shape is dropped: a
@@ -16,9 +48,19 @@ export function readReporting(raw: unknown): PlayerReporting | undefined {
   const reasons = raw.reasons
     .filter(isObject)
     .filter((r) => text(r.id) && r.id !== '' && text(r.label) && r.label !== '')
-    .map((r) => ({ id: r.id as string, label: r.label as string, hint: text(r.hint) ? r.hint : '', group: text(r.group) ? r.group : '', asksNote: r.asksNote === true }));
+    .map((r) => ({
+      id: r.id as string,
+      label: r.label as string,
+      hint: text(r.hint) ? r.hint : '',
+      group: text(r.group) ? r.group : '',
+      asksNote: r.asksNote === true,
+      // A reason's own thank-you (null: the general one) and whether it offers the help resources: only when they are well formed.
+      thanks: text(r.thanks) ? r.thanks : null,
+      showResources: r.showResources === true,
+    }));
   const flow = FLOWS.find((f) => f === raw.flow) ?? 'one_tap';
-  return { flow, reasons, thanks: text(raw.thanks) ? raw.thanks : '' };
+  const resources = Array.isArray(raw.resources) ? raw.resources.map(resourceOf).filter((r): r is NonNullable<typeof r> => r !== undefined).slice(0, MAX_RESOURCES) : [];
+  return { flow, reasons, thanks: text(raw.thanks) ? raw.thanks : '', resources };
 }
 
 export type ReasonItem = PlayerReporting['reasons'][number];
@@ -48,4 +90,16 @@ export function groupReasons(reasons: readonly ReasonItem[]): ReasonGroup[] {
     else groups.push({ name: '', items: [other] });
   }
   return groups;
+}
+
+/**
+ * The words to show for a text the server sent that has an English default in the catalogue (a default report reason's label or hint, the
+ * thank-you). While the server's text still equals that English default the owner has not changed it, so the catalogue's words are used (the
+ * language the page is in); a text the owner edited is the game's own and is shown as sent, and so is one the catalogue has no key for.
+ */
+export function defaultText(t: PlayerT, key: string, sent: string): string {
+  const english = (en as Record<string, string>)[key];
+  if (english === undefined || sent.trim() !== english) return sent;
+  const own = t(key as PlayerText);
+  return own === key ? sent : own;
 }

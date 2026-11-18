@@ -6,7 +6,6 @@ import type { ReportLabel, ReportOutcome, SayLabel, SayOutcome, TestRoom } from 
 
 /**
  * One step of a script.
- * @experimental
  */
 export type Step =
   | { player: string; say: string; expect?: SayLabel | readonly SayLabel[] }
@@ -18,7 +17,6 @@ export type Step =
 
 /**
  * What a script did.
- * @experimental
  */
 export interface Run {
   readonly steps: ReadonlyArray<SayOutcome | ReportOutcome | { kind: 'wait'; at: number } | { kind: 'mute'; at: number } | { kind: 'suggest'; at: number; suggestion: Suggestion }>;
@@ -31,7 +29,6 @@ export interface Run {
 /**
  * Thrown when a script's outcomes are not the expected ones. A plain `Error` with a table of expected and actual per step, so it reads the same in
  * any test runner.
- * @experimental
  */
 export class ScriptMismatch extends Error {
   /** The 1-based number of the first step or outcome that differs, or 0 when the lengths differ. */
@@ -140,7 +137,6 @@ export async function runScript(kit: Playground, steps: readonly Step[], options
 /**
  * Compare a run's say and report outcomes with the expected labels, as a whole. Throws a `ScriptMismatch` that names the first difference, or the two lengths
  * when they differ. Runner-neutral: nothing here imports a test runner.
- * @experimental
  */
 export function expectOutcomes(run: Run, expected: readonly string[]): void {
   const actual = run.outcomes;

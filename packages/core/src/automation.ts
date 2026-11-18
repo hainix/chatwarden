@@ -9,17 +9,14 @@ import type { Clock, Logger, Store, SubjectId } from './types.js';
 
 /**
  * The closed reasons a person can be marked "do not automate" for. A frozen list, not an option.
- * @experimental
  */
 export const AUTOMATION_CODES: readonly AutomationCode[] = Object.freeze(['vulnerable', 'under_review', 'staff', 'sensitive_case', 'other'] as const);
 
-/** @experimental */
 export type AutomationCode = 'vulnerable' | 'under_review' | 'staff' | 'sensitive_case' | 'other';
 
 /**
  * What `cw.people.automation.get` answers: whether the AI may ever act on this person, the closed reason when it may not, and when the mark was set.
  * No actor and no text: the senior's ref stays in the store.
- * @experimental
  */
 export interface AutomationMark {
   allowed: boolean;
@@ -30,7 +27,6 @@ export interface AutomationMark {
 /**
  * `cw.people.automation`: a senior's mark that the AI never acts on a person (staff only; `automation.write` in the HTTP layer). It follows a merge:
  * a mark is kept under the canonical person, and a read looks at every alias, the newest mark winning, so a mark set before two people merged is not lost.
- * @experimental
  */
 export interface AutomationFacade {
   /**

@@ -48,7 +48,7 @@ describe('@chatwarden/http/chat', () => {
     for (const name of DOCUMENTED) expect(name in entry, name).toBe(true);
     expect(typeof entry.createRoomBroadcaster).toBe('function');
     expect(typeof entry.chatRoutes).toBe('function');
-    expect(entry.CHAT_WIRE_VERSION).toBe(1);
+    expect(entry.CHAT_WIRE_VERSION).toBe(2);
     expect(entry.HEARTBEAT).toBe(': ping\n\n');
   });
 
@@ -96,6 +96,6 @@ describe('@chatwarden/http/chat', () => {
     expect(PKG.typesVersions['*'].chat).toEqual(['dist/src/chat/index.d.ts']);
     expect(PKG.files).toContain('dist/src');
     // the existing subpaths are untouched
-    expect(Object.keys(PKG.exports)).toEqual(['.', './admin', './chat', './express', './fetch', './cli', './discord', './coop', './eos']);
+    expect(Object.keys(PKG.exports)).toEqual(['.', './admin', './chat', './service', './express', './fetch', './cli', './discord', './coop', './eos']);
   });
 });

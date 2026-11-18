@@ -5,7 +5,7 @@ import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
 import { absoluteTime, formatDuration, listOf, waitTone } from '../format.js';
 import { Icon } from '../icons.js';
-import { errorText, groupName, reasonChip } from '../labels.js';
+import { errorText, filterOriginLabel, groupName, reasonChip } from '../labels.js';
 import { useQueue } from '../liveQueue.js';
 import { useFeatures } from '../features.js';
 import { LazyAiParts, LazyAppealList } from '../lazyParts.js';
@@ -13,7 +13,8 @@ import { hasAiRead } from '../queue.js';
 import { useMode } from '../mode.js';
 import type { ShownRow } from '../live.js';
 import type { Route } from '../router.js';
-import { Avatar, Kbd, Link, PersonChip, Segmented, Skeleton } from '../ui.js';
+import { Avatar, Kbd, Link, PersonChip, Segmented, Skeleton, Tag } from '../ui.js';
+import { UrgentChip, useUrgentAnnouncement } from './UrgentChip.js';
 
 /** The people shown by name on a row before it says "and N more". */
 const VIEWERS_NAMED = 1;
@@ -55,6 +56,8 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
   const focusIn = useRef(false);
   const sync = (): void => queue.setInteracting(pointerIn.current || focusIn.current);
 
+  // A new urgent report is said once, in the pane's own polite status line (the one "N new" uses).
+  const arrived = useUrgentAnnouncement(queue);
   const people = queue.groups.length;
   const summary = listOf([t('hub.queue.people', { count: people }), t('hub.reports.row.reports', { count: queue.reports })], locale);
 
@@ -96,7 +99,7 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
     body = (
       <div className="cw-empty">
         <p>{t('hub.queue.empty.filtered')}</p>
-        <button type="button" className="cw-linkbtn" onClick={() => queue.setFilter({ claim: 'all', category: 'all', reason: 'all' })}>
+        <button type="button" className="cw-linkbtn" onClick={() => queue.setFilter({ claim: 'all', category: 'all', reason: 'all', asked: undefined })}>
           {t('hub.queue.clearFilters')}
         </button>
       </div>
@@ -137,6 +140,7 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
             onChange={(v) => go(v === 'appeals' ? { name: 'appeals' } : { name: 'reports', status: 'open' })}
           />
         )}
+        {piece === undefined && !appealsView && <UrgentChip />}
         {canTake && !appealsView && (
           <button type="button" className="cw-take" onClick={() => void actions.takeNext()} {...(shortcuts ? { 'aria-keyshortcuts': 'N' } : {})}>
             <span className="cw-take-text">
@@ -162,8 +166,14 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
           </div>
         )}
         {!simple && !appealsView && <ReasonFilter />}
+        {!simple && !appealsView && features.workflow && piece === undefined && <AskedFilter />}
       </div>
       <div className="cw-newbar" role="status">
+        {arrived !== null && (
+          <span key={arrived.key} className="cw-sr">
+            {arrived.text}
+          </span>
+        )}
         {!appealsView && queue.incoming > 0 && (
           <button type="button" className="cw-newpill" title={t('hub.queue.newTitle')} onClick={queue.showIncoming}>
             {t('hub.queue.new', { count: queue.incoming })}
@@ -205,6 +215,19 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
   );
 }
 
+/** With the staff workflow on: one option in the filters, the cases someone asked a second look of the caller's role or lower. Off: nothing is drawn. */
+function AskedFilter() {
+  const { t, me } = useHub();
+  const queue = useQueue();
+  const roles: ReadonlyArray<'senior' | 'owner'> = me.role === 'owner' ? ['senior', 'owner'] : me.role === 'senior' ? ['senior'] : [];
+  return (
+    <label className="cw-check cw-queue-asked">
+      <input type="checkbox" checked={queue.filter.asked !== undefined} onChange={(e) => queue.setFilter({ asked: e.target.checked ? roles : undefined })} />
+      <span>{t('hub.desk.filter.asked')}</span>
+    </label>
+  );
+}
+
 /** The reasons in the queue (and "No reason given") to filter by: a person with any report that said so stays. */
 function ReasonFilter() {
   const { t } = useHub();
@@ -241,6 +264,7 @@ function ReasonFilter() {
  */
 function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; simple: boolean; selected: boolean; piece: PieceRows | undefined; onRelease: () => void }) {
   const { t, locale, now, me } = useHub();
+  const features = useFeatures();
   const g = row.group;
   const name = groupName(t, g);
   const waiting = g.oldestOpenAt === null ? null : Math.max(0, now() - g.oldestOpenAt);
@@ -260,15 +284,22 @@ function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; s
           {!simple && <PersonChip person={g.person} />}
         </span>
         <span className="cw-case-cats">
+          {g.urgent === true && <Tag>{t('hub.urgent.row')}</Tag>}
+          {g.asked !== undefined && features.workflow && <Tag>{t('hub.desk.row.asked')}</Tag>}
           {g.reasons.map((r) => (
             <span key={r.id ?? 'none'} className="cw-cat">
               {reasonChip(t, r.label)}
             </span>
           ))}
+          {(g.origins ?? []).map((o) => (
+            <span key={o.key} className="cw-cat">
+              {filterOriginLabel(t, o.key, o.label)}
+            </span>
+          ))}
           {!simple && hasAiRead(g) && <LazyAiParts part="chip" group={g} />}
         </span>
         <span className="cw-case-facts">
-          {t('hub.queue.reports', { count: g.reports, reporters: t('hub.queue.reporters', { count: g.reporters }) })}
+          {g.reporters === 0 ? t('hub.queue.reports.plain', { count: g.reports }) : t('hub.queue.reports', { count: g.reports, reporters: t('hub.queue.reporters', { count: g.reporters }) })}
           {row.gone && <span className="cw-case-closed"> {t('hub.queue.row.gone')}</span>}
           {g.rankedLow === true && <span className="cw-sr"> {t('hub.queue.row.rankedLow')}</span>}
         </span>

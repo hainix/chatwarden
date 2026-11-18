@@ -48,6 +48,7 @@ describe('withErrors: mapping', () => {
     ['HttpError(unauthorized)', () => new HttpError('unauthorized'), 401, 'unauthorized'],
     ['HttpError(forbidden)', () => new HttpError('forbidden'), 403, 'forbidden'],
     ['HttpError(payload_too_large)', () => new HttpError('payload_too_large'), 413, 'payload_too_large'],
+    ['HttpError(request_timeout)', () => new HttpError('request_timeout'), 408, 'request_timeout'],
     ['HttpError(rate_limited)', () => new HttpError('rate_limited'), 429, 'rate_limited'],
     ['HttpError(invalid_json)', () => new HttpError('invalid_json'), 400, 'invalid_json'],
     ['HttpError(invalid_term)', () => new HttpError('invalid_term'), 400, 'invalid_term'],

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useHub } from './context.js';
 import { absoluteTime, formatDuration, relativeTime, waitTone } from './format.js';
-import { displayName, groupName, reasonChip } from './labels.js';
+import { useFeatures } from './features.js';
+import { displayName, filterOriginLabel, groupName, reasonChip } from './labels.js';
 import { LazyAiParts } from './lazyParts.js';
 import { hasAiRead } from './queue.js';
 import type { QueueGroup } from './queue.js';
@@ -17,6 +18,7 @@ export const EARLIER_SHOWN = 10;
  */
 export function QueueRow({ group, showStatus = false, earlier = true }: { group: QueueGroup; showStatus?: boolean; earlier?: boolean }) {
   const { t, locale, now } = useHub();
+  const workflow = useFeatures().workflow;
   const [expanded, setExpanded] = useState(false);
   // A flagged handle is the hidden label here, as in every list: the name is a click away, in the case.
   const name = group.handle === null ? t('hub.reports.row.unnamed') : groupName(t, group);
@@ -33,8 +35,13 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
         <div className="cw-qrow-who">
           <span className="cw-qrow-name">{name}</span>
           <PersonChip person={group.person} />
+          {group.urgent === true && <Tag>{t('hub.urgent.row')}</Tag>}
+          {group.asked !== undefined && workflow && <Tag>{t('hub.desk.row.asked')}</Tag>}
           {group.reasons.map((r) => (
             <Tag key={r.id ?? 'none'}>{reasonChip(t, r.label)}</Tag>
+          ))}
+          {(group.origins ?? []).map((o) => (
+            <Tag key={o.key}>{filterOriginLabel(t, o.key, o.label)}</Tag>
           ))}
           {hasAiRead(group) && <LazyAiParts part="chip" group={group} />}
           {showStatus && group.open > 0 && <Tag>{t('hub.reports.tag.open')}</Tag>}
@@ -44,7 +51,7 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
         <div className="cw-facts">
           <span>{t('hub.reports.row.reports', { count: group.reports })}</span>
           <span>{t('hub.reports.row.rooms', { count: group.rooms.length })}</span>
-          <span>{t('hub.reports.row.reporters', { count: group.reporters })}</span>
+          {(group.reporters > 0 || (group.origins ?? []).length === 0) && <span>{t('hub.reports.row.reporters', { count: group.reporters })}</span>}
           {group.handles.length > 1 && <span>{t('hub.reports.row.alsoSeenAs', { names: seenAs.join(', ') })}</span>}
         </div>
         {earlier && older.length > 0 && (

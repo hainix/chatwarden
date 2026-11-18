@@ -20,7 +20,7 @@ async function file(w: W, over: { targetHandle?: string; key?: string } = {}) {
   if (!res.ok) throw new Error(`report refused: ${res.refused}`);
   const report = w.cw.reports.get(res.reportId);
   if (report === null) throw new Error('report missing');
-  return { room, id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson };
+  return { room, id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson! };
 }
 let seq = 0;
 

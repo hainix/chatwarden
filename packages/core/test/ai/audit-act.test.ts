@@ -9,7 +9,8 @@ type Rec = Parameters<Awaited<ReturnType<typeof aiWorld>>['cw']['audit']['record
 
 describe('ai.act, ai.acting and ai.undo_all', () => {
   it('are appended after person.automation, once each', () => {
-    expect(AUDIT_ACTIONS.slice(-3)).toEqual(['ai.act', 'ai.acting', 'ai.undo_all']);
+    const at = AUDIT_ACTIONS.indexOf('ai.act');
+    expect(AUDIT_ACTIONS.slice(at, at + 3)).toEqual(['ai.act', 'ai.acting', 'ai.undo_all']);
     expect(AUDIT_ACTIONS[32]).toBe('person.automation');
     for (const a of ['ai.act', 'ai.acting', 'ai.undo_all']) expect(AUDIT_ACTIONS.filter((x) => x === a)).toHaveLength(1);
   });

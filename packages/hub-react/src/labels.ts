@@ -157,7 +157,6 @@ export function termErrorText(t: HubT, error: HubError): string {
  * A handle as text, and the only way one becomes text (names, design 5.5). A handle the server flags (`names.maskInHub`) is the same "hidden" label a blocked line
  * has until a moderator shows it; a handle that is not flagged, or from a server that flags nothing, is as typed. No handle is the empty string: a caller that
  * must say something else (the tag) says it. The label holds no part of the name, not even its length.
- * @experimental
  */
 export function displayName(t: HubT, name: { handle: string | null; flagged?: boolean | undefined; revealed?: boolean | undefined }): string {
   if (name.handle === null) return '';
@@ -167,4 +166,52 @@ export function displayName(t: HubT, name: { handle: string | null; flagged?: bo
 /** How a reported person is named in a queue or a toast: their handle (hidden when flagged), or "Person" and the short tag. */
 export function groupName(t: HubT, g: { handle: string | null; person: string; handleFlagged?: boolean | undefined }, revealed = false): string {
   return g.handle === null ? t('hub.person.unnamed', { tag: personTag(g.person) }) : displayName(t, { handle: g.handle, flagged: g.handleFlagged, revealed });
+}
+
+// ---- Chat filters (0.2.0) ----
+
+/** The words of a filter action, as the panel's choice words them. */
+const FILTER_ACTION: Record<'count' | 'flag' | 'mask' | 'refuse', HubText> = {
+  count: 'hub.settings.filters.action.count',
+  flag: 'hub.settings.filters.action.flag',
+  mask: 'hub.settings.filters.action.mask',
+  refuse: 'hub.settings.filters.action.refuse',
+};
+export const filterActionLabel = (t: HubT, action: string): string => (Object.hasOwn(FILTER_ACTION, action) ? t(FILTER_ACTION[action as keyof typeof FILTER_ACTION]) : action);
+
+const FILTER_KEY: Record<string, HubText> = {
+  'link.deny': 'hub.settings.filters.key.link.deny',
+  'link.invite': 'hub.settings.filters.key.link.invite',
+  'link.shortener': 'hub.settings.filters.key.link.shortener',
+  'link.unlisted': 'hub.settings.filters.key.link.unlisted',
+  'link.new_account': 'hub.settings.filters.key.link.new_account',
+  'personal_info.phone': 'hub.settings.filters.key.personal_info.phone',
+  'personal_info.email': 'hub.settings.filters.key.personal_info.email',
+  'personal_info.card': 'hub.settings.filters.key.personal_info.card',
+  'personal_info.contact': 'hub.settings.filters.key.personal_info.contact',
+  'personal_info.address': 'hub.settings.filters.key.personal_info.address',
+  'ratio.caps': 'hub.settings.filters.key.ratio.caps',
+  'ratio.repeats': 'hub.settings.filters.key.ratio.repeats',
+  'ratio.emoji': 'hub.settings.filters.key.ratio.emoji',
+  'ratio.mentions': 'hub.settings.filters.key.ratio.mentions',
+};
+
+/** What a filter counter key means, in words: "Link on no list", "Phone number", the phrase rule's own name (`phraseLabel`), else "Phrase" or "Filter hit". Never the key. */
+export function filterKeyLabel(t: HubT, key: string, phraseLabel?: string): string {
+  if (Object.hasOwn(FILTER_KEY, key)) return t(FILTER_KEY[key] as HubText);
+  if (key.startsWith('phrase.')) return phraseLabel !== undefined && phraseLabel !== '' ? phraseLabel : t('hub.settings.filters.key.phrase');
+  return t('hub.settings.filters.key.unknown');
+}
+
+/**
+ * The chip on a report a chat filter filed, where a reporter would be: "Filter: Links", "Filter: Personal info", "Filter: Shouting and repeats", "Filter: <the phrase
+ * rule's name>", "Filter: Phrase" when its rule is gone, and plain "Filter" for a key it does not know. Never the key itself.
+ */
+export function filterOriginLabel(t: HubT, key: string | null | undefined, phraseLabel?: string | null): string {
+  const family = typeof key === 'string' ? key.split('.', 1)[0] : '';
+  if (family === 'link') return t('hub.report.origin', { what: t('hub.report.origin.links') });
+  if (family === 'personal_info') return t('hub.report.origin', { what: t('hub.report.origin.personal') });
+  if (family === 'ratio') return t('hub.report.origin', { what: t('hub.report.origin.ratio') });
+  if (family === 'phrase') return t('hub.report.origin', { what: phraseLabel !== undefined && phraseLabel !== null && phraseLabel !== '' ? phraseLabel : t('hub.report.origin.phrase') });
+  return t('hub.report.origin.plain');
 }

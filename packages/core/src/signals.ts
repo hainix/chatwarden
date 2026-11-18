@@ -15,7 +15,6 @@ export type SignalPolarity = 'negative' | 'positive';
 
 /**
  * One kind a game declares. The key in `kinds` is the id the game passes to `record`.
- * @experimental
  */
 export interface SignalKindSpec {
   /** What staff read: "Muted by other players". Plain text, 1 to 60 characters, no markup. Also the label the AI feed sends. */
@@ -25,7 +24,6 @@ export interface SignalKindSpec {
   weight?: number;
 }
 
-/** @experimental */
 export interface SignalGuards {
   /**
    * At most one row per (kind, subject, source) per this many ms. Default 86 400 000 (one day). 60 000 to 30 days. The cap is a calendar bucket
@@ -39,7 +37,6 @@ export interface SignalGuards {
 
 /**
  * One threshold, over distinct sources, in a window.
- * @experimental
  */
 export interface SignalThreshold {
   /** Declared kinds, 1 to 8. */
@@ -54,7 +51,6 @@ export interface SignalThreshold {
 
 /**
  * The feeds. Absent means that feed is off.
- * @experimental
  */
 export interface SignalFeeds {
   /** Lines on the Person page record. `'*'` means every declared kind. */
@@ -67,7 +63,6 @@ export interface SignalFeeds {
   ai?: { kinds: string[] | '*'; windowDays: number };
 }
 
-/** @experimental */
 export interface SignalSettings {
   /** Code only. */
   kinds?: Record<string, SignalKindSpec>;
@@ -93,7 +88,6 @@ export interface ResolvedSignalGuards {
 /**
  * What the kit reads: the declared kinds merged over the built-ins, the guards filled in, the feeds as given. Look kinds up with
  * {@link kindSpecOf}, never with `kinds[id]`.
- * @experimental
  */
 export interface ResolvedSignals {
   kinds: Readonly<Record<string, ResolvedSignalKind>>;
@@ -104,7 +98,6 @@ export interface ResolvedSignals {
 /** Who a signal is about or from: a staff-side subject id (`cw.rooms.subjectAt`), or the raw identity the game already passes to the doors. */
 export type SignalParty = SubjectId | RawWho;
 
-/** @experimental */
 export interface SignalInput {
   /** A declared kind (or a built-in). */
   kind: string;
@@ -120,7 +113,6 @@ export interface SignalInput {
   weight?: number;
 }
 
-/** @experimental */
 export interface SignalCount {
   kind: string;
   label: string;
@@ -134,7 +126,6 @@ export interface SignalCount {
   lastAt: number;
 }
 
-/** @experimental */
 export interface SignalKindView {
   kind: string;
   label: string;
@@ -145,7 +136,6 @@ export interface SignalKindView {
 
 /**
  * Kinds the kit declares itself. An adopter may relabel or re-weight one by declaring the same key; the polarity must stay negative.
- * @experimental
  */
 export const BUILTIN_SIGNAL_KINDS: Readonly<Record<'flood_triggered', Readonly<SignalKindSpec>>> = deepFreeze({
   flood_triggered: { label: 'Flooded the chat', polarity: 'negative' as const },
@@ -366,7 +356,6 @@ function ladderFeed(v: unknown, path: string, ctx: FeedContext): void {
  * Check the feeds against the declared `kinds` and `opts.signalsMs` (the retention of signal rows, ms), throwing {@link ProfileError}
  * whose path starts with `path` (`path.queue.kinds[0]`). A feed names declared kinds only; `queue` and a `raise` rule name negative
  * kinds only; a count and a window are in range; a window is not longer than `signalsMs` (rows older than that are gone) or 90 days.
- * @experimental
  */
 export function checkSignalFeeds(
   feeds: SignalFeeds | undefined,
@@ -404,7 +393,6 @@ function dropReason(err: unknown): SignalDropReason {
  * in force. Never throws: garbage in gives `{}`. `opts.onDrop` is told the name of each feed that lost something, once per feed, with
  * the reason code of the first thing lost (a name that is not one of the four feeds is passed as it was stored, with `unknown_feed`: do
  * not log it). The result passes {@link checkSignalFeeds}.
- * @experimental
  */
 export function pruneSignalFeeds(
   feeds: unknown,
@@ -475,7 +463,6 @@ function copyFeeds(feeds: SignalFeeds): SignalFeeds {
  * feeds as given. Throws {@link ProfileError} naming the field (`signals.kinds.x.label`), never echoing the value. The feeds are
  * checked against the declared kinds and the 90 day cap here; the cross-check with `retention.signalsMs` is {@link checkSignalFeeds}'s
  * job, called where the retention is known. The result shares nothing with the input, and resolving it again gives the same value.
- * @experimental
  */
 export function resolveSignals(input: SignalSettings | undefined, path = 'signals'): ResolvedSignals {
   if (input === undefined) return { kinds: resolveKinds(undefined, `${path}.kinds`), guards: resolveGuards(undefined, `${path}.guards`), feeds: {} };

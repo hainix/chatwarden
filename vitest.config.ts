@@ -12,6 +12,10 @@ export default defineConfig({
     // Order matters: the more specific `@chatwarden/matcher/fixtures` subpaths must come before `@chatwarden/matcher`.
     alias: [
       {
+        find: '@chatwarden/core/notice-copy',
+        replacement: fileURLToPath(new URL('./packages/core/src/noticeCopy.ts', import.meta.url)),
+      },
+      {
         find: '@chatwarden/core',
         replacement: fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
       },
@@ -74,6 +78,10 @@ export default defineConfig({
       {
         find: '@chatwarden/http/chat',
         replacement: fileURLToPath(new URL('./packages/http/src/chat/index.ts', import.meta.url)),
+      },
+      {
+        find: '@chatwarden/http/service',
+        replacement: fileURLToPath(new URL('./packages/http/src/service/index.ts', import.meta.url)),
       },
       {
         find: '@chatwarden/http/express',

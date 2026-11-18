@@ -123,7 +123,7 @@ describe('socketTransport drives a real ChatBox', () => {
     fireEvent.click(within(log()).getByRole('button', { name: 'Report' }));
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Report' }));
     await waitFor(() => expect(socket.calls).toContain('chat:report'));
-    expect(await screen.findByText(/Thanks. We got your report./)).toBeTruthy();
+    expect(await screen.findByText(/Thanks for the report. We.ll look into it./)).toBeTruthy();
   });
 
   it('a banned player is closed with the reason banned (no retry), and close() disconnects only this socket', async () => {

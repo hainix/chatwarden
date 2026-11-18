@@ -33,6 +33,12 @@ export const durationOf = (key: DurationKey): number | null => DURATIONS.find((d
 /** The kinds "Something else" offers, in the order shown. */
 export const CUSTOM_KINDS: readonly SanctionKind[] = ['chat', 'area', 'ban', 'warning', 'note'];
 
+/** What a scoped caller may apply (`Me.scopedLimits`): the kinds, and the longest length of a restriction or a ban (a permanent one never). */
+export interface ChoiceLimits {
+  kinds: readonly SanctionKind[];
+  maxDurationMs: number;
+}
+
 /** A kind has no length when it is only a record: a warning or a note. */
 export const hasLength = (kind: SanctionKind): boolean => kind !== 'warning' && kind !== 'note';
 
@@ -40,6 +46,15 @@ export const hasLength = (kind: SanctionKind): boolean => kind !== 'warning' && 
 export interface Choice {
   kind: SanctionKind;
   durationMs: number | null;
+}
+
+/**
+ * The choices a scoped caller's limits allow (the server refuses the rest with `invalid_sanction`): only the kinds listed and, for a kind with a length, a length of at most the limit (never a permanent one).
+ * No limits (a caller with no scope) changes nothing.
+ */
+export function limitChoices(choices: readonly Choice[], limits: ChoiceLimits | undefined): Choice[] {
+  if (limits === undefined) return [...choices];
+  return choices.filter((c) => limits.kinds.includes(c.kind) && (!hasLength(c.kind) || (c.durationMs !== null && c.durationMs <= limits.maxDurationMs)));
 }
 
 /** A stable text for a choice, used as the value of the "What happens" menu: `chat:86400000`, `ban:null`. */
@@ -114,16 +129,19 @@ export interface Draft {
 
 export type UiVerdict = 'fair' | 'not_a_problem' | 'bad_faith';
 
-/** @experimental */
 export interface DecisionForm {
   verdict: UiVerdict | null;
   evidence: string;
   reason: string;
   actions: Draft[];
+  /**
+   * "Ask for a new name": the reported person is also asked to choose another, citing this rule (a number as text, or `''` while it is not chosen). Null when it is not asked.
+   * Only with the verdict "fair" and only of the reported person.
+   */
+  rename: { rule: string } | null;
 }
 
-/** @experimental */
-export const emptyForm = (): DecisionForm => ({ verdict: null, evidence: '', reason: '', actions: [] });
+export const emptyForm = (): DecisionForm => ({ verdict: null, evidence: '', reason: '', actions: [], rename: null });
 
 /** A new action for `person`; `rule` is the rule to start from (the report's), or `''`. */
 export function newDraft(uid: string, person: string, rule: number | ''): Draft {
@@ -144,10 +162,14 @@ export function resolveDraft(d: Draft): Choice | null {
   return parseChoiceKey(d.what);
 }
 
-/** The verdict the server is sent. "Fair" is `noted` when every action is a note (and there is one), else `upheld`. */
+/**
+ * The verdict the server is sent. "Fair" is `noted` when every action is a note (and there is one), else `upheld`. A request for a new name is `upheld` always:
+ * the server refuses `noted` with a rename (a note is not a decision against the person).
+ */
 export function serverVerdict(form: DecisionForm): DecideInput['verdict'] {
   if (form.verdict === 'not_a_problem') return 'no_action';
   if (form.verdict === 'bad_faith') return 'bad_faith';
+  if (form.rename !== null) return 'upheld';
   const choices = form.actions.map(resolveDraft);
   return choices.length > 0 && choices.every((c) => c?.kind === 'note') ? 'noted' : 'upheld';
 }
@@ -175,6 +197,7 @@ export function toInput(form: DecisionForm): DecideInput {
   const input: DecideInput = { verdict: serverVerdict(form), actions };
   if (reason !== '' || !isPlainDismissal(form)) input.reason = reason;
   if (form.verdict === 'bad_faith') input.evidence = form.evidence.trim();
+  if (form.rename !== null) input.rename = { rule: Number(form.rename.rule) };
   return input;
 }
 
@@ -216,6 +239,8 @@ export interface Problems {
   reason?: Problem;
   /** About the list of actions as a whole. */
   list?: Problem;
+  /** "Ask for a new name": its rule is not chosen or not in force, the verdict is not "fair", or an action is about someone but the reported person. */
+  rename?: Problem;
   /** By draft `uid`; a draft with no problem has no entry. */
   actions: Record<string, ActionProblems>;
   count: number;
@@ -242,6 +267,13 @@ export function validate(form: DecisionForm, ctx: ValidationContext): Problems {
   else if (form.actions.length > 0 && !ctx.canApply) out.list = problem('hub.decide.error.cannotApply');
 
   const dismissal = form.verdict === 'not_a_problem' || form.verdict === 'bad_faith';
+  if (form.rename !== null) {
+    // A rename rides on a "fair" decision, of the reported person only, and always cites a numbered rule that is in force.
+    if (dismissal) out.rename = problem('hub.decide.error.renameNeedsFair');
+    else if (form.actions.some((a) => a.person !== ctx.target)) out.rename = problem('hub.decide.error.renameOnlyReported');
+    else if (!/^[1-9]\d*$/.test(form.rename.rule)) out.rename = problem('hub.decide.error.ruleRequired');
+    else if (!ctx.rules.includes(Number(form.rename.rule))) out.rename = problem('hub.decide.error.ruleUnknown');
+  }
   const used = new Set<string>();
   for (const d of form.actions) {
     const found: ActionProblems = {};
@@ -277,7 +309,7 @@ export function validate(form: DecisionForm, ctx: ValidationContext): Problems {
   }
 
   out.count =
-    [out.verdict, out.evidence, out.reason, out.list].filter((x) => x !== undefined).length +
+    [out.verdict, out.evidence, out.reason, out.list, out.rename].filter((x) => x !== undefined).length +
     Object.values(out.actions).reduce((sum, a) => sum + Object.keys(a).length, 0);
   return out;
 }
@@ -294,11 +326,25 @@ export function addAction(form: DecisionForm, ctx: ValidationContext, reportRule
   return { ...form, actions: [...form.actions, newDraft(uid, person, startRule(ctx, reportRule))] };
 }
 
-/** A change of verdict: drops the actions on the reported person when the new verdict may not act on them. */
-export function dropTargetActions(form: DecisionForm, target: string): { form: DecisionForm; dropped: number } {
+/**
+ * A change of verdict: drops the actions on the reported person when the new verdict may not act on them, and the request for a new name (which only a
+ * "fair" decision may carry). `renameCleared` says the request was there.
+ */
+export function dropTargetActions(form: DecisionForm, target: string): { form: DecisionForm; dropped: number; renameCleared: boolean } {
   const kept = form.actions.filter((a) => a.person !== target);
   const dropped = form.actions.length - kept.length;
-  return dropped === 0 ? { form, dropped } : { form: { ...form, actions: kept }, dropped };
+  const renameCleared = form.rename !== null;
+  if (dropped === 0 && !renameCleared) return { form, dropped, renameCleared };
+  return { form: { ...form, actions: kept, rename: null }, dropped, renameCleared };
+}
+
+/**
+ * The rule "Ask for a new name" starts on: the first action's rule when it is a numbered rule in force, else the report's rule when it is, else none yet.
+ */
+export function renameStartRule(form: DecisionForm, ctx: ValidationContext, reportRule: number | 'uncovered'): string {
+  const first = form.actions.find((a) => /^[1-9]\d*$/.test(a.rule) && ctx.rules.includes(Number(a.rule)));
+  if (first !== undefined) return first.rule;
+  return typeof reportRule === 'number' && ctx.rules.includes(reportRule) ? String(reportRule) : '';
 }
 
 /** The draft fields that say `choice`, or null when the form cannot say it (a length over 365 days). */
@@ -380,7 +426,6 @@ export function initialForm(ctx: ValidationContext, outcome: Suggestion['outcome
 /**
  * Where the form in the bar came from: the ladder's pre-fill (as always), the AI's recommendation as it stands, or the AI's after the
  * moderator changed anything (a key counts: pressing 1, 2 or 3 by hand is an edit, not an accept).
- * @experimental
  */
 export type FormSource = 'ladder' | 'ai' | 'edited';
 

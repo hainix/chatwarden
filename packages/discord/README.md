@@ -16,7 +16,7 @@ Status: pre-release, as-is, no support promise.
 npm install @chatwarden/discord @chatwarden/core
 ```
 
-Node 22.13 or newer. No other dependencies; it uses the global `fetch`. The peer range on `@chatwarden/core` is `^0.1.9`: the feed listens for the two appeal events, which core 0.1.8 does not have.
+Node 22.13 or newer. No other dependencies; it uses the global `fetch`. The peer range on `@chatwarden/core` is `^0.2.0`, like every `@chatwarden/*` peer in 0.2.0: the feed listens for the appeal events and posts the urgent and digest posts, which an older core does not have.
 
 ## Set up
 
@@ -51,6 +51,8 @@ const feed = discordFeed(cw, {
 feed.dispose();
 ```
 
+`feed.postDigest(days = 7)` (new in 0.2.0) posts the Insights digest of the last 7, 30 or 90 days to the same channel on demand: one message of counts and times (reports filed, decided and open, urgent ones, the median and the 90th percentile of the time to a decision, the longest open wait), no names, pinging nobody. It returns `true` when a post was queued and `false` when there was nothing to post (`desk.insights` off, or the feed disposed). The kit has no scheduler: call it from your own timer or cron. A failed read or post is logged by class and never thrown.
+
 `cw` is what `createChatwarden` returned. If you also mount `@chatwarden/http`, `hubLink` can point at its staff routes (for
 example `GET /admin/reports/:id`), or at your own console page that calls them.
 
@@ -64,6 +66,7 @@ and subscribes nothing.
 | `webhookUrl` | `string` | The forum channel's webhook. `https:` on `discord.com` or `discordapp.com` (also the `ptb.` and `canary.` hosts), path `/api/webhooks/<id>/<token>`, no port or credentials. Required. |
 | `hubLink` | `(kind: 'report' \| 'person', id: string) => string` | Builds the links in each post. Required. The id is the only place an id appears in a post (see below). A result that is not an `http(s)` URL, one over 512 characters, or a throw drops that one link and keeps the post. |
 | `mentionRoleId` | `string` | A Discord role id (17 to 20 digits) to ping on a severe report or a severe sanction. Nothing else ever pings anyone. |
+| `urgentMention` | `string` | New in 0.2.0. A Discord role id (17 to 20 digits) to ping on an urgent report. An urgent report posts "Urgent report." with this mention and an "Open in the hub" link and nothing else: never its reason (a welfare report's most of all), category, rule, handle or note. Without it the urgent post is the same and pings nobody. An urgent report is posted even with `severeOnly`. `report.handoff` posts nothing. |
 | `severeOnly` | `boolean` | Post only severe reports, their closing, severe sanctions, the lift of a sanction under a severe rule and appeals under a severe rule. Skips automatic timeouts and rule gaps. Default `false`. |
 | `components` | `(post: { kind: 'report'; reportId: string }) => DiscordActionRow[] \| undefined` | `@experimental`. Buttons for the post that announces a report; nothing else gets any. Give it `bot.components` from `discordBot`. Needs an application-owned webhook (see "Buttons"). A throw or an invalid result drops the buttons for that post, never the post. |
 | `fetch` | `typeof fetch` | The `fetch` to post with. Default: the global one. For tests. |
@@ -73,7 +76,7 @@ and subscribes nothing.
 **What counts as severe.** A report in category `hate`, or a report or sanction whose Community Rule is in
 `cw.profile.severeRules` (by default Community Rule 1). Only severe posts carry the role ping.
 
-**Appeals (0.1.9, `@experimental`).** With appeals on (`profile.appeals.enabled`), two more posts go into the person's thread, and ping no one: `Appeal filed
+**Appeals (0.1.9).** With appeals on (`profile.appeals.enabled`), two more posts go into the person's thread, and ping no one: `Appeal filed
 against a 24-hour chat restriction, Rule 2.` when a player files, and `Appeal decided: lighter.` when a moderator decides (the word is `upheld`, `lighter`
 or `revoked`), each with an "Open in the hub" link on the person. The length comes from the appeal's sanction (`cw.appeals.get`, read for the two times only); without it
 the post names the kind and no length. An appeal made moot by someone else's revoke posts nothing, and neither does `rename.required`, which is for your game. With

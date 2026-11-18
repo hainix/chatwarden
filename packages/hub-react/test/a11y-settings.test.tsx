@@ -315,8 +315,11 @@ describe.each(['light', 'dark'] as const)('axe on names: the panel, the rename f
     expect(await violations(container)).toEqual([]);
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(await screen.findByText('Write a reason. Only staff see it.')).toBeInTheDocument();
+    // A rename always cites a numbered Community Rule: the first Apply says so too, and the second needs one picked.
+    expect(screen.getAllByText('Choose a rule').length).toBeGreaterThan(0);
     expect(await violations(container)).toEqual([]);
     await user.type(screen.getByLabelText('Reason'), 'A name against the rules.');
+    await user.selectOptions(screen.getByLabelText('Community Rule'), '1');
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     await screen.findByText('Asked to choose a new name');
     expect(await violations(container)).toEqual([]);
@@ -342,3 +345,39 @@ describe.each(['light', 'dark'] as const)('axe on names: the panel, the rename f
 async function user_names(user: ReturnType<typeof renderHub>['user']): Promise<void> {
   await user.click(await screen.findByRole('button', { name: 'Names' }));
 }
+
+describe.each(['light', 'dark'] as const)('axe on the urgent-lane settings, %s theme', (theme) => {
+  it('the per-reason fields (closed and open, with a thank-you over the limit and the urgent warning) have none', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    const { container, user } = renderHub(w, { theme, path: '/settings/reporting' });
+    await screen.findByRole('list', { name: 'Reasons' });
+    expect(await violations(container)).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'More about Threats' }));
+    await user.click(screen.getByRole('button', { name: 'More about Spam or ads' }));
+    await user.click(within(screen.getByRole('group', { name: 'After a report about Threats' })).getByRole('checkbox', { name: 'Urgent' }));
+    expect(await violations(container)).toEqual([]);
+    const field = within(screen.getByRole('group', { name: 'After a report about Spam or ads' })).getByRole('textbox', { name: 'Thank-you for this reason' });
+    await user.click(field);
+    await user.paste('x'.repeat(301));
+    expect(screen.getByText('Keep this to 300 characters or fewer.')).toBeInTheDocument();
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the Safety panel (collapsed, open, with a refused link, read-only) has none', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    const { container, user } = renderHub(w, { theme, path: '/settings/advanced' });
+    await screen.findByRole('region', { name: 'Safety and urgent cases' });
+    expect(await violations(container)).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Guidance, contact and resources' }));
+    await user.click(screen.getByRole('button', { name: 'Add a resource' }));
+    await user.type(screen.getByRole('textbox', { name: 'Resource 1: link' }), 'http://x.test');
+    expect(await screen.findByText('Resource 1: the link must start with https://.')).toBeInTheDocument();
+    expect(await violations(container)).toEqual([]);
+    cleanup();
+    const reader = await hubWorld({ role: 'moderator' });
+    const read = renderHub(reader, { theme, path: '/settings/advanced' });
+    await screen.findByRole('region', { name: 'Safety and urgent cases' });
+    await read.user.click(screen.getByRole('button', { name: 'Guidance, contact and resources' }));
+    expect(await violations(read.container)).toEqual([]);
+  });
+});

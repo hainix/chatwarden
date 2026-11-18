@@ -54,7 +54,7 @@ async function world(over: { wrap?: (cw: Chatwarden) => Chatwarden; permissions?
       id: res.reportId,
       report,
       target: report.targetPerson,
-      reporter: report.reporterPerson,
+      reporter: report.reporterPerson!,
       bystander: real.rooms.subjectAt(room, 'p3') as string,
     };
   };
@@ -109,18 +109,33 @@ describe('adminRoutes: shape', () => {
   it('includes exactly the report/decision/history routes and the two AI report routes (the other groups have their own files)', async () => {
     const { routes } = await world();
     expect(Object.keys(routes).filter((k) => /\/(reports|people)/.test(k)).sort()).toEqual([
+      // Legal hold and privacy requests (0.2.0): their own checks are in admin.legal.test.ts and admin.privacy.test.ts.
+      // The staff workflow (0.2.0): their own checks are in admin.workflow.test.ts.
+      'DELETE /reports/:id/comments/:cid',
+      'DELETE /reports/:id/escalate',
+      'DELETE /reports/:id/hold',
       'GET /people/:ref/history',
+      'GET /people/:ref/links',
+      'GET /people/:ref/privacy/export',
       'GET /reports',
       'GET /reports/:id',
+      'GET /reports/:id/bundle',
+      'POST /people/:ref/privacy/erase',
       // The rename route lives with the sanctions (its own checks are in admin.names.test.ts).
       'POST /people/:ref/rename',
       'POST /reports/:id/ai/dont-teach',
       'POST /reports/:id/ai/read',
+      'POST /reports/:id/comments',
       'POST /reports/:id/decide',
+      'POST /reports/:id/escalate',
+      // The urgent lane (0.2.0): their own checks are in admin.urgent.test.ts.
+      'POST /reports/:id/handoff',
       'POST /reports/:id/suggest',
+      'POST /reports/:id/urgent',
       'POST /reports/dismiss-open',
       // AI levels 3 and 4 (0.1.13): the "do not automate" mark lives with the people routes (its own checks are in admin.automation.test.ts).
       'PUT /people/:id/automation',
+      'PUT /reports/:id/hold',
     ]);
   });
 

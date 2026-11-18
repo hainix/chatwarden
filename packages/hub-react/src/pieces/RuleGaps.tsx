@@ -4,7 +4,6 @@ import type { PieceProps } from './Piece.js';
 
 /**
  * The props of `RuleGaps`: a class name.
- * @experimental
  */
 export type RuleGapsProps = PieceProps;
 
@@ -15,7 +14,6 @@ export type RuleGapsProps = PieceProps;
  * ```tsx
  * <RuleGaps />
  * ```
- * @experimental
  */
 export function RuleGaps({ className }: RuleGapsProps) {
   return (

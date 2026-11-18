@@ -7,8 +7,9 @@ import {
   type Span,
   type TermRow,
 } from './matcher.js';
-import { collapseLikePreset, foldPhrase, foldTerm } from './normalise.js';
-import { matchName } from './names.js';
+import { collapseLikePreset, foldPhrase, foldTerm, nfkcVisible, normaliseUnspaced } from './normalise.js';
+import { scanLetters } from './unspaced.js';
+import { matchName, matchReserved } from './names.js';
 import type { TermPack } from './termPack.js';
 import type { ExceptionRecord, TermRecord, TermStore } from './termStore.js';
 
@@ -27,8 +28,9 @@ interface Rows {
  *  and remember that players typed them. */
 export interface TermEditor {
   /** Returns the new row id. */
-  addTerm(input: { term: string; language: string; note?: string | null }, hits?: string[]): string;
-  updateTerm(id: string, patch: { term?: string; language?: string; note?: string | null }, hits?: string[]): void;
+  addTerm(input: { term: string; language: string; note?: string | null; matchMode?: 'word' | 'segment' | 'contains' | null }, hits?: string[]): string;
+  /** `matchMode: null` clears the mode (by script); a mode that does not fit the term's script is refused (`invalid`). */
+  updateTerm(id: string, patch: { term?: string; language?: string; note?: string | null; matchMode?: 'word' | 'segment' | 'contains' | null }, hits?: string[]): void;
   setTermActive(id: string, active: boolean): void;
   /** Returns the new row id. */
   addException(input: { phrase: string; language: string; note?: string | null }, hits?: string[]): string;
@@ -51,7 +53,7 @@ export interface TermEditor {
 export type ChangeRefusalCode = 'duplicate' | 'unblocks_known' | 'invalid' | 'not_found' | 'not_loaded' | 'build_failed';
 
 /** What {@link LiveTerms.syncPack} changed, counted over terms and exceptions together. `keptYours` is a row a human has edited (left
- *  alone), `skipped` a pack row whose word already reads as another row's word. @experimental */
+ *  alone), `skipped` a pack row whose word already reads as another row's word. */
 export interface SyncSummary {
   added: number;
   deactivated: number;
@@ -61,12 +63,13 @@ export interface SyncSummary {
   skipped: number;
 }
 
-/** The answer of {@link LiveTerms.syncPack}: the summary and the pack version, or the refusal code ({@link ChangeRefusalCode}). @experimental */
+/** The answer of {@link LiveTerms.syncPack}: the summary and the pack version, or the refusal code ({@link ChangeRefusalCode}). */
 export type SyncResult = { ok: true; summary: SyncSummary; version: string } | { ok: false; code: ChangeRefusalCode };
 
 /** `error` is a message safe to show a moderator (it never quotes a term or a line); `code` is the same refusal as data. */
 export type ChangeResult<T> = { ok: true; value: T } | { ok: false; error: string; code: ChangeRefusalCode };
-export type CheckResult = { ok: true; hits: string[] } | { ok: false; error: string };
+/** The dry run: the lines the candidate would block, and (for a term in a script written without spaces) the mode it was read in. */
+export type CheckResult = { ok: true; hits: string[]; matchMode?: 'segment' | 'contains' } | { ok: false; error: string };
 
 /** A change the rules refuse. The message is safe to hand back to a moderator (it never quotes a term). */
 class Refusal extends Error {
@@ -118,7 +121,7 @@ export interface ExceptionListRow extends ExceptionRow {
   updatedAt: number | null;
 }
 
-const plainTerm = (r: TermRecord): TermRow => ({ id: r.id, term: r.term, language: r.language, active: r.active });
+const plainTerm = (r: TermRecord): TermRow => ({ id: r.id, term: r.term, language: r.language, active: r.active, ...(r.matchMode === null || r.matchMode === undefined ? {} : { matchMode: r.matchMode }) });
 const plainException = (r: ExceptionRecord): ExceptionRow => ({
   id: r.id,
   phrase: r.phrase,
@@ -129,7 +132,7 @@ const plainException = (r: ExceptionRecord): ExceptionRow => ({
 const isThenable = (v: unknown): boolean =>
   typeof v === 'object' && v !== null && typeof (v as { then?: unknown }).then === 'function';
 
-const NEVER: Matcher = { match: () => null, spans: () => [], matchName: () => null };
+const NEVER: Matcher = { match: () => null, spans: () => [], matchName: () => null, matchReserved };
 
 /** Terms and exceptions share a shape apart from the word column, so one set of edit internals serves both. */
 interface Kind {
@@ -140,8 +143,8 @@ interface Kind {
   key(word: string): string;
   words(): { id: string; word: string }[];
   get(id: string): TermRecord | ExceptionRecord | undefined;
-  insert(id: string, word: string, language: string, note: string | null, actor: string, at: number): void;
-  patch(id: string, p: { word?: string; language?: string; note?: string | null }, actor: string, at: number): void;
+  insert(id: string, word: string, language: string, note: string | null, actor: string, at: number, matchMode?: 'word' | 'segment' | 'contains' | null): void;
+  patch(id: string, p: { word?: string; language?: string; note?: string | null; matchMode?: 'word' | 'segment' | 'contains' | null }, actor: string, at: number): void;
   setActive(id: string, active: boolean, actor: string, at: number): void;
 }
 
@@ -193,6 +196,7 @@ export class LiveTerms implements Matcher {
         return {
           terms: this.store.listTerms().map((r) => ({
             id: r.id, term: r.term, language: r.language, active: r.active,
+            ...(r.matchMode === null || r.matchMode === undefined ? {} : { matchMode: r.matchMode }),
             note: r.note, addedBy: r.addedBy, addedAt: r.addedAt, updatedBy: r.updatedBy, updatedAt: r.updatedAt,
           })),
           exceptions: this.store.listExceptions().map((r) => ({
@@ -218,6 +222,11 @@ export class LiveTerms implements Matcher {
   /** {@link match} for a name (a handle, a table or deck name): also reads the name split into words. */
   matchName(name: string): { termId: string } | null {
     return matchName(this.current, name);
+  }
+
+  /** Is this name one of the protected `entries` (reserved names)? Independent of the term list: see {@link matchReserved}. */
+  matchReserved(name: string, entries: readonly string[], allow: readonly string[]): boolean {
+    return matchReserved(name, entries, allow);
   }
 
   /** Every match as a range on the original text (end exclusive), for masking. Same rules as {@link match}. */
@@ -250,19 +259,22 @@ export class LiveTerms implements Matcher {
    * corpus and `recentLines`, minus the known losses. Existing exceptions apply; the candidate is matched
    * alone, so the answer is about this term, not the rest of the list. Writes nothing.
    */
-  check(term: string, language: string, recentLines: readonly string[]): CheckResult {
+  check(term: string, language: string, recentLines: readonly string[], matchMode?: 'word' | 'segment' | 'contains' | null): CheckResult {
     let matcher: Matcher;
     try {
       // A blank exception is the stored list's problem, not the candidate's: skip it.
       const usable = this.loaded.exceptions.filter((e) => foldPhrase(e.phrase).length > 0);
-      matcher = buildMatcher([{ id: 'candidate', term, language, active: true }], usable);
+      matcher = buildMatcher([{ id: 'candidate', term, language, active: true, ...(matchMode === undefined || matchMode === null ? {} : { matchMode }) }], usable);
     } catch (err) {
       if (err instanceof MatcherBuildError) return { ok: false, error: describeBuildError(err, false) };
       throw err;
     }
     const losses = new Set(this.pack?.knownLosses ?? []);
     const lines = new Set([...(this.pack?.negativeCorpus ?? []), ...recentLines].filter((l) => !losses.has(l)));
-    return { ok: true, hits: [...lines].filter((l) => matcher.match(l) !== null) };
+    const hits = [...lines].filter((l) => matcher.match(l) !== null);
+    // A term in a script written without spaces says which mode it was read in (`segment` unless asked for `contains`); a Latin term has none.
+    const letters = typeof term === 'string' ? scanLetters(normaliseUnspaced(term)) : { unspaced: false, foreign: false };
+    return letters.unspaced ? { ok: true, hits, matchMode: matchMode === 'contains' ? 'contains' : 'segment' } : { ok: true, hits };
   }
 
   /**
@@ -344,7 +356,6 @@ export class LiveTerms implements Matcher {
    * A row is the adopter's ("touched") when `updatedBy` is set to anything that is not a `corpus:` actor, so the rows this method
    * itself changed (which {@link TermStore} stamps with `actor`) stay the corpus's to change until a human edits them. Pass
    * `corpus:<version>` as the actor. Never throws: a store failure is `build_failed` and logged (`terms.sync_failed`, error class only).
-   * @experimental
    */
   syncPack(pack: TermPack, options: { actor: string; dryRun?: boolean }): SyncResult {
     if (this.pack !== null && !this.storeLoaded) return { ok: false, code: 'not_loaded' };
@@ -391,10 +402,10 @@ export class LiveTerms implements Matcher {
         fold: foldTerm,
         records: store.listTerms() as Mergeable[],
         insert: (r) => store.insertTerm(r),
-        setWord: (id, word, language) => store.updateTerm(id, { term: word, language, updatedBy: actor, updatedAt: at }),
+        setWord: (id, word, language, matchMode) => store.updateTerm(id, { term: word, language, ...(matchMode === undefined ? {} : { matchMode }), updatedBy: actor, updatedAt: at }),
         setActive: (id, active) => store.setTermActive(id, active, actor, at),
       },
-      pack.terms.map((t) => ({ id: t.id, word: t.term, language: t.language, active: t.active })),
+      pack.terms.map((t) => ({ id: t.id, word: t.term, language: t.language, active: t.active, matchMode: t.matchMode ?? null })),
       actor,
       at,
       summary,
@@ -420,7 +431,7 @@ export class LiveTerms implements Matcher {
 
   private mergeRows(
     kind: MergeKind,
-    rows: { id: string; word: string; language: string; active: boolean }[],
+    rows: { id: string; word: string; language: string; active: boolean; matchMode?: 'word' | 'segment' | 'contains' | null }[],
     actor: string,
     at: number,
     summary: SyncSummary,
@@ -452,6 +463,7 @@ export class LiveTerms implements Matcher {
           [kind.wordField]: kind.fold(row.word),
           language: row.language,
           active: row.active,
+          ...(row.matchMode === null || row.matchMode === undefined ? {} : { matchMode: row.matchMode }),
           note: null,
           addedBy: actor,
           addedAt: at,
@@ -472,14 +484,19 @@ export class LiveTerms implements Matcher {
       }
       let now = cur;
       const oldKey = kind.key(cur[kind.wordField]);
-      if (key !== oldKey || row.language !== cur.language) {
+      const modeChanged = kind.subject === 'term' && (row.matchMode ?? null) !== (cur.matchMode ?? null);
+      if (key !== oldKey || row.language !== cur.language || modeChanged) {
         const holder = taken.get(key);
         if (key !== oldKey && holder !== undefined && holder !== row.id) {
           summary.skipped += 1;
         } else {
           const word = key !== oldKey ? kind.fold(row.word) : cur[kind.wordField];
-          kind.setWord(row.id, word, row.language);
+          kind.setWord(row.id, word, row.language, kind.subject === 'term' ? (row.matchMode ?? null) : undefined);
           now = { ...cur, [kind.wordField]: word, language: row.language, updatedBy: actor, updatedAt: at };
+          if (kind.subject === 'term') {
+            if (row.matchMode === null || row.matchMode === undefined) delete now.matchMode;
+            else now.matchMode = row.matchMode;
+          }
           writeAudit('update', cur, now);
           if (taken.get(oldKey) === row.id) taken.delete(oldKey);
           taken.set(key, row.id);
@@ -534,7 +551,7 @@ export class LiveTerms implements Matcher {
     if (this.pack) {
       try {
         const rows: Rows = {
-          terms: this.pack.terms.map((t) => ({ id: t.id, term: t.term, language: t.language, active: t.active })),
+          terms: this.pack.terms.map((t) => ({ id: t.id, term: t.term, language: t.language, active: t.active, ...(t.matchMode === null || t.matchMode === undefined ? {} : { matchMode: t.matchMode }) })),
           exceptions: this.pack.exceptions.map((e) => ({ ...e })),
         };
         this.current = buildMatcher(rows.terms, rows.exceptions);
@@ -565,6 +582,7 @@ export class LiveTerms implements Matcher {
         if (taken.has(`id:${t.id}`) || taken.has(`w:${key}`)) continue;
         store.insertTerm({
           id: t.id, term: t.term, language: t.language, active: t.active,
+          ...(t.matchMode === null || t.matchMode === undefined ? {} : { matchMode: t.matchMode }),
           note: null, addedBy: 'seed', addedAt: at, updatedBy: null, updatedAt: null,
         });
         taken.add(`id:${t.id}`);
@@ -627,16 +645,16 @@ export class LiveTerms implements Matcher {
     const store = this.store;
     return {
       subject: 'term',
-      fold: foldTerm,
+      fold: foldStored,
       key: termKey,
       words: () => store.listTerms().map((r) => ({ id: r.id, word: r.term })),
       get: (id) => store.listTerms().find((r) => r.id === id),
-      insert: (id, word, language, note, actor, at) =>
+      insert: (id, word, language, note, actor, at, matchMode) =>
         store.insertTerm({
-          id, term: word, language, active: true, note, addedBy: actor, addedAt: at, updatedBy: null, updatedAt: null,
+          id, term: word, language, active: true, ...(matchMode === null || matchMode === undefined ? {} : { matchMode }), note, addedBy: actor, addedAt: at, updatedBy: null, updatedAt: null,
         }),
       patch: (id, p, actor, at) =>
-        store.updateTerm(id, { term: p.word, language: p.language, note: p.note, updatedBy: actor, updatedAt: at }),
+        store.updateTerm(id, { term: p.word, language: p.language, note: p.note, ...(p.matchMode === undefined ? {} : { matchMode: p.matchMode }), updatedBy: actor, updatedAt: at }),
       setActive: (id, active, actor, at) => store.setTermActive(id, active, actor, at),
     };
   }
@@ -663,14 +681,20 @@ export class LiveTerms implements Matcher {
     const term = this.termKind();
     const exception = this.exceptionKind();
     return {
-      addTerm: (input, hits) => this.add(term, actor, input.term, input.language, input.note, hits),
-      updateTerm: (id, p, hits) => this.edit(term, actor, id, { word: p.term, language: p.language, note: p.note }, hits),
+      addTerm: (input, hits) => this.add(term, actor, input.term, input.language, input.note, hits, input.matchMode),
+      updateTerm: (id, p, hits) => this.edit(term, actor, id, { word: p.term, language: p.language, note: p.note, matchMode: p.matchMode }, hits),
       setTermActive: (id, active) => this.toggle(term, actor, id, active),
       addException: (input, hits) => this.add(exception, actor, input.phrase, input.language, input.note, hits),
       updateException: (id, p, hits) =>
         this.edit(exception, actor, id, { word: p.phrase, language: p.language, note: p.note }, hits),
       setExceptionActive: (id, active) => this.toggle(exception, actor, id, active),
     };
+  }
+
+  /** A mode must be `word`, `segment`, `contains` or null: refused before anything is written (whether it fits the term is the build's to say). */
+  private assertMode(matchMode: unknown): void {
+    if (matchMode === undefined || matchMode === null || matchMode === 'word' || matchMode === 'segment' || matchMode === 'contains') return;
+    throw new Refusal('invalid', 'malformed term: the match mode must be word, segment or contains');
   }
 
   /** Words the matcher reads as one are duplicates, in any language and active or not: a second row for the
@@ -711,10 +735,11 @@ export class LiveTerms implements Matcher {
     });
   }
 
-  private add(kind: Kind, actor: string, word: string, language: string, note: string | null | undefined, hits?: string[]): string {
+  private add(kind: Kind, actor: string, word: string, language: string, note: string | null | undefined, hits?: string[], matchMode?: unknown): string {
+    this.assertMode(matchMode);
     this.assertNotDuplicate(kind, word);
     const id = newId();
-    kind.insert(id, kind.fold(word), language, note ?? null, actor, this.clock.now());
+    kind.insert(id, kind.fold(word), language, note ?? null, actor, this.clock.now(), matchMode as 'word' | 'segment' | 'contains' | null | undefined);
     this.audit(kind, actor, 'add', id, null, this.snapshot(kind, id), hits);
     return id;
   }
@@ -723,15 +748,16 @@ export class LiveTerms implements Matcher {
     kind: Kind,
     actor: string,
     id: string,
-    patch: { word?: string; language?: string; note?: string | null },
+    patch: { word?: string; language?: string; note?: string | null; matchMode?: 'word' | 'segment' | 'contains' | null },
     hits?: string[],
   ): void {
     const before = this.snapshot(kind, id);
-    if (patch.word === undefined && patch.language === undefined && patch.note === undefined) return;
+    if (patch.word === undefined && patch.language === undefined && patch.note === undefined && patch.matchMode === undefined) return;
+    this.assertMode(patch.matchMode);
     if (patch.word !== undefined) this.assertNotDuplicate(kind, patch.word, id);
     kind.patch(
       id,
-      { word: patch.word === undefined ? undefined : kind.fold(patch.word), language: patch.language, note: patch.note },
+      { word: patch.word === undefined ? undefined : kind.fold(patch.word), language: patch.language, note: patch.note, ...(patch.matchMode === undefined ? {} : { matchMode: patch.matchMode }) },
       actor,
       this.clock.now(),
     );
@@ -761,7 +787,7 @@ interface MergeKind {
   fold(word: string): string;
   records: Mergeable[];
   insert(record: Mergeable): void;
-  setWord(id: string, word: string, language: string): void;
+  setWord(id: string, word: string, language: string, matchMode?: 'word' | 'segment' | 'contains' | null): void;
   setActive(id: string, active: boolean): void;
 }
 
@@ -776,7 +802,14 @@ function isSyncable(pack: TermPack): boolean {
   return true;
 }
 
-/** What the matcher compares for a term: two terms with the same key are the same word. */
+/** What the matcher compares for a term: two terms with the same key are the same word. A term in a script written without spaces is read as the matcher reads it (NFKC, hiragana as katakana, marks kept). */
 function termKey(term: string): string {
-  return collapseLikePreset(foldTerm(term));
+  const letters = scanLetters(normaliseUnspaced(term));
+  return letters.unspaced || letters.foreign ? `u:${normaliseUnspaced(term)}` : collapseLikePreset(foldTerm(term));
+}
+
+/** The stored form of a term: folded for a plain word, and only NFKC-trimmed for one in a script written without spaces (folding would strip a Thai tone mark and turn a kana into another). */
+function foldStored(term: string): string {
+  const letters = scanLetters(normaliseUnspaced(term));
+  return letters.unspaced || letters.foreign ? nfkcVisible(term).trim() : foldTerm(term);
 }

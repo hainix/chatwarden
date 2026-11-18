@@ -885,19 +885,19 @@ describe('POST /reports/:id/decide and POST /sanctions with a claim in the way',
 });
 
 describe('GET /changes', () => {
-  it('answers { token, changed } exactly; with no since it is changed', async () => {
+  it('answers { token, changed, urgent } exactly; with no since it is changed', async () => {
     const w = await world();
     const res = await w.call('GET', '/changes');
     expect(res.status).toBe(200);
-    expect(Object.keys(body(res))).toEqual(['token', 'changed']);
-    expect(body(res)).toEqual({ token: w.cw.changes.token(), changed: true });
+    expect(Object.keys(body(res))).toEqual(['token', 'changed', 'urgent']);
+    expect(body(res)).toEqual({ token: w.cw.changes.token(), changed: true, urgent: 0 });
   });
 
   it('is unchanged for the token it just gave, and changed for any other value', async () => {
     const w = await world();
     const { token } = body(await w.call('GET', '/changes'));
-    expect(body(await w.call('GET', '/changes', { query: { since: token } }))).toEqual({ token, changed: false });
-    expect(body(await w.call('GET', '/changes', { query: { since: 'someting-else' } }))).toEqual({ token, changed: true });
+    expect(body(await w.call('GET', '/changes', { query: { since: token } }))).toEqual({ token, changed: false, urgent: 0 });
+    expect(body(await w.call('GET', '/changes', { query: { since: 'someting-else' } }))).toEqual({ token, changed: true, urgent: 0 });
     expect(body(await w.call('GET', '/changes', { query: { since: '0' } })).changed).toBe(token !== '0');
   });
 
@@ -915,8 +915,8 @@ describe('GET /changes', () => {
     reads.length = 0;
     const res = await w.call('GET', '/changes', { query: { since: 'x' } });
     expect(res.status).toBe(200);
-    // The token, and one live read of whether appeals are on (the open count is read only while they are, and only for a caller who may read it).
-    expect(reads).toEqual(['changes', 'appeals']);
+    // The token, one live read of whether appeals are on (the open count is read only while they are, and only for a caller who may read it), and the open urgent count.
+    expect(reads).toEqual(['changes', 'appeals', 'desk', 'cases']);
     expect(w.routeAudit()).toEqual([]);
   });
 

@@ -14,7 +14,6 @@ import { randomHex } from './random.js';
 import { encodeFrame, HEARTBEAT } from './sse.js';
 import type { ChatFrame, WireRefusal } from './wire.js';
 
-/** @experimental */
 export interface ChatRoutesOptions {
   /** Who is calling. Exactly the `identify` of `playerRoutes`: the same function can be passed to both. A caller with neither `accountId` nor `clientKey` is `401 unauthorized` (an address alone cannot chat). */
   identify: (req: KitRequest) => RawWho | Promise<RawWho>;
@@ -77,13 +76,15 @@ function optionalText(body: Record<string, unknown>, key: string, max: number): 
  * The chat routes over a broadcaster. Mount them with `createRouter` / `toExpress`, under `/chat` for example:
  * - `GET /rooms/:room/stream`: `200 text/event-stream`, an open response of `ChatFrame`s (the first is `hello`). `401`, `403`, `429`.
  * - `POST /rooms/:room/lines { text }`: `200 SendResult` (a refusal is an answer, not an error). `400`, `401`, `403`, `413`, `429`.
- * - `POST /rooms/:room/mute { lineId | ref, on }`: `200 { ok, hiddenIds }` (the ids of the lines it hid from this player; see `MuteResult`).
+ * - `POST /rooms/:room/phrases { phrase }`: `200 SendResult`, for a phrase-only room (its context's `chat.phrases`): `phrase` is the id of one phrase of the room's book (the `hello` carries the book). The same guards as `lines`; a refusal is an
+ *   answer (`gate` for a room that is not phrase-only, `phrase_unknown` for an id the book lacks). Typed text in a phrase room is refused `phrases_only` on `lines`.
+ * - `POST /rooms/:room/mute { lineId | ref, on, block? }`: `200 { ok, hiddenIds, limit? }` (the ids of the lines it hid from this player; see `MuteResult`). `block: true` with `on` makes it a block: a mute that is
+ *   also two-way and lasting. `block` must be a boolean when given (400 otherwise); `limit: true` says the player's list is full of blocks.
  * - `POST /rooms/:room/report { lineId, reason?, note? }`: `200 ReportOutcome`.
  * POST bodies must be `application/json`; any other content type is `400`, which is what stops a cross-site form from making a player speak.
  * Every response is `cache-control: no-store` (the stream's is `no-store, no-transform`, so a body-rewriting middleware leaves it alone).
  * No route returns a seat, a subject, a report id or a moderator field. A restriction in the `hello` and `state` frames reads a stored automatic
  * timeout as a moderator's (`WireRestriction.byModerator`); the refusal of a line is exact.
- * @experimental
  */
 export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options: ChatRoutesOptions): RouteTable {
   if (typeof cw !== 'object' || cw === null) throw new TypeError('chatRoutes: cw must be the kit');
@@ -267,6 +268,16 @@ export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options
       return ok(entered.send({ text }));
     }),
 
+    'POST /rooms/:room/phrases': route(async (req, params) => {
+      checkOrigin(req);
+      requireJson(req);
+      const phrase = tokenField(bodyObject(req).phrase);
+      const who = await caller(req, actions);
+      const entered = await enter(req, params.room as string, who);
+      if ('banned' in entered) return ok({ ok: false, refused: entered.banned });
+      return ok(entered.sendPhrase({ phrase }));
+    }),
+
     'POST /rooms/:room/mute': route(async (req, params) => {
       checkOrigin(req);
       requireJson(req);
@@ -274,11 +285,12 @@ export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options
       const hasLine = Object.hasOwn(body, 'lineId');
       const hasRef = Object.hasOwn(body, 'ref');
       if (hasLine === hasRef || typeof body.on !== 'boolean') throw new ValidationError();
+      if (Object.hasOwn(body, 'block') && typeof body.block !== 'boolean') throw new ValidationError();
       const target = hasLine ? { lineId: tokenField(body.lineId) } : { ref: tokenField(body.ref) };
       const who = await caller(req, actions);
       const entered = await enter(req, params.room as string, who);
       if ('banned' in entered) return ok({ ok: false, hiddenIds: [] });
-      return ok(entered.muteResult({ ...target, on: body.on }));
+      return ok(entered.muteResult({ ...target, on: body.on, ...(body.block === true ? { block: true } : {}) }));
     }),
 
     'POST /rooms/:room/report': route(async (req, params) => {

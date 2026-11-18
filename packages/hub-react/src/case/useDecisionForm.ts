@@ -11,7 +11,9 @@ import {
   emptyForm,
   defaultLines,
   initialForm,
+  limitChoices,
   outcomeChoice,
+  renameStartRule,
   presets,
   resolveDraft,
   validate,
@@ -20,12 +22,13 @@ import {
 } from '../decision.js';
 import type { Choice, DecisionForm, Draft, NotAdded, Problems, UiVerdict, ValidationContext } from '../decision.js';
 import type { ReportPerson } from '../excerpt.js';
+import { useScopedLimits } from '../features.js';
 import { useHubData } from '../hooks.js';
 import type { HubData } from '../hooks.js';
 import { outcomeLabel } from '../labels.js';
 import { lengthsOf } from '../policy/lengths.js';
 import type { LengthPolicy } from '../policy/lengths.js';
-import type { ConductLevel, PolicyDocs, ReportDetail, Suggestion } from '../types.js';
+import type { CommunityRule, ConductLevel, PolicyDocs, ReportDetail, Suggestion } from '../types.js';
 
 // The decision form's state, kept above both the transcript (its margin boxes pick the lines the player sees) and the decision
 // bar. It starts from what the ladder suggests (so most decisions are a verdict, a reason and one key) and gives back the form
@@ -51,6 +54,8 @@ export interface DecisionDraft {
   rules: ReadonlyArray<{ number: number; title: string }>;
   /** The reporting reasons and the rules each usually means, or undefined until the policy is read (or when the kit sends none). */
   reportReasons: ReadonlyArray<{ id: string; rules: readonly number[] }> | undefined;
+  /** `names.renames` as the profile has it (the owner's setting), or undefined until the policy is read (or when the role cannot read it). */
+  renamesSetting: boolean | undefined;
   /** Whether the rules are loaded; a verdict can still be sent without them (no actions). */
   rulesState: RulesState;
   rulesError: HubError | null;
@@ -71,6 +76,10 @@ export interface DecisionDraft {
   suggestionIndex: number;
   useSuggestion: () => void;
   setVerdict: (verdict: UiVerdict) => void;
+  /** Tick or untick "Ask for a new name": ticked, its rule starts on the first action's rule, else the report's (and the change is announced). */
+  toggleRename: (on: boolean) => void;
+  /** The rule the player is told when asked for a new name. */
+  setRenameRule: (rule: string) => void;
   patchAction: (uid: string, patch: Partial<Draft>) => void;
   toggleLine: (uid: string, lineId: string) => void;
   addEmptyAction: () => string | null;
@@ -111,17 +120,23 @@ export function useDecisionForm({
   /** The AI's part of the case has decided what to open with (or could not be loaded). */
   aiDecided?: boolean;
 }): DecisionDraft {
-  const { t, locale, can, session, client } = useHub();
+  const { t, locale, can, session, client, me } = useHub();
   const decisions = useDecisions();
   const report = detail?.report;
 
-  const canRules = can('policy.read');
-  const wantsRules = enabled && canRules && report !== undefined;
+  // The whole policy for a role that may read it. A scoped moderator cannot (it is not scope-aware), so they read the rule list alone (`GET /policy/rules`): enough to name a rule, nothing of the settings.
+  const readsPolicy = can('policy.read');
+  const readsRulesOnly = !readsPolicy && me.scope !== undefined && can('reports.decide');
+  const canRules = readsPolicy || readsRulesOnly;
+  const wantsRules = enabled && readsPolicy && report !== undefined;
+  const wantsRulesOnly = enabled && readsRulesOnly && report !== undefined;
   const policy: HubData<PolicyDocs | null> = useHubData<PolicyDocs | null>(wantsRules ? 'policy' : 'policy:idle', () => (wantsRules ? session.policy() : Promise.resolve(null)));
-  const rulesState: RulesState = !canRules ? 'denied' : policy.data !== undefined ? 'ok' : policy.error !== null ? 'failed' : 'loading';
+  const ruleList: HubData<CommunityRule[] | null> = useHubData<CommunityRule[] | null>(wantsRulesOnly ? 'policy:rules' : 'policy:rules:idle', () => (wantsRulesOnly ? session.rules() : Promise.resolve(null)));
+  const source = readsRulesOnly ? ruleList : policy;
+  const rulesState: RulesState = !canRules ? 'denied' : source.data !== undefined ? 'ok' : source.error !== null ? 'failed' : 'loading';
   const rules = useMemo(
-    () => (policy.data?.rules ?? []).filter((r) => r.retired !== true).sort((a, b) => a.number - b.number).map((r) => ({ number: r.number, title: r.title })),
-    [policy.data],
+    () => (readsRulesOnly ? (ruleList.data ?? []) : (policy.data?.rules ?? [])).filter((r) => r.retired !== true).sort((a, b) => a.number - b.number).map((r) => ({ number: r.number, title: r.title })),
+    [policy.data, ruleList.data, readsRulesOnly],
   );
 
   const reportReasons = useMemo(() => policy.data?.profile.reporting?.reasons.map((r) => ({ id: r.id, rules: r.rules })), [policy.data]);
@@ -204,10 +219,12 @@ export function useDecisionForm({
   const setForm = useCallback((update: (f: DecisionForm) => DecisionForm): void => setFormState((f) => update(f ?? emptyForm())), []);
   const problems = formState === null ? NO_PROBLEMS : validate(formState, ctx);
 
+  const limits = useScopedLimits();
   const choices = useMemo(() => {
     const suggested = current === undefined ? null : outcomeChoice(current.outcome);
-    return presets(policy.data?.profile ?? {}, suggested === null ? [] : [suggested]);
-  }, [policy.data, current]);
+    // A scoped caller is offered only what their limits allow (the server refuses the rest).
+    return limitChoices(presets(policy.data?.profile ?? {}, suggested === null ? [] : [suggested]), limits);
+  }, [policy.data, current, limits]);
 
   const lengths = useMemo(() => lengthsOf(policy.data?.profile), [policy.data]);
 
@@ -245,8 +262,10 @@ export function useDecisionForm({
         const result = dropTargetActions(next, ctx.target);
         if (result.dropped > 0) {
           dropped.current = true;
-          announce(t('hub.decide.announce.dropped', { count: result.dropped }));
+          if (!result.renameCleared) announce(t('hub.decide.announce.dropped', { count: result.dropped }));
         }
+        // A request for a new name goes with "Fair": it is taken off, and the moderator is told (after the dropped actions, when both went).
+        if (result.renameCleared) announce(result.dropped > 0 ? `${t('hub.decide.announce.dropped', { count: result.dropped })} ${t('hub.decide.announce.renameDropped')}` : t('hub.decide.announce.renameDropped'));
         next = result.form;
       }
       formRef.current = next;
@@ -254,6 +273,21 @@ export function useDecisionForm({
     },
     [announce, ctx, detail, nextUid, reportedLine, t],
   );
+
+  const toggleRename = useCallback(
+    (on: boolean): void => {
+      const base = formRef.current ?? emptyForm();
+      if (on === (base.rename !== null) || detail === undefined) return;
+      const next: DecisionForm = { ...base, rename: on ? { rule: renameStartRule(base, ctx, detail.rule) } : null };
+      formRef.current = next;
+      setFormState(next);
+      announce(t(on ? 'hub.decide.announce.renameOn' : 'hub.decide.announce.renameOff'));
+    },
+    [announce, ctx, detail, t],
+  );
+  const setRenameRule = useCallback((rule: string): void => {
+    setFormState((f) => (f === null || f.rename === null ? f : { ...f, rename: { rule } }));
+  }, []);
 
   /** Asks the ladder again: for another conduct level, and for the rule the reported person's action cites. The latest ask wins. */
   const ask = useCallback(
@@ -350,9 +384,10 @@ export function useDecisionForm({
     problems,
     rules,
     reportReasons,
+    renamesSetting: policy.data === undefined || policy.data === null ? undefined : (policy.data.profile as { names?: { renames?: boolean } }).names?.renames === true,
     rulesState,
-    rulesError: policy.error,
-    reloadRules: policy.reload,
+    rulesError: source.error,
+    reloadRules: source.reload,
     choices,
     lengths,
     suggestion: current ?? ({ outcome: 'none', why: '' } as Suggestion),
@@ -364,6 +399,8 @@ export function useDecisionForm({
     suggestionIndex,
     useSuggestion,
     setVerdict,
+    toggleRename,
+    setRenameRule,
     patchAction,
     toggleLine,
     addEmptyAction,

@@ -27,6 +27,15 @@ export const PERMISSION_KEYS = [
   'ai.review',
   'ai.pause',
   'automation.write',
+  'filters.read',
+  'legal.hold',
+  'reports.urgent',
+  'reports.handoff',
+  'reports.comment',
+  'reports.escalate',
+  'insights.read',
+  'rooms.read',
+  'rooms.manage',
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -41,9 +50,15 @@ export type Permissions = Readonly<Record<PermissionKey, Role>>;
  * same people may already dismiss each report one by one. An adopter who wants a sweep to be a senior's can raise it.
  * `appeals.read` (the inbox, one appeal and the numbers) is `moderator`; `appeals.decide` (uphold, reduce or revoke) is `senior`. A small
  * team whose people are all moderators lowers it: `permissions: { 'appeals.decide': 'moderator' }`.
- * AI levels 3 and 4 (0.1.13, `@experimental`): `automation.write` (mark a person "do not automate", or clear the mark) is `senior`. `ai.review` (confirm or undo what
+ * AI levels 3 and 4 (0.1.13): `automation.write` (mark a person "do not automate", or clear the mark) is `senior`. `ai.review` (confirm or undo what
  * the AI did) is `moderator` and `ai.pause` (pause the AI's acting) is `senior`: `ai.pause` is used from 0.1.14 by `POST /ai/acting/pause`, `ai.review` is used from 0.1.14 by `GET /ai/actions` and, in the acting release, by confirming or undoing what the AI did.
  * Starting, stopping and undoing the AI's acting are not permissions at all: they are the owner's, fixed in code.
+ * Legal hold (0.2.0): `legal.hold` (hold one report so no purge and no erase reaches it) is `senior`. Releasing a hold, downloading an evidence bundle, and finding, exporting and
+ * erasing a person's data are the owner's, fixed in code like the AI's acting steps: they are not keys, so no override can lower them.
+ * Chat filters (0.2.0): `filters.read` (the counts, the test box and the dry run over recent lines: reads and tries, never writes) is `moderator`. Editing the filters is the profile's `policy.write`, the owner's.
+ * The urgent lane, the desk and the rooms (0.2.0): `reports.urgent` (mark a report urgent or not), `reports.handoff` (mark it passed to the game's safety team), `reports.comment`
+ * (the staff thread), `reports.escalate` (ask for a second look), `insights.read` (the Insights page), `rooms.read` (the rooms list) and `rooms.manage` (lock a room, take a line
+ * back) are all `moderator`. Raise any of them with the `permissions` option; a team that wants room control to be a senior's sets `{ 'rooms.manage': 'senior' }`.
  */
 export const PERMISSIONS: Permissions = Object.freeze({
   'reports.read': 'moderator',
@@ -70,6 +85,15 @@ export const PERMISSIONS: Permissions = Object.freeze({
   'ai.review': 'moderator',
   'ai.pause': 'senior',
   'automation.write': 'senior',
+  'filters.read': 'moderator',
+  'legal.hold': 'senior',
+  'reports.urgent': 'moderator',
+  'reports.handoff': 'moderator',
+  'reports.comment': 'moderator',
+  'reports.escalate': 'moderator',
+  'insights.read': 'moderator',
+  'rooms.read': 'moderator',
+  'rooms.manage': 'moderator',
 });
 
 const isRole = (v: unknown): v is Role => typeof v === 'string' && (ROLES as readonly string[]).includes(v);

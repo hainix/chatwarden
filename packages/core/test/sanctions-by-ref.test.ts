@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createChatwarden } from '../src/chatwarden.js';
 import { normalizeRefCode } from '../src/sanctions.js';
@@ -186,13 +185,6 @@ describe('cw.sanctions.byRef', () => {
   it('byRef(123) throws TypeError, for every non-string', async () => {
     const { cw } = await setup();
     for (const v of [123, null, undefined, {}, ['M-7K3Q9'], true]) expect(() => cw.sanctions.byRef(v as never), String(v)).toThrow(TypeError);
-  });
-
-  it('is tagged @experimental', () => {
-    const src = readFileSync(new URL('../src/chatwarden.ts', import.meta.url), 'utf8');
-    const at = src.indexOf('\n    byRef(refCode: string)');
-    expect(at).toBeGreaterThan(-1);
-    expect(src.slice(src.lastIndexOf('/**', at), at)).toContain('@experimental');
   });
 });
 

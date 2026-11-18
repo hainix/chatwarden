@@ -60,12 +60,12 @@ describe('the screen', () => {
     await screen.findByRole('heading', { level: 2, name: 'Reporting' });
   });
 
-  it('shows the settings in force: one tap, the ten default reasons in order, the thank-you', async () => {
+  it('shows the settings in force: one tap, the thirteen default reasons in order, the thank-you', async () => {
     const w = await owner();
     await open(w);
     for (const name of ['How players report', 'Reasons', 'Thank-you', 'What players see']) expect(screen.getByRole('region', { name })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'One tap' })).toBeChecked();
-    expect(labels()).toEqual(['Insults or harassment', 'Hate', 'Sexual content', 'Threats', 'Spam or ads', 'Sharing personal info', 'Cheating', 'Throwing or griefing', 'Leaving or AFK', 'Something else']);
+    expect(labels()).toEqual(['Insults or harassment', 'Hate', 'Sexual content', 'Threats', 'Spam or ads', 'Sharing personal info', 'Inappropriate name', 'Pretending to be staff or someone else', 'Someone may be in trouble', 'Cheating', 'Throwing or griefing', 'Leaving or AFK', 'Something else']);
     const hate = within(row('Hate'));
     expect(hate.getByLabelText('Hint (optional)')).toHaveValue('Hate aimed at who someone is');
     expect(hate.getByLabelText('Group (optional)')).toHaveValue('Chat');
@@ -134,7 +134,7 @@ describe('the reasons', () => {
     await save(user);
     await screen.findByText('Saved the reporting settings.');
     const got = (await rules(w)).reasons.find((r) => r.id === 'hate');
-    expect(got).toEqual({ id: 'hate', label: 'Hate speech', hint: 'Words aimed at who someone is', group: 'Words', asksNote: false });
+    expect(got).toEqual({ id: 'hate', label: 'Hate speech', hint: 'Words aimed at who someone is', group: 'Words', asksNote: false, thanks: null, showResources: false });
     expect(screen.getByRole('group', { name: 'Reason: Hate speech' })).toBeInTheDocument();
   });
 
@@ -150,7 +150,7 @@ describe('the reasons', () => {
     await save(user);
     await screen.findByText('Saved the reporting settings.');
     const list = (await rules(w)).reasons;
-    expect(list.map((r) => r.id)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'cheating', 'griefing', 'afk', 'lag_switching', 'other']);
+    expect(list.map((r) => r.id)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name', 'cheating', 'griefing', 'afk', 'lag_switching', 'other']);
     expect(list.find((r) => r.id === 'lag_switching')).toMatchObject({ label: 'Lag switching', group: 'Gameplay', asksNote: true });
     // The saved row keeps its place and now has its id: renaming it later does not change what old reports mean.
     expect(labels().at(-2)).toBe('Lag switching');
@@ -194,10 +194,10 @@ describe('the reasons', () => {
     const w = await owner();
     const { user } = await open(w);
     await user.click(within(row('Hate')).getByRole('button', { name: 'Move Hate up' }));
-    const note = await screen.findByText('Moved Hate to 1 of 10.');
+    const note = await screen.findByText('Moved Hate to 1 of 13.');
     expect(note.closest('[role="status"]')).not.toBeNull();
     await user.click(within(row('Hate')).getByRole('button', { name: 'Move Hate down' }));
-    expect(await screen.findByText('Moved Hate to 2 of 10.')).toBeInTheDocument();
+    expect(await screen.findByText('Moved Hate to 2 of 13.')).toBeInTheDocument();
     // A move that goes nowhere says nothing new.
     await user.click(within(row('Leaving or AFK')).getByRole('button', { name: 'Move Leaving or AFK down' }));
     expect(screen.queryByText(/Moved Leaving or AFK/)).toBeNull();
@@ -225,7 +225,7 @@ describe('the reasons', () => {
     const w = await owner();
     const { user } = await open(w);
     await user.click(within(row('Leaving or AFK')).getByRole('button', { name: 'Remove Leaving or AFK' }));
-    expect(labels()).toHaveLength(9);
+    expect(labels()).toHaveLength(12);
     await save(user);
     await screen.findByText('Saved the reporting settings.');
     expect((await rules(w)).reasons.map((r) => r.id)).not.toContain('afk');
@@ -281,7 +281,8 @@ describe('the reasons', () => {
     const { user } = await open(w);
     for (const g of within(screen.getByRole('list', { name: 'Reasons' })).getAllByRole('group')) {
       const on = within(g).getByRole('checkbox', { name: 'Switched on' });
-      if (!(on as HTMLInputElement).disabled) await user.click(on);
+      // "Someone may be in trouble" ships switched off: only a row that is on is switched off.
+      if (!(on as HTMLInputElement).disabled && (on as HTMLInputElement).checked) await user.click(on);
     }
     await save(user);
     await screen.findByText('Saved the reporting settings.');
@@ -291,8 +292,8 @@ describe('the reasons', () => {
   it('at most 20 reasons: the button says so and adds nothing more', async () => {
     const w = await owner();
     const { user } = await open(w);
-    expect(screen.getByText('10 of 20 reasons.')).toBeInTheDocument();
-    for (let i = 0; i < 10; i += 1) await user.click(screen.getByRole('button', { name: 'Add a reason' }));
+    expect(screen.getByText('13 of 20 reasons.')).toBeInTheDocument();
+    for (let i = 0; i < 7; i += 1) await user.click(screen.getByRole('button', { name: 'Add a reason' }));
     expect(labels()).toHaveLength(20);
     expect(screen.getByRole('button', { name: 'Add a reason' })).toHaveAttribute('aria-disabled', 'true');
     await user.click(screen.getByRole('button', { name: 'Add a reason' }));
@@ -611,7 +612,7 @@ describe('What players see', () => {
     const m = within(mock());
     expect(m.getByText('<b>Bold</b>')).toBeInTheDocument();
     expect(mock().querySelector('b')).toBeNull();
-    expect(m.getAllByRole('listitem')).toHaveLength(10);
+    expect(m.getAllByRole('listitem')).toHaveLength(11);
   });
 
   it('does not ask the server for a preview (it is drawn from the draft)', async () => {
@@ -676,7 +677,7 @@ describe('the picture matches what players are sent (the real /rules after a sav
       'a new reason with no group, a group on Something else, and a reason with spaces around its group',
       async (user: User) => {
         await user.click(screen.getByRole('button', { name: 'Add a reason' }));
-        const fresh = within(screen.getByRole('list', { name: 'Reasons' })).getAllByRole('listitem')[9] as HTMLElement;
+        const fresh = within(screen.getByRole('list', { name: 'Reasons' })).getAllByRole('listitem').find((li) => (within(li).getByLabelText('Name players see') as HTMLInputElement).value === '') as HTMLElement;
         fireEvent.change(within(fresh).getByLabelText('Name players see'), { target: { value: 'Tilt' } });
         fireEvent.change(within(row('Something else')).getByLabelText('Group (optional)'), { target: { value: 'Chat' } });
         fireEvent.change(within(row('Spam or ads')).getByLabelText('Group (optional)'), { target: { value: '  Chat  ' } });

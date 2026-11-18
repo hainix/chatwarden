@@ -1,5 +1,7 @@
 import { isValidAuditActor, AUDIT_REASON_MAX } from './audit.js';
 import { sampleRecords, suggest } from './ladder.js';
+import { checkFilterRules } from './filters.js';
+import { checkNameRules } from './names.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
 import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
 import { playerReporting } from './reporting.js';
@@ -28,7 +30,6 @@ export const POLICY_REFRESH_MS = 10_000;
 /**
  * A stored signal feed that was dropped when the layer was read: the feed (`record`, `queue`, `ladder`, `ai`, or `unknown` for a name the kit
  * does not have) and why. A code only: never a kind id, a rule id, a label or a number from the stored layer.
- * @experimental
  */
 export interface PolicyDropped {
   feed: string;
@@ -38,13 +39,14 @@ export interface PolicyDropped {
 /**
  * The kit's own numbers the settings screens need, read only: they come from `createChatwarden` (`limits.chatRate`, `retention.signalsMs`), are
  * never part of the stored layer, and a save cannot change them.
- * @experimental
  */
 export interface PolicyLimits {
   /** The chat rate the kit enforces per room and seat: at most `count` lines in any `windowMs` (default 3 per 5 000 ms). Slow mode and burst sit beside it. */
   chatRate: { count: number; windowMs: number };
   /** How long signal rows are kept, ms: the longest window a signal feed may look back (default 90 days, never less than 14). */
   signalsMs: number;
+  /** What the chat filters can use: `accountAge` is true only when the kit was given `signals.accountAgeDays`, so a "new account" link rule can act. */
+  filters: { accountAge: boolean };
 }
 
 /** What {@link PolicyService.get} answers. */
@@ -73,13 +75,11 @@ export interface PolicyState {
    * Present only when the stored layer held signal feeds that could no longer be used (the code stopped declaring their kind, or a
    * window is longer than the retention now allows) and were left out of `layer` and of what is in force. One entry per feed, with the
    * reason of the first thing lost from it. The stored row itself is rewritten by the next save.
-   * @experimental
    */
   dropped?: readonly PolicyDropped[];
   /**
    * The chat rate limit actually in force and the signals retention window, so a settings screen can say what slow mode sits beside and how
    * far back a feed may look. Read only, deep-frozen.
-   * @experimental
    */
   limits: PolicyLimits;
 }
@@ -129,14 +129,23 @@ export class PolicyService {
   private readonly signalsMs: () => number;
   /** The chat rate in force (`limits.chatRate`), for `get().limits`. */
   private readonly chatRate: { count: number; windowMs: number };
+  /** What the chat filters can use, for `get().limits`. */
+  private readonly filtersLimits: Readonly<{ accountAge: boolean }>;
   /** Whether the store has the appeal methods. Without them a layer cannot turn appeals on: it is refused when saved, and kept off when read. */
   private readonly appealsKept: boolean;
+  /** Whether the store has the comment and escalation methods. Without them a layer cannot turn `desk.workflow` on: it is refused when saved, and read as off. */
+  private readonly workflowKept: boolean;
   private readonly appealsWarn: ThrottledWarn;
+  /** Whether a Community Rule number is an active rule of the registry: the filters may cite only those, checked when a layer is saved or previewed. */
+  private readonly isActiveRule: (rule: number) => boolean;
 
-  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean }) {
+  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean; workflowKept?: boolean; isActiveRule?: (rule: number) => boolean; accountAge?: boolean }) {
+    this.isActiveRule = deps.isActiveRule ?? (() => true);
     this.appealsKept = deps.appealsKept ?? true;
+    this.workflowKept = deps.workflowKept ?? true;
     this.appealsWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.signalsMs = deps.signalsMs ?? (() => RETENTION_DEFAULTS.signalsMs);
+    this.filtersLimits = Object.freeze({ accountAge: deps.accountAge === true });
     this.chatRate = Object.freeze({ count: deps.chatRate?.count ?? RATE_LIMIT, windowMs: deps.chatRate?.windowMs ?? RATE_WINDOW_MS });
     this.store = deps.store;
     this.clock = deps.clock;
@@ -161,9 +170,17 @@ export class PolicyService {
    * (a code profile that asked for them is refused at creation, never here). Warned by class only, throttled.
    */
   private served(effective: ResolvedProfile): ResolvedProfile {
-    if (this.appealsKept || !effective.appeals.enabled || this.base.appeals.enabled) return effective;
-    this.appealsWarn.warn('chatwarden.appeals_unsupported_store', {});
-    return Object.freeze({ ...effective, appeals: Object.freeze({ ...effective.appeals, enabled: false }) });
+    let out = effective;
+    if (!this.appealsKept && out.appeals.enabled && !this.base.appeals.enabled) {
+      this.appealsWarn.warn('chatwarden.appeals_unsupported_store', {});
+      out = Object.freeze({ ...out, appeals: Object.freeze({ ...out.appeals, enabled: false }) });
+    }
+    // The same for the staff workflow: a layer that turned it on over a store without the thread methods leaves it off.
+    if (!this.workflowKept && out.desk.workflow && !this.base.desk.workflow) {
+      this.appealsWarn.warn('chatwarden.workflow_unsupported_store', {});
+      out = Object.freeze({ ...out, desk: Object.freeze({ ...out.desk, workflow: false }) });
+    }
+    return out;
   }
 
   /** Make `stored` the layer in force: the effective profile is rebuilt, or the base kept when the layer cannot be used. */
@@ -260,7 +277,7 @@ export class PolicyService {
       canSave: this.supported,
       ...(layerError === undefined ? {} : { layerError: { ...layerError } }),
       ...(dropped === undefined ? {} : { dropped }),
-      limits: Object.freeze({ chatRate: this.chatRate, signalsMs: this.signalsMs() }),
+      limits: Object.freeze({ chatRate: this.chatRate, signalsMs: this.signalsMs(), filters: this.filtersLimits }),
     };
   }
 
@@ -316,6 +333,10 @@ export class PolicyService {
       checkSignalFeeds(effective.signals.feeds, effective.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
       // A switch that would do nothing is refused, so the owner is not shown "on" over a store that cannot keep appeals.
       if (!this.appealsKept && effective.appeals.enabled && !this.base.appeals.enabled) return { ok: false, error: 'invalid', path: 'layer.appeals.enabled' };
+      if (!this.workflowKept && effective.desk.workflow && !this.base.desk.workflow) return { ok: false, error: 'invalid', path: 'layer.desk.workflow' };
+      // A filter may cite only an active Community Rule. Checked here, not when a stored layer is read: a rule switched off later fails the next save, never the chat path.
+      checkFilterRules(effective.filters, this.isActiveRule, 'layer.filters');
+      checkNameRules(effective.names, this.isActiveRule, 'layer.names');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;
@@ -369,6 +390,8 @@ export class PolicyService {
       candidate = applyPolicyLayer(this.base, layer);
       // As save: a window longer than the retention could never be met, so the candidate is refused here too, not only when it is saved.
       checkSignalFeeds(candidate.signals.feeds, candidate.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
+      checkFilterRules(candidate.filters, this.isActiveRule, 'layer.filters');
+      checkNameRules(candidate.names, this.isActiveRule, 'layer.names');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;
@@ -388,6 +411,6 @@ export class PolicyService {
       }
       samples[sample] = levels;
     }
-    return { ok: true, samples, reporting: playerReporting(candidate.reporting) };
+    return { ok: true, samples, reporting: playerReporting(candidate.reporting, candidate.safety) };
   }
 }

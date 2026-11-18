@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { compileSnippets } from './snippetCompile.js';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
 import { badWords } from './no-corpus-data.mjs';
@@ -364,8 +364,17 @@ describe('RELEASING.md', () => {
     for (const api of ['cw.policy', 'ResolvedProfile', 'reportedReason', 'addDetail', 'releaseWhenDone', 'detailUntil']) expect(note.slice(0, 1600), api).toContain(api);
     expect(note).toContain('scripts/manifests.test.ts');
   });
-  it('tells the releaser to cut a patch while the peer ranges are ^0.1.x', () => {
-    expect(flat(doc)).toMatch(/release a patch: a minor version \(0\.2\.0\) falls outside every `\^0\.1\.x` peer range/);
+  it('tells the releaser that every peer range is ^0.2.0, that the next 0.x minor falls outside them, and to set the ranges by hand before npm run version', () => {
+    const text = flat(doc);
+    expect(text).toMatch(/Every `@chatwarden\/\*` peer range is `\^0\.2\.0` since 0\.2\.0/);
+    expect(text).toMatch(/The next 0\.x minor \(0\.3\.0\) falls outside every `\^0\.2\.x` peer range/);
+    expect(text).toMatch(/set every peer range to `\^0\.3\.0` by hand first/);
+    expect(text).toMatch(/For a 0\.x minor, set every range to the new minor before `npm run version`/);
+  });
+  it('says http does not dev-depend on hub-element and that an optional peer is never imported statically', () => {
+    const text = flat(doc);
+    expect(text).toContain('`http` does not dev-depend on `hub-element`');
+    expect(text).toContain('scripts/http-optional-peers.test.ts');
   });
   it('documents the provenance input of the workflow', () => {
     expect(flat(doc)).toMatch(/provenance=false/);
@@ -423,79 +432,7 @@ declare const bot: import('@chatwarden/http/discord').DiscordBot;
   const standalone = (code: string): boolean => code.startsWith('import ');
 
   function compile(extra: Array<{ file: string; code: string }> = []): Map<string, string[]> {
-    const dir = join(root, 'scripts', '__snippets__').replaceAll('\\', '/');
-    const cfg = ts.readConfigFile(join(root, 'tsconfig.base.json'), ts.sys.readFile);
-    const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, root);
-    // The workspace packages resolve to their TypeScript source (the same map vitest.config.ts uses), so this check needs no
-    // prior `tsc -b` and never reads a stale `dist`. Exact keys, so a subpath such as `/express` is not taken by the bare name.
-    const src = (rel: string): string[] => [`packages/${rel}`];
-    const options: ts.CompilerOptions = {
-      ...parsed.options,
-      pathsBasePath: root,
-      paths: {
-        '@chatwarden/core': src('core/src/index.ts'),
-        '@chatwarden/store-sqlite': src('store-sqlite/src/index.ts'),
-        '@chatwarden/store-memory': src('store-memory/src/index.ts'),
-        '@chatwarden/store-memory/testing': src('store-memory/src/testing/index.ts'),
-        '@chatwarden/matcher': src('matcher/src/index.ts'),
-        '@chatwarden/matcher/corpus': src('matcher/src/corpus/index.ts'),
-        '@chatwarden/matcher/corpus/node': src('matcher/src/corpus/node/index.ts'),
-        '@chatwarden/matcher/fixtures': src('matcher/src/fixtures/index.ts'),
-        '@chatwarden/matcher/test-fixtures': src('matcher/src/fixtures/testFixtures.ts'),
-        '@chatwarden/profanity': src('profanity/src/index.ts'),
-        '@chatwarden/discord': src('discord/src/index.ts'),
-        '@chatwarden/http': src('http/src/index.ts'),
-        '@chatwarden/http/admin': src('http/src/admin-entry.ts'),
-        '@chatwarden/http/chat': src('http/src/chat/index.ts'),
-        '@chatwarden/http/discord': src('http/src/discord/index.ts'),
-        '@chatwarden/http/coop': src('http/src/coop/index.ts'),
-        '@chatwarden/http/eos': src('http/src/eos/index.ts'),
-        '@chatwarden/hub-element': src('hub-element/src/index.ts'),
-        '@chatwarden/hub-element/standalone': src('hub-element/src/standalone.ts'),
-        '@chatwarden/hub-react': src('hub-react/src/index.ts'),
-        '@chatwarden/hub-react/headless': src('hub-react/src/headless/index.ts'),
-        '@chatwarden/player-react': src('player-react/src/index.ts'),
-        '@chatwarden/player-react/chat': src('player-react/src/chat/index.ts'),
-        '@chatwarden/http/express': src('http/src/express.ts'),
-        '@chatwarden/http/fetch': src('http/src/fetch.ts'),
-        '@chatwarden/http/cli': src('http/src/cli/index.ts'),
-      },
-      noEmit: true,
-      composite: false,
-      incremental: false,
-      declaration: false,
-      declarationMap: false,
-      sourceMap: false,
-    };
-    const virtual = new Map<string, string>();
-    const stubs = `${dir}/stubs.d.ts`;
-    virtual.set(stubs, STUBS);
-    const names: string[] = [stubs];
-    for (const s of [...snippets.filter((x) => standalone(x.code)), ...extra]) {
-      const path = `${dir}/${s.file}`;
-      virtual.set(path, `${s.code}\nexport {};\n`);
-      names.push(path);
-    }
-    const host = ts.createCompilerHost(options);
-    const realFile = host.fileExists.bind(host);
-    const realRead = host.readFile.bind(host);
-    const realSource = host.getSourceFile.bind(host);
-    const norm = (f: string): string => f.replaceAll('\\', '/');
-    host.fileExists = (f) => virtual.has(norm(f)) || realFile(f);
-    host.readFile = (f) => virtual.get(norm(f)) ?? realRead(f);
-    host.getSourceFile = (f, lang, onError, shouldCreate) => {
-      const text = virtual.get(norm(f));
-      return text === undefined ? realSource(f, lang, onError, shouldCreate) : ts.createSourceFile(f, text, lang, true);
-    };
-    const program = ts.createProgram({ rootNames: names, options, host });
-    const byFile = new Map<string, string[]>();
-    for (const d of ts.getPreEmitDiagnostics(program)) {
-      const file = d.file === undefined ? undefined : norm(d.file.fileName);
-      if (file === undefined || !file.includes('/__snippets__/')) continue;
-      const name = file.split('/').at(-1) as string;
-      byFile.set(name, [...(byFile.get(name) ?? []), ts.flattenDiagnosticMessageText(d.messageText, '\n')]);
-    }
-    return byFile;
+    return compileSnippets([...snippets.filter((x) => standalone(x.code)), ...extra], STUBS);
   }
 
   it('finds the snippets it is meant to check, in every package README', () => {
@@ -537,7 +474,7 @@ declare const bot: import('@chatwarden/http/discord').DiscordBot;
 describe('the AI sections', () => {
   it('core: the AI section says what it is, that it is off until an adapter is given, what it can never do, what it costs, and how to try it', () => {
     const doc = flat(section(readme('core'), 'The AI (levels 1 and 2)'));
-    for (const needle of ['`ai`', '`ModerationAI`', '`createFakeModerationAI`', '@experimental', '0.1.7', '`AI_MAX_PREFILL_MS`', '`dailyBudgetMicros`', '`profile.ai.dailyCalls`', "`blockedLines: 'mask'`", 'examples/ai-anthropic', 'docs/adoption/moxgate.md', '`AIError`']) {
+    for (const needle of ['`ai`', '`ModerationAI`', '`createFakeModerationAI`', '0.1.7', '`AI_MAX_PREFILL_MS`', '`dailyBudgetMicros`', '`profile.ai.dailyCalls`', "`blockedLines: 'mask'`", 'examples/ai-anthropic', 'docs/adoption/moxgate.md', '`AIError`']) {
       expect(doc, needle).toContain(needle);
     }
     expect(doc).toMatch(/never writes a sanction, a strike, a mute or a notice/);
@@ -598,27 +535,27 @@ describe('the AI sections', () => {
   it('store-memory: the AI methods are opt-in through withMemoryAi, said plainly, with a snippet that compiles (it starts with an import)', () => {
     const doc = flat(readme('store-memory'));
     expect(doc).toContain('## The AI methods (opt-in)');
-    for (const needle of ['`withMemoryAi(store)`', '@experimental', '`createMemoryStore()`', '`chatwarden.ai_store_unsupported`', 'SQLite store has them']) expect(doc, needle).toContain(needle);
+    for (const needle of ['`withMemoryAi(store)`', '`createMemoryStore()`', '`chatwarden.ai_store_unsupported`', 'SQLite store has them']) expect(doc, needle).toContain(needle);
     expect(doc).toMatch(/leaves the AI inert/i);
     expect(doc).toMatch(/does not carry them/i);
     expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemoryAi[^}]*\} from '@chatwarden\/store-memory';/);
   });
 
-  it('store-memory: the test kit says first that it is not for production, names its entry, its experimental status and its plain errors, and its example starts with an import', () => {
+  it('store-memory: the test kit says first that it is not for production, names its entry, its plain errors, and its example starts with an import', () => {
     const raw = readme('store-memory');
     const section = raw.slice(raw.indexOf('## The test kit'));
     expect(section.length).toBeGreaterThan(500);
     const doc = flat(section);
     expect(doc.indexOf('Not for production')).toBeGreaterThanOrEqual(0);
     expect(doc.indexOf('Not for production')).toBeLessThan(80);
-    for (const needle of ['@chatwarden/store-memory/testing', '@experimental', 'ScriptMismatch', 'createTestKit', 'kit.play', 'checkLines', 'no `node:` import', 'invented']) expect(doc, needle).toContain(needle);
+    for (const needle of ['@chatwarden/store-memory/testing', 'ScriptMismatch', 'createTestKit', 'kit.play', 'checkLines', 'no `node:` import', 'invented']) expect(doc, needle).toContain(needle);
     expect(section).toMatch(/```ts\nimport \{[^}]*createTestKit[^}]*\} from '@chatwarden\/store-memory\/testing';/);
   });
 
   it('store-memory: the signal methods are opt-in through withMemorySignals, said plainly, with a snippet that compiles (it starts with an import)', () => {
     const doc = flat(readme('store-memory'));
     expect(doc).toContain('## The signal methods (opt-in)');
-    for (const needle of ['`withMemorySignals(store)`', '@experimental', '`createMemoryStore()`', '`chatwarden.signals_store_unsupported`', 'SQLite store has them', 'refused when it is created']) expect(doc, needle).toContain(needle);
+    for (const needle of ['`withMemorySignals(store)`', '`createMemoryStore()`', '`chatwarden.signals_store_unsupported`', 'SQLite store has them', 'refused when it is created']) expect(doc, needle).toContain(needle);
     expect(doc).toMatch(/does not carry them/i);
     expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemorySignals[^}]*\} from '@chatwarden\/store-memory';/);
   });
@@ -666,11 +603,11 @@ describe('the chat box docs', () => {
     for (const f of props) expect(propRows, `ChatBoxProps.${f}`).toContain(`\`${f}`);
   });
 
-  it('the READMEs list the @experimental names, every one the entries export', () => {
+  it('the READMEs list the chat names, every one the entries export, and none is called experimental', () => {
     const httpEntry = read('packages/http/src/chat/index.ts');
     const httpNames = [...names(httpEntry, 'value'), ...names(httpEntry, 'type')].filter((n) => !['KitStream', 'NamesRateLimit'].includes(n));
     const httpChat = flat(section(httpDoc, 'Chat'));
-    const httpList = httpChat.slice(httpChat.indexOf('Experimental names'));
+    const httpList = httpChat.slice(httpChat.indexOf('**Names:**'));
     expect(httpNames.length).toBeGreaterThan(15);
     for (const n of httpNames) expect(httpList, n).toContain(`\`${n}\``);
     const playerEntry = read('packages/player-react/src/chat/index.ts');
@@ -678,8 +615,8 @@ describe('the chat box docs', () => {
     const playerList = flat(section(playerDoc, 'The chat box'));
     expect(playerNames.length).toBeGreaterThan(15);
     for (const n of playerNames) expect(playerList, n).toContain(`\`${n}\``);
-    expect(playerList).toMatch(/`@experimental` until 0\.2/);
-    expect(httpChat).toMatch(/`@experimental` until 0\.2/);
+    expect(playerList).not.toMatch(/@experimental/);
+    expect(httpChat).not.toMatch(/@experimental/);
   });
 
   it('the root README adds chat to the install table and the package rows, with a short chat block that compiles', () => {
@@ -726,8 +663,8 @@ describe('the flood control and signals docs (0.1.8)', () => {
     for (const feed of ['`record`', '`queue`', '`ladder`', '`ai`']) expect(doc, feed).toContain(feed);
   });
 
-  it('core: the experimental list names the new API, and the table rows and retention default are there', () => {
-    const doc = flat(section(readme('core'), 'What is experimental in 0.1.8'));
+  it('core: the 0.1.8 list names the new API, and the table rows and retention default are there', () => {
+    const doc = flat(section(readme('core'), 'What 0.1.8 added'));
     for (const needle of ['`PaceSettings`', '`PACE_SUGGESTIONS`', '`cw.rooms.setPace`', '`cw.signals`', '`PolicyLimits`', '`withMemorySignals`', '`secondsLeft`', '`signalBoost`']) expect(doc, needle).toContain(needle);
     expect(core).toContain('| `cw.signals` |');
     expect(core).toContain('signals 90 (`signalsMs`, never less than 14)');
@@ -742,7 +679,7 @@ describe('the flood control and signals docs (0.1.8)', () => {
 
   it('player-react: one wait convention, said plainly (a bare duration, the sentence has the "in")', () => {
     const doc = flat(section(readme('player-react'), 'Pace words and `secondsLeft`'));
-    for (const needle of ['bare duration', 'in {left}', '`secondsLeft(ms, locale)`', '`player.pace.ready`', '`.soon`', '`RestrictedChatLine`', '@experimental']) expect(doc, needle).toContain(needle);
+    for (const needle of ['bare duration', 'in {left}', '`secondsLeft(ms, locale)`', '`player.pace.ready`', '`.soon`', '`RestrictedChatLine`']) expect(doc, needle).toContain(needle);
     expect(doc).not.toMatch(/carry their own "in"/);
   });
 
@@ -815,8 +752,8 @@ describe('the appeals and names docs (0.1.9)', () => {
     }
   });
 
-  it('core: the experimental list, the table rows, the retention defaults and the upgrade notes are there', () => {
-    const list = flat(section(coreDoc, 'What is experimental in 0.1.9'));
+  it('core: the 0.1.9 list, the table rows, the retention defaults and the upgrade notes are there', () => {
+    const list = flat(section(coreDoc, 'What 0.1.9 added'));
     for (const needle of ['`cw.appeals`', '`AppealSettings`', '`NameSettings`', '`cw.names.requireRename`', '`cw.people.accountIds`', '`rename.required`', '`withMemoryAppeals`', '`withMemoryNames`', '`AppealDialog`', '`nameReasonText`', '`appealsRateLimit`', '`includeAccounts`']) {
       expect(list, needle).toContain(needle);
     }
@@ -841,9 +778,8 @@ describe('the appeals and names docs (0.1.9)', () => {
   it('http: the appeal and name routes, the new bodies, the limiter and the webhook option are described', () => {
     for (const needle of [
       '| `GET /appeals?status&cursor&limit` |', '| `GET /appeals/:id` |', '| `POST /appeals/:id/decide` |', '| `POST /people/:ref/rename` |', '| `GET /appeals` |', '| `POST /appeals { noticeId, statement }` |',
-      '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (`@experimental`, new in 0.1.9) is `{ appeals, renames, keepBlocked }`',
-      'With all three off the body is what 0.1.8 sent.', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
-      '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.1.9`',
+      '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (new in 0.1.9) is `{ appeals, renames, keepBlocked, rooms, workflow, insights }`', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
+      '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.2.0`',
       '`name_profane`', 'Also `POST /people/:ref/rename`.',
     ]) {
       expect(httpDoc, needle).toContain(needle);
@@ -857,17 +793,20 @@ describe('the appeals and names docs (0.1.9)', () => {
 
   it('player-react: the appeals section says what the prop does, the new words to translate (counted from the catalog), and the older version', () => {
     const doc = flat(section(playerDoc, 'Install') + playerDoc.slice(playerDoc.indexOf('### Appeals'), playerDoc.indexOf('### Transports')));
-    for (const needle of ['`appeals`', '`AppealDialog`', '`appealUrl` is not used then', 'older than 0.1.9', '`nameReasonText(t, reason)`', '`@chatwarden/core` is a peer too (`^0.1.9`)', '`AppealRefusal`, `PlayerAppeal` and `NameReason`']) {
+    for (const needle of ['`appeals`', '`AppealDialog`', '`appealUrl` is not used then', 'older than 0.1.9', '`nameReasonText(t, reason)`', '`@chatwarden/core` is a peer too (`^0.2.0`)', '`AppealRefusal`, `PlayerAppeal` and `NameReason`']) {
       expect(doc, needle).toContain(needle);
     }
     const catalog = read('packages/player-react/src/i18n.ts');
     const count = (prefix: string): number => [...catalog.matchAll(new RegExp(`^ {2}'${prefix.replaceAll('.', '\\.')}[a-zA-Z_.]*'`, 'gm'))].length;
     expect(count('player.appeal.')).toBe(18);
-    expect(count('player.name.')).toBe(2);
-    expect(doc).toContain('28 keys to `en`: 18 `player.appeal.*`, 2 `player.name.*`');
+    expect(count('player.name.')).toBe(3);
+    expect(doc).toContain('29 keys to `en`: 18 `player.appeal.*`, 3 `player.name.*`');
+    // The notice words moved to core (`@chatwarden/core/notice-copy`); `en` spreads them.
+    const words = read('packages/core/src/noticeCopy.ts');
+    expect(catalog).toContain('...NOTICE_WORDS');
     for (const kind of ['rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked']) {
-      expect(catalog, `title ${kind}`).toContain(`'player.notice.title.${kind}'`);
-      expect(catalog, `body ${kind}`).toContain(`'player.notice.body.${kind}'`);
+      expect(words, `title ${kind}`).toContain(`'player.notice.title.${kind}'`);
+      expect(words, `body ${kind}`).toContain(`'player.notice.body.${kind}'`);
     }
   });
 
@@ -882,14 +821,14 @@ describe('the appeals and names docs (0.1.9)', () => {
     const mounted = ['LazyPaceSettings', 'LazySignalSettings', 'LazyAppealSettings', 'LazyNameSettings'].map((n) => advanced.indexOf(`<${n} `));
     expect([...mounted].sort((a, b) => a - b)).toEqual(mounted);
     const doc = flat(hubDoc);
-    for (const needle of ['a custom length is never offered', 'shows on the Person page in Simple too', '`^0.1.9` for both', 'Translators: words new in 0.1.9', '`displayName(t, { handle, flagged, revealed })`']) {
+    for (const needle of ['a custom length is never offered', 'shows on the Person page in Simple too', '`^0.2.0` for both', 'Translators: words new in 0.1.9', '`displayName(t, { handle, flagged, revealed })`']) {
       expect(doc, needle).toContain(needle);
     }
   });
 
   it('discord: the two appeal posts, what they never carry, severeOnly and the peer floor', () => {
     const doc = flat(readme('discord'));
-    for (const needle of ['Appeal filed against a 24-hour chat restriction, Rule 2.', 'Appeal decided: lighter.', 'never carries the statement', '`rename.required`', 'only appeals under a severe rule post', '`^0.1.9`', 'no appeal statement']) {
+    for (const needle of ['Appeal filed against a 24-hour chat restriction, Rule 2.', 'Appeal decided: lighter.', 'never carries the statement', '`rename.required`', 'only appeals under a severe rule post', '`^0.2.0`', 'no appeal statement']) {
       expect(doc, needle).toContain(needle);
     }
   });
@@ -934,7 +873,7 @@ describe('the appeals and names docs (0.1.9)', () => {
         '`overrides.names.maskInHub: false`', '`appeals.read` (default `moderator`', '`appeals.decide` (default `senior`', 'An older player-react shows the generic title',
         '28 keys', 'from 11 KB to 14 KB', 'from 82 KB to 88 KB', 'The AI prompt version is now 4 for everyone', 'count against your daily call and money caps',
         '`PurgeResult` gains `appeals`, `appealStatements`, `blockedNames` and `appealsClosed`', '`withdrawNotice(id, at)` is new and optional', 'a custom store without it has renames off',
-        '`closeOrphanAppeals`', '`clearStatement`', '`purgeNotices(before, unseen?)`', '`@experimental` until 0.2', 'No new package is published',
+        '`closeOrphanAppeals`', '`clearStatement`', '`purgeNotices(before, unseen?)`', 'No new package is published',
       ]) {
         expect(text, `${dir}: ${needle}`).toContain(needle);
       }
@@ -977,7 +916,7 @@ describe('the adoption docs (0.1.10)', () => {
     expect(quick).toContain('createChatwarden');
   });
 
-  it('the root README has "Test your policy", with the same example the store-memory README runs, and says it is experimental', () => {
+  it('the root README has "Test your policy", with the same example the store-memory README runs, and does not call it experimental', () => {
     const mine = section(rootDoc, 'Test your policy');
     const kit = readme('store-memory');
     const theirs = /```ts\n([\s\S]*?)```/.exec(kit.slice(kit.indexOf('## The test kit')))?.[1];
@@ -985,7 +924,7 @@ describe('the adoption docs (0.1.10)', () => {
     expect(block, 'the root block').toBeDefined();
     expect(block).toBe(theirs);
     expect(block?.startsWith("import { createTestKit, expectOutcomes } from '@chatwarden/store-memory/testing';")).toBe(true);
-    expect(flat(mine)).toContain('`@experimental` until 0.2');
+    expect(flat(mine)).not.toContain('@experimental');
     expect(flat(mine)).toContain('invented');
   });
 
@@ -999,13 +938,13 @@ describe('the adoption docs (0.1.10)', () => {
     expect(core).toContain('npx chatwarden init');
   });
 
-  it('store-memory: the README names every export of the testing entry, and says they are experimental', () => {
+  it('store-memory: the README names every export of the testing entry, and does not call them experimental', () => {
     const entry = read('packages/store-memory/src/testing/index.ts');
     const names = [...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim()).filter(Boolean));
     expect(names.length).toBeGreaterThan(15);
     const kit = flat(readme('store-memory').slice(readme('store-memory').indexOf('## The test kit')));
     for (const name of names) expect(kit, name).toContain(name);
-    expect(kit).toContain('`@experimental` until 0.2');
+    expect(kit).not.toContain('@experimental');
   });
 
   it('the project docs say it exists: status, follow-ups, CLAUDE.md, RELEASING.md and tiny-chat', () => {
@@ -1097,13 +1036,13 @@ describe('the shared term list docs (K7, 0.1.11)', () => {
     expect(doc).not.toContain('`definitelyNotAnOption`');
   });
 
-  it('the READMEs list the @experimental names of the corpus subpaths, every one the entries export, and LiveTerms.syncPack', () => {
+  it('the READMEs list the names of the corpus subpaths, every one the entries export, and LiveTerms.syncPack', () => {
     const doc = flat(section(matcherDoc, 'The community term corpus'));
     const names = [...exported(read('packages/matcher/src/corpus/index.ts')), ...exported(read('packages/matcher/src/corpus/node/index.ts'))];
     expect(names.length).toBeGreaterThan(60);
     for (const n of names) expect(doc, n).toContain(`\`${n}\``);
     for (const n of ['LiveTerms.syncPack', 'SyncResult', 'SyncSummary']) expect(doc, n).toContain(`\`${n}\``);
-    expect(doc).toMatch(/`@experimental` until 0\.2/);
+    expect(doc).not.toMatch(/@experimental/);
   });
 
   it('no README holds a term: every word in a term, phrase or line of a code block is invented or ordinary', () => {
@@ -1342,12 +1281,12 @@ describe('the AI gate dashboard and do-not-automate docs (0.1.13)', () => {
   const hub = flat(section(readme('hub-react'), 'AI levels 3 and 4, release 1 (0.1.13)'));
   const sqlite = flat(readme('store-sqlite'));
 
-  it('core: says nothing acts, what the seam is, the gate view, the mark, the migration (one-way, back up first), the unions and the experimental names', () => {
+  it('core: says nothing acts, what the seam is, the gate view, the mark, the migration (one-way, back up first), the unions and the names', () => {
     for (const needle of [
       '**Nothing in this release lets the AI act.**', '`source: \'ai\'`', '`applySanction`', '`writeSanction`', '`validateSanctionInput`', '`service`', '`cw.ai.gates()`', '`AiGatesView`',
       '`actingAvailable` is false', 'lower 95% bound', '`cw.people.automation`', '`AUTOMATION_CODES`', 'no free text', 'follows a merge', '`automationAllowed(person, lookup?)`',
       'migration 24 (SQLite)', '`kit_ai_noauto`', '**one-way**', '**back up the file before upgrading**', '`aiGateRows`', '`setNoAutomation`', '`loadNoAutomation`', '`withMemoryAi(store)`',
-      '`AUDIT_ACTIONS` gains `person.automation`', 'Experimental names',
+      '`AUDIT_ACTIONS` gains `person.automation`', '**Names:**',
     ]) {
       expect(core, needle).toContain(needle);
     }
@@ -1376,5 +1315,135 @@ describe('the AI gate dashboard and do-not-automate docs (0.1.13)', () => {
     for (const needle of ['Migration 24 adds five columns', '`kit_ai_outcomes`', '`ai_rule`', '`decided_by`', '`kit_ai_noauto`', '`human`, `holdback`, `review` or `service`', 'a 0.1.12 or older store refuses a database at version 24', 'back up the file before upgrading']) {
       expect(sqlite, needle).toContain(needle);
     }
+  });
+});
+
+// Rooms, many players and languages (0.2.0): what each README says about the room contexts, phrase-only rooms, block, staff scope, reserved names and the entity reports.
+describe('the rooms sections (0.2.0)', () => {
+  const core = flat(readme('core'));
+  const http = flat(readme('http'));
+  const player = flat(readme('player-react'));
+  const hub = flat(readme('hub-react'));
+  const matcher = flat(readme('matcher'));
+  const sqlite = flat(readme('store-sqlite'));
+  const has = (doc: string, needles: string[]): void => {
+    for (const needle of needles) expect(doc, needle).toContain(needle);
+  };
+
+  it('the readme checks pass for the changed packages: core says contexts, phrases, block, scope, reserved names, entity reports, the refusal reasons and the tag grammar', () => {
+    has(core, ['## Room contexts', '### Phrase-only rooms', '### Staff scope', '### Block', '### Reserved names and entity reports']);
+    // contexts and the tag grammar
+    has(core, ['`CONTEXT_SECTIONS`', '`ROOM_TAG_KEYS`', '`checkRoomTags`', '`chatwarden.context_unknown`', '`account_too_new`']);
+    // phrases
+    has(core, ['`cw.chat.acceptPhrase(room, seat, id)`', '`phrases_only`', '`phrase_unknown`', '`cw.phrases.names()`', '`cw.phrases.book(roomId)`', '`checkPhraseBooks(input, screens?)`', '`PhraseBookError`', '`MAX_PHRASES_PER_BOOK`', 'ships no phrase text']);
+    // reserved names and entity reports
+    has(core, ['`names.reserved`', '`names.reservedAllow`', '`names.reservedRule`', '`name_reserved`', '`NameKind`', '`ReportInput.entity`', '`entity_invalid`', '`impersonation`', '`rename.required`']);
+    expect(core).toMatch(/refused `phrases_only`/);
+    expect(core).toMatch(/an entity rename.* no notice/i);
+  });
+
+  it('the readme checks pass for the changed packages: http says scope on authorize, scopedLimits, wire version 2, the kind on names, the phrases and mute routes and the entity on a case', () => {
+    has(http, ['`scope?: string[]`', 'scopedLimits: { kinds, maxDurationMs }', 'Wire version 2', '`POST /rooms/:room/phrases`', '`POST /rooms/:room/mute`', '`GET /policy/contexts`']);
+    has(http, ['`POST /names/check { name, kind? }`', '`name_reserved`', '`POST /people/:ref/rename` | `{ reason, rule, takeOver?, entity? }`', '`entities`', '`entityLabelFlagged`', '`phrases_only`', '`phrase_unknown`']);
+    expect(http).toMatch(/`kind` is `player` \(the default\) or `entity`/);
+  });
+
+  it('the readme checks pass for the service mode: http says the /v1 table, the keys and their rotation, the process and its variables, the client, the description and the honest limits; core says shared pacing', () => {
+    has(http, ['## Service mode', '`serviceRoutes(cw, { keys })`', '`@chatwarden/http/service`', '`SERVICE_OPENAPI`', '`createServiceClient`', '`chatwarden serve`', '`chatwarden init --service`', '`GET /v1`', '`POST /v1/rooms/{room}/seats/{seat}/lines`', '`POST /v1/blocks/between`']);
+    has(http, ['`CHATWARDEN_SECRET`', '`CHATWARDEN_SERVICE_KEYS`', '`CHATWARDEN_ADMIN_TOKEN`', '`CHATWARDEN_AUTH_MODULE`', '`CHATWARDEN_PROCESSES`', '`Idempotency-Key`', '`idempotent-replay`', '`synthetic_terms`', '`pacing_per_process`', '`plain_http`']);
+    has(http, ['### Rotating a service key', '### What it does not do']);
+    expect(http).toMatch(/A service key is a database password/);
+    expect(http).toMatch(/Seats are the game's to keep/);
+    expect(http).toMatch(/one process per room set/i);
+    has(core, ['## Shared pacing', '`createChatwarden({ sharedPacing: true })`', '`paceLoad`', '`paceUpdate`', '`paceDropRoom`', '`paceSweep`', '`PaceStateRow`', '`PurgeResult.pace`']);
+    expect(core).toMatch(/setPace` overrides stay per process/);
+  });
+
+  it('the readme checks pass for the changed packages: player-react says Block, the phrase picker, the phrase catalogue keys and the name words', () => {
+    has(player, ['phrase picker', '`phrase.<id>`', '`player.chat.phrases`', '`player.chat.refused.phrases_only`', '`player.chat.refused.phrase_unknown`', '`ChatTransport.sendPhrase(id)`', '`player.name.reserved`', '`player.report.refused.entity_invalid`']);
+    has(player, ['Block']);
+    expect(player).toMatch(/in place of the phrase's text/);
+  });
+
+  it('the readme checks pass for the changed packages: hub-react says the context chip, the contexts list, the entity row, the reserved names and Match', () => {
+    has(hub, ['## Rooms, names for entities and terms without spaces (0.2.0)', '**Room contexts**', 'context chip', '`EntityRow`', '`entityLabelFlagged`', '"Protected names"', '"Match"', '"Anywhere in the text"', '`matchMode`']);
+    expect(hub).toMatch(/a scoped moderator is offered neither/i);
+  });
+
+  it('the readme checks pass for the changed packages: matcher says skeleton, matchReserved and what a reserved name does and does not compare', () => {
+    has(matcher, ['### Reserved names', '`skeleton(text)`', '`matchReserved(name, entries, allow)`']);
+    expect(matcher).toMatch(/whole words/i);
+    expect(matcher).toMatch(/never the chat/i);
+  });
+
+  it('the core README says how many words NOTICE_WORDS holds, and the number is the real one (39: 36 notice words and the three restricted-chat words)', async () => {
+    const { NOTICE_WORDS } = await import('@chatwarden/core/notice-copy');
+    const count = Object.keys(NOTICE_WORDS).length;
+    expect(count).toBe(39);
+    expect(flat(readme('core'))).toContain(`\`NOTICE_WORDS\` (${count} keys: 36 notice words and the three restricted-chat words)`);
+  });
+
+  it('the READMEs say the Spanish and Portuguese catalogues are machine drafts that a person has not read', () => {
+    for (const dir of ['player-react', 'hub-react', 'hub-element']) {
+      const text = flat(readme(dir));
+      expect(text, dir).toMatch(/Spanish and Portuguese are machine-drafted/);
+      expect(text, dir).toMatch(/not been reviewed by a person/);
+      expect(text, dir).toMatch(/who speaks the language/);
+    }
+  });
+
+  // Migration 26 is shared by every theme of 0.2.0, so its README list is judged against the SQL itself: every table and every column the migration adds is named in the
+  // store-sqlite README's Migration 26 section, and the core README, which also describes the migration, does not name a table the SQL does not create.
+  describe('migration 26 in the READMEs, against the migration itself', () => {
+    const migrations = read('packages', 'store-sqlite', 'src', 'migrations.ts');
+    const at = migrations.indexOf('version: 26,');
+    const sql = migrations.slice(at, migrations.indexOf('`,', migrations.indexOf('sql: `', at)));
+    const tables = [...sql.matchAll(/CREATE TABLE (kit_[a-z_]+)/g)].map((m) => m[1] as string);
+    const columns = [...sql.matchAll(/ALTER TABLE (kit_[a-z_]+) ADD COLUMN ([a-z_]+)/g)].map((m) => `${m[1]}.${m[2]}`);
+    const sqliteDoc = read('packages', 'store-sqlite', 'README.md').replace(/\r\n/g, '\n');
+    const start = sqliteDoc.indexOf('### Migration 26');
+    const section26 = flat(start === -1 ? '' : sqliteDoc.slice(start, sqliteDoc.indexOf('\n#', start + 5) === -1 ? undefined : sqliteDoc.indexOf('\n#', start + 5)));
+    const core = flat(readme('core'));
+
+    it('control: the scan finds the tables and columns of the migration', () => {
+      expect(tables).toEqual(expect.arrayContaining(['kit_filter_hits', 'kit_legal_holds', 'kit_erasures', 'kit_report_comments', 'kit_chat_days', 'kit_pace']));
+      expect(columns).toEqual(expect.arrayContaining(['kit_reports.origin', 'kit_reports.urgent', 'kit_reports.scope', 'kit_terms.match_mode', 'kit_mutes.block']));
+    });
+
+    it('store-sqlite has a "Migration 26" section that says it is one-way and to back up first', () => {
+      expect(start).toBeGreaterThan(-1);
+      expect(section26).toMatch(/one-way/);
+      expect(section26).toMatch(/back up/i);
+    });
+
+    it.each(tables)('the store-sqlite section names the table %s', (table) => {
+      expect(section26).toContain(`\`${table}\``);
+    });
+
+    it.each(columns)('the store-sqlite section names the column %s', (column) => {
+      expect(section26).toContain(`\`${column}\``);
+    });
+
+    it('the section names every index the migration creates', () => {
+      for (const index of new Set([...sql.matchAll(/CREATE (?:UNIQUE )?INDEX (kit_[a-z_]+)/g)].map((m) => m[1] as string))) expect(section26, index).toContain(`\`${index}\``);
+    });
+
+    it('the section names the erasure epoch row, and the core README points at it and names no table or index the migrations do not create', () => {
+      expect(section26).toContain('erasure_epoch');
+      expect(core).toMatch(/migration 26/i);
+      for (const name of new Set([...core.matchAll(/`(kit_[a-z_]+)`/g)].map((m) => m[1] as string))) {
+        const known = new RegExp(`CREATE (?:UNIQUE )?(?:TABLE|INDEX)(?: IF NOT EXISTS)? ${name}\\b`).test(migrations);
+        expect(known, `${name} is a table or index the migrations create`).toBe(true);
+      }
+    });
+
+    it('the core README lists the same new tables as the migration for migration 26 (filters, holds, erasures, comments, chat days, pace)', () => {
+      const line = core.slice(core.search(/SQLite migration 26/i));
+      for (const table of ['kit_filter_hits', 'kit_legal_holds', 'kit_erasures', 'kit_report_comments', 'kit_chat_days', 'kit_pace']) expect(line.slice(0, 1800), table).toContain(`\`${table}\``);
+    });
+  });
+
+  it('the readme checks pass for the changed packages: store-sqlite names the rooms and languages columns of migration 26', () => {
+    has(sqlite, ['Migration 26', '`kit_reports.scope`', '`kit_reports.entity_json`', '`kit_terms.match_mode`', '`kit_mutes.block`']);
   });
 });

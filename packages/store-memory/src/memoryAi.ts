@@ -530,8 +530,9 @@ class MemoryAi extends MemoryStore {
     // In place, so the journal of an earlier write in the same transaction still points at this list.
     const rows = this.actions();
     const snapshot = [...rows];
-    const kept = snapshot.filter((r) => r.createdAt >= before);
-    const noted = kept.filter((r) => r.createdAt < undoNotesBefore && r.undoNote !== null).map((r) => [r, r.undoNote] as const);
+    const held = this.heldReportIds();
+    const kept = snapshot.filter((r) => r.createdAt >= before || held.has(r.reportId));
+    const noted = kept.filter((r) => r.createdAt < undoNotesBefore && r.undoNote !== null && !held.has(r.reportId)).map((r) => [r, r.undoNote] as const);
     for (const [r] of noted) r.undoNote = null;
     rows.splice(0, rows.length, ...kept);
     this.undoWith(() => {
@@ -544,12 +545,14 @@ class MemoryAi extends MemoryStore {
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
     const reads = this.aiReads;
     const outcomes = new Map(this.aiOutcomes);
-    const keptReads = reads.filter((r) => r.createdAt >= readsBefore);
+    const held = this.heldReportIds();
+    const keptReads = reads.filter((r) => r.createdAt >= readsBefore || held.has(r.reportId));
     const ledger = this.aiSpend;
     this.aiSpend = ledger.filter((e) => e.at >= readsBefore);
     const stripped: Array<[AiOutcomeRow, AiOutcomeRow['example']]> = [];
     let gone = 0;
     for (const [id, r] of outcomes) {
+      if (held.has(id)) continue;
       if (r.decidedAt < outcomesBefore) {
         this.aiOutcomes.delete(id);
         gone += 1;
@@ -566,6 +569,43 @@ class MemoryAi extends MemoryStore {
       for (const [r, example] of stripped) r.example = example;
     });
     return { reads: reads.length - keptReads.length, outcomes: gone };
+  }
+
+  // Privacy (0.2.0): `MemoryStore.eraseSubjects` and `exportSubjects` call these when the wrapper is present. Not part of the Store interface.
+
+  /** Delete the "do not automate" marks of the set. Returns how many. */
+  privacyEraseNoAutomation(set: ReadonlySet<string>): number {
+    const rows = this.noAutomation;
+    if (rows === undefined) return 0;
+    const keep = [...rows].filter(([subject]) => !set.has(subject));
+    const n = rows.size - keep.length;
+    if (n === 0) return 0;
+    this.noAutomation = new Map(keep);
+    this.undoWith(() => {
+      this.noAutomation = rows;
+    });
+    return n;
+  }
+
+  /** Delete the action rows of these reports. Returns how many. */
+  privacyEraseAiActions(reportIds: ReadonlySet<string>): number {
+    if (this.actionRows === undefined) return 0;
+    const snapshot = this.actionRows;
+    const kept = snapshot.filter((r) => !reportIds.has(r.reportId));
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.actionRows = kept;
+      this.undoWith(() => {
+        this.actionRows = snapshot;
+      });
+    }
+    return n;
+  }
+
+  /** The mark's closed code for the first of the set that has one (newest mark first), or null. */
+  privacyExportNoAutomation(set: ReadonlySet<string>): string | null {
+    const marks = [...(this.noAutomation?.values() ?? [])].filter((r) => set.has(r.subject)).sort((a, b) => b.setAt - a.setAt);
+    return marks[0]?.code ?? null;
   }
 }
 
@@ -621,7 +661,6 @@ function ruleOrder(a: string | null, b: string | null): number {
  * Give a {@link MemoryStore} the optional AI methods (`reserveAiRead`, `loadAiOutcome`, `aiStats`, ...), so `createChatwarden({ ai })` can use
  * it. Returns the same store. `createMemoryStore()` does not carry them, so an app that never turns the AI on does not bundle them. A method the
  * store already has (a subclass's override) is left as it is, and calling this twice changes nothing.
- * @experimental
  */
 export function withMemoryAi<S extends MemoryStore>(store: S): S & MemoryAiMethods {
   const target = store as unknown as Record<string, unknown>;

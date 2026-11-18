@@ -18,7 +18,6 @@ const TEST_SECRET = 'testing-secret-do-not-use-in-production';
 /**
  * Options for a test kit: anything `createChatwarden` takes except the store, platform, clock, logger and secret (the kit sets those), plus two word-list
  * shorthands.
- * @experimental
  */
 export interface TestKitOptions extends Partial<Omit<ChatwardenOptions, 'store' | 'platform' | 'clock' | 'logger' | 'secret'>> {
   /** Shorthand for `matcher: wordMatcher(blocked)`. Ignored when `matcher` is given. Pass your real matcher as `matcher` to test your own term list. */
@@ -33,7 +32,6 @@ export interface TestKitOptions extends Partial<Omit<ChatwardenOptions, 'store' 
 
 /**
  * A kit for tests.
- * @experimental
  */
 export interface TestKit {
   readonly cw: Chatwarden;
@@ -55,7 +53,6 @@ export interface TestKit {
 
 /**
  * Build a test kit.
- * @experimental
  */
 export async function createTestKit(options: TestKitOptions = {}): Promise<TestKit> {
   const { blocked, swears, store: given, start, ...rest } = options;
@@ -120,7 +117,6 @@ export async function createTestKit(options: TestKitOptions = {}): Promise<TestK
 /**
  * For each case, build a fresh kit and one player, say the text, and compare the label. Throws one `ScriptMismatch` listing every case that differs, not
  * only the first. Each case is independent of the others (strikes and rate limits do not carry over).
- * @experimental
  */
 export async function checkLines(options: TestKitOptions, cases: ReadonlyArray<{ text: string; expect: SayLabel }>): Promise<void> {
   const differing: string[] = [];

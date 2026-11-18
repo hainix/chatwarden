@@ -1,9 +1,9 @@
 // The wire types of the chat stream, copied from `@chatwarden/http/chat` so this package stays types-only toward the kit.
 // `test/chat-wire.test.ts` keeps the two copies the same type and `CHAT_WIRE_VERSION` the same number.
-import type { ReportRefusal } from '@chatwarden/core';
+import type { ReportRefusal, RoomMode } from '@chatwarden/core';
 
 /** The version of the frames below. A change that breaks a reader raises it. */
-export const CHAT_WIRE_VERSION = 1;
+export const CHAT_WIRE_VERSION = 2;
 
 /** One delivered line, as a viewer sees it. No seat, no person, no hash. */
 export interface WireLine {
@@ -17,6 +17,20 @@ export interface WireLine {
   text: string;
   /** Present and true on the viewer's own lines. */
   mine?: true;
+  /** Version 2: the id of the phrase, when the line was sent from a phrase book (a phrase-only room). `text` is then the canonical text; a viewer with its own words for the id shows those. Absent on a typed line. */
+  phrase?: string;
+}
+
+/** One phrase of a phrase-only room's book: the id to send, the canonical text and an optional group that heads a section in the picker. */
+export interface WirePhrase {
+  id: string;
+  text: string;
+  group?: string;
+}
+
+/** The phrases of a phrase-only room (version 2): the room's list in picker order. */
+export interface WirePhrases {
+  book: WirePhrase[];
 }
 
 /** The restriction on the viewer's own chat, or null. Same meaning as `RestrictedChatLineProps`. */
@@ -27,29 +41,41 @@ export interface WireRestriction {
   byModerator: boolean;
 }
 
-/** A player the viewer muted, by an opaque token only the viewer can use to undo it. */
+/** A player the viewer muted or blocked, by an opaque token only the viewer can use to undo it. `block` is true for a block; a mute has no key. */
 export interface WireMuted {
   ref: string;
   name: string;
+  block?: true;
 }
 
 /**
  * Why a line was not sent, for its author. `reason` is one of: `length`, `rate`, `gate`, `restricted`, `blocked`, `profanity`, `banned`,
- * `empty`, and, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`). A reader treats any other string as unknown.
+ * `empty`, `link`, `personal_info` and `filter`, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`),
+ * and, new in version 2, `locked` and `new_account` (the room's mode: they carry `until`, when it ends), `probation` (a new account's pause: it carries `retryAfterMs`), `account_too_new` (a room's least account age) and, for phrase-only rooms,
+ * `phrases_only` (typed text in one) and `phrase_unknown` (an id the room's book lacks). A reader treats any other string as unknown.
  * Never carries text, a handle, an id or a moderator's note.
  */
 export interface WireRefusal {
   reason: string;
-  /** `restricted` and `banned`: epoch ms it ends, or null. */
+  /** `restricted`, `banned`, `locked` and `new_account`: epoch ms it ends, or null. */
   until?: number | null;
   byModerator?: boolean;
   /** The Community Rule number to show as "Community Rule N". */
   rule?: number;
   /** The player's own notice that explains it (look it up with the player routes). */
   noticeId?: string;
-  /** `slow_mode`, `flood`, `duplicate`: when to try again, ms from the answer (a whole number, 1 or more). */
+  /** `slow_mode`, `flood`, `duplicate`, `probation`: when to try again, ms from the answer (a whole number, 1 or more). */
   retryAfterMs?: number;
 }
+
+/** A room's mode as the chat box is told it: `kind` and when it ends (epoch ms, null for `normal`). Never who set it or why. */
+export interface WireMode {
+  kind: RoomMode;
+  until: number | null;
+}
+
+/** Why a viewer cannot post right now, when it is the room's mode: `locked` (staff only) or `new_account` (an emergency, and an account too young). Absent when they can post. */
+export type WireReadOnly = 'locked' | 'new_account';
 
 export type ChatFrame =
   | {
@@ -58,7 +84,10 @@ export type ChatFrame =
       /** Changes when the server restarts or the room is closed and reopened. */
       epoch: string;
       room: string;
-      you: { name: string };
+      /** `readOnly`: the viewer cannot post because of the room's mode (version 2); absent when they can. */
+      you: { name: string; readOnly?: WireReadOnly };
+      /** The room's mode now (version 2): `normal`, `locked` or `emergency` and when it ends. */
+      mode: WireMode;
       /** The line length limit (`cw.limits.chatMaxLength`), for the input. */
       maxLength: number;
       /** How often the server sends a heartbeat comment while a stream is idle (the broadcaster's `heartbeatMs`), so a client can size its liveness watchdog from it. */
@@ -71,6 +100,8 @@ export type ChatFrame =
       /** Recent lines the viewer may see, oldest first. */
       lines: WireLine[];
       muted: WireMuted[];
+      /** The room's phrase book (version 2) when it is phrase-only: the box then shows a picker instead of the input. `null` for a free-text room. */
+      phrases: WirePhrases | null;
     }
   | { type: 'line'; line: WireLine }
   /** Lines to remove from view (the viewer muted their author). */
@@ -79,6 +110,10 @@ export type ChatFrame =
   | { type: 'state'; restriction: WireRestriction | null; muted: WireMuted[] }
   /** A notice is waiting for this player: ask the player routes for it. Carries nothing else. */
   | { type: 'notices' }
+  /** The room's mode changed or ended (version 2). `readOnly` is computed for THIS viewer. Carries no actor and no reason. */
+  | { type: 'mode'; mode: WireMode; readOnly?: WireReadOnly }
+  /** Lines were taken back for everyone (version 2): remove each id from view and drop its text. Sent to every stream, the author's too. */
+  | { type: 'retract'; ids: string[] }
   /** The server is ending this stream. `banned` carries when the ban ends. */
   | { type: 'bye'; reason: 'banned' | 'room_closed' | 'shutdown' | 'replaced'; until?: number | null };
 
@@ -86,9 +121,9 @@ export type SendResult = { ok: true; line: WireLine } | { ok: false; refused: Wi
 export type MuteTarget = { lineId: string } | { ref: string };
 /**
  * The answer to a mute: `ok` is whether anything changed; `hiddenIds` are the ids of the muted player's lines still in the room history
- * (oldest first, the same ids as the `hide` frame), so a client hides exactly those. `[]` for an unmute or a no-op.
+ * (oldest first, the same ids as the `hide` frame), so a client hides exactly those. `[]` for an unmute or a no-op. `limit: true` (with `ok` false): the list is full of blocks.
  */
-export type MuteResult = { ok: boolean; hiddenIds: string[] };
+export type MuteResult = { ok: boolean; hiddenIds: string[]; limit?: true };
 export type ReportOutcome =
   | { ok: true; remaining: number }
   | { ok: false; refused: ReportRefusal | 'not_found'; remaining?: number };
@@ -109,6 +144,12 @@ export const DEFAULT_HEARTBEAT_MS = 20_000;
 const MAX_HIDDEN = 1000;
 /** A line id over this is not an id. */
 const MAX_ID = 64;
+/** The most phrases a book may hold (the kit's own limit); a phrase's text and group are cut at the kit's limits too. */
+const MAX_PHRASES = 300;
+const MAX_PHRASE_TEXT = 100;
+const MAX_PHRASE_GROUP = 24;
+/** A phrase id as the kit issues them. */
+const PHRASE_ID = /^[A-Za-z0-9_-]{1,32}$/;
 
 type Bag = Record<string, unknown>;
 
@@ -138,6 +179,20 @@ function restrictionOf(raw: unknown): WireRestriction | null | undefined {
   return { until, byModerator };
 }
 
+const MODES: readonly RoomMode[] = ['normal', 'locked', 'emergency'];
+
+/** A mode from the wire, or undefined when it is not one (a kind outside the three, or an `until` that is neither a time nor null). */
+function modeOf(raw: unknown): WireMode | undefined {
+  const o = bagOf(raw);
+  if (o === null) return undefined;
+  const kind = own(o, 'kind');
+  const until = own(o, 'until');
+  if (!MODES.includes(kind as RoomMode) || (until !== null && !isNum(until))) return undefined;
+  return { kind: kind as RoomMode, until };
+}
+
+const readOnlyOf = (raw: unknown): WireReadOnly | undefined => (raw === 'locked' || raw === 'new_account' ? raw : undefined);
+
 function mutedOf(raw: unknown): WireMuted[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: WireMuted[] = [];
@@ -146,9 +201,30 @@ function mutedOf(raw: unknown): WireMuted[] | undefined {
     if (o === null) continue;
     const ref = own(o, 'ref');
     const name = own(o, 'name');
-    if (isStr(ref) && ref !== '' && isStr(name)) out.push({ ref, name: cut(name, MAX_NAME) });
+    if (isStr(ref) && ref !== '' && isStr(name)) out.push({ ref, name: cut(name, MAX_NAME), ...(own(o, 'block') === true ? { block: true as const } : {}) });
   }
   return out;
+}
+
+/** The phrase book of a hello, or null: no book, or a value that is not one (a reader never invents a picker). Items are copied field by field; a bad item is dropped. */
+function phrasesOf(raw: unknown): WirePhrases | null {
+  const o = bagOf(raw);
+  const list = o === null ? undefined : own(o, 'book');
+  if (!Array.isArray(list)) return null;
+  const book: WirePhrase[] = [];
+  for (const item of list as unknown[]) {
+    if (book.length >= MAX_PHRASES) break;
+    const p = bagOf(item);
+    if (p === null) continue;
+    const id = own(p, 'id');
+    const text = own(p, 'text');
+    const group = own(p, 'group');
+    if (!isStr(id) || !PHRASE_ID.test(id) || !isStr(text) || text === '') continue;
+    const phrase: WirePhrase = { id, text: cut(text, MAX_PHRASE_TEXT) };
+    if (isStr(group) && group !== '') phrase.group = cut(group, MAX_PHRASE_GROUP);
+    book.push(phrase);
+  }
+  return { book };
 }
 
 /** One line from the wire, or null when it is not a line. The name and text are cut; unknown fields are left behind. */
@@ -162,6 +238,8 @@ export function readLine(raw: unknown): WireLine | null {
     const text = own(o, 'text');
     if (!isStr(id) || id === '' || id.length > MAX_ID || !isNum(at) || !isStr(name) || !isStr(text)) return null;
     const line: WireLine = { id, at, name: cut(name, MAX_NAME), text: cut(text, MAX_TEXT) };
+    const phrase = own(o, 'phrase');
+    if (isStr(phrase) && PHRASE_ID.test(phrase)) line.phrase = phrase;
     if (own(o, 'mine') === true) line.mine = true;
     return line;
   } catch {
@@ -176,7 +254,7 @@ export function readMuteResult(raw: unknown): MuteResult | null {
     if (o === null || typeof own(o, 'ok') !== 'boolean') return null;
     const ids = own(o, 'hiddenIds');
     const hiddenIds = Array.isArray(ids) ? (ids as unknown[]).filter((id): id is string => isStr(id) && id !== '' && id.length <= MAX_ID).slice(0, MAX_HIDDEN) : [];
-    return { ok: own(o, 'ok') as boolean, hiddenIds };
+    return { ok: own(o, 'ok') as boolean, hiddenIds, ...(own(o, 'limit') === true ? { limit: true as const } : {}) };
   } catch {
     return null;
   }
@@ -211,6 +289,8 @@ function readHello(o: Bag): ChatFrame | null {
   const room = own(o, 'room');
   const you = bagOf(own(o, 'you'));
   const youName = you === null ? undefined : own(you, 'name');
+  const youReadOnly = you === null ? undefined : readOnlyOf(own(you, 'readOnly'));
+  const mode = modeOf(own(o, 'mode'));
   const maxLength = own(o, 'maxLength');
   // An older server that does not say gets the broadcaster's default.
   const sent = own(o, 'heartbeatMs');
@@ -222,26 +302,40 @@ function readHello(o: Bag): ChatFrame | null {
   if (own(o, 'v') !== CHAT_WIRE_VERSION) return null;
   if (!isStr(epoch) || !isStr(room) || !isStr(youName) || !isStr(summary)) return null;
   if (!isNum(maxLength) || !Number.isInteger(maxLength) || maxLength < 1) return null;
-  if (restriction === undefined || muted === undefined || !Array.isArray(lines)) return null;
+  if (restriction === undefined || muted === undefined || mode === undefined || !Array.isArray(lines)) return null;
   const serverNow = own(o, 'now');
   return {
     type: 'hello',
     v: CHAT_WIRE_VERSION,
     epoch,
     room,
-    you: { name: cut(youName, MAX_NAME) },
+    you: youReadOnly === undefined ? { name: cut(youName, MAX_NAME) } : { name: cut(youName, MAX_NAME), readOnly: youReadOnly },
+    mode,
     maxLength,
     heartbeatMs: heartbeat,
     summary,
     restriction,
     lines: (lines as unknown[]).map(readLine).filter((l): l is WireLine => l !== null),
     muted,
+    phrases: phrasesOf(own(o, 'phrases')),
     ...(isNum(serverNow) && serverNow >= 0 ? { now: serverNow } : {}),
   };
 }
 
 /**
- * A frame from parsed JSON, or null when it is not one of the six frames or a field has the wrong type. Never throws. It builds a fresh
+ * Is this a `hello` of another wire version (an older or a newer server, or one with no version at all)? The box refuses such a server as unsupported instead of waiting for a hello it can read. Never throws.
+ */
+export function isForeignHello(raw: unknown): boolean {
+  try {
+    const o = bagOf(raw);
+    return o !== null && own(o, 'type') === 'hello' && own(o, 'v') !== CHAT_WIRE_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A frame from parsed JSON, or null when it is not one of the eight frames or a field has the wrong type. Never throws. It builds a fresh
  * object field by field from own properties, so `__proto__` and `constructor` keys never land on the result, and unknown fields
  * are left behind. A name is cut at 64 and a text at 1 000. `jsonLength` is the length of the JSON text the value came from, in bytes;
  * a frame over 64 KiB is dropped.
@@ -270,6 +364,17 @@ export function readFrame(raw: unknown, jsonLength?: number): ChatFrame | null {
       }
       case 'notices':
         return { type: 'notices' };
+      case 'mode': {
+        const mode = modeOf(own(o, 'mode'));
+        if (mode === undefined) return null;
+        const readOnly = readOnlyOf(own(o, 'readOnly'));
+        return readOnly === undefined ? { type: 'mode', mode } : { type: 'mode', mode, readOnly };
+      }
+      case 'retract': {
+        const ids = own(o, 'ids');
+        if (!Array.isArray(ids)) return null;
+        return { type: 'retract', ids: (ids as unknown[]).filter((id): id is string => isStr(id) && id !== '' && id.length <= MAX_ID) };
+      }
       case 'bye': {
         const reason = own(o, 'reason');
         if (reason !== 'banned' && reason !== 'room_closed' && reason !== 'shutdown' && reason !== 'replaced') return null;

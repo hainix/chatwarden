@@ -47,9 +47,14 @@ export type LadderStep = 0 | 1 | 2 | 3 | 4 | 5;
  * The canonical person's actions over the last 90 days (`startsAt >= now - HISTORY_LOOKBACK_MS`, inclusive),
  * across every alias that has been merged into them. Revoked rows are included, flagged `revoked`.
  */
-export function historyOf(store: Store, subjects: SubjectIndex, subject: SubjectId, now: number): ActionRecord[] {
+export function historyOf(store: Store, subjects: SubjectIndex, subject: SubjectId, now: number, scope?: readonly string[]): ActionRecord[] {
   const root = subjects.canonical(subject);
   const out: ActionRecord[] = [];
+  // A staff scope keeps only the actions made from a report filed in one of its rooms (a direct or an automatic sanction has no report and is never one of them).
+  if (scope !== undefined) {
+    for (const row of store.listSubjectSanctions({ subjects: subjects.aliasesOf(root), since: now - HISTORY_LOOKBACK_MS, scope, limit: 200 })) out.push(toRecord(row));
+    return out;
+  }
   for (const row of store.loadSubjectActions(now - HISTORY_LOOKBACK_MS)) {
     if (row.targetType !== 'subject' || subjects.canonical(row.value) !== root) continue;
     out.push(toRecord(row));
@@ -166,21 +171,23 @@ export interface SuggestContext {
    * The signal rules that fired for the reported person (design 5.6). Set by the facade (`cw.suggest` computes them from
    * `feeds.ladder` and ignores a list passed to it); a rule only adds to the suggestion, never starts one: banter returns before any
    * of this, and nothing here applies a sanction.
-   * @experimental
    */
   signals?: readonly SignalHit[];
   /**
    * Leave the signal rules' sentences and the `signals` key out of the suggestion (the outcome still moves, which is the part a decider must
    * see). For a caller who may not read the person's record: the sentence is a count of what other players did. Set by a route; default false.
-   * @experimental
    */
   hideSignalText?: boolean;
+  /**
+   * Read only what happened in these staff scopes: the person's record is the actions made from reports filed in a room of one of them, and no signal rule is read (a count of what other
+   * players did would reach past the scope). Set by a staff route for a scoped moderator; `cw.suggest` applies it. An empty list reads an empty record.
+   */
+  scope?: readonly string[];
 }
 
 /**
  * One signal rule that fired: its id, what it does and the sentence for the moderator ("Muted by other players: 5 players in 14
  * days"). Carries no identifier.
- * @experimental
  */
 export interface SignalHit {
   id: string;
@@ -195,7 +202,7 @@ export interface Suggestion {
   label: string;
   /** One plain sentence naming the profile and the reason. */
   why: string;
-  /** Present only when a signal rule fired: the ids of the rules, and whether one of them raised the suggestion by a step. @experimental */
+  /** Present only when a signal rule fired: the ids of the rules, and whether one of them raised the suggestion by a step. */
   signals?: { raised: boolean; ids: string[] };
 }
 

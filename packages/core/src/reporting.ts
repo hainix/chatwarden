@@ -1,4 +1,6 @@
+import { httpsUrl } from './settingsCheck.js';
 import type { ReportCategory } from './types.js';
+import type { SafetyResource } from './safety.js';
 
 // The reporting settings: how a player reports (the flow), what they may say it is for (the reasons), and what they are
 // told afterwards (the thank-you). Pure data and lookups: no store, no IO. The validation lives with the rest of the profile
@@ -38,9 +40,13 @@ export function isReasonId(v: unknown): v is string {
 /** The id of the reason that can never be removed or switched off: the fallback and what an old `other` category reads as. */
 export const OTHER_REASON_ID = 'other';
 
+/** The longest evidence link template (`reporting.evidenceUrl`), in characters. */
+export const REPORT_EVIDENCE_URL_MAX = 300;
+
 /**
  * One reason as you write it. `id` (a lowercase slug, unique) and `label` are required; the rest default to
- * `hint: ''`, `group: ''` (no group), `rules: []`, `asksNote: false` and `enabled: true`.
+ * `hint: ''`, `group: ''` (no group), `rules: []`, `asksNote: false`, `enabled: true`, `urgent: false`, `thanks: null` and
+ * `showResources: false`.
  */
 export interface ReportReasonInput {
   /** A unique lowercase slug of letters, digits, `_` and `-` (at most 32 characters). `none` is reserved. */
@@ -57,6 +63,12 @@ export interface ReportReasonInput {
   asksNote?: boolean;
   /** Offered to players. A switched-off reason stays valid for reports already filed. */
   enabled?: boolean;
+  /** Reports filed under this reason are urgent: a snapshot taken when the report is filed. Default false (`threat` and `welfare` are urgent in the defaults). */
+  urgent?: boolean;
+  /** What the reporter is told after sending a report under this reason (at most 300 characters). `null` or absent: `reporting.thanks`. */
+  thanks?: string | null;
+  /** Show `safety.resources` to the reporter after the thank-you for this reason. Default false (`welfare` shows them in the defaults). */
+  showResources?: boolean;
 }
 
 /** One reason with every field filled in. */
@@ -68,6 +80,12 @@ export interface ReportReason {
   rules: number[];
   asksNote: boolean;
   enabled: boolean;
+  /** Reports filed under this reason are urgent. */
+  urgent: boolean;
+  /** The reporter's own thank-you for this reason, or `null` for the global one. */
+  thanks: string | null;
+  /** Show the owner's resource list after the thank-you. */
+  showResources: boolean;
 }
 
 /** The reporting settings as you write them: every field is optional and defaulted. */
@@ -78,6 +96,11 @@ export interface ReportingSettings {
   reasons?: ReportReasonInput[];
   /** What the reporter is told after sending a report (at most 300 characters). Default {@link DEFAULT_REPORT_THANKS}. */
   thanks?: string;
+  /**
+   * A link template for the case's evidence link: `https://`, exactly one `{ref}` placeholder (never in the host), at most 300
+   * characters, no credentials. `null` or absent: no link.
+   */
+  evidenceUrl?: string | null;
 }
 
 /** The reporting settings in force: every field filled in. */
@@ -85,39 +108,65 @@ export interface ResolvedReporting {
   flow: ReportFlow;
   reasons: ReportReason[];
   thanks: string;
+  /** The evidence link template, or `null`. */
+  evidenceUrl: string | null;
 }
 
-/** What a player's client may read: the enabled reasons and nothing of the staff side (no rule mapping). */
+/**
+ * What a player's client may read: the enabled reasons and nothing of the staff side (no rule mapping, no urgent flag, no safety
+ * guidance or contact line). A reason's `thanks` is `null` when the global `thanks` applies; the top-level `resources` are shown after
+ * the thank-you for a reason whose `showResources` is true. The server always sends the three new fields, and a client reads a missing one as `null`, `false` and no resources.
+ */
 export interface PlayerReporting {
   flow: ReportFlow;
-  reasons: Array<{ id: string; label: string; hint: string; group: string; asksNote: boolean }>;
+  reasons: Array<{ id: string; label: string; hint: string; group: string; asksNote: boolean; thanks: string | null; showResources: boolean }>;
   thanks: string;
+  resources: SafetyResource[];
 }
 
-const reason = (id: string, label: string, hint: string, group: string, rules: number[], asksNote = false): ReportReason => ({
+const reason = (
+  id: string,
+  label: string,
+  hint: string,
+  group: string,
+  rules: number[],
+  asksNote = false,
+  extra: { urgent?: boolean; showResources?: boolean; enabled?: boolean } = {},
+): ReportReason => ({
   id,
   label,
   hint,
   group,
   rules,
   asksNote,
-  enabled: true,
+  enabled: extra.enabled ?? true,
+  urgent: extra.urgent ?? false,
+  thanks: null,
+  showResources: extra.showResources ?? false,
 });
 
 /**
  * The default reasons, deep-frozen: Chat (insults or harassment, hate, sexual content, threats, spam or ads, sharing personal
- * info), Gameplay (cheating, throwing or griefing, leaving or AFK), then Something else. Each maps to the starter Community
- * Rules it usually means: harassment, threats and personal info to CR 2, hate to CR 1, sexual content to CR 3, spam to CR 4,
- * cheating to CR 5, griefing and AFK to CR 6. `other` maps to none.
+ * info, an inappropriate name, a disabled "Pretending to be staff or someone else" and a disabled "Someone may be in trouble"), Gameplay (cheating, throwing or griefing, leaving or AFK), then Something else. Each maps to the starter Community
+ * Rules it usually means: harassment, threats and personal info to CR 2, a name to CR 7, hate to CR 1, sexual content to CR 3, spam to CR 4,
+ * cheating to CR 5, griefing and AFK to CR 6; `impersonation` to CR 2, switched off until the owner turns it on (it appears in Settings > Reporting and in no player's report dialog until then). `other` and `welfare` map to none. `threat` is urgent; `welfare` is urgent, shows the owner's
+ * resources and is switched off until the owner turns it on.
  */
 export const DEFAULT_REPORT_REASONS: readonly Readonly<ReportReason>[] = Object.freeze(
   [
     reason('harassment', 'Insults or harassment', 'Insults, put-downs or picking on someone', 'Chat', [2]),
     reason('hate', 'Hate', 'Hate aimed at who someone is', 'Chat', [1]),
     reason('sexual', 'Sexual content', 'Sexual messages or pressure', 'Chat', [3]),
-    reason('threat', 'Threats', 'Threatening someone', 'Chat', [2]),
+    reason('threat', 'Threats', 'Threatening someone', 'Chat', [2], false, { urgent: true }),
     reason('spam', 'Spam or ads', 'Repeated messages, flooding or advertising', 'Chat', [4]),
     reason('personal_info', 'Sharing personal info', "Posting someone's private details", 'Chat', [2]),
+    reason('name', 'Inappropriate name', 'An offensive or inappropriate player name', 'Chat', [7]),
+    reason('impersonation', 'Pretending to be staff or someone else', 'A name or message that pretends to be a moderator, the game or another player', 'Chat', [2], false, { enabled: false }),
+    reason('welfare', 'Someone may be in trouble', 'Someone who says they want to hurt themselves, or may be at risk', 'Chat', [], true, {
+      urgent: true,
+      showResources: true,
+      enabled: false,
+    }),
     reason('cheating', 'Cheating', 'Cheating or exploiting a bug', 'Gameplay', [5]),
     reason('griefing', 'Throwing or griefing', 'Losing on purpose or ruining the game', 'Gameplay', [6]),
     reason('afk', 'Leaving or AFK', 'Leaving the game or not playing', 'Gameplay', [6]),
@@ -131,6 +180,7 @@ export function defaultReporting(): ResolvedReporting {
     flow: DEFAULT_REPORT_FLOW,
     reasons: DEFAULT_REPORT_REASONS.map((r) => ({ ...r, rules: [...r.rules] })),
     thanks: DEFAULT_REPORT_THANKS,
+    evidenceUrl: null,
   };
 }
 
@@ -164,7 +214,7 @@ export function reasonLabel(reasons: readonly ReportReason[], id: string | null)
 /**
  * The 0.1.1 category a reason id is kept under in the stored report's `category` column (which old consumers still read): the
  * six old ids are themselves, `griefing` and `afk` are `disruption`, `threat` is `harassment`, and everything else (no reason,
- * `sexual`, `personal_info`, a studio's own) is `other`.
+ * `sexual`, `personal_info`, `name`, a studio's own) is `other`.
  */
 export function legacyCategoryOf(id: string | null): ReportCategory {
   switch (id) {
@@ -205,14 +255,18 @@ export function suggestedRule(
   return found.rules.find((n) => rules.isCitable(n)) ?? 'uncovered';
 }
 
-/** What a player may read: the enabled reasons in order, with no rule mapping. Each field is copied by name, so nothing added later leaks. */
-export function playerReporting(reporting: ResolvedReporting): PlayerReporting {
+/**
+ * What a player may read: the enabled reasons in order, with no rule mapping, and the owner's resource list (`safety`, optional: none
+ * when left out). Each field is copied by name, so nothing added later leaks (the safety guidance and contact line never do).
+ */
+export function playerReporting(reporting: ResolvedReporting, safety?: { resources: readonly SafetyResource[] }): PlayerReporting {
   return {
     flow: reporting.flow,
     reasons: reporting.reasons
       .filter((r) => r.enabled)
-      .map((r) => ({ id: r.id, label: r.label, hint: r.hint, group: r.group, asksNote: r.asksNote })),
+      .map((r) => ({ id: r.id, label: r.label, hint: r.hint, group: r.group, asksNote: r.asksNote, thanks: r.thanks, showResources: r.showResources })),
     thanks: reporting.thanks,
+    resources: (safety?.resources ?? []).map((r) => ({ label: r.label, detail: r.detail, url: r.url })),
   };
 }
 
@@ -228,6 +282,7 @@ export function fillReporting(value: unknown): unknown {
   const out: Record<string, unknown> = { ...value };
   if (!Object.hasOwn(out, 'flow')) out['flow'] = DEFAULT_REPORT_FLOW;
   if (!Object.hasOwn(out, 'thanks')) out['thanks'] = DEFAULT_REPORT_THANKS;
+  if (!Object.hasOwn(out, 'evidenceUrl')) out['evidenceUrl'] = null;
   if (!Object.hasOwn(out, 'reasons')) {
     out['reasons'] = defaultReporting().reasons;
   } else if (Array.isArray(out['reasons'])) {
@@ -239,6 +294,9 @@ export function fillReporting(value: unknown): unknown {
       if (!Object.hasOwn(filled, 'rules')) filled['rules'] = [];
       if (!Object.hasOwn(filled, 'asksNote')) filled['asksNote'] = false;
       if (!Object.hasOwn(filled, 'enabled')) filled['enabled'] = true;
+      if (!Object.hasOwn(filled, 'urgent')) filled['urgent'] = false;
+      if (!Object.hasOwn(filled, 'thanks')) filled['thanks'] = null;
+      if (!Object.hasOwn(filled, 'showResources')) filled['showResources'] = false;
       return filled;
     });
   }
@@ -248,4 +306,21 @@ export function fillReporting(value: unknown): unknown {
 /** {@link fillReporting} for settings already known to be valid: the typed result. */
 export function resolveReporting(settings: ReportingSettings | undefined): ResolvedReporting {
   return fillReporting(settings) as ResolvedReporting;
+}
+
+/**
+ * The link to the evidence behind a report: the owner's `reporting.evidenceUrl` template with `{ref}` replaced by `encodeURIComponent(ref)`, or `null` with no template. The template is
+ * checked again here (an `https` URL with a host, no credentials and exactly one `{ref}`, never in the host): one that is not, say a layer edited to `http` after it was saved, gives `null`.
+ * Pure; the kit fetches nothing.
+ */
+export function evidenceLink(settings: { evidenceUrl?: string | null }, ref: string): string | null {
+  const template = settings.evidenceUrl;
+  if (typeof template !== 'string' || template === '' || typeof ref !== 'string' || ref === '') return null;
+  try {
+    httpsUrl(template, 'reporting.evidenceUrl', REPORT_EVIDENCE_URL_MAX, true);
+  } catch {
+    return null;
+  }
+  const encoded = encodeURIComponent(ref);
+  return template.replace('{ref}', () => encoded);
 }

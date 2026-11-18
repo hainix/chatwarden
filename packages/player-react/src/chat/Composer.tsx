@@ -1,22 +1,23 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { PlayerError } from '../client.js';
+import { clockText } from '../format.js';
 import type { PlayerText } from '../i18n.js';
 import { errorText } from '../ui.js';
 import type { Ui } from '../ui.js';
 import type { SendResult, WireLine, WireRefusal } from './wire.js';
 
 /** How long a refusal stays under the input (a wait stays until it ends). */
-const REFUSAL_MS = 8000;
+export const REFUSAL_MS = 8000;
 /** The reasons with a sentence of their own; any other gets the generic one. */
-const KNOWN = new Set(['length', 'rate', 'gate', 'blocked', 'profanity', 'slow_mode', 'flood', 'duplicate']);
+const KNOWN = new Set(['length', 'rate', 'gate', 'blocked', 'profanity', 'link', 'personal_info', 'filter', 'slow_mode', 'flood', 'duplicate', 'locked', 'new_account', 'probation', 'phrases_only', 'phrase_unknown', 'account_too_new']);
 /** The reasons whose sentence holds the wait. */
-const WITH_WAIT = new Set(['slow_mode', 'flood', 'duplicate']);
+const WITH_WAIT = new Set(['slow_mode', 'flood', 'duplicate', 'probation']);
 /** The counter shows in the last this many characters. */
 const COUNT_FROM = 20;
 
 /** A failure to send as an error the components can word: anything that is not already a PlayerError is a dropped connection. */
-const failureOf = (e: unknown): PlayerError => (e instanceof PlayerError ? e : new PlayerError({ status: 0, code: 'network', message: 'Could not reach the server.' }));
+export const failureOf = (e: unknown): PlayerError => (e instanceof PlayerError ? e : new PlayerError({ status: 0, code: 'network', message: 'Could not reach the server.' }));
 
 /** The wait as words: whole seconds up to 120, then minutes, rounded up. */
 export function waitText(ui: Ui, ms: number): string {
@@ -31,13 +32,22 @@ export function waitOf(refusal: WireRefusal): number | null {
 }
 
 /** The one sentence a refusal gets (or none, for an empty line), with the rule and the notice when it carries them. */
-function refusalText(ui: Ui, refusal: WireRefusal, maxLength: number): string {
+export function refusalText(ui: Ui, refusal: WireRefusal, maxLength: number): string {
   if (refusal.reason === 'empty') return '';
   const wait = waitOf(refusal);
   const key = KNOWN.has(refusal.reason) ? refusal.reason : 'unknown';
   // A pace refusal with no valid wait has sentences of its own with no time in them, never "in ." (the wait is bare: the sentence has the "in").
   const soon = wait === null && WITH_WAIT.has(key) ? '.soon' : '';
-  const parts = [ui.t(`player.chat.refused.${key}${soon}` as PlayerText, { max: maxLength, left: wait === null ? '' : waitText(ui, wait) })];
+  const left = wait === null ? '' : waitText(ui, wait);
+  let first: string;
+  if (key === 'locked') {
+    // The room's mode: the same words as the status line above the input. With no end, the sentence has no time in it.
+    const until = refusal.until;
+    first = typeof until === 'number' && Number.isFinite(until) ? ui.t('player.chat.locked', { time: clockText(until, ui.locale, ui.timeZone) }) : ui.t('player.chat.lockedNoEnd');
+  } else if (key === 'new_account') first = ui.t('player.chat.readOnlyNew');
+  else if (key === 'probation') first = soon === '' ? ui.t('player.chat.probation', { left }) : ui.t('player.chat.probationSoon');
+  else first = ui.t(`player.chat.refused.${key}${soon}` as PlayerText, { max: maxLength, left });
+  const parts = [first];
   if (refusal.rule !== undefined) parts.push(ui.t('player.chat.refused.rule', { rule: refusal.rule }));
   if (refusal.noticeId !== undefined) parts.push(ui.t('player.chat.refused.notice'));
   return parts.join(' ');
@@ -53,10 +63,16 @@ export interface ComposerProps {
   onDelivered: (line: WireLine) => void;
   /** The line was refused. The box acts on `restricted`, `banned` and `noticeId`; the composer words the rest. */
   onRefused: (refusal: WireRefusal) => void;
+  /**
+   * The room's mode keeps this viewer from posting (a lock, or a new account in an emergency): the input stays, in the tab order, but cannot be typed in (`aria-disabled`, read-only) and Send does nothing.
+   */
+  paused?: boolean;
+  /** The id of the mode's status line, while there is one: it describes the input whether or not the viewer can post. */
+  modeLine?: string | undefined;
 }
 
 /** The one input and its Send button, with the counter and the refusal line. */
-export function Composer({ ui, maxLength, autoFocus, send, onDelivered, onRefused }: ComposerProps) {
+export function Composer({ ui, maxLength, autoFocus, send, onDelivered, onRefused, paused = false, modeLine }: ComposerProps) {
   const { t } = ui;
   const inputId = useId();
   const countId = useId();
@@ -106,7 +122,7 @@ export function Composer({ ui, maxLength, autoFocus, send, onDelivered, onRefuse
 
   const submit = async (): Promise<void> => {
     const text = draft.trim();
-    if (text === '' || sending.current || waiting.current) return;
+    if (paused || text === '' || sending.current || waiting.current) return;
     sending.current = true;
     setBusy(true);
     try {
@@ -159,7 +175,9 @@ export function Composer({ ui, maxLength, autoFocus, send, onDelivered, onRefuse
           maxLength={maxLength}
           placeholder={t('player.chat.placeholder')}
           value={draft}
-          aria-describedby={left <= COUNT_FROM ? countId : undefined}
+          readOnly={paused || undefined}
+          aria-disabled={paused || undefined}
+          aria-describedby={[modeLine ?? '', left <= COUNT_FROM ? countId : ''].filter((id) => id !== '').join(' ') || undefined}
           onChange={(e) => {
             setDraft(e.target.value);
             // A wait is not cleared by typing: it ends when it ends.
@@ -173,7 +191,7 @@ export function Composer({ ui, maxLength, autoFocus, send, onDelivered, onRefuse
             composing.current = false;
           }}
         />
-        <button ref={button} type="submit" className="cw-btn cw-btn--primary cw-chat-send" disabled={busy || held}>
+        <button ref={button} type="submit" className="cw-btn cw-btn--primary cw-chat-send" disabled={busy || held} aria-disabled={paused || undefined}>
           {t('player.chat.send')}
         </button>
       </div>

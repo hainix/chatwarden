@@ -28,10 +28,15 @@ async function bundle() {
     minify: true,
     jsx: 'automatic',
     external: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/*', '@chatwarden/*'],
+    // Split, as an adopter's bundler splits at a dynamic import(): the Spanish and Portuguese catalogues are chunks loaded on demand (loadPlayerT), not part of the entry.
+    splitting: true,
+    outdir: fileURLToPath(new URL('../.size-out', import.meta.url)),
+    entryNames: 'entry',
+    chunkNames: 'chunk-[name]-[hash]',
     metafile: true,
     logLevel: 'silent',
   });
-  const out = result.outputFiles[0];
+  const out = result.outputFiles.find((o) => o.path.endsWith('entry.js'));
   if (out === undefined) throw new Error('esbuild produced no output');
   return { text: out.text, bytes: out.contents.byteLength, gzip: gzipSync(out.contents, { level: 9 }).byteLength, inputs: Object.keys(result.metafile.inputs) };
 }
@@ -50,11 +55,11 @@ describe('bundle size', () => {
     expect(inputs.filter((i) => /@chatwarden|packages[\\/](core|http|store-memory|matcher|hub-react)[\\/]/.test(i))).toEqual([]);
   });
 
-  it('imports only what the peers provide: React and React DOM (for the optional portal); the kit is types only', async () => {
+  it('imports only what the peers provide: React and React DOM (for the optional portal) and the one run-time kit import, the shared notice words and view (@chatwarden/core/notice-copy); the rest of the kit is types only', async () => {
     const { text } = await bundle();
     // `import ... from "x"` only: a catalog phrase that happens to end in "from" is not an import.
     const imports = [...text.matchAll(/\bimport\b[^;"]*?\bfrom\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(new Set(imports)).toEqual(new Set(['react', 'react/jsx-runtime', 'react-dom']));
+    expect(new Set(imports)).toEqual(new Set(['react', 'react/jsx-runtime', 'react-dom', '@chatwarden/core/notice-copy']));
   });
 
   it('contains no Node builtin and no eval', async () => {

@@ -58,13 +58,32 @@ class MemoryLinks extends MemoryStore {
     }
     return gone.length;
   }
+
+  // Privacy (0.2.0): `MemoryStore.eraseSubjects` calls this when the wrapper is present. Not part of the Store interface.
+
+  /**
+   * Delete the Coop links that name one of these (deleted) reports, and the EOS sanction links keyed by one of these (deleted) sanction groups (`<group id>#<hash>`).
+   * An EOS report link is a hash of the report's own fields and stays. Returns how many.
+   */
+  privacyEraseLinks(reportIds: ReadonlySet<string>, goneGroups: ReadonlySet<string>): number {
+    const rows = this.links;
+    if (rows === undefined) return 0;
+    const eosGroup = (ref: string): string => ref.slice(0, Math.max(0, ref.indexOf('#')));
+    const keep = [...rows].filter(([, r]) => !((r.system === 'coop-report' && reportIds.has(r.ref)) || (r.system === 'eos-sanction' && goneGroups.has(eosGroup(r.ref)))));
+    const n = rows.size - keep.length;
+    if (n === 0) return 0;
+    this.links = new Map(keep);
+    this.undoWith(() => {
+      this.links = rows;
+    });
+    return n;
+  }
 }
 
 /**
  * Give a {@link MemoryStore} the optional link methods (`getLink`, `putLink`, `listLinks`, `purgeLinks`), so `cw.links` is supported and the
  * Coop and EOS adapters can keep their ids. Returns the same store. `createMemoryStore()` does not carry them. A method the store already has
  * (a subclass's override) is left as it is, and calling this twice changes nothing.
- * @experimental
  */
 export function withMemoryLinks<S extends MemoryStore>(store: S): S & MemoryLinkMethods {
   const target = store as unknown as Record<string, unknown>;

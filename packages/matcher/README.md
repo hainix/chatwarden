@@ -94,7 +94,7 @@ loader. The list is a precision-first list that many communities keep together: 
 must never block. It is published as signed, versioned releases. Your server downloads a release, checks its signature, keeps it
 on disk and loads it as a term pack. No real slur is in this repository or in any package.
 
-Everything in this section is `@experimental` until 0.2. Until the first release exists, the loader has no trusted keys and answers
+Until the first release exists, the loader has no trusted keys and answers
 `no_trusted_keys`, and your own list is untouched.
 
 ### Turn it on
@@ -192,7 +192,7 @@ on: an answer becomes a closed code.
 The list is released under CC BY 4.0. Put this sentence in your docs, or wherever you credit your data: "Contains the Chatwarden
 community term list (chatwarden.dev), CC BY 4.0." The same sentence is in each release's manifest (`manifest.license.attribution`).
 
-### The names (`@experimental` until 0.2)
+### The names
 
 From `@chatwarden/matcher`: `LiveTerms.syncPack`, `SyncResult`, `SyncSummary`.
 
@@ -215,6 +215,31 @@ options of the share client are `endpoint`, `sign`, `publicKey`, `fetch`, `clock
 
 A release is a signed zip with `terms.json`, `exceptions.json`, `positive.json`, `negative.<lang>.json` and a manifest. See the
 [design note](https://github.com/hainix/chatwarden/blob/main/docs/design/2026-11-12-k7-term-corpus.md) for the formats.
+
+### Reserved names
+
+New in 0.2.0. A game can protect names (`admin`, `moderator`, `game master`) so a player cannot take one, or something that only looks like one. `@chatwarden/core` calls this through `names.reserved`; the two functions are exported for a game that checks names itself.
+
+- **`skeleton(text)`** reduces a name to the letters and digits it looks like: invisible characters and combining marks are removed (NFKD), the same look-alike and leet folding the matcher applies to chat is applied (`M0d3rat0r` reads as `moderator`, and full-width letters read as plain ones), and everything that is not `a-z` or `0-9` is dropped. Two names that look the same have the same skeleton.
+- **`matchReserved(name, entries, allow)`** answers whether a name is one of the protected `entries`. A name matches when its whole skeleton is an entry's, or when any run of consecutive words of the name is: a space, an underscore, a camel-case hump, a digit run and a punctuation mark are word breaks, so `Mod_Anna`, `ModAnna`, `M0d_Anna` and `Moderator` match the entries `mod` and `moderator` while `xXmodXx`, `Sodmin` and `Moderately` do not. It compares whole words, like chat matching, not a substring. A name whose whole skeleton is one of `allow` never matches (a real player who is called like staff). It never throws (anything that is not text is no match), reads at most 256 characters of a name, and an entry with no letter or digit is ignored rather than matching every name. The compiled list is cached per array, so pass the same array each time. A short entry is a broad net (`mod` also catches `Mod Squad` and `M o D`, not `Mood` or `Mad`), and an entry in a script with no Latin skeleton matches nothing: ask `matchReserved(entry, entries, [])` to see whether an entry protects anything.
+- **What it is for.** Names only, never the chat: the chat matcher and its terms are unchanged, and a name is not checked against the term list by this function. `LiveTerms` and the matcher `buildMatcher` returns expose it as `matchReserved(name, entries, allow)` so the core's `Matcher` can ask without a second import.
+
+## Terms in scripts written without spaces (0.2.0)
+
+A term in Chinese, Japanese, Thai, Lao, Khmer or Burmese has no spaces to read whole words by, so these scripts have their own path (`@chatwarden/matcher` reads Han, Hiragana, Katakana, Thai, Lao, Khmer and Myanmar; any other script, Cyrillic, Arabic and Hangul included, is a `MatcherBuildError` "not supported yet", naming the row and never the term). A Latin term is exactly what it was.
+
+| Row field | Rule |
+| --- | --- |
+| `term` | Letters of one script family and nothing else: no space, punctuation, digit or Latin letter. Han, Hiragana and Katakana may mix for Japanese; Han with Thai is refused. 2 to 24 code points (3 to 24 for `contains`). |
+| `language` | `zh`, `ja`, `th`, `lo`, `km` or `my`, and one that fits the script (kana is `ja`, Han alone is `zh` or `ja`, Thai is `th`). It picks the segmenter. |
+| `matchMode` | `segment` (the default for such a term), `contains`, or for a plain a-z term `word` (the only mode it has). A mode that does not fit the script is refused at build. |
+
+- **segment.** The term must occupy whole segments: the text is cut into runs of those letters (a space, punctuation, a digit, a Latin letter or an emoji ends a run) and each run is cut by `Intl.Segmenter(language, { granularity: 'word' })`; a hit starts and ends on segment edges, so the same characters inside a longer dictionary word do not hit, and a slang term the dictionary splits into single characters still does. A runtime without `Intl.Segmenter` and an active `segment` term fails `buildMatcher` (a missing capability is not silently weaker).
+- **contains.** Hits anywhere inside a run, for a severe term an owner would rather match everywhere than risk missing. It never cuts a grapheme cluster (a Thai letter is not read without its tone mark).
+- **Reading text.** NFKC, not NFKD (decomposing would turn a voiced Japanese kana into an unvoiced one and Thai vowel signs and tone marks are marks that carry the word); only format characters, the blank fillers and variation selectors are removed; hiragana and katakana are one spelling (`foldKana`, `normaliseUnspaced`). `spans()` still gives exact ranges on the text as typed.
+- **Exceptions.** An exception phrase in these scripts suppresses a hit inside it only when its own edges are segment edges; one that mixes Latin and Han is refused at build.
+- **Bounded cost.** Terms are looked up by their first two characters, and a call makes at most `UNSPACED_WORK_MAX` (4 million) term and exception comparisons; a normal list and line make a few thousand. A pathological list (thousands of terms that share their first two characters) against a very long line of that prefix stops at the budget and answers with the hits found so far, so no line can hold the event loop for long.
+- **Honest limits.** Segmentation is a dictionary algorithm and moves between ICU versions, so the corpus gate (every term ships with lines it must and must not match) runs on both Node versions in CI, and the hub's dry run shows a term's effect before it is saved. Characters inserted between letters, homophones, pinyin and simplified/traditional conversion are not read: add the term in each form that matters. `isUnspacedTerm`, `UNSPACED_SCRIPTS` and `UNSPACED_LANGUAGES` are exported; `@chatwarden/matcher/fixtures` gains `SYNTHETIC_UNSPACED_TERMS` (invented transliterations, never a real term).
 
 ## Options
 

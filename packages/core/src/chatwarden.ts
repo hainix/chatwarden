@@ -1,18 +1,30 @@
 import { createInertAi } from './ai/inert.js';
 import type { AiFacade, AiOptions, AiService } from './ai/service.js';
 import { AuditService } from './audit.js';
-import type { AuditPage, AuditQuery, AuditRecordInput } from './audit.js';
+import type { AuditPage, AuditQuery, AuditRecordInput, Role } from './audit.js';
+import { roomAuditRef } from './audit.js';
 import { ChatService } from './chat.js';
+import { ChatCounter, utcDay } from './chatCounter.js';
+import { AccountAges } from './accountAge.js';
+import { surgeOf } from './surge.js';
+import type { ReportSurge } from './surge.js';
+import { RoomModes } from './roomModes.js';
+import type { RoomModeState } from './roomModes.js';
+import type { RoomMode } from './roomSettings.js';
+import { checkInsightsDays, computeInsights, INSIGHTS_READ_DAYS, INSIGHTS_ROW_CAP } from './insights.js';
+import type { InsightsDays, InsightsResult } from './insights.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
-import type { ChatResult, RestrictedAnswer } from './chat.js';
+import type { ChatResult, RestrictedAnswer, RoomChatRules } from './chat.js';
 import { bindDocuments } from './documents.js';
 import type { Documents } from './documents.js';
 import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
+import { checkPhraseBooks } from './phrases.js';
+import type { Phrase, PhraseBook } from './phrases.js';
 import { EventBus } from './events.js';
-import type { Subscribe } from './events.js';
+import type { InsightsDigest, Subscribe } from './events.js';
 import { hashWho, makeHasher } from './hasher.js';
 import { safeWarn, ThrottledWarn } from './log.js';
 import { historyOf, suggest } from './ladder.js';
@@ -22,14 +34,29 @@ import type { Limits, LimitsInput } from './limits.js';
 import { createAutomation } from './automation.js';
 import { hmacSha256Hex } from './crypto.js';
 import type { AutomationFacade } from './automation.js';
+import { CaseWorkflow } from './caseWorkflow.js';
+import { CommentService, hasWorkflowMethods } from './commentService.js';
+import { missingUrgentMethods } from './storeCapability.js';
+import type { ClearEscalationResult, CommentRemoveResult, CommentResult, EscalateResult } from './commentService.js';
+import type { CaseMarkResult } from './caseWorkflow.js';
 import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
+import { checkFilterRules, mergeFilters, resolveFilters } from './filters.js';
+import type { FilterSettings } from './filters.js';
+import { FilterHits } from './filters/counters.js';
+import type { FilterStats } from './filters/counters.js';
+import { checkLines, createFilterEngine, shiftTestSpans, testLine } from './filters/engine.js';
+import type { FilterCheckResult, FilterTestResult } from './filters/engine.js';
 import { checkPace, mergePace } from './pace.js';
+import { assertPaceStore, createSharedPacer } from './pacingShared.js';
+import { checkContextBooks, checkScope, Contexts, effectiveOf } from './contexts.js';
+import type { EffectiveContext } from './contexts.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
-import type { NameCheckResult } from './names.js';
+import { checkNameRules } from './names.js';
+import type { NameCheckResult, NameKind } from './names.js';
 import type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, AppealSummary, PlayerAppeal } from './appeals.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
@@ -39,18 +66,25 @@ import type { PaceSettings, ResolvedPace } from './pace.js';
 import { ProfileError, resolveProfile } from './profile.js';
 import type { ModerationProfile, PolicyLayer, PolicySection, PresetName, ProfanityConfig, ProfileOverrides, ResolvedProfile } from './profile.js';
 import { MuteService } from './mutes.js';
+import type { MuteOutcome } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
 import { ReportService } from './reports.js';
-import type { ReportCounts, ReportDetailInput, ReportDetailResult, ReportInput, ReportResult } from './reports.js';
+import { evidenceLink } from './reporting.js';
+import type { ReportCounts, ReportDetailInput, ReportDetailResult, ReportInput, ReportResult, SystemReportInput, SystemReportResult } from './reports.js';
 import { checkLinkRow, hasLinkMethods, isLinkSystem, isLinkValue, linkLimit } from './links.js';
 import type { LinkRow, LinkSystem } from './links.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
+import { checkBundleSecret, createLegal } from './legalService.js';
+import { createPrivacy } from './privacyService.js';
+import type { PrivacyService } from './privacyService.js';
+import type { LegalService } from './legalService.js';
+import { VERSION } from './version.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
-import { applySanction, isInternalSource, normalizeRefCode, SanctionError, SanctionIndex } from './sanctions.js';
-import type { SanctionInput } from './sanctions.js';
+import { APPEALS_START_TOKEN, applySanction, checkRevokeWithin, isInternalSource, normalizeRefCode, SanctionError, SanctionIndex, validateSanctionInput } from './sanctions.js';
+import type { RevokeWithin, SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
 import {
   blockedCountsByTerm,
@@ -60,6 +94,7 @@ import {
   reporterRecord,
   sanctionByRef,
   sanctionsOfPerson,
+  scopedHistoryOf,
 } from './staffViews.js';
 import { reporterAccuracyFor } from './reporterAccuracy.js';
 import type { ReporterAccuracy } from './reporterAccuracy.js';
@@ -72,6 +107,7 @@ import type {
   SanctionGroupView,
   SanctionListInput,
   SanctionPage,
+  ScopedHistory,
 } from './staffViews.js';
 import { listStaffReports, staffReport } from './staffReports.js';
 import type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
@@ -89,6 +125,8 @@ import type {
   RawWho,
   ReasonRow,
   ReportCategory,
+  ReportComment,
+  ReportExcerptLine,
   ConductLevel,
   Store,
   StoredReport,
@@ -144,6 +182,20 @@ export interface ChatwardenOptions {
    * ready `profanity` filter is given.
    */
   profanityPackage?: { createProfanityFilter(config: ProfanityConfig): ProfanityFilter };
+  /**
+   * Phrase books for phrase-only rooms: `{ junior: [{ id: 'gg', text: 'Good game!' }, { id: 'help', text: 'Can you help me?', group: 'Ask' }] }`. A context with `chat: { phrases: 'junior' }` makes every room tagged with it phrase-only:
+   * `cw.chat.acceptPhrase` sends one, and typed text is refused `phrases_only`. A book id is `^[a-z][a-z0-9_-]{0,31}$` (at most 20 books); a phrase id `^[A-Za-z0-9_-]{1,32}$`, unique in its book (at most 300 phrases); `text` is 1 to 100
+   * characters with no control or bidi character (the game's default language: what evidence, moderators and a client with no translation see); `group` (1 to 24 characters) heads a section in the picker. Checked at start-up,
+   * each phrase through the matcher and the profanity filter: a book that hits throws `PhraseBookError` naming the book and phrase id, never the text. A context that names a book not declared here is a `ProfileError`.
+   */
+  phrases?: Readonly<Record<string, readonly { id: string; text: string; group?: string }[]>>;
+  /**
+   * Keep the pacer's state (slow mode, the burst limit and repeat refusal) in the store instead of the process, so several processes on one store judge one player's lines together.
+   * A deployment property, not a moderation setting: it is not in the profile or the hub. The store must have `paceLoad`, `paceUpdate`, `paceDropRoom` and `paceSweep` (the memory and SQLite
+   * stores do); `createChatwarden` throws a plain message naming the missing one otherwise. Costs one indexed read per line in a room where a check is on and one write per accepted line; a
+   * room with every check off touches the store not at all. `cw.rooms.setPace` overrides stay per process. Default false: the in-memory pacer, exactly as before.
+   */
+  sharedPacing?: boolean;
   /** Defaults to the system clock. */
   clock?: Clock;
   /** The kill switch, read per call. Drives both sanction enforcement and report intake. Defaults to always on. */
@@ -221,7 +273,6 @@ export interface ChatwardenOptions {
    * (`profile.ai.level`, default 0) held to at most `maxLevel`. Needs a store with the AI methods (SQLite has them; the
    * in-memory store has them through `withMemoryAi`). A store without them leaves the AI inert and logs `chatwarden.ai_store_unsupported`
    * once at creation, as with any optional Store method; a bad option still throws. The adapter runs on the server only; see `ModerationAI`.
-   * @experimental
    */
   ai?: AiOptions;
   /**
@@ -229,7 +280,6 @@ export interface ChatwardenOptions {
    * holds the one hook the profile cannot. Signals need a store with the three signal methods (SQLite has them; the in-memory store has them
    * through `withMemorySignals`): declaring kinds or feeds over a store without them is refused at creation, and the kit loads its signal
    * service only for a store that has them.
-   * @experimental
    */
   signals?: {
     /**
@@ -240,6 +290,26 @@ export interface ChatwardenOptions {
      */
     accountAgeDays?: (accountIds: readonly string[]) => number | null | undefined;
   };
+  /**
+   * The secret that signs an evidence bundle (`cw.legal.bundle`): at least 32 characters, the same rule as a webhook secret. It is read from here and nowhere else and
+   * is never logged, never put in a body or an error. Without one a bundle is produced unsigned (its `hmacSha256` is null and the hub says "not signed"); the
+   * SHA-256 still shows the file was not edited. A shorter secret throws at creation, naming `bundleSecret` and never its value.
+   */
+  bundleSecret?: string;
+}
+
+/**
+ * How a person is linked (`cw.people.links`): counts only, never an id, a key, a hash or an address.
+ */
+export interface PersonLinks {
+  /** Account ids the kit holds for the person, across their merged subjects. */
+  accounts: number;
+  /** Client keys (devices) the kit holds for them. */
+  devices: number;
+  /** Other subjects folded into them. */
+  merged: number;
+  /** Bans, area bans and chat restrictions in force that were placed on a merged subject rather than on the person's own. */
+  inForceOnLinked: { ban: number; area: number; chat: number };
 }
 
 /** The moderation kit as an adopter uses it. Nothing here returns an identifier meant for a player. */
@@ -268,16 +338,83 @@ export interface Chatwarden {
      * override whole; it is not merged into it. The object is read once, so changing it afterwards changes nothing. Throws `ProfileError` for an invalid
      * value (a setup mistake, not a hot-path call), and changes nothing when it does. In memory, this process only: `rooms.close(roomId)`
      * drops it, and a game that runs several processes calls it in each process that serves the room. The override sits on top of the
-     * stored layer, which sits on top of the profile in code. @experimental
+     * stored layer, which sits on top of the profile in code.
      */
     setPace(roomId: string, pace: PaceSettings | null): void;
-    /** The pace in force for the room: the profile's (code, then the stored layer) with the room's override applied. Every field filled, `null` is off. @experimental */
+    /**
+     * The pace in force for the room: the profile's (code, then the stored layer) with the room's override applied; while the room is in emergency its slow mode is the stricter of its own and
+     * `rooms.emergency.slowModeMs`. Every field filled, `null` is off.
+     */
     pace(roomId: string): ResolvedPace;
+    /**
+     * Put the room in a mode: `normal` (clears at once), `locked` (only staff may chat: `chat.accept(..., { staff: true })` or `ChatMember.staff`) or `emergency` (slow mode, and accounts younger
+     * than `rooms.emergency.newAccountDays` read-only). Every mode but normal ends by itself after `opts.forMs` (60 000 to 86 400 000, whole ms) or `rooms.defaultModeMs`; there is no "until I
+     * turn it off". A second call replaces the first whole and restarts the clock. Raises `room.mode`. A mode is never a sanction. In memory, this process only, like the pace: a game that runs
+     * several processes calls it in each; `rooms.close` clears it. `RangeError` for an unknown mode or a bad length, `TypeError` for a bad room id; either changes nothing.
+     */
+    setMode(roomId: string, mode: RoomMode, opts?: { forMs?: number }): RoomModeState;
+    /** The room's mode now, with the expiry applied (a mode that ran out is noticed here, announced once as `room.mode` with `expired`). A copy. */
+    mode(roomId: string): RoomModeState;
+    /** The rooms this process knows (seated players, or a mode set), up to 500, the most seated first: tags, seats held, mode and end. No seat id, no handle. */
+    list(): Array<{ roomId: string; tags: Record<string, string>; seated: number; mode: RoomMode; until: number | null }>;
+    /**
+     * Whether a seat may chat in the room right now: `'ok'`, `'locked'` or `'new_account'` (an emergency and a young account). The same decision as `accept` for the seat; `opts.staff`
+     * (the game's word, as for `accept`) is always `'ok'`. A pure read, for the chat box's hello.
+     */
+    postingState(roomId: string, seatId: string, opts?: { staff?: boolean }): 'ok' | 'locked' | 'new_account';
+    /**
+     * Take a delivered line back for everyone, keeping it as evidence: its text stays in the evidence buffer and in any report filed from now on (flagged `retracted`), a report already filed is
+     * not rewritten, and a report on the line is still valid. `opts.allFromAuthor` also takes back every delivered line still in the buffer by the same person (the spam-wave case). It works only
+     * while the line is in the evidence buffer (15 minutes, 100 lines a room), else `not_found` (also for a line already taken back, a blocked line and any bad argument). Raises `line.retracted`
+     * (the room, the line ids and a time: no text, no seat). Not a sanction: no notice, no strike, nothing said to the author.
+     */
+    retract(roomId: string, lineId: string, opts?: { allFromAuthor?: boolean }): { ok: true; lineIds: string[] } | { ok: false; refused: 'not_found' };
+    /**
+     * The lines the room's evidence buffer holds now, as id, send time and whether each was taken back: for staff to see which lines of a report can still be removed. No text, no seat, no handle.
+     * A pure read; empty for an unknown room.
+     */
+    lineStates(roomId: string): Array<{ lineId: string; ts: number; retracted: boolean }>;
+  };
+  /**
+   * The chat filters (`profile.filters`): what they did, and a way to try them before they act. All off until an owner turns a block on.
+   */
+  filters: {
+    /**
+     * What the filters did over the last 7 or 30 UTC days (today included): per counter key (`link.unlisted`, `personal_info.phone`,
+     * `phrase.<id>`, `ratio.caps` ...), the counts by applied action (`count`, `flag`, `mask`, `refuse`, and `flag_capped` when the daily cap
+     * turned a flag into a count). This process's held counts are written first. No person, room or text is in a count. Throws `RangeError` for
+     * another number of days.
+     */
+    stats(q: { days: 7 | 30 }): Promise<FilterStats>;
+    /**
+     * Try one line under the filters in force, or under `candidate` settings that are not saved (throws `ProfileError` for invalid ones):
+     * the verdict (every hit with its kind, detail, action, rule and matched ranges) and the line as it would be delivered (`null` when it
+     * would be refused). Writes nothing and counts nothing. Staff only: the ranges point at the matched part of the line. A line is judged as a
+     * person with no account age, so a `newAccountDays` rule does not act.
+     */
+    test(text: string, candidate?: FilterSettings): FilterTestResult;
+    /**
+     * Run `candidate` settings over `lines` (the adopter's recent lines): per counter key, how many lines it would hit and up to 20 sample lines
+     * with their ranges, and how many lines it would refuse or mask. Writes nothing and counts nothing. At most 5 000 lines are read. Staff only.
+     */
+    check(candidate: FilterSettings, lines: readonly string[]): FilterCheckResult;
   };
   chat: {
-    accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult;
+    accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult;
+    /**
+     * Send one phrase from the room's book (a phrase-only room: its context sets `chat.phrases`). The same pipeline as `accept` without the text steps: occupant and gate, restriction, the room's mode, the context's least account age,
+     * pacing and the fixed rate, then deliver; no length check, matcher, filters or profanity (the book is trusted text, checked at start-up). The line is kept as evidence with `raw` equal to the phrase's canonical text, and
+     * `deliver` carries `phrase` (its id) and `text` (the canonical text). In a room that is not phrase-only the answer is `gate`; an id the book lacks is `phrase_unknown` and nothing is spent. `accept` with text in a phrase room is
+     * refused `phrases_only`, also spending nothing. `opts.staff` is as for `accept`. Never throws.
+     */
+    acceptPhrase(roomId: string, seatId: string, phraseId: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult;
     /** Should `viewerSeat` be shown a line `senderSeat` sent (mutes applied)? */
     visibleTo(roomId: string, viewerSeat: string, senderSeat: string): boolean;
+    /**
+     * The seats of the room that must NOT be shown a line `senderSeat` sent (they muted or blocked its sender, or the sender blocked them): the other seats `visibleTo` is false for, sorted. It costs the people who
+     * muted or blocked the sender, not the seats in the room, so a line in a room of thousands is cheap. [] for an unknown room, an empty seat or a guest. This process's seats only, like `visibleTo`. Seat ids only.
+     */
+    hiddenFor(roomId: string, senderSeat: string): string[];
     /**
      * Is this person chat-restricted right now (a chat restriction, a ban or an automatic timeout)? For a typing
      * indicator: show none while `restricted` is true. It runs the same decision as `accept`, and equals what
@@ -306,15 +443,55 @@ export interface Chatwarden {
      * rules (a merge is followed, a failure reads as not restricted and is logged once a minute), the same shape; `opts` as in
      * `restricted`. A value that is not a subject id, or a subject nobody holds, reads `{ restricted: false, until: null, kind: null }`.
      * A subject id is an identifier: pass it from server code, never from what a client sent, and never send it to a player.
-     * @experimental
      */
     restrictedBySubject(subject: SubjectId, opts?: { roomId?: string | null; seatId?: string | null }): RestrictedAnswer;
   };
+  /**
+   * Room contexts (`profile.contexts`): rules per room, selected by the room's `context` tag at `rooms.seat`. Read-only lookups.
+   */
+  contexts: {
+    /** The declared context names, in declaration order. Empty when the profile declares none. */
+    names(): string[];
+    /** The room's context tag when it is well formed, else null (no tag, or an unknown room). The name need not be declared. */
+    of(roomId: string): string | null;
+    /**
+     * What a room in the context runs with, over the profile in force (code, then the stored layer, then the context): profanity, pace, chat (`phrases`,
+     * `minAccountAgeDays`) and filters, every value filled in. `null` is the base. A pure lookup: the values are frozen copies that share nothing with the profile
+     * (a `cw.rooms.setPace` override on a room is not part of it). Throws `ProfileError` for a name the profile does not declare.
+     */
+    effective(name: string | null): EffectiveContext;
+  };
+  /**
+   * Phrase books (`createChatwarden({ phrases })`). Read-only lookups for the chat box's hello and a service's handshake: the kit ships no phrases.
+   */
+  phrases: {
+    /** The declared book ids, in declaration order. */
+    names(): string[];
+    /** The phrases of the room's book (its context's `chat.phrases`), or null for a room that is not phrase-only, an unknown room or a context with no book. A frozen list. */
+    book(roomId: string): PhraseBook | null;
+  };
   mutes: {
-    /** `viewerSeat`'s occupant mutes (`on`) or unmutes `targetSeat`'s occupant. Does nothing if either seat has no subject. */
-    set(roomId: string, viewerSeat: string, targetSeat: string, on: boolean): void;
-    /** The seats whose current occupant the viewer has muted. Seat ids only. */
+    /**
+     * `viewerSeat`'s occupant mutes (`on`) or unmutes `targetSeat`'s occupant (a block is undone too: the row goes). Answers `ok`, `limit` (the viewer's list holds 500 blocks, so
+     * nothing can be added) or `none` (either seat has no subject, or it is one person). Muting someone already blocked changes nothing.
+     */
+    set(roomId: string, viewerSeat: string, targetSeat: string, on: boolean): MuteOutcome;
+    /** The seats whose current occupant the viewer has muted or blocked. Seat ids only. */
     mutedSeats(roomId: string, viewerSeat: string): string[];
+    /** The seats whose current occupant the viewer has BLOCKED (a subset of `mutedSeats`). Seat ids only. */
+    blockedSeats(roomId: string, viewerSeat: string): string[];
+  };
+  /**
+   * Blocks: a mute the viewer makes lasting and two-way. The row is the mute's (one per pair, never purged by age); `chat.visibleTo` is false when either blocked the other, so neither sees the
+   * other's lines. The kit holds only hashes and has no call that lists who blocked whom: a game asks about the pairs it is about to put together.
+   */
+  blocks: {
+    /** `viewerSeat`'s occupant blocks (`on`) or unblocks `targetSeat`'s occupant. Answers as `mutes.set` does; two guests (no person) are never blocked (`none`). */
+    set(roomId: string, viewerSeat: string, targetSeat: string, on: boolean): MuteOutcome;
+    /** Has either of these two players blocked the other? Found, never created: a player the kit does not know is not blocked. A merged person's blocks follow the merge. */
+    between(whoA: RawWho, whoB: RawWho): boolean;
+    /** `between(who, other)` for each of `others`, in order. At most 50 (`RangeError` otherwise). */
+    anyBetween(who: RawWho, others: readonly RawWho[]): boolean[];
   };
   reports: {
     /**
@@ -324,6 +501,14 @@ export interface Chatwarden {
      * See {@link ReportInput} and {@link ReportRefusal}. The kit has no player report route: your game's own route calls this.
      */
     submit(input: ReportInput): Promise<ReportResult>;
+    /**
+     * File the report of a chat filter's `flag` (and, later, of the AI watch): a report with no reporter, `origin: 'filter'`, the room's evidence as its
+     * excerpt, for a person to decide. Nothing happens to the speaker until one does. The chat filters call this themselves when a rule's action is
+     * `flag`; it is public for a game that runs its own rules. Never rejects: `filed`, `open_exists` (one is already open for this person and room),
+     * `capped` (`flagCapPerDay` filter reports filed today across the instance), `no_subject` (a guest), or `off`. See {@link SystemReportInput}.
+     * A report it files is announced like any other (`report.created` with `origin`, `onReport`). Staff views show its reporter as null.
+     */
+    fileSystem(input: SystemReportInput): Promise<SystemReportResult>;
     /**
      * The reporter's one optional follow-up after a report: `{ reason?, note? }` attached to the same report. Only the original
      * reporter (the same seat, still in the report's room), once, within ten minutes, and while the report is open; it never
@@ -346,7 +531,7 @@ export interface Chatwarden {
      * One report as a {@link StaffReport}, or null for an unknown id. Throws the store's own error if it fails.
      * Carries subject ids: staff channels only, never send to a player.
      */
-    get(id: string): StaffReport | null;
+    get(id: string, opts?: { scope?: readonly string[] }): StaffReport | null;
     /**
      * How the reports this person FILED stand (total, open, actioned, dismissed, bad faith) and when their reporting
      * suspension ends (null if none), under the same rule intake uses, and how often their reported reason was borne out
@@ -360,7 +545,6 @@ export interface Chatwarden {
      * report in the window is absent; a store without `reporterOutcomes` gives an empty map. `falseRate` is null below
      * `REPORTER_ACCURACY_MIN_DECIDED` decided reports. A ranking hint and a line on the case: it never refuses a report and never
      * counts toward a suspension. Staff only: never send to a player.
-     * @experimental
      */
     reporterAccuracy(people: readonly SubjectId[]): Map<SubjectId, ReporterAccuracy>;
     /**
@@ -373,7 +557,6 @@ export interface Chatwarden {
      * a bad `actor` is a `RangeError`; a STORE failure rejects, the reports closed before it stay closed, and running it again
      * finishes the rest. Writes no audit row: the staff layer records the sweep. Carries subject ids: staff channels only, never send
      * to a player.
-     * @experimental
      */
     dismissMany(input: DismissManyInput): Promise<DismissManyResult>;
   };
@@ -390,7 +573,6 @@ export interface Chatwarden {
      * The blocked NAMES kept as evidence (`names.keepBlocked`) over the last `days` days (1, 7 or 30, else `RangeError`), newest first, at most
      * 200: `{ id, at, person, name, termId, reason }`, the person a staff ref or null. Empty when none was kept, or the store keeps none. A name
      * is a player's text and `person` a subject id: staff channels only, never send either to a player.
-     * @experimental
      */
     names(q: { days: BlockedDays }): BlockedNameItem[];
   };
@@ -416,7 +598,7 @@ export interface Chatwarden {
      * process that loses the database lock race in between (SQLite BUSY) is retried up to `CLAIM_BUSY_TRIES` times with
      * a fresh read, so it answers `claimed` with the winner, not an error.
      */
-    claim(person: SubjectId, actor: string, opts?: { takeOver?: boolean }): ClaimOutcome;
+    claim(person: SubjectId, actor: string, opts?: { takeOver?: boolean; scope?: readonly string[] }): ClaimOutcome;
     /** End `actor`'s own claim. True only when it ended a live one; never touches another moderator's. */
     release(person: SubjectId, actor: string): boolean;
     /**
@@ -426,6 +608,10 @@ export interface Chatwarden {
      */
     releaseWhenDone(person: SubjectId, actor: string): boolean;
     /**
+     * With an urgent report open, the oldest free case that has one is served first, under the same `category` and `reason` filters, ignoring `rankDownHabitual` and `signalBoost`
+     * for that pass; a case another moderator holds is skipped (urgent never overrides a claim), and when none is free the ordinary scan below runs unchanged. With no urgent report open
+     * this is exactly what it was.
+     *
      * Claim and return the oldest OPEN case nobody holds, optionally only cases with an open report of `category`
      * or that gave `reason` (an id, the old `disruption` reading as `griefing`; `null`: none given; `RangeError` for an unknown category or a
      * malformed id), or null. A case is a person, ranked by their oldest open report and opened on
@@ -441,19 +627,87 @@ export interface Chatwarden {
      * first but a case is claimed only when it is overdue (its oldest open report has waited 24 hours) or boosted (the person meets the
      * feed's threshold); the first such case wins. If the queue, or the first 200 people, hold neither, the oldest free case is claimed as
      * usual, so nothing is ever left out. A boosted case is never ranked down. A non-boolean value is a `RangeError`.
-     * @experimental (the `rankDownHabitual` and `signalBoost` filters)
+     * (the `rankDownHabitual` and `signalBoost` filters)
      */
-    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean }): NextCase | null;
+    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean; scope?: readonly string[] }): NextCase | null;
+    /**
+     * Mark an open report urgent or not urgent (any moderator, both directions; the staff layer audits it). `ok: true` also for a repeat; `closed` for a decided report, `not_found` for
+     * an unknown id. Urgent is a stored snapshot (a reason's flag sets it at filing, see `reporting.reasons[].urgent`); this is the one other way it changes. Moves the change token,
+     * announces nothing, touches no claim and nothing about a person. `RangeError` for a malformed actor or a non-boolean flag; `TypeError` for a store without the urgent lane.
+     */
+    setUrgent(reportId: string, actor: string, on: boolean): CaseMarkResult;
+    /**
+     * Mark that `actor` passed the case to the game's safety team: who and when, once (the first call wins; a repeat answers `ok: true` and changes nothing). Allowed on an urgent or an
+     * ordinary open report. Emits `report.handoff` (the report id and the time only) after the write commits, fenced. It contacts no one and writes nothing to the person.
+     */
+    handoff(reportId: string, actor: string): CaseMarkResult;
+    /**
+     * Ask a senior or the owner for a second look at an open report (`desk.workflow` on; `off` otherwise). A moderator or a senior may ask a senior or the owner; an owner no one
+     * (`not_allowed`). Sets the report's escalation, adds an `ask` or `escalate` entry (with the optional note) to its staff thread and emits `case.escalated` after the commit. It never
+     * touches the claim, never blocks a decision, never reorders the queue; deciding the report clears it. `RangeError` for a malformed actor or role.
+     */
+    escalate(reportId: string, actor: string, role: Role, input: { to: 'senior' | 'owner'; note?: string }): EscalateResult;
+    /**
+     * End a second look ("Looked at"): the asker, or anyone at or above the role asked. A report with none answers ok and changes nothing.
+     */
+    clearEscalation(reportId: string, actor: string, role: Role): ClearEscalationResult;
+    /** How many open reports are asked of each role (zeros with the workflow off). */
+    askedCount(): { senior: number; owner: number };
+    /** How many open reports are urgent (0 for a store without the urgent lane); with `scope`, only those filed in a room of one of these staff scopes. */
+    urgentCount(scope?: readonly string[]): number;
     /**
      * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
      * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
      * (`VIEWING_PER_ACTOR_MAX`), a newer beat dropping their oldest. True when the beat was recorded.
      */
-    view(person: SubjectId, actor: string): boolean;
+    view(person: SubjectId, actor: string, scope?: readonly string[]): boolean;
+    /**
+     * Does the person have a report, open or decided, filed in a room of one of these staff scopes? What a scoped caller's id routes ask before they answer: a person with none is
+     * answered as a person nobody holds. An empty list says no. With `open: true` only an OPEN report counts (what a claim needs).
+     */
+    inScope(person: SubjectId, scope: readonly string[], opts?: { open?: boolean }): boolean;
     /** Who has the person's case open now (sorted), leaving `except` out. In this process's memory: other processes are not seen. */
     viewers(person: SubjectId, except?: string): string[];
     /** `viewers` for several people at once; people nobody is viewing are absent. */
     viewersOf(people: readonly SubjectId[], except?: string): Map<SubjectId, string[]>;
+  };
+  /**
+   * The staff thread on a report (`desk.workflow` on; `off` and an empty list otherwise): comments of 1 to 500 characters, at most 50 entries a report, deleted with the report, never
+   * claim-gated, never in an event, a webhook, a post, an audit row, a notice, an AI input or a log. `RangeError` for a malformed actor or role. Staff only.
+   */
+  comments: {
+    /** Add a comment (cleaned like an appeal statement: control, bidi and zero-width characters removed; counted in code points). A decided report still takes one. */
+    add(reportId: string, actor: string, role: Role, text: string): CommentResult;
+    /** The thread, oldest first. Includes the entries an ask, an escalation and a "looked at" wrote. */
+    list(reportId: string): ReportComment[];
+    /** Remove an entry: its author, or a senior or the owner. Another moderator's, an unknown id and another report's all answer `not_found`. */
+    remove(reportId: string, commentId: string, actor: string, role: Role): CommentRemoveResult;
+  };
+  /**
+   * The desk's own switches.
+   */
+  desk: {
+    /** Whether `desk.workflow` is on in the profile in force (and the store can keep the thread). */
+    workflowEnabled(): boolean;
+  };
+  /**
+   * Insights (`desk.insights`, off by default): how the team is doing, from rows the kit already holds plus a daily line counter. Counts and times only: never a person, a handle, text or
+   * a staff member, and no per-person number.
+   */
+  insights: {
+    /** `desk.insights` is on in the profile in force and the store can read the rows. */
+    enabled(): boolean;
+    /**
+     * One window: `days` 7, 30 (default) or 90 (`RangeError` for anything else). `null` while Insights is off. Flushes this process's line counter first. Reads at most 20 000 reports
+     * (`partial` says when it hit that).
+     */
+    read(days?: InsightsDays): InsightsResult | null;
+    /** The compact numbers of a window (default 7 days), or `null` while off: counts and times, for a message or a webhook. */
+    digest(days?: InsightsDays): InsightsDigest | null;
+    /** Raise `insights.digest` once with `digest(days)` and return it; nothing is raised (and `null` returned) while off. The kit has no scheduler: call it from your own timer. */
+    emitDigest(days?: InsightsDays): InsightsDigest | null;
+    /** Write the line counts held in memory to the store now (also done when the minute changes and at `close()`). */
+    flush(): void;
   };
   /** A cheap "did anything change?" for the moderator queue. */
   changes: {
@@ -486,18 +740,20 @@ export interface Chatwarden {
      * Write one sanction group and make it live at once. Resolves with the group id and the player-quotable ref
      * code. This writes no player notice: `decide` is the path that does.
      */
-    apply(input: SanctionInput): Promise<{ groupId: string; refCode: string }>;
+    apply(input: SanctionInput, opts?: { forReport?: string }): Promise<{ groupId: string; refCode: string }>;
     /**
      * Revoke a whole group and withdraw its player notice in the same transaction: an unseen notice is never shown,
-     * a seen one leaves "My record". Resolves true when this call revoked something.
+     * a seen one leaves "My record". Resolves true when this call revoked something. With a `scope`, only a sanction made from a report filed in one of its rooms can be revoked (else `false`).
+     * With `within` (a scoped moderator's limits), a sanction of a kind not listed, a permanent one (for a kind with a length), or one longer than `maxDurationMs` is not revoked: it throws a
+     * {@link SanctionError}, after the group is known to exist (and to be in scope), so an unknown or out-of-scope group is still `false`. A warning has no length.
      */
-    revoke(groupId: string, actor: string, reason: string): Promise<boolean>;
+    revoke(groupId: string, actor: string, reason: string, opts?: { scope?: readonly string[]; within?: RevokeWithin }): Promise<boolean>;
     /**
      * A person's sanctions as staff see them, newest first: the last 90 days plus every unrevoked permanent one, across
      * the aliases merged into them, at most 200. Each is a {@link SanctionGroupView} built from the group's subject row
      * (never an IP row, never a hashed identifier). Carries staff-only text (reason, actor): never send to a player.
      */
-    forPerson(subject: SubjectId): SanctionGroupView[];
+    forPerson(subject: SubjectId, opts?: { scope?: readonly string[] }): SanctionGroupView[];
     /**
      * Every person's sanctions, newest first, one page at a time (`limit` default 50, clamped to 1..200; `cursor` is the
      * previous `next`; `source` filters). Not windowed. Throws {@link SanctionQueryError} for a cursor that is not ours or an
@@ -510,7 +766,6 @@ export interface Chatwarden {
      * or one with an ambiguous letter (never throws for a string; a non-string is a `TypeError`). Revoked and ended groups are found: the
      * code never changes. Built from the group's subject row only (never an IP row). Synchronous. Carries staff-only text (reason, actor):
      * never send to a player. A store without `sanctionGroupByRef` is read through its newest 1 000 groups.
-     * @experimental
      */
     byRef(refCode: string): PersonSanctionView | null;
   };
@@ -537,12 +792,16 @@ export interface Chatwarden {
      * hit is `name_profane` (a matcher hit wins). `rule` is the Community Rule the slur filter cites (`autoRestrictRule`) for both. No
      * matcher, a matcher that fails (logged, class only) and a filter that fails (`chatwarden.names_filter_failed`) all let the name through.
      *
+     * A third reason, `name_reserved`, comes after those two: the name reads as one of `names.reserved` (a staff or system name, by skeleton and as a whole word: `Mod_Anna`, `M0derator`; not `xXmodXx`) and is not one of
+     * `names.reservedAllow`. It cites `names.reservedRule` (default Community Rule 2), not the slur rule, and is never kept as evidence. `opts.skipReserved: true` skips only that check, for the game's own staff signup. `opts.kind: 'entity'`
+     * is a name for a clan, guild, team, deck, pet or item: the same checks and the same answer (default `'player'`; any other value is a `TypeError`).
+     *
      * `opts.who` is the caller, as the doors take it. It is used ONLY to tie kept evidence to a person (found, never created); it never
      * changes the answer. A blocked name is kept (`kit_blocked_names`) only when `names.keepBlocked` is on: at most 5 an hour per person
      * (per `who`, or per name when there is none) and 200 an hour overall, in memory per process; past that the check still answers and
      * nothing more is stored. An allowed name is never stored, and a name is never logged.
      */
-    check(text: string, opts?: { who?: RawWho }): NameCheckResult;
+    check(text: string, opts?: { who?: RawWho; kind?: NameKind; skipReserved?: boolean }): NameCheckResult;
     /**
      * Would the matcher refuse this as a name? The evidence-free read for staff screens and routes (a list of handles): the matcher only,
      * no profanity pass, nothing stored whatever `names.keepBlocked` says, no person looked up. False for no matcher, for a non-string and
@@ -552,29 +811,29 @@ export interface Chatwarden {
     /**
      * Ask a player to choose a new name. Writes one notice of kind `rename_required` (it names no name, no excerpt, no reason) and, after
      * the write, tells the player's client and emits `rename.required`. Staff only. `{ ok: false, error: 'off' }` while `names.renames` is
-     * false (or the store cannot release a rename); `invalid` for a reason that is not 1 to 500 characters or a rule that is not an active
-     * integer rule; `not_found` for a person the kit does not hold; `pending` while a request is already waiting. `rule` defaults to the
-     * slur filter's (`autoRestrictRule`) and is shown to the player as a rule label. A store failure is logged (class only) and thrown.
-     * @experimental
+     * false (or the store cannot release a rename); `invalid` for a reason that is not 1 to 500 characters or a rule that is missing or is not an
+     * active integer rule; `not_found` for a person the kit does not hold; `pending` while a request is already waiting. `rule` is required (a rename always cites a
+     * Community Rule; there is no default) and is shown to the player as a rule label. A store failure is logged (class only) and thrown.
+     *
+     * With `entity: { kind, ref }` the rename is of something the player owns (a clan, guild, team), not their own name: the kit has no screen for it, so it creates NO notice (`noticeId` is null) and sets no pending request
+     * (an entity rename may repeat); it emits `rename.required` with `entity: { kind, ref }` (never the label) and the game tells the owner in its own UI. The person is the owner. Otherwise as above.
      */
-    requireRename(input: { subject: SubjectId; actor: string; reason: string; rule?: number }): { ok: true; noticeId: string } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
-    /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. @experimental */
+    requireRename(input: { subject: SubjectId; actor: string; reason: string; rule: number; entity?: { kind: string; ref: string } }): { ok: true; noticeId: string | null } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
+    /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. */
     pendingRename(who: RawWho): boolean;
-    /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. @experimental */
+    /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. */
     renamed(who: RawWho): boolean;
     /**
      * Whether `requireRename` can work right now: `names.renames` is on AND the store can release a rename (the test `requireRename` applies
      * first). A live read. For a staff screen, so it never offers a rename that always answers `off`.
-     * @experimental
      */
     renamesEnabled(): boolean;
-    /** A person's rename requests, newest first, at most 20: `{ at, pending }` each. No reason, actor, rule or name. Staff only: never send to a player. @experimental */
+    /** A person's rename requests, newest first, at most 20: `{ at, pending }` each. No reason, actor, rule or name. Staff only: never send to a player. */
     renamesOf(subject: SubjectId): Array<{ at: number; pending: boolean }>;
   };
   /**
    * "This kit id is that outside id": a small table the Coop and EOS adapters keep their links in (a report sent to Coop, a sanction pushed
    * to EOS, an EOS report already filed, a polling cursor). Rows are ids and one short state word, never text. Purged with `retention.reportsMs`.
-   * @experimental
    */
   links: {
     /** True when the store implements the link methods. An adapter that needs links throws `RangeError` at construction when false. */
@@ -593,14 +852,12 @@ export interface Chatwarden {
    * The AI read and recommend service. Always present: without an `ai` option (or at level 0) it answers as if there were no AI. A
    * read is made after the report is stored and never delays the player's ack; a failing, slow or refusing provider changes nothing
    * for players or moderators. Staff only: a read describes chat lines.
-   * @experimental
    */
   ai: AiFacade;
   /**
    * Signals: what the game records about a player (muted by others, kicked, left mid-game), counted by distinct source. A signal never
    * acts: it is read only where a profile rule says so (the Person page record, the ladder suggestion, the AI read, the queue order).
    * Staff-side data: never send any of this to a player.
-   * @experimental
    */
   signals: {
     /**
@@ -685,11 +942,16 @@ export interface Chatwarden {
     record(who: RawWho): PlayerNotice[];
     /** True while the person has a warning they have not acknowledged. */
     pendingWarning(who: RawWho): boolean;
+    /**
+     * Staff side: the text a player is shown for one report excerpt line, the same text a sanction notice stores for it. A delivered line is its
+     * delivered form; a blocked line (or one with no delivered form) has only its matched terms starred, or is all stars when the matcher cannot
+     * say where they are. Never the raw text of a blocked line. Throws for a line with no raw text. Never send a raw line to a player.
+     */
+    lineText(line: ReportExcerptLine): string;
   };
   /**
    * Appeals (0.1.9, `profile.appeals`, off until turned on). The player side takes the same `RawWho` as `notices` and FINDS the person
    * (never creates one); every answer is a reason or a rule number, never an identifier, a staff ref or a reason a moderator gave.
-   * @experimental
    */
   appeals: {
     /** Whether appeals are on right now: the profile in force says so (a live read) and the store can keep them. */
@@ -731,7 +993,6 @@ export interface Chatwarden {
      * One person's appeals (across their merged subjects) as summaries, newest first, at most 50; a moot appeal is left out. For the person's
      * page. Still listed after appeals are switched off (what was filed stays visible until retention removes it); empty for a store that cannot keep
      * appeals or a person the kit does not hold. Carries a staff ref and never the statement: staff channels only.
-     * @experimental
      */
     forPerson(subject: SubjectId): AppealSummary[];
   };
@@ -761,6 +1022,12 @@ export interface Chatwarden {
    * only, never send to a player (the returned `label` and `why` themselves hold no identifier).
    */
   suggest(subject: SubjectId, level: ConductLevel | null, rule: RuleRef, context?: SuggestContext): Suggestion;
+  /**
+   * The person as a moderator limited to `scope` (a staff scope: the labels of the rooms they may see) may see them: the reports filed against them in those rooms and the sanctions that came
+   * from those reports, never an account id, a signal, a link or another scope's report. Folds merged aliases in. At most 20 well-formed labels (`RangeError` otherwise); an empty list sees nothing.
+   * Carries subject ids and staff-only text: never send to a player.
+   */
+  scopedHistory(subject: SubjectId, scope: readonly string[]): ScopedHistory;
   /** Rule gaps: sanctions a moderator filed under `'uncovered'`, for the periodic rules review. Staff only. */
   gaps: {
     list(): GapRow[];
@@ -784,6 +1051,11 @@ export interface Chatwarden {
      * `action` throws `AuditQueryError`. Never carries the json the term editor kept.
      */
     list(q: AuditQuery): AuditPage;
+    /**
+     * The audit ref of a room, for the `room.mode` and `room.retract` rows: the room id itself when it fits the ref alphabet (1 to 64 of `A-Z a-z 0-9 _ . : -`), else `h-` and 16 hex characters of a keyed
+     * hash (the kit's own secret, so the same id gives the same ref across restarts and the id never reaches the trail).
+     */
+    roomRef(roomId: string): string;
   };
   /**
    * Idempotency keys for incoming webhooks (`@chatwarden/http`'s `webhookIn`), on the kit's clock. A key is remembered
@@ -813,16 +1085,33 @@ export interface Chatwarden {
      * The account ids the kit holds for this person across their merged aliases, sorted: exactly the strings the game passed as
      * `RawWho.accountId` (no client key, no IP, no hash). A guest has none; so does an unknown id. For the game to find the player to rename
      * after `rename.required`. Server side only: never send to a player.
-     * @experimental
      */
     accountIds(subject: SubjectId): string[];
     /**
      * The "do not automate" mark (AI levels 3 and 4, design 6.4): a senior marks a person so the AI never acts on them. Staff only (`automation.write` in
      * the HTTP layer). Reads and drafts are still produced for a marked person. Follows a merge. A store without the methods answers `unsupported`.
-     * @experimental
      */
     automation: AutomationFacade;
+    /**
+     * How a person is linked, as counts only: `accounts` (account ids the kit holds for them) and `devices` (client keys), `merged` (other subjects folded into them), and `inForceOnLinked`, how many
+     * bans, area bans and chat restrictions in force were placed on a merged subject rather than on the person's own. Never an id, a key, a hash or an address; the IP rows are not read; a guest and an
+     * unknown subject read zeros. A hint (a shared device can link two different people), not proof. A pure read. Staff only: it says who is linked to a person.
+     */
+    links(subject: SubjectId): PersonLinks;
   };
+  /**
+   * Privacy requests (0.2.0): find a person by an account id or a client key, export what the kit holds about them, and erase it (a receipt, a stated safety remainder
+   * that keeps a ban in force until retention removes it, a dry run). The adopter verifies the requester first; the kit never does, never tells the player and never
+   * judges a request. Owner-only in the HTTP layer and on no player route. Erase leaves the staff audit trail (its person refs read the receipt id) and any report held
+   * for legal reasons.
+   */
+  privacy: PrivacyService;
+  /**
+   * Legal hold (0.2.0): hold a report so no retention purge and no erase reaches it or what hangs on it, release it, and produce its signed evidence bundle. A senior
+   * holds and the owner releases and downloads in the HTTP layer; `hold` emits `report.escalated` (ids and a code, never text). The kit judges nothing and forwards
+   * nothing: it keeps what it held.
+   */
+  legal: LegalService;
   /**
    * The Discord feed's thread map (`@chatwarden/discord`): the forum thread kept per person (`kit_discord_threads`). A
    * thin facade over the store, which throws its own error if it fails. Holds no chat text.
@@ -871,6 +1160,9 @@ function buildPackageFilter(pkg: NonNullable<ChatwardenOptions['profanityPackage
   return built;
 }
 
+/** The most players one `blocks.anyBetween` call asks about. */
+const BLOCKS_ASKED_MAX = 50;
+
 /**
  * Wire every component and return the kit. This is the recommended entry point: the component classes stay
  * exported for adapters and advanced use, but an adopter needs only this.
@@ -892,6 +1184,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   // and the profanity handling, which are code-only.
   const baseProfile = resolveProfile(opts.profile ?? 'standard', opts.overrides);
   const limits = resolveLimits(opts.limits);
+  if (opts.sharedPacing !== undefined && typeof opts.sharedPacing !== 'boolean') throw new TypeError('createChatwarden: sharedPacing must be true or false');
+  if (opts.sharedPacing === true) assertPaceStore(store);
+  // The phrase books: the grammar and sizes first, then every context's `chat.phrases` must name one. Each phrase is also run through the matcher and every profanity filter in force, once those exist (further down).
+  const phraseBooks = checkPhraseBooks(opts.phrases);
+  checkContextBooks(baseProfile.contexts, phraseBooks);
 
   const { everyMs, ...givenRetention } = opts.retention === false ? {} : (opts.retention ?? {});
   /** The policy in force: what was given, with `badFaithMs` following a longer suspension window than its default. */
@@ -943,10 +1240,28 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (autoRule === undefined || autoRule.retired === true) {
     throw new RangeError('autoRestrictRule must be the number of an active rule in the registry');
   }
+  const isActiveRule = (n: number): boolean => {
+    const r = rules.get(n);
+    return r !== undefined && r.retired !== true;
+  };
+  // The filters may cite only an active Community Rule (a code profile fails here, a layer when it is saved).
+  checkFilterRules(baseProfile.filters, isActiveRule, 'profile.filters');
+  // The reserved-name rule likewise (a layer is checked when it is saved).
+  checkNameRules(baseProfile.names, isActiveRule, 'profile.names');
+  // The staff workflow keeps a thread per report in the store: a code profile that asks for it over a store that cannot is refused here, plainly.
+  if (baseProfile.desk.workflow && !hasWorkflowMethods(store)) {
+    throw new Error('desk.workflow needs a store that keeps staff comments and escalation (insertComment, listComments, deleteComment, countComments, setEscalation, countOpenEscalated); this store lacks them');
+  }
+  // The urgent lane's store methods are optional: a store without them still runs, but a report's urgent flag is lost, take next has no urgent pass and marking or handing off a case fails with a
+  // named error. Say so once, by method name.
+  const noUrgent = missingUrgentMethods(store);
+  if (noUrgent.length > 0) safeWarn(logger, 'chatwarden.store_no_urgent_lane', { missing: noUrgent.join(',') });
   if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
   const profanity = buildProfanityFilter(opts, baseProfile.profanity);
   if (profanity === undefined && baseProfile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
 
+  // At least 32 characters or absent; checked here, with the other options, before anything starts.
+  const bundleSecret = checkBundleSecret(opts.bundleSecret);
   const bus = new EventBus(logger);
   const subjects = new SubjectIndex(store, clock, { logger });
   const sanctions = new SanctionIndex({ enabled, subjects });
@@ -960,8 +1275,36 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await mutes.load();
   await strikes.load();
   // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
-  const policy = new PolicyService({ store, clock, logger, base: baseProfile, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store) });
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile, isActiveRule: isActiveRule, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store), workflowKept: hasWorkflowMethods(store), accountAge: typeof opts.signals?.accountAgeDays === 'function' });
   policy.load();
+
+  // Room contexts: the lookup over the profile in force and the room's tag. The profanity handling of each context is built once, here: it is code-only, so a stored layer never
+  // changes it. A context that sets no `profanity` or `chat` key runs the base path exactly (null rules).
+  for (const [name, ctx] of Object.entries(baseProfile.contexts)) {
+    if (ctx.filters !== undefined) checkFilterRules(mergeFilters(baseProfile.filters, ctx.filters, `profile.contexts.${name}.filters`), isActiveRule, `profile.contexts.${name}.filters`);
+  }
+  const contexts = new Contexts({ profile: () => policy.profileNow(), tag: (roomId) => roster.tag(roomId, 'context') });
+  const contextRules = new Map<string, RoomChatRules | null>();
+  /** A context's book as the chat path looks it up: by phrase id. Built once. */
+  const bookIndexes = new Map<string, ReadonlyMap<string, Phrase>>();
+  for (const [name, list] of Object.entries(phraseBooks)) bookIndexes.set(name, new Map(list.map((p) => [p.id, p])));
+  for (const [name, ctx] of Object.entries(baseProfile.contexts)) {
+    if (ctx.profanity === undefined && (ctx.chat === undefined || (ctx.chat.minAccountAgeDays === undefined && (ctx.chat.phrases ?? null) === null))) {
+      contextRules.set(name, null);
+      continue;
+    }
+    const eff = effectiveOf(baseProfile, name);
+    const sameLists = (['add', 'remove', 'only', 'languages'] as const).every((k) => JSON.stringify(eff.profanity[k]) === JSON.stringify(baseProfile.profanity[k]));
+    // The base filter is reused when the context changes neither the word lists nor the style; a context with its own word lists gets its own filter.
+    const filter = eff.profanity.mode === 'allow' ? undefined : sameLists && ctx.profanity?.style === undefined && profanity !== undefined ? profanity : buildProfanityFilter(opts, eff.profanity);
+    if (filter === undefined && eff.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
+    contextRules.set(name, { profanityMode: eff.profanity.mode, profanity: filter, minAccountAgeDays: eff.chat.minAccountAgeDays, phrases: eff.chat.phrases === null ? null : (bookIndexes.get(eff.chat.phrases) ?? null) });
+  }
+  // The game's own phrases cannot hold a slur or a swear word: every phrase goes through the matcher and each profanity filter that could act on a room (the base's, and each context's).
+  const phraseFilters = new Set<ProfanityFilter>();
+  if (profanity !== undefined) phraseFilters.add(profanity);
+  for (const rules of contextRules.values()) if (rules?.profanity !== undefined) phraseFilters.add(rules.profanity);
+  checkPhraseBooks(opts.phrases, { matcher: opts.matcher, filters: [...phraseFilters] });
 
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and
   // decisions all write to and read from it, and `platform.notify` hears of every new notice through it.
@@ -985,12 +1328,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   /** The merged pace of a room with an override, with the profile pace it was merged onto: valid while that object is the one in force. */
   const paceMerged = new Map<string, { base: ResolvedPace; merged: ResolvedPace }>();
   /**
-   * The pace in force for a room: the override over the profile's (the layer over the code). A room without an override gets the
-   * profile's own object; one with an override is merged once per change of the profile's pace (it is a new object on every layer
+   * The pace in force for a room: the override over the room's context over the profile's (the layer over the code). A room without an override gets the
+   * profile's own object (or its context's merged one); one with an override is merged once per change of the profile's pace (it is a new object on every layer
    * change), not once per line.
    */
-  const paceOf = (roomId: string): ResolvedPace => {
-    const base = policy.profileNow().pace;
+  const profilePaceOf = (roomId: string): ResolvedPace => {
+    const base = contexts.paceOf(roomId);
     const over = paceOverrides.get(roomId);
     if (over === undefined) return base;
     const cached = paceMerged.get(roomId);
@@ -1000,7 +1343,67 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     return merged;
   };
 
+  // Room modes: this process only, in memory, expiring (roomModes.ts). A change and an expiry are announced as `room.mode`.
+  const roomModes = new RoomModes({
+    clock,
+    defaultModeMs: () => policy.profileNow().rooms.defaultModeMs,
+    changed: (change) => bus.emit({ type: 'room.mode', roomId: change.roomId, mode: change.mode, until: change.until, ...(change.expired === true ? { expired: true as const } : {}), at: change.at }),
+  });
+  /** The emergency pace of a room: the room's merged pace with the slow mode raised to the emergency one, kept while both inputs are the same objects and the same length. */
+  const emergencyPace = new Map<string, { base: ResolvedPace; slowModeMs: number; merged: ResolvedPace }>();
+  /**
+   * The pace in force for a room: the override over the profile's (the layer over the code), and, while the room is in emergency, a slow mode that is the stricter of the room's and
+   * `rooms.emergency.slowModeMs`. A room with no override and no emergency gets the profile's own object.
+   */
+  const paceOf = (roomId: string): ResolvedPace => {
+    const base = profilePaceOf(roomId);
+    if (roomModes.get(roomId).mode !== 'emergency') {
+      emergencyPace.delete(roomId);
+      return base;
+    }
+    const slowModeMs = Math.max(base.slowModeMs ?? 0, policy.profileNow().rooms.emergency.slowModeMs);
+    const cached = emergencyPace.get(roomId);
+    if (cached !== undefined && cached.base === base && cached.slowModeMs === slowModeMs) return cached.merged;
+    const merged: ResolvedPace = { ...base, slowModeMs };
+    emergencyPace.set(roomId, { base, slowModeMs, merged });
+    return merged;
+  };
+  // How old a player's account is (the adopter's hook, cached ten minutes): for an emergency's read-only rule and, later, probation.
+  const accountAges = new AccountAges({
+    hook: opts.signals?.accountAgeDays,
+    accountIds: (subject) => subjects.identifiersOf(subject).accounts,
+    canonical: (subject) => subjects.canonical(subject),
+    clock,
+    logger,
+  });
+
+  // The chat filters: the engine (the per-room settings getter and the account-age lookup) and the hit counters, held in memory, written to the
+  // store every 30 seconds and on close (a crash loses at most 30 seconds of counts). Nothing is built per line while every block is off.
+  const filterEngine = createFilterEngine({
+    settings: () => policy.profileNow().filters,
+    accountAgeDays: opts.signals?.accountAgeDays,
+    accountIds: (subject) => subjects.identifiersOf(subject).accounts,
+    canonical: (subject) => subjects.canonical(subject),
+    clock,
+    logger,
+  });
+  const filterHits = new FilterHits({
+    clock,
+    logger,
+    sink: { add: (rows) => store.addFilterHits(rows), list: (from, to) => store.listFilterHits(from, to) },
+  });
+
+  // The daily line counter behind Insights' report rate: counts only while `desk.insights` is on, writes at most once a minute.
+  const chatCounter = new ChatCounter({ clock, store, logger, enabled: () => policy.profileNow().desk.insights });
   const chat = new ChatService({
+    counter: chatCounter,
+    rooms: { state: (roomId) => roomModes.get(roomId), settings: () => policy.profileNow().rooms, accountAge: (subject) => accountAges.ageOf(subject) },
+    contexts: {
+      rules: (roomId) => {
+        const name = contexts.resolveTag(roomId);
+        return name === 'unknown' ? 'unknown' : name === null ? null : (contextRules.get(name) ?? null);
+      },
+    },
     roster,
     buffer,
     subjects,
@@ -1021,8 +1424,39 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     notices,
     autoRestrictRule,
     limits: { maxLength: limits.chatMaxLength, rate: limits.chatRate },
+    filters: {
+      settings: (roomId) => contexts.filtersOf(roomId),
+      accountIsNew: (subject, days) => filterEngine.accountIsNew(subject, days),
+      count: (hit) => filterHits.count(hit),
+    },
+    // A `flag` files a report with no reporter (see `reports.fileSystem`) and counts by what came of it: `flag` when one was filed, `flag_capped`
+    // when the daily cap stopped it, `count` when one was already open, the speaker is a guest or anything went wrong. The chat path never waits:
+    // the verdict is already decided, so the report (a snapshot, a cap count and an insert in one store transaction) is filed on a microtask,
+    // after `accept` has returned, not inside it.
+    onFilterFlag: ({ roomId, subject, lineId, hit }) => {
+      queueMicrotask(() => {
+        void (async () => {
+          let outcome: Awaited<ReturnType<typeof reports.fileSystem>> = 'off';
+          try {
+            outcome = await reports.fileSystem({
+              origin: 'filter',
+              originKey: hit.key,
+              roomId,
+              target: subject,
+              lineId,
+              reportedReason: hit.kind === 'personal_info' ? 'personal_info' : 'spam',
+            });
+          } catch {
+            // fileSystem never rejects; a failure to even ask counts as a plain count
+          }
+          filterHits.count({ key: hit.key, action: outcome === 'filed' ? 'flag' : outcome === 'capped' ? 'flag_capped' : 'count' });
+        })();
+      });
+    },
     pace: {
       settings: paceOf,
+      floorMax: () => (policy.profileNow().rooms.probation.enabled ? policy.profileNow().rooms.probation.slowModeMs : 0),
+      ...(opts.sharedPacing === true ? { pacer: createSharedPacer({ clock, settings: paceOf, store, ...(logger === undefined ? {} : { logger }) }) } : {}),
       canonical: (subject) => subjects.canonical(subject),
       // A flood trip records the built-in kind, deferred so the verdict is returned first. `flood` never throws and logs its own
       // refusals; a room id the signal rules do not accept is left out (the trip is then a day source, not dropped).
@@ -1048,6 +1482,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     onReport: opts.onReport,
     logger,
     limits: limits.reports,
+    flagCap: () => policy.profileNow().filters.flagCapPerDay,
+    // A report a filter filed is announced like any other: `report.created` with its origin.
+    onSystemReport: (reportId) => announceReport(reportId),
   });
   const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices });
   // The AI service is built after the audit trail it writes to; a decision reaches it through this late binding.
@@ -1156,7 +1593,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         reportId: stored.id,
         createdAt: stored.createdAt,
         category: stored.category,
-        reportedReason: stored.reportedReason,
+        reportedReason: stored.reportedReason ?? null,
+        urgent: stored.urgent === true,
+        ...(stored.origin === null || stored.origin === undefined ? {} : { origin: stored.origin }),
         roomTags: { ...stored.tags },
       });
     } catch (err) {
@@ -1165,8 +1604,25 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   };
 
   const seat: Chatwarden['rooms']['seat'] = (roomId, seatId, who, handle, tags) => {
+    // The tags are checked first, so a malformed or changed context seats nobody and creates no person.
+    roster.checkTags(roomId, tags);
     const subject = subjects.resolve(hashWho(hasher, who));
     roster.seat(roomId, seatId, subject, handle, tags);
+  };
+
+  /**
+   * One retention pass. When it finished an erase that had kept a remainder, this process forgets that person at once (the subject index catches up with the store).
+   * The timer and `cw.purge()` both run it.
+   */
+  const runPurge = async (policyNow: Partial<RetentionPolicy>): Promise<PurgeResult> => {
+    // A person made in this process whose save to the store failed has rows that look like strays: write them first (the index retries on a flush), and when one is
+    // still unsaved leave the sweep for the next pass rather than delete the rows of a person who is playing right now.
+    await subjects.flush();
+    const result = await purge(store, clock.now(), policyNow, { sweepStrays: !subjects.hasUnsaved() });
+    // The sweep is visible: a count and nothing else (no id, no line), so an integration that writes rows for people it never saved shows up in the log.
+    if (result.strayRows > 0) safeWarn(logger, 'chatwarden.stray_rows_swept', { count: result.strayRows });
+    if (result.erasuresFinished > 0 || result.strayRows > 0) await subjects.refresh();
+    return result;
   };
 
   // The retention timer. `setInterval` is not a clock read, so Date.now() stays out of it; `unref` so it never
@@ -1180,7 +1636,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     };
     timer = setInterval(() => {
       try {
-        purge(store, clock.now(), retentionPolicy).then(undefined, failed);
+        runPurge(retentionPolicy).then(undefined, failed);
       } catch (err) {
         failed(err);
       }
@@ -1237,6 +1693,83 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     boosted: (people) => signals.boosted(people),
   });
   const reasonBook = new ReasonBook(store);
+  const caseWorkflow = new CaseWorkflow({ store, clock, emit: (event) => bus.emit(event) });
+  const commentService = new CommentService({ store, clock, enabled: () => policy.profileNow().desk.workflow, emit: (event) => bus.emit(event) });
+
+  // The case read (`reports.get`): the staff report plus the evidence pointer with its link and, when `desk.surge` is on and the person is over its threshold, the surge hint. Neither is stored, raised or
+  // used by anything else; a failure of the surge read leaves the case without the hint.
+  const caseOf = (report: StaffReport, withSurge = true): StaffReport => {
+    const profile = policy.profileNow();
+    const evidence = report.evidenceRef === null ? null : { ref: report.evidenceRef, url: evidenceLink(profile.reporting, report.evidenceRef) };
+    let surge: ReportSurge | null = null;
+    try {
+      if (withSurge) surge = surgeOf(report.targetPerson, clock.now(), profile.desk.surge, {
+        listReportsByPerson: (people, limit) => store.listReportsByPerson(people, limit),
+        aliasesOf: (subject) => subjects.aliasesOf(subject),
+        canonical: (subject) => subjects.canonical(subject),
+        ...(accountAges.enabled ? { ageOf: (subject: SubjectId) => accountAges.ageOf(subject) } : {}),
+      });
+    } catch (err) {
+      safeWarn(logger, 'chatwarden.surge_failed', { error: err instanceof Error ? err.name : typeof err });
+    }
+    return { ...report, evidence, ...(surge === null ? {} : { surge }) };
+  };
+  /** How a person is linked: counts only (see `people.links`). */
+  const personLinks = (subject: SubjectId): PersonLinks => {
+    const out: PersonLinks = { accounts: 0, devices: 0, merged: 0, inForceOnLinked: { ban: 0, area: 0, chat: 0 } };
+    if (typeof subject !== 'string' || subject === '') return out;
+    const root = subjects.canonical(subject);
+    const ids = subjects.identifiersOf(root);
+    const aliases = subjects.aliasesOf(root);
+    out.accounts = ids.accounts.length;
+    out.devices = ids.keys.length;
+    out.merged = Math.max(0, aliases.length - 1);
+    if (out.merged > 0) {
+      // Subject rows only (an address row is never listed), in force now, on a subject that is not the person's own.
+      for (const row of store.listSubjectSanctions({ subjects: aliases, activeAt: clock.now(), limit: 200 })) {
+        if (row.value === root) continue;
+        if (row.kind === 'ban' || row.kind === 'area' || row.kind === 'chat') out.inForceOnLinked[row.kind] += 1;
+      }
+    }
+    return out;
+  };
+
+  // Insights: on with `desk.insights` and a store that can read the rows.
+  const insightsOn = (): boolean => policy.profileNow().desk.insights && typeof store.insightRows === 'function';
+  /** One window of Insights, or null when it is off. The rows go back 90 days whatever the window, so an old open report still shows in the wait; the window is cut in `computeInsights`. `RangeError` for a bad `days`, off or on. */
+  const readInsights = (days: number): InsightsResult | null => {
+    const window: InsightsDays = checkInsightsDays(days);
+    if (!insightsOn()) return null;
+    // What this process has counted this minute counts too.
+    chatCounter.flush();
+    const now = clock.now();
+    const from = now - window * 86_400_000;
+    const rows = store.insightRows?.(now - INSIGHTS_READ_DAYS * 86_400_000, INSIGHTS_ROW_CAP) ?? [];
+    // The oldest open report in the whole store (oldest first): one that the 90 day read or the row cap left out still sets the longest wait, and makes the result partial.
+    const oldestOpenAt = store.listOpenReports({ limit: 1 })[0]?.createdAt ?? null;
+    const counts = store.chatCounts?.(utcDay(from), utcDay(now)) ?? [];
+    // `null`, not `[]`, when the store cannot count them: the page says "not available", not "none".
+    const rules = store.countSanctionsByRule?.(from) ?? null;
+    const labels = new Map(policy.profileNow().reporting.reasons.map((r) => [r.id, r.label] as const));
+    return computeInsights(rows, counts, rules, now, window, (id) => labels.get(id), { oldestOpenAt });
+  };
+  const digestOf = (days: number): InsightsDigest | null => {
+    const r = readInsights(days);
+    if (r === null) return null;
+    return {
+      days: r.days,
+      from: r.from,
+      to: r.to,
+      filed: r.reports.filed,
+      decided: r.reports.decided,
+      open: r.reports.open,
+      urgentFiled: r.urgent.filed,
+      urgentOpen: store.countOpenUrgent?.() ?? 0,
+      medianMs: r.decision.medianMs,
+      p90Ms: r.decision.p90Ms,
+      longestOpenMs: r.wait.longestOpenMs,
+    };
+  };
 
   // The AI read service. It listens for new reports and only enqueues; with no adapter it is a facade that is always off.
   const aiService =
@@ -1330,6 +1863,41 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     emit: (event) => bus.emit(event),
   });
 
+  // What the kit holds in memory about erased people (not the subject index itself): evidence lines, caches, pacing, claims and the sanction and mute indexes, and with
+  // `whole` the room seats. The store rows are the store's.
+  const forgetInMemory = (people: ReadonlySet<SubjectId>, whole: boolean): void => {
+    const reloaded = (what: string) => (err: unknown) => safeWarn(logger, 'chatwarden.privacy_failed', { error: err instanceof Error ? err.name : typeof err, what });
+    buffer.scrub(people);
+    chat.forgetPeople(people);
+    accountAges.forget(people);
+    strikes.forgetPeople(people);
+    notices.forgetPeople(people);
+    signals.forgetPeople?.(people);
+    desk.forgetPeople(people);
+    // The sanction and mute indexes are read back from the store: a sanction the remainder keeps still applies, one that went stops at once.
+    sanctions.load(store, clock.now()).catch(reloaded('sanctions'));
+    mutes.load().catch(reloaded('mutes'));
+    if (whole) roster.forget(people);
+  };
+
+  // Privacy requests. `forget` is what the kit holds in memory about an erased person; the store rows are the store's (see `PrivacyDeps.forget`).
+  const privacy = createPrivacy({
+    store,
+    clock,
+    subjects,
+    hasher,
+    logger,
+    audit: (input) => audit.record(input),
+    retention: () => retentionPolicy,
+    forget: (people, whole) => {
+      forgetInMemory(people, whole);
+      if (whole) subjects.forget(people);
+    },
+  });
+  // The same fix-up for people the subject index learns are gone because ANOTHER process erased them (a reload after the epoch moved): their room seats become
+  // guests and every cache lets go, so a seat of an erased person never keeps writing rows under the dead id.
+  subjects.onGone = (gone) => forgetInMemory(gone, true);
+
   return {
     ai,
     signals: {
@@ -1352,6 +1920,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         buffer.drop(roomId);
         paceOverrides.delete(roomId);
         paceMerged.delete(roomId);
+        emergencyPace.delete(roomId);
+        roomModes.clear(roomId);
         chat.dropPaceRoom(roomId);
       },
       subjectAt: (roomId, seatId) => {
@@ -1373,10 +1943,63 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         else paceOverrides.set(roomId, Object.freeze(kept));
       },
       pace: (roomId) => paceOf(roomId),
+      setMode: (roomId, mode, o) => roomModes.set(roomId, mode, o),
+      mode: (roomId) => roomModes.get(roomId),
+      list: () => {
+        const modes = new Map(roomModes.active().map((m) => [m.roomId, m] as const));
+        const seen = new Set<string>();
+        const rows: Array<{ roomId: string; tags: Record<string, string>; seated: number; mode: RoomMode; until: number | null }> = [];
+        for (const room of roster.rooms()) {
+          seen.add(room.roomId);
+          const m = modes.get(room.roomId);
+          rows.push({ roomId: room.roomId, tags: room.tags, seated: room.seated, mode: m?.mode ?? 'normal', until: m?.until ?? null });
+        }
+        for (const m of modes.values()) if (!seen.has(m.roomId)) rows.push({ roomId: m.roomId, tags: {}, seated: 0, mode: m.mode, until: m.until });
+        // A room that is empty and has no mode is not worth a row; the most seated first, then by room id so the order is stable.
+        return rows
+          .filter((r) => r.seated > 0 || r.mode !== 'normal')
+          .sort((a, b) => b.seated - a.seated || (a.roomId < b.roomId ? -1 : a.roomId > b.roomId ? 1 : 0))
+          .slice(0, 500);
+      },
+      retract: (roomId, lineId, o) => {
+        if (typeof roomId !== 'string' || roomId === '' || typeof lineId !== 'string' || lineId === '') return { ok: false, refused: 'not_found' };
+        const lineIds = buffer.retract(roomId, lineId, { allFromAuthor: o?.allFromAuthor === true, canonical: (subject) => subjects.canonical(subject) });
+        if (lineIds.length === 0) return { ok: false, refused: 'not_found' };
+        bus.emit({ type: 'line.retracted', roomId, lineIds, at: clock.now() });
+        return { ok: true, lineIds: [...lineIds] };
+      },
+      lineStates: (roomId) => (typeof roomId === 'string' ? buffer.snapshot(roomId).map((l) => ({ lineId: l.lineId, ts: l.ts, retracted: l.retracted === true })) : []),
+      postingState: (roomId, seatId, o) => {
+        const subject = roster.occupant(roomId, seatId)?.subject ?? null;
+        return chat.modeRefusal(roomId, subject, o?.staff === true)?.reason ?? 'ok';
+      },
+    },
+    contexts: {
+      names: () => contexts.names(),
+      of: (roomId) => (typeof roomId === 'string' ? contexts.of(roomId) : null),
+      effective: (name) => contexts.effective(name),
+    },
+    filters: {
+      stats: (q) => {
+        if (q === null || typeof q !== 'object' || (q.days !== 7 && q.days !== 30)) return Promise.reject(new RangeError('filters.stats: days must be 7 or 30'));
+        return filterHits.stats(q.days);
+      },
+      test: (text, candidate) => {
+        if (typeof text !== 'string') throw new TypeError('filters.test: text must be a string');
+        const settings = candidate === undefined ? policy.profileNow().filters : resolveFilters(candidate, 'candidate');
+        // The line is read as chat reads it (trimmed), but the ranges are given on the text as it was handed in, so a screen that shows the text as
+        // typed marks the right characters. `delivered` is the trimmed line, as it would be sent.
+        const line = text.trim();
+        const result = testLine(filterEngine.evaluateWith(settings, line, { subject: null }), line);
+        return line.length === 0 || line.length === text.length ? result : shiftTestSpans(result, text.length - text.trimStart().length);
+      },
+      check: (candidate, lines) => checkLines(filterEngine, resolveFilters(candidate, 'candidate'), lines),
     },
     chat: {
       accept: (roomId, seatId, text, o) => chat.accept(roomId, seatId, text, o),
+      acceptPhrase: (roomId, seatId, phraseId, o) => chat.acceptPhrase(roomId, seatId, phraseId, o),
       visibleTo: (roomId, viewerSeat, senderSeat) => chat.visibleTo(roomId, viewerSeat, senderSeat),
+      hiddenFor: (roomId, senderSeat) => chat.hiddenFor(roomId, senderSeat),
       restricted: (who, o) => {
         try {
           return chat.restricted(personOf(who), o?.roomId, o?.seatId);
@@ -1395,14 +2018,40 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         }
       },
     },
+    phrases: {
+      names: () => Object.keys(phraseBooks),
+      book: (roomId) => {
+        if (typeof roomId !== 'string') return null;
+        const name = contexts.resolveTag(roomId);
+        if (name === null || name === 'unknown') return null;
+        const book = baseProfile.contexts[name]?.chat?.phrases;
+        return typeof book === 'string' ? (phraseBooks[book] ?? null) : null;
+      },
+    },
     mutes: {
       set: (roomId, viewerSeat, targetSeat, on) => {
         const viewer = roster.occupant(roomId, viewerSeat)?.subject ?? null;
         const target = roster.occupant(roomId, targetSeat)?.subject ?? null;
-        if (viewer === null || target === null) return;
-        mutes.set(viewer, target, on);
+        if (viewer === null || target === null) return 'none';
+        return mutes.set(viewer, target, on);
       },
       mutedSeats: (roomId, viewerSeat) => mutes.mutedSeats(roomId, viewerSeat, roster),
+      blockedSeats: (roomId, viewerSeat) => mutes.blockedSeats(roomId, viewerSeat, roster),
+    },
+    blocks: {
+      set: (roomId, viewerSeat, targetSeat, on) => {
+        const viewer = roster.occupant(roomId, viewerSeat)?.subject ?? null;
+        const target = roster.occupant(roomId, targetSeat)?.subject ?? null;
+        if (viewer === null || target === null) return 'none';
+        return mutes.set(viewer, target, on, 'block');
+      },
+      between: (whoA, whoB) => mutes.blockedBetween(personOf(whoA), personOf(whoB)),
+      anyBetween: (who, others) => {
+        if (!Array.isArray(others)) throw new TypeError('blocks.anyBetween: others must be a list');
+        if (others.length > BLOCKS_ASKED_MAX) throw new RangeError(`blocks.anyBetween: at most ${BLOCKS_ASKED_MAX} players at a time`);
+        const me = personOf(who);
+        return others.map((other) => mutes.blockedBetween(me, personOf(other)));
+      },
     },
     reports: {
       submit: async (input) => {
@@ -1410,6 +2059,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         if (res.ok) announceReport(res.reportId);
         return res;
       },
+      fileSystem: (input) => reports.fileSystem(input),
       addDetail: async (reportId, reporterSeat, detail) => {
         const res = await reports.addDetail(reportId, reporterSeat, detail);
         // The follow-up changes what the AI would read: queue one new read (it only enqueues; the reporter's ack never waits).
@@ -1417,9 +2067,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         return res;
       },
       list: (q) => listStaffReports(store, subjects, q, policy.profileNow().reporting.reasons),
-      get: (id) => {
-        const record = typeof id === 'string' ? store.loadReport(id) : null;
-        return record === null ? null : staffReport(record, subjects);
+      get: (id, o) => {
+        const scope = o?.scope === undefined ? undefined : checkScope(o.scope, 'reports.get: scope');
+        const record = typeof id !== 'string' ? null : scope === undefined ? store.loadReport(id) : store.loadReportInScope(id, scope);
+        if (record === null) return null;
+        // A scoped read leaves the surge hint out: it counts the reports filed against the person in every scope.
+        return scope === undefined ? caseOf(staffReport(record, subjects)) : caseOf(staffReport(record, subjects), false);
       },
       reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
       reporterAccuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
@@ -1437,9 +2090,33 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       release: (person, actor) => desk.release(person, actor),
       releaseWhenDone: (person, actor) => desk.releaseWhenDone(person, actor),
       next: (actor, filter) => desk.next(actor, filter),
-      view: (person, actor) => desk.view(person, actor),
+      setUrgent: (reportId, actor, on) => caseWorkflow.setUrgent(reportId, actor, on),
+      handoff: (reportId, actor) => caseWorkflow.handoff(reportId, actor),
+      escalate: (reportId, actor, role, input) => commentService.escalate(reportId, actor, role, input),
+      clearEscalation: (reportId, actor, role) => commentService.clearEscalation(reportId, actor, role),
+      askedCount: () => commentService.askedCount(),
+      urgentCount: (scope) => caseWorkflow.urgentCount(scope),
+      view: (person, actor, scope) => desk.view(person, actor, scope),
+      inScope: (person, scope, o) => desk.inScope(person, scope, o),
       viewers: (person, except) => desk.viewers(person, except),
       viewersOf: (people, except) => desk.viewersOf(people, except),
+    },
+    comments: {
+      add: (reportId, actor, role, text) => commentService.add(reportId, actor, role, text),
+      list: (reportId) => commentService.list(reportId),
+      remove: (reportId, commentId, actor, role) => commentService.remove(reportId, commentId, actor, role),
+    },
+    desk: { workflowEnabled: () => policy.profileNow().desk.workflow },
+    insights: {
+      enabled: () => insightsOn(),
+      read: (days = 30) => readInsights(days),
+      digest: (days = 7) => digestOf(days),
+      emitDigest: (days = 7) => {
+        const digest = digestOf(days);
+        if (digest !== null) bus.emit({ type: 'insights.digest', at: clock.now(), digest: { ...digest } });
+        return digest;
+      },
+      flush: () => chatCounter.flush(),
     },
     changes: { token: () => store.changeToken() },
     reasons: {
@@ -1450,9 +2127,16 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
-      apply: async (input) => {
+      apply: async (given, o) => {
         // The AI's own source is not for a caller (design 6.1): refused before the clock, the store or the index is touched.
-        if (isInternalSource(input.source)) throw new SanctionError('applySanction: invalid source');
+        if (isInternalSource(given.source)) throw new SanctionError('applySanction: invalid source');
+        let input = given;
+        if (o?.forReport !== undefined) {
+          // A sanction made for a report (a scoped moderator's): the whole ordinary check runs first, then the report is named on the row, so the scoped reads find it.
+          validateSanctionInput(given);
+          if (typeof o.forReport !== 'string' || o.forReport === '' || store.loadReport(o.forReport) === null) throw new SanctionError('applySanction: unknown report');
+          input = { ...given, reportId: o.forReport, startsAtToken: APPEALS_START_TOKEN };
+        }
         const now = clock.now();
         const done = await applySanction(store, subjects, input, now, sanctions);
         try {
@@ -1478,7 +2162,17 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         }
         return done;
       },
-      revoke: async (groupId, actor, reason) => {
+      revoke: async (groupId, actor, reason, o) => {
+        // With a staff scope, only a sanction made from a report filed in one of its rooms can be revoked: a direct or an automatic one, another scope's and an unknown group are all "not found".
+        const within = o?.within === undefined ? undefined : checkRevokeWithin(o.within);
+        if (o?.scope !== undefined || within !== undefined) {
+          const scope = o?.scope === undefined ? undefined : checkScope(o.scope, 'sanctions.revoke: scope');
+          const found = typeof groupId !== 'string' || groupId === '' ? [] : store.listSubjectSanctions({ groupId, ...(scope === undefined ? {} : { scope }), limit: 1 });
+          const row = found[0];
+          if (row === undefined) return false;
+          if (within !== undefined && !(within.kinds as readonly string[]).includes(row.kind)) throw new SanctionError('sanctions.revoke: outside the limits');
+          if (within !== undefined && row.kind !== 'warning' && row.kind !== 'note' && (row.endsAt === null || row.endsAt - row.startsAt > within.maxDurationMs)) throw new SanctionError('sanctions.revoke: outside the limits');
+        }
         // One instant for the stored revokedAt and the event, so a consumer correlating the two sees the same time.
         const at = clock.now();
         const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, {
@@ -1514,7 +2208,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         }
         return revoked;
       },
-      forPerson: (subject) => sanctionsOfPerson(store, subjects, subject, clock.now()),
+      forPerson: (subject, o) => sanctionsOfPerson(store, subjects, subject, clock.now(), o?.scope === undefined ? undefined : checkScope(o.scope, 'sanctions.forPerson: scope')),
       list: (q) => listSanctionGroups(store, subjects, q ?? {}, clock.now()),
       byRef: (refCode) => {
         const code = normalizeRefCode(refCode);
@@ -1575,6 +2269,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),
       record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
+      lineText: (line) => notices.lineText(line),
     },
     appeals: {
       enabled: () => appealService.enabled(),
@@ -1589,11 +2284,18 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
+    scopedHistory: (subject, scope) => {
+      if (typeof subject !== 'string' || subject === '') throw new RangeError('scopedHistory: subject must be a non-empty string');
+      return scopedHistoryOf(store, subjects, subject, checkScope(scope, 'scopedHistory: scope'), clock.now());
+    },
     suggest: (subject, level, rule, context) => {
       const now = clock.now();
       // The signal hits are the kit's to compute: a list the caller passes is dropped, the real one set when a ladder rule is met.
       const { signals: _ignored, ...given } = (context ?? {}) as SuggestContext;
       void _ignored;
+      // A scoped suggestion reads only the actions made from reports in that scope and no signal rule: both would carry what happened in other rooms.
+      const scope = given.scope === undefined ? undefined : checkScope(given.scope, 'suggest: scope');
+      if (scope !== undefined) return suggest(policy.profileNow(), historyOf(store, subjects, subject, now, scope), level, rule, now, { ...given, scope, hideSignalText: true });
       const hits = signals.ladderHits(subject);
       return suggest(policy.profileNow(), historyOf(store, subjects, subject, now), level, rule, now, hits.length === 0 ? given : { ...given, signals: hits });
     },
@@ -1615,6 +2317,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     audit: {
       record: (input) => audit.record(input),
       list: (q) => audit.list(q),
+      roomRef: (roomId) => roomAuditRef(roomId, hasher),
     },
     webhookKeys: {
       reserve: (key, fingerprint) => {
@@ -1629,7 +2332,18 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       aliases: (subject) => subjects.aliasesOf(subject),
       accountIds: (subject) => (typeof subject === 'string' ? subjects.identifiersOf(subject).accounts : []),
       automation,
+      links: (subject) => personLinks(subject),
     },
+    privacy,
+    legal: createLegal({
+      store,
+      clock,
+      emit: (event) => bus.emit(event),
+      canonical: (subject) => subjects.canonical(subject),
+      accountIds: (subject) => subjects.identifiersOf(subject).accounts,
+      bundleSecret,
+      kitVersion: VERSION,
+    }),
     discordThreads: {
       get: (subject) => store.transaction(() => store.getDiscordThread(subject)),
       put: (row) => store.transaction(() => store.putDiscordThread(row)),
@@ -1641,7 +2355,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       // A feed window longer than the signal retention could never be met: refuse the purge that would make it so, deleting nothing.
       const { kinds, feeds } = policy.profileNow().signals;
       checkSignalFeeds(feeds, kinds, { signalsMs: merged.signalsMs ?? RETENTION_DEFAULTS.signalsMs }, 'profile.signals.feeds');
-      return await purge(store, clock.now(), merged);
+      return await runPurge(merged);
     },
     ready: () => {
       try {
@@ -1659,6 +2373,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       // Stop reading and abort calls in flight, and let them end before the store goes.
       ai.close();
       await ai.idle();
+      chatCounter.flush();
+      await filterHits.close();
       await subjects.flush();
       store.close();
     },

@@ -50,13 +50,51 @@ class MemoryNames extends MemoryStore {
     }
     return n;
   }
+
+  // Privacy (0.2.0): `MemoryStore.eraseSubjects` and `exportSubjects` call these when the wrapper is present. Not part of the Store interface.
+
+  /** Delete the kept names of the set. Returns how many. */
+  privacyEraseBlockedNames(set: ReadonlySet<string>): number {
+    const snapshot = this.blocked ?? [];
+    const kept = snapshot.filter((r) => r.subject === null || !set.has(r.subject));
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.blocked = kept;
+      this.undoWith(() => {
+        this.blocked = snapshot;
+      });
+    }
+    return n;
+  }
+
+  /** Delete the kept names whose subject does not exist and `matches` (the store's stray rule). A name with no subject is never stray. Returns how many. */
+  privacyPurgeStrayNames(_exists: (id: string) => boolean, matches: (subject: string, at: number) => boolean): number {
+    const snapshot = this.blocked ?? [];
+    const kept = snapshot.filter((r) => r.subject === null || !matches(r.subject, r.at));
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.blocked = kept;
+      this.undoWith(() => {
+        this.blocked = snapshot;
+      });
+    }
+    return n;
+  }
+
+  /** The kept names of the set, newest first (time, then write order, descending): the export's names. */
+  privacyExportBlockedNames(set: ReadonlySet<string>): BlockedNameRow[] {
+    return (this.blocked ?? [])
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.subject !== null && set.has(r.subject))
+      .sort((a, b) => b.r.at - a.r.at || b.i - a.i)
+      .map(({ r }) => structuredClone(r));
+  }
 }
 
 /**
  * Give a {@link MemoryStore} the optional blocked-name methods (`insertBlockedName`, `listBlockedNames`, `purgeBlockedNames`), so a kit with
  * `names.keepBlocked` can keep a blocked name as evidence. Returns the same store. `createMemoryStore()` does not carry them. A method the
  * store already has (a subclass's override) is left as it is, and calling this twice changes nothing.
- * @experimental
  */
 export function withMemoryNames<S extends MemoryStore>(store: S): S & MemoryNameMethods {
   const target = store as unknown as Record<string, unknown>;

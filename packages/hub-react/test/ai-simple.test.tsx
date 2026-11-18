@@ -192,13 +192,21 @@ describe('the shortcut sheet', () => {
   });
 });
 
+/** A copy of the dock without the "What the player sees" panel (or its placeholder). */
+const withoutPanel = (dock: HTMLElement): HTMLElement => {
+  const copy = dock.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll('.cw-pv, .cw-pv-hold').forEach((n) => n.remove());
+  return copy;
+};
+
 describe('the bar around it', () => {
   it('with the AI off, the decision bar is byte-identical to before', async () => {
     const markup = async (o: Parameters<typeof aiCase>[0]) => {
       cleanup();
       const { container } = await aiCase({ stay: true, ...o });
       await settle();
-      const dock = container.querySelector('.cw-dock') as HTMLElement;
+      // "What the player sees" quotes the case's own lines and is a lazy part: it is held to its own tests (preview-*.test.tsx), not to this comparison.
+      const dock = withoutPanel(container.querySelector('.cw-dock') as HTMLElement);
       // Ids come from the order things were drawn in; times and the case's own ids are not what this is about.
       return dock.outerHTML.replace(/_r_[0-9a-z]+_/g, '_id_').replace(/report [\w-]+/g, 'report');
     };
@@ -212,7 +220,7 @@ describe('the bar around it', () => {
       const f = await w.fileRich({});
       const { container } = await open(w, f.id, { stay: true });
       await settle();
-      return (container.querySelector('.cw-dock') as HTMLElement).outerHTML.replace(/_r_[0-9a-z]+_/g, '_id_').replace(/report [\w-]+/g, 'report');
+      return withoutPanel(container.querySelector('.cw-dock') as HTMLElement).outerHTML.replace(/_r_[0-9a-z]+_/g, '_id_').replace(/report [\w-]+/g, 'report');
     })();
     expect(zero).toBe(off);
     const one = await markup({ level: 1 });

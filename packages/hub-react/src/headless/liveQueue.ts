@@ -5,7 +5,7 @@ import { BANNER_AFTER_FAILURES, adopt, pollDelay, reconcile } from '../live.js';
 import type { ShownRow } from '../live.js';
 import { filterGroups, groupQueue, hasRanker, loadRanker } from '../queue.js';
 import type { QueueFilter, QueueGroup } from '../queue.js';
-import type { Claim } from '../types.js';
+import type { Claim, ReportSummary } from '../types.js';
 import type { PageSource, Timers } from './env.js';
 import { createStore } from './store.js';
 import type { Store } from './store.js';
@@ -20,18 +20,14 @@ import type { Toasts } from './toasts.js';
 
 /**
  * The open queue is read 200 reports a page, up to 5 pages: 1,000 reports. Past that the numbers say they are partial.
- * @experimental
  */
 export const QUEUE_PAGE = 200;
-/** @experimental */
 export const QUEUE_MAX_PAGES = 5;
 
-/** @experimental */
 export type Connection = 'live' | 'lost' | 'offline' | 'signedOut';
 
 /**
  * What the queue knows, as a snapshot.
- * @experimental
  */
 export interface LiveQueueState {
   /** `loading` until the first answer; `error` when there has never been one; `ready` after, even while a refresh fails. */
@@ -58,6 +54,11 @@ export interface LiveQueueState {
   minute: number;
   /** The appeals waiting, as `GET /changes` last said (only for a caller who may read appeals while they are on); absent otherwise and from an older server. */
   appeals?: number;
+  /**
+   * How many open reports are urgent: what `GET /changes` last said, else (an older server) what the groups hold. The chip reads it; the groups carry the urgent reports themselves, found
+   * by `GET /reports?urgent=1` even when they are older than the pages the queue loads.
+   */
+  urgent: number;
   /** Counts every read of the queue that was put to use, so a screen can reload its own data when the queue moved. */
   revision: number;
   /** When the last read succeeded (the hub's clock), or null. */
@@ -72,14 +73,12 @@ const REFRESH_MIN_MS = 1_000;
 
 /**
  * One hold on a live queue (see `acquire`).
- * @experimental
  */
 export interface QueueHold {
   release: () => void;
   ready: Promise<void>;
 }
 
-/** @experimental */
 export interface LiveQueueStore extends Store<LiveQueueState> {
   /** True while it is polling (after `start`, until `stop` or `dispose`). A part that starts the queue for itself can ask first, and stop only what it started. */
   readonly running: boolean;
@@ -104,7 +103,7 @@ export interface LiveQueueStore extends Store<LiveQueueState> {
   /** Ask now, instead of waiting for the next poll (the banner's "Try now"). */
   retryNow: () => void;
   /**
-   * @experimental Poll the change token now, as a normal poll would (and read the queue when it moved). Only reads: it sends nothing that writes.
+   * Poll the change token now, as a normal poll would (and read the queue when it moved). Only reads: it sends nothing that writes.
    * Does nothing while the queue is not running (before `start`), after `dispose`, while the browser is offline, or once the session has
    * ended. At most one read a second: a call made while a read is on its way is ignored, and one made within a second of the last
    * refresh is held and sent once, when the second is up (calls in between add nothing). Do not call it in a loop: it is for "something
@@ -130,7 +129,6 @@ export interface LiveQueueStore extends Store<LiveQueueState> {
   endTake: (cooldownMs: number) => void;
 }
 
-/** @experimental */
 export interface LiveQueueOptions {
   client: HubClient;
   /** The hub's clock. */
@@ -147,14 +145,12 @@ const NO_FILTER: QueueFilter = { claim: 'all', category: 'all' };
 
 /**
  * The rows that pass the filters and whose decision is not on its way. Pure: the clock comes in.
- * @experimental
  */
 export function visibleRows(rows: readonly ShownRow[], filter: QueueFilter, pending: ReadonlySet<string>, actor: string, now: number): ShownRow[] {
   const keepPersons = new Set(filterGroups(rows.map((r) => r.group), filter, actor, now).map((g) => g.person));
   return rows.filter((r) => keepPersons.has(r.group.person) && !pending.has(r.group.person));
 }
 
-/** @experimental */
 export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   const { client, now, timers, page, toasts, words } = options;
   const initial: LiveQueueState = {
@@ -167,6 +163,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     incoming: 0,
     partial: false,
     reports: 0,
+    urgent: 0,
     connection: page.online() ? 'live' : 'offline',
     authError: null,
     minute: 0,
@@ -211,7 +208,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   const keep = (person: string): boolean => interacting || person === openPerson;
 
   /** Reads the queue and puts it on screen: in place (`refresh`), or as it is (`adopt`, for the first read and by request). */
-  const read = async (mode: 'adopt' | 'refresh', known?: { token: string; appeals?: number }): Promise<QueueGroup[]> => {
+  const read = async (mode: 'adopt' | 'refresh', known?: { token: string; appeals?: number; urgent?: number }): Promise<QueueGroup[]> => {
     // Reads can overlap (a poll, Take next, Try again): only the one started last is put to use, so a slow old answer never
     // overwrites a newer one.
     const mine = ++seq;
@@ -219,18 +216,21 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     const seen = known ?? (await client.changes());
     const at = seen.token;
     const all = await fetchAllOpen(client);
+    // An urgent report older than the pages read is found by the urgent list (only asked when the count says there is one), and merged in.
+    const items = await withUrgent(client, all.items, seen.urgent);
     // Longest wait first, unless the server sends AI reads: then the `priority` sort (wait, open reports, the read, the reporter's record).
-    const reads = all.items.some((r) => r.ai != null);
+    const reads = items.some((r) => r.ai != null);
     if (reads) await loadRanker();
     const ranked = reads && hasRanker();
-    const groups = groupQueue(all.items, { sort: reads ? 'priority' : 'oldest', now: now(), rankDown: { now: now() } });
+    const groups = groupQueue(items, { sort: reads ? 'priority' : 'oldest', now: now(), rankDown: { now: now() } });
     if (mine !== seq) return groups;
     token = at;
     commit((prev) => {
       const { appeals: _before, ...base } = prev;
       void _before;
       const shown = mode === 'adopt' || prev.status !== 'ready' ? { rows: adopt(groups), incoming: 0 } : reconcile(prev.rows, groups, keep);
-      return { ...base, ...(seen.appeals === undefined ? {} : { appeals: seen.appeals }), status: 'ready', error: null, groups, ranked, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: all.items.length, updatedAt: now(), revision: prev.revision + 1 };
+      const urgent = seen.urgent ?? groups.reduce((n, g) => n + (g.urgentOpen ?? 0), 0);
+      return { ...base, ...(seen.appeals === undefined ? {} : { appeals: seen.appeals }), urgent, status: 'ready', error: null, groups, ranked, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: items.length, updatedAt: now(), revision: prev.revision + 1 };
     });
     return groups;
   };
@@ -482,6 +482,24 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     },
   };
   return api;
+}
+
+/** The urgent reports are read at most this many pages (200 each): an urgent queue longer than that is a queue nobody can work from the chip. */
+const URGENT_MAX_PAGES = 2;
+
+/**
+ * The open reports and the urgent ones the open pages did not reach, once each (by id). The urgent list is only asked when `GET /changes` says
+ * there is an urgent report; a failed urgent read leaves the ordinary list as it is (the queue is never taken down by it).
+ */
+async function withUrgent(client: HubClient, items: ReportSummary[], urgent: number | undefined): Promise<ReportSummary[]> {
+  if (urgent === undefined || urgent <= 0) return items;
+  try {
+    const extra = await fetchAll((cursor) => client.listReports({ urgent: true, limit: QUEUE_PAGE, ...(cursor === undefined ? {} : { cursor }) }), { maxPages: URGENT_MAX_PAGES });
+    const seen = new Set(items.map((r) => r.id));
+    return [...items, ...extra.items.filter((r) => !seen.has(r.id))];
+  } catch {
+    return items;
+  }
 }
 
 function fetchAllOpen(client: HubClient) {

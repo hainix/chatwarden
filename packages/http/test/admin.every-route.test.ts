@@ -16,12 +16,17 @@ interface Ids {
   person: string;
   /** A saved reason. */
   reason: string;
+  /** An open report nobody has held, and one that is held (for the release route). */
+  report: string;
+  held: string;
 }
 interface Spec {
   name: string;
   method: string;
   path: (i: Ids) => string;
   body?: unknown;
+  /** The query the route needs to answer 200. */
+  query?: Record<string, string>;
   /** Permissions that put the route out of the moderator's and senior's reach. */
   lock: Record<string, 'owner'>;
   /** The lowest role that may call it with the default permissions. */
@@ -45,6 +50,7 @@ const SPECS: Spec[] = [
   { name: 'GET /blocked', method: 'GET', path: () => '/blocked', lock: { 'blocked.read': 'owner' }, min: 'moderator' },
   { name: 'POST /terms/test', method: 'POST', path: () => '/terms/test', body: { text: 'a harmless line' }, lock: { 'terms.read': 'owner' }, min: 'moderator' },
   { name: 'GET /policy', method: 'GET', path: () => '/policy', lock: { 'policy.read': 'owner' }, min: 'moderator' },
+  { name: 'GET /policy/rules', method: 'GET', path: () => '/policy/rules', lock: { 'policy.read': 'owner' }, min: 'moderator' },
   { name: 'GET /policy/profile', method: 'GET', path: () => '/policy/profile', lock: { 'policy.read': 'owner' }, min: 'moderator' },
   { name: 'PUT /policy/profile', method: 'PUT', path: () => '/policy/profile', body: { layer: { customDuration: true }, version: 0, reason: 'tune' }, lock: { 'policy.write': 'owner' }, min: 'owner' },
   { name: 'POST /policy/profile/preview', method: 'POST', path: () => '/policy/profile/preview', body: { layer: {} }, lock: { 'policy.read': 'owner' }, min: 'moderator' },
@@ -62,6 +68,22 @@ const SPECS: Spec[] = [
   // AI levels 3 and 4 (0.1.13): the gate dashboard's data and the "do not automate" mark. Their own checks are in admin.ai-gates.test.ts and admin.automation.test.ts.
   { name: 'GET /ai/gates', method: 'GET', path: () => '/ai/gates', lock: { 'policy.read': 'owner' }, min: 'moderator' },
   { name: 'PUT /people/:id/automation', method: 'PUT', path: (i) => `/people/${i.person}/automation`, body: { allowed: false, code: 'other' }, lock: { 'automation.write': 'owner' }, min: 'senior' },
+  // Chat filters (0.2.0): counts, the test box and the dry run. All three are `filters.read`, a moderator's.
+  { name: 'GET /filters/stats', method: 'GET', path: () => '/filters/stats', query: { days: '7' }, lock: { 'filters.read': 'owner' }, min: 'moderator' },
+  { name: 'POST /filters/test', method: 'POST', path: () => '/filters/test', body: { text: 'a harmless line' }, lock: { 'filters.read': 'owner' }, min: 'moderator' },
+  { name: 'POST /filters/check', method: 'POST', path: () => '/filters/check', body: { candidate: {} }, lock: { 'filters.read': 'owner' }, min: 'moderator' },
+  // Privacy requests and legal hold (0.2.0): the owner's routes are fixed in code, so no permission lock moves them; the hold is `legal.hold`, a senior's. Their own checks are in
+  // admin.privacy.test.ts and admin.legal.test.ts.
+  { name: 'POST /privacy/find', method: 'POST', path: () => '/privacy/find', body: { accountId: 'acct-none' }, lock: {}, min: 'owner' },
+  { name: 'GET /people/:ref/privacy/export', method: 'GET', path: (i) => `/people/${i.subject}/privacy/export`, lock: {}, min: 'owner' },
+  { name: 'POST /people/:ref/privacy/erase', method: 'POST', path: (i) => `/people/${i.subject}/privacy/erase`, body: { keep: 'safety', confirm: 'SUBJ', dryRun: true }, lock: {}, min: 'owner' },
+  { name: 'GET /privacy/statement', method: 'GET', path: () => '/privacy/statement', lock: {}, min: 'owner' },
+  { name: 'PUT /reports/:id/hold', method: 'PUT', path: (i) => `/reports/${i.report}/hold`, body: { code: 'other' }, lock: { 'legal.hold': 'owner' }, min: 'senior' },
+  { name: 'DELETE /reports/:id/hold', method: 'DELETE', path: (i) => `/reports/${i.held}/hold`, lock: {}, min: 'owner' },
+  { name: 'GET /reports/:id/bundle', method: 'GET', path: (i) => `/reports/${i.report}/bundle`, lock: {}, min: 'owner' },
+  // The urgent lane (0.2.0): mark a report urgent, mark it as passed to the safety team. Their own checks are in admin.urgent.test.ts.
+  { name: 'POST /reports/:id/urgent', method: 'POST', path: (i) => `/reports/${i.report}/urgent`, body: { on: true }, lock: { 'reports.urgent': 'owner' }, min: 'moderator' },
+  { name: 'POST /reports/:id/handoff', method: 'POST', path: (i) => `/reports/${i.report}/handoff`, body: {}, lock: { 'reports.handoff': 'owner' }, min: 'moderator' },
   { name: 'GET /audit', method: 'GET', path: () => '/audit', lock: { 'audit.read': 'owner' }, min: 'senior' },
 ];
 
@@ -83,7 +105,9 @@ async function ids(w: Awaited<ReturnType<typeof world>>): Promise<Ids> {
   const exception = w.live.rows.exceptions[0]?.id as string;
   const filed = await w.file();
   const reason = w.cw.reasons.add({ label: 'Seed', text: 'A seeded reason.' });
-  return { group: made.groupId, gap: gap.groupId, term, exception, subject, person: filed.target, reason: reason.id };
+  const second = await w.file();
+  await w.cw.legal.hold(second.id, { code: 'other', actor: 'senior_seed' });
+  return { group: made.groupId, gap: gap.groupId, term, exception, subject, person: filed.target, reason: reason.id, report: filed.id, held: second.id };
 }
 const bodyOf = (s: Spec, i: Ids): unknown =>
   s.body === undefined ? undefined : JSON.parse(JSON.stringify(s.body).replace('SUBJ', i.subject));
@@ -92,9 +116,11 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
   it('the route table has exactly the new routes plus the report and team routes', async () => {
     const { routes } = await world();
     // `:id~ref` is the audit-ref charset for a term id; the shape is the same.
-    expect(Object.keys(routes).map((k) => k.replace('~ref', '')).sort()).toEqual(
+    expect(Object.keys(routes).map((k) => k.replace('~ref', '').replace('~room', '')).sort()).toEqual(
       [
         'GET /me',
+        // 0.2.0: the room contexts (admin.contexts.test.ts has its checks).
+        'GET /policy/contexts',
         // The appeal routes (their own checks are in admin.appeals.test.ts: they need a world with appeals on).
         'GET /appeals',
         'GET /appeals/stats',
@@ -106,6 +132,18 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
         'GET /reports/:id',
         'POST /reports/:id/decide',
         'POST /reports/:id/suggest',
+        // Insights (0.2.0): checks in admin.insights.test.ts (it needs desk.insights on).
+        'GET /insights',
+        // The room routes and the linked-accounts count (0.2.0): their own checks are in admin.rooms.test.ts and admin.links.test.ts.
+        'GET /rooms',
+        'POST /rooms/:room/mode',
+        'POST /rooms/:room/lines/:line/retract',
+        'GET /people/:ref/links',
+        // The staff workflow routes (0.2.0): their own checks are in admin.workflow.test.ts (they need a world with desk.workflow on).
+        'POST /reports/:id/comments',
+        'DELETE /reports/:id/comments/:cid',
+        'POST /reports/:id/escalate',
+        'DELETE /reports/:id/escalate',
         // The AI routes (their own checks are in admin.ai.test.ts: they need a world with an adapter).
         'GET /ai/status',
         'POST /reports/:id/ai/read',
@@ -130,7 +168,7 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
       const before = w.audit().length;
       const termsBefore = JSON.stringify(w.live.rows);
       const body = bodyOf(spec, i);
-      const res = await w.call(spec.method, spec.path(i), { role: null, ...(body === undefined ? {} : { body }) });
+      const res = await w.call(spec.method, spec.path(i), { role: null, ...(spec.query === undefined ? {} : { query: spec.query }), ...(body === undefined ? {} : { body }) });
       expect(res.status).toBe(401);
       expect(res.body).toEqual({ error: 'unauthorized', message: 'Authentication is required.' });
       expect(w.audit()).toHaveLength(before);
@@ -144,12 +182,12 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
       const before = w.audit().length;
       const body = bodyOf(spec, i);
       for (const role of ['moderator', 'senior'] as const) {
-        const res = await w.call(spec.method, spec.path(i), { role, ...(body === undefined ? {} : { body }) });
+        const res = await w.call(spec.method, spec.path(i), { role, ...(spec.query === undefined ? {} : { query: spec.query }), ...(body === undefined ? {} : { body }) });
         expect(res.status, role).toBe(403);
         expect(errorOf(res)).toBe('forbidden');
       }
       expect(w.audit()).toHaveLength(before);
-      const ok = await w.call(spec.method, spec.path(i), { role: 'owner', ...(body === undefined ? {} : { body }) });
+      const ok = await w.call(spec.method, spec.path(i), { role: 'owner', ...(spec.query === undefined ? {} : { query: spec.query }), ...(body === undefined ? {} : { body }) });
       expect(ok.status).toBe(200);
     });
 
@@ -160,7 +198,7 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
         const w = await world();
         const i = await ids(w);
         const body = bodyOf(spec, i);
-        const res = await w.call(spec.method, spec.path(i), { role, ...(body === undefined ? {} : { body }) });
+        const res = await w.call(spec.method, spec.path(i), { role, ...(spec.query === undefined ? {} : { query: spec.query }), ...(body === undefined ? {} : { body }) });
         if (roles.indexOf(role) >= roles.indexOf(spec.min)) expect(res.status, role).toBe(200);
         else expect(res.status, role).toBe(403);
       }

@@ -7,7 +7,7 @@ import { defineProfile, PRESETS, ProfileError, resolveProfile, validateProfile }
 // The `appeals` settings: in the profile (code), resolved with every field filled, refused with a path and never the value.
 
 const DEFAULTS = { enabled: false, perPlayerPerWeek: 3, allowSelfReview: false };
-const NAME_DEFAULTS = { profanity: false, keepBlocked: false, renames: false, maskInHub: true };
+const NAME_DEFAULTS = { profanity: false, keepBlocked: false, renames: false, maskInHub: true, reserved: [], reservedAllow: [], reservedRule: 2 };
 
 function failure(fn: () => unknown): ProfileError {
   try {

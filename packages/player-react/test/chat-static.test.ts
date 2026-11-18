@@ -69,7 +69,7 @@ describe('the words', () => {
 
   it('every dynamic player.chat.<x>.${...} key has a catalog entry for each value it is given', () => {
     // The refusal and closed tables are read as `player.chat.refused.${reason}` and `player.chat.closed.${why}`.
-    for (const reason of ['length', 'rate', 'gate', 'blocked', 'profanity', 'slow_mode', 'flood', 'duplicate', 'unknown']) expect(keys.has(`player.chat.refused.${reason}`), reason).toBe(true);
+    for (const reason of ['length', 'rate', 'gate', 'blocked', 'profanity', 'link', 'personal_info', 'filter', 'slow_mode', 'flood', 'duplicate', 'unknown']) expect(keys.has(`player.chat.refused.${reason}`), reason).toBe(true);
     for (const why of ['banned', 'forbidden', 'unauthorized', 'room_closed', 'shutdown', 'replaced', 'not_found', 'unsupported']) expect(keys.has(`player.chat.closed.${why}`), why).toBe(true);
   });
 
@@ -143,6 +143,12 @@ describe('imports', () => {
 
   it('imports nothing but React, the kit types and its own files', () => {
     for (const f of chatFiles) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react-dom$|react\/jsx-runtime$|@chatwarden\/core$)/);
+  });
+
+  it('the chat entry exports the version 2 wire types and the placeholder line, as types only', () => {
+    const entry = read(join(chatDir, 'index.ts'));
+    const typeExports = entry.split('\n').filter((l) => l.startsWith('export type {'));
+    for (const name of ['WireMode', 'WireReadOnly', 'StateLine']) expect(typeExports.some((l) => new RegExp(String.raw`[{ ,]${name}[ ,}]`).test(l)), name).toBe(true);
   });
 
   it('the chat entry does not export the test-only transport factory', () => {
@@ -309,9 +315,9 @@ describe('the manifest', () => {
     expect(existsSync(join(src, 'chat.css'))).toBe(true);
   });
 
-  it('the chat entry exports ChatBox, sseTransport and the experimental pure parts, and not the main entry\'s own names twice', () => {
+  it('the chat entry exports ChatBox, sseTransport and the pure parts, and not the main entry\'s own names twice', () => {
     const entry = read(join(chatDir, 'index.ts'));
     for (const name of ['ChatBox', 'sseTransport', 'chatReducer', 'readFrame', 'enChat']) expect(entry, name).toContain(name);
-    expect(entry).toMatch(/@experimental/);
+    expect(entry).not.toMatch(/@experimental/);
   });
 });

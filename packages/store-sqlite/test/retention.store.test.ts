@@ -64,13 +64,15 @@ async function sanction(
 describe('purge against SQLite', () => {
   it('deletes old reports, strikes and mutes at the exact cutoffs', async () => {
     const { db, store } = env();
+    // The strikes belong to a bare subject id with no subject row: the stray-row sweep of the same pass is off here (it has its own tests).
+    store.purgeStrayRows = () => 0;
     store.insertReport(report('old', NOW - 90 * DAY - 1));
     store.insertReport(report('edge', NOW - 90 * DAY));
     store.insertStrike(strike('old', NOW - 30 * DAY - 1));
     store.insertStrike(strike('edge', NOW - 30 * DAY));
-    store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 180 * DAY - 1 });
-    store.upsertMute({ viewer: 'v', target: 'edge', createdAt: NOW - 180 * DAY });
-    expect(await purge(store, NOW)).toEqual({ reports: 1, sanctions: 0, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
+    store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 180 * DAY - 1, block: false });
+    store.upsertMute({ viewer: 'v', target: 'edge', createdAt: NOW - 180 * DAY, block: false });
+    expect(await purge(store, NOW)).toEqual({ reports: 1, sanctions: 0, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
     expect(db.prepare('SELECT id FROM kit_reports').all().map((r) => r.id)).toEqual(['edge']);
     expect(db.prepare('SELECT id FROM kit_strikes').all().map((r) => r.id)).toEqual(['edge']);
     expect(db.prepare('SELECT target_id FROM kit_mutes').all().map((r) => r.target_id)).toEqual(['edge']);
@@ -132,7 +134,7 @@ describe('purge against SQLite', () => {
       const { db, store } = env();
       store.insertReport(report('old', NOW - 1000 * DAY));
       store.insertStrike(strike('old', NOW - 1000 * DAY));
-      store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 1000 * DAY });
+      store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 1000 * DAY, block: false });
       await expect(purge(store, bad)).rejects.toThrow('purge: invalid now');
       expect(count(db, 'kit_reports')).toBe(1);
       expect(count(db, 'kit_strikes')).toBe(1);

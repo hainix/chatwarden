@@ -21,7 +21,6 @@ import type { Store } from './store.js';
 import { createToastStore } from './toasts.js';
 import type { ToastStore } from './toasts.js';
 
-/** @experimental */
 export interface HubControllerOptions {
   /** The staff client: `createHubClient(fetchTransport({ baseUrl: '/admin' }))`. */
   client: HubClient;
@@ -35,7 +34,6 @@ export interface HubControllerOptions {
   t?: HubT;
   /**
    * Where the moderator is looking, and how to bring them somewhere: a host with a router says so here.
-   * @experimental
    */
   host?: HubHost;
 }
@@ -43,7 +41,6 @@ export interface HubControllerOptions {
 /**
  * What the controller asks of the host it runs in. Both are optional: without them the open case (see `open`) is "what the
  * moderator is looking at", and bringing them to a report does nothing (the controller never navigates by itself).
- * @experimental
  */
 export interface HubHost {
   /** The report the moderator has open right now, or null. Asked when a decision fails or is undone, to know whether they have moved on. */
@@ -54,7 +51,6 @@ export interface HubHost {
 
 /**
  * What a host may change after the controller is made.
- * @experimental
  */
 export interface HubControllerSettings {
   t?: HubT;
@@ -62,7 +58,6 @@ export interface HubControllerSettings {
 
 /**
  * A decision to make. `name` is how the reported person is named in a toast (default their short tag); `snapshot` the form to give back on a failure.
- * @experimental
  */
 export interface DecideCommand {
   reportId: string;
@@ -74,11 +69,9 @@ export interface DecideCommand {
 
 /**
  * How `start()` went, with what lets go of the hold it took on the queue (a no-op when there is none).
- * @experimental
  */
 export type StartResult = ActionResult<Me> & { release: () => void };
 
-/** @experimental */
 export interface HubController {
   readonly client: HubClient;
   readonly session: Session;
@@ -134,12 +127,10 @@ export interface HubController {
    * session has ended. At most one read a second: a call made while a read is on its way is ignored, and one made within a second of the
    * last is held and sent once when the second is up. A call while a read is in flight is ignored; a change made just after that read
    * started shows at the next poll. Do not call it in a loop: it is for "something just changed", the queue polls by itself.
-   * @experimental
    */
   refresh(): void;
   /**
    * Tell the controller what the host has changed since it was made: the words.
-   * @experimental
    */
   configure(patch: HubControllerSettings): void;
   /** True once `dispose()` has run. */
@@ -148,7 +139,6 @@ export interface HubController {
   dispose(): void;
 }
 
-/** @experimental */
 export function createHubController(options: HubControllerOptions): HubController {
   const { client } = options;
   const timers: Timers = { ...browserTimers, ...options.schedule };

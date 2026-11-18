@@ -1,7 +1,12 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { createChatwarden } from '../packages/core/src/index.js';
+import { adminRoutes, createRouter } from '../packages/http/src/admin-entry.js';
+import { createMemoryStore } from '../packages/store-memory/src/index.js';
+import { compileSnippets } from './snippetCompile.js';
 
 // The recipe pages in docs/recipes embed the golden files, byte for byte (design 9.6, ruling 8). A page holds no code of its own: a code block is
 // either the text of a golden file, introduced by a marker line `<!-- golden: <case>/<file> -->`, or a short shell line. `UPDATE_RECIPES=1`
@@ -11,6 +16,8 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const cases = join(root, 'examples', 'recipes', 'cases');
 const recipes = join(root, 'docs', 'recipes');
 const PAGES = ['express', 'fastify', 'nextjs', 'socketio', 'colyseus'];
+// Guides for the person who runs the moderation (0.2.0): prose with at most a short snippet, not a framework recipe, so the golden-file rules above do not apply to them.
+const GUIDES = ['urgent-and-welfare', 'raids', 'digest', 'kids-rooms', 'creator-channels', 'service-mode', 'translations'];
 const MARKER = /^<!-- golden: (\S+) -->$/;
 const FENCE = /^```(\w*)$/;
 
@@ -77,8 +84,8 @@ const page = (name: string): string => lf(readFileSync(pageOf(name), 'utf8'));
 const prose = (name: string): string => page(name).replace(/```[\s\S]*?```/g, '');
 
 describe('docs/recipes', () => {
-  it('has the five pages and nothing else', () => {
-    expect(readdirSync(recipes).filter((f) => f.endsWith('.md')).sort()).toEqual(PAGES.map((p) => `${p}.md`).sort());
+  it('has the five pages and the five guides, and nothing else', () => {
+    expect(readdirSync(recipes).filter((f) => f.endsWith('.md')).sort()).toEqual([...PAGES, ...GUIDES].map((p) => `${p}.md`).sort());
   });
 
   it('every golden marker resolves to a committed file and the page contains its exact text', () => {
@@ -202,5 +209,155 @@ describe('docs/recipes', () => {
       expect(prose(name), name).not.toMatch(/\b(blazing|seamless|powerful|robust|world-class|cutting-edge|revolutionary|effortless)\b/i);
       expect(page(name), name).not.toMatch(/[A-Za-z]:\\|\/Users\/|\/home\//);
     }
+  });
+});
+
+describe('docs/recipes: the guides say what the kit does not do', () => {
+  const guide = (name: string): string => lf(readFileSync(join(recipes, `${name}.md`), 'utf8')).replace(/\s+/g, ' ');
+  const all = GUIDES.map(guide).join(' ');
+
+  // Each limit of the kit's safety statement (design 3): it is said in the adopter guide, in words an adopter can quote.
+  const LIMITS: Array<[string, RegExp]> = [
+    ['it does not decide whether anyone is at risk or a threat is real', /does not decide whether anyone is at risk, or whether a threat is real/],
+    ['it does not message anyone', /does not message the person reported/],
+    ['it does not ring, email or post by itself', /does not ring, email or post anywhere by itself/],
+    ['it does not report to any authority', /does not report to any authority/],
+    ['it does not store, copy, fetch or forward images or link targets', /does not store, copy, fetch or forward images, link targets or media/],
+    ['it does not promise a response time and is not a pager', /does not promise a response time, and it is not a pager/],
+    ['the child line: stop, do not copy, follow your legal procedure', /stop\. Do not save, copy, screenshot or forward it\. Follow your studio's legal procedure/],
+    ['not legal advice', /not legal advice/i],
+  ];
+
+  it.each(LIMITS)('the urgent guide says: %s', (_name, pattern) => {
+    expect(guide('urgent-and-welfare')).toMatch(pattern);
+  });
+
+  it('every guide says it is not legal advice, and none promises a response time', () => {
+    for (const name of GUIDES) {
+      expect(guide(name), name).toMatch(/not legal advice/i);
+      expect(guide(name), name).not.toMatch(/within \d+ (minutes|hours)|guarantee/i);
+    }
+    expect(all).toMatch(/promise a response time/);
+  });
+
+  it('the raids guide says a mode always expires, is per process, and is not a sanction; the digest guide says the kit has no scheduler', () => {
+    expect(guide('raids')).toMatch(/every mode ends by itself/);
+    expect(guide('raids')).toMatch(/There is no "until I turn it off"/);
+    expect(guide('raids')).toMatch(/memory of the process that serves the room/);
+    expect(guide('raids')).toMatch(/None of them is a sanction/);
+    expect(guide('digest')).toMatch(/The kit has no scheduler/);
+    expect(guide('digest')).toMatch(/cw\.insights\.emitDigest/);
+  });
+
+  it('a guide holds no more code than a short snippet, in a fenced block', () => {
+    for (const name of GUIDES) {
+      const text = lf(readFileSync(join(recipes, `${name}.md`), 'utf8'));
+      expect((text.match(/^```/gm) ?? []).length % 2, `${name}: unclosed fence`).toBe(0);
+      for (const block of text.matchAll(/```(\w*)\n([\s\S]*?)```/g)) expect((block[2] as string).split('\n').length, `${name}: a snippet is a few lines`).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it('no guide names a real slur, key or token', () => {
+    expect(all).not.toMatch(/sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{10,}|https:\/\/discord\.com\/api\/webhooks\/\d+/);
+  });
+});
+
+describe("docs/recipes: kids-rooms and creator-channels say what the kit does and what stays the game's", () => {
+  const guide = (name: string): string => lf(readFileSync(join(recipes, `${name}.md`), 'utf8')).replace(/\s+/g, ' ');
+
+  it("kids-rooms: a context with phrase-only chat and a strict pace, the refusals, and what is the game's (age, which rooms)", () => {
+    const text = guide('kids-rooms');
+    for (const needle of ['`profile.contexts`', '`chat.phrases`', '`cw.chat.acceptPhrase(room, seat, id)`', '`phrases_only`', '`phrase_unknown`', '`slowModeMs`', '`chat.minAccountAgeDays`', '`account_too_new`', '`gate`', '`phrase.<id>`']) {
+      expect(text, needle).toContain(needle);
+    }
+    expect(text).toMatch(/The kit never learns how old a player is/);
+    expect(text).toMatch(/Which rooms are kids' rooms is your decision/);
+    expect(text).toMatch(/The kit ships no phrase text/);
+    expect(text).toMatch(/a typo in the context name fails shut/i);
+    expect(text).toMatch(/account age is not a person's age/i);
+    expect(text).toMatch(/not legal advice/i);
+  });
+
+  it('creator-channels: a scope per creator, scoped moderators, what a scoped moderator cannot do and the sanction limits', () => {
+    const text = guide('creator-channels');
+    for (const needle of ['`scope`', '`creator:alice`', '`cw.rooms.seat`', '`authorize`', '`scopedLimits`', '`reportId`', '`GET /me`', '`guard()`', '404 `not_found`', '403 `forbidden`']) {
+      expect(text, needle).toContain(needle);
+    }
+    expect(text).toMatch(/A report from a room with no scope is invisible to a scoped moderator/);
+    expect(text).toMatch(/The owner role cannot be scoped/);
+    expect(text).toMatch(/only a warning or a chat restriction, for at most 7 days, never permanent/);
+    expect(text).toMatch(/settings, terms, the audit trail, appeals/);
+    expect(text).toMatch(/Which creator a moderator works for is your decision/);
+    expect(text).toMatch(/not legal advice/i);
+  });
+});
+
+describe('docs/recipes: the code of kids-rooms and creator-channels', () => {
+  // The ts blocks of a page, in order, are one program: the imports first, then the steps. Names the page leaves to the game are declared here and passed in when it runs.
+  const STUBS = `
+declare function isKidsRoom(roomId: string): boolean;
+declare function yourLogin(req: import('@chatwarden/http').KitRequest): Promise<{ email: string; creator: string } | null>;
+`;
+  const tsBlocks = (name: string): string =>
+    blocksOf(page(name))
+      .filter((b) => b.language === 'ts')
+      .map((b) => b.text)
+      .join('\n');
+
+  type Run = (...values: unknown[]) => Promise<Record<string, unknown>>;
+  /** Run a page's program: its imports are replaced by the real modules, its game-owned names by `given`, and `after` is appended to it. */
+  async function run(name: string, given: Record<string, unknown>, after = ''): Promise<Record<string, unknown>> {
+    const source = `${tsBlocks(name).replace(/^import .*;$/gm, '')}\n${after}`;
+    const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+    const all: Record<string, unknown> = { createChatwarden, createMemoryStore, adminRoutes, createRouter, ...given };
+    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => Run;
+    return new AsyncFunction(...Object.keys(all), js)(...Object.values(all));
+  }
+
+  it('both pages hold ts blocks, and all of them compile in one program each; a deliberate error is caught (control)', { timeout: 120_000 }, () => {
+    const files = ['kids-rooms', 'creator-channels'].map((n) => ({ file: `${n}.ts`, code: tsBlocks(n) }));
+    for (const f of files) expect(f.code.length, f.file).toBeGreaterThan(200);
+    const diagnostics = compileSnippets([...files, { file: 'control.ts', code: "const n: number = 'not a number';" }], STUBS);
+    expect(diagnostics.get('control.ts')?.length, 'the control must fail to compile').toBe(1);
+    diagnostics.delete('control.ts');
+    expect(Object.fromEntries(diagnostics)).toEqual({});
+  });
+
+  it('kids-rooms runs against a memory kit: a phrase room refuses text and accepts a phrase; a room that is not a kids room takes text', async () => {
+    const kids = await run('kids-rooms', { isKidsRoom: () => true }, 'return { typed, picked };');
+    expect(kids.typed).toMatchObject({ refuse: { reason: 'phrases_only' } });
+    expect(kids.picked).toMatchObject({ deliver: { text: 'Good game!', phrase: 'gg' } });
+    const open = await run('kids-rooms', { isKidsRoom: () => false }, 'return { typed, picked };');
+    expect(open.typed).toMatchObject({ deliver: { text: 'hello there' } });
+    expect((open.typed as { deliver: object }).deliver).not.toHaveProperty('phrase');
+    // A phrase is not a way around the room: outside a kids room the phrase id names a book the room does not use, and is refused.
+    expect(open.picked).toHaveProperty('refuse');
+  });
+
+  it("creator-channels runs against a memory kit: a creator's scoped moderator sees only that creator's reports, and cannot reach the settings or a ban", async () => {
+    const after = `
+for (const [id, scope] of [['alice-lobby', 'creator:alice'], ['bob-lobby', 'creator:bob']] as const) {
+  cw.rooms.seat(id, 'p1', { clientKey: id + '-reporter-key' }, 'Reporter', { scope });
+  cw.rooms.seat(id, 'p2', { clientKey: id + '-target-key' }, 'Target', { scope });
+  cw.chat.accept(id, 'p2', 'hello there');
+  const filed = await cw.reports.submit({ roomId: id, reporterSeat: 'p1', targetSeat: 'p2' });
+  if (!filed.ok) throw new Error('refused: ' + filed.refused);
+}
+const ask = (method: string, path: string, body?: unknown) =>
+  handle({ method, path, query: {}, headers: {}, body: undefined, ...(body === undefined ? {} : { rawBody: JSON.stringify(body) }) } as never);
+const queue = await ask('GET', '/reports');
+const policy = await ask('GET', '/policy');
+const me = await ask('GET', '/me');
+const first = (queue.body as { items: Array<{ id: string; person: string }> }).items[0];
+const ban = first === undefined ? undefined : await ask('POST', '/sanctions', { subject: first.person, kind: 'ban', durationMs: 86400000, rule: 1, reason: 'no', reportId: first.id });
+return { queue, policy, me, ban };
+`;
+    const out = await run('creator-channels', { yourLogin: async () => ({ email: 'alice-mod@example.test', creator: 'alice' }) }, after);
+    const queue = out.queue as { status: number; body: { items: unknown[] } };
+    expect(queue.status).toBe(200);
+    expect(queue.body.items).toHaveLength(1);
+    expect((out.policy as { status: number }).status).toBe(403);
+    expect((out.me as { body: { scope: string[] } }).body.scope).toEqual(['creator:alice']);
+    expect((out.ban as { status: number }).status).toBe(400);
   });
 });

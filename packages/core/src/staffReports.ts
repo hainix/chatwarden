@@ -1,7 +1,10 @@
+import { checkScope } from './contexts.js';
 import { ownLineIdsByPerson } from './notices.js';
 import { canonicalReasonId, isReasonId, reasonOfCategory } from './reporting.js';
 import type { ReportReason } from './reporting.js';
 import type { SubjectIndex } from './subjects.js';
+import { isOriginReport } from './types.js';
+import type { ReportSurge } from './surge.js';
 import type { ReportRecord, Store, SubjectId } from './types.js';
 
 /** The page size when `limit` is missing or not a number. */
@@ -17,8 +20,8 @@ const STATUSES: ReadonlyArray<ReportRecord['status']> = ['open', 'actioned', 'di
  * person query does not take).
  */
 export class ReportQueryError extends Error {
-  readonly field: 'status' | 'before' | 'person' | 'reason';
-  constructor(field: 'status' | 'before' | 'person' | 'reason') {
+  readonly field: 'status' | 'before' | 'person' | 'reason' | 'urgent';
+  constructor(field: 'status' | 'before' | 'person' | 'reason' | 'urgent') {
     super(
       field === 'status'
         ? 'reports.list: unknown status'
@@ -54,8 +57,22 @@ export interface StaffReport extends ReportRecord {
   /** The reason the reporter gave (an id from the profile's reasons, an old category read as its new id), or null when they gave none. A hint, never the truth. */
   reportedReason: string | null;
   targetPerson: SubjectId;
-  reporterPerson: SubjectId;
+  /** The canonical person who filed the report, or null for a report nobody filed (`origin` is set: a chat filter's flag). */
+  reporterPerson: SubjectId | null;
   ownLineIds: Record<SubjectId, string[]>;
+  /**
+   * Set by `cw.reports.get` only (never by the queue listing): the game's evidence pointer as `{ ref, url }` (`url` is the owner's `reporting.evidenceUrl` with the ref filled in, or `null` with no
+   * usable template) or `null` for a report with no ref.
+   */
+  evidence?: ReportEvidence | null;
+  /** Set by `cw.reports.get` only, and only with `desk.surge` on and the person over its threshold: a hint, never a reason to set a report aside. */
+  surge?: ReportSurge;
+}
+
+/** The evidence pointer of a case: the game's opaque ref and the staff link built from `reporting.evidenceUrl`, when there is one. */
+export interface ReportEvidence {
+  ref: string;
+  url: string | null;
 }
 
 /** What `reports.list` takes. Every field is optional. */
@@ -78,6 +95,16 @@ export interface ReportQuery {
    * query does not take it.
    */
   reason?: string | null;
+  /**
+   * Only urgent reports (`true`): the urgent queue, found at any age. It means open reports, so it does not combine with another `status` or with `person` (`ReportQueryError`).
+   * `false` or absent: every report.
+   */
+  urgent?: boolean;
+  /**
+   * Only reports filed in a room whose `scope` tag is one of these (a staff scope): applied in the store query, so the order and the cursor are the unscoped ones. A report with no scope is never
+   * listed, an empty list lists nothing, and absent is every report. At most 20 well-formed labels (`RangeError` otherwise).
+   */
+  scope?: readonly string[];
 }
 
 /**
@@ -135,38 +162,56 @@ export function staffReport(record: ReportRecord, subjects: SubjectIndex): Staff
     ...structuredClone(record),
     reportedReason: stored === undefined ? reasonOfCategory(record.category) : stored,
     detailAt: record.detailAt ?? null,
+    urgent: record.urgent === true,
+    evidenceRef: record.evidenceRef ?? null,
+    handoffAt: record.handoffAt ?? null,
+    handoffBy: record.handoffBy ?? null,
+    escalatedTo: record.escalatedTo ?? null,
+    escalatedBy: record.escalatedBy ?? null,
+    escalatedAt: record.escalatedAt ?? null,
     people: record.people.map((p) => subjects.canonical(p)),
     targetPerson: subjects.canonical(record.targetSubject),
-    reporterPerson: subjects.canonical(record.reporterSubject),
+    reporterPerson: isOriginReport(record) ? null : subjects.canonical(record.reporterSubject),
+    origin: record.origin ?? null,
+    originKey: record.originKey ?? null,
     ownLineIds: ownLineIdsByPerson(record, subjects),
   };
 }
 
 /** One page of the staff queue. Throws {@link ReportQueryError} for an unknown status or a bad cursor. */
 export function listStaffReports(store: Store, subjects: SubjectIndex, q: ReportQuery = {}, reasons: readonly ReportReason[] = []): ReportPage {
+  const scope = q.scope === undefined ? undefined : checkScope(q.scope, 'reports.list: scope');
+  // Applied in the store query; applied again to what comes back, so a store that ignored it still cannot show another scope's report (the page may then be short, never wrong).
+  const inScope = (r: { scope: string | null }): boolean => scope === undefined || (r.scope !== null && scope.includes(r.scope));
   if (q.person !== undefined) {
     if (typeof q.person !== 'string' || q.person === '') throw new ReportQueryError('person');
     if (q.status !== undefined) throw new ReportQueryError('status');
     if (q.reason !== undefined) throw new ReportQueryError('reason');
+    if (q.urgent !== undefined) throw new ReportQueryError('urgent');
     if (q.before !== undefined && q.before !== null) throw new ReportQueryError('before');
-    const rows = store.listReportsByPerson(subjects.aliasesOf(q.person), clampLimit(q.limit));
-    return { items: rows.map((r) => staffReport(r, subjects)), next: null };
+    const rows = store.listReportsByPerson(subjects.aliasesOf(q.person), clampLimit(q.limit), scope);
+    return { items: rows.filter(inScope).map((r) => staffReport(r, subjects)), next: null };
   }
   if (q.status !== undefined && !STATUSES.includes(q.status)) throw new ReportQueryError('status');
   if (q.reason !== undefined && q.reason !== null && !isReasonId(q.reason)) throw new ReportQueryError('reason');
+  if (q.urgent !== undefined && typeof q.urgent !== 'boolean') throw new ReportQueryError('urgent');
+  // The urgent queue is the open urgent reports: another status is a contradiction, not an empty page.
+  if (q.urgent === true && q.status !== undefined && q.status !== 'open') throw new ReportQueryError('urgent');
   const cursor = q.before === undefined || q.before === null ? null : decodeReportCursor(q.before);
   const limit = clampLimit(q.limit);
   const reason = q.reason === undefined || q.reason === null ? q.reason : canonicalReasonId(reasons, q.reason);
+  const urgentOnly = q.urgent === true;
   const rows = store.listReports({
-    ...(q.status === undefined ? {} : { status: q.status }),
+    ...(urgentOnly ? { status: 'open' as const, urgent: true } : q.status === undefined ? {} : { status: q.status }),
     ...(cursor === null ? {} : { before: cursor.createdAt, beforeId: cursor.id }),
     ...(reason === undefined ? {} : { reason }),
+    ...(scope === undefined ? {} : { scope }),
     limit,
   });
   const last = rows[rows.length - 1];
   // The cursor and "is there more" follow the rows the store gave; the filter is applied again to what it returned, so a store
   // that does not know `reason` still cannot show the wrong reports.
-  const items = rows.map((r) => staffReport(r, subjects));
+  const items = rows.filter(inScope).map((r) => staffReport(r, subjects)).filter((r) => !urgentOnly || r.urgent);
   return {
     items: reason === undefined ? items : items.filter((r) => r.reportedReason === reason),
     next: rows.length === limit && last !== undefined ? encodeReportCursor(last.createdAt, last.id) : null,

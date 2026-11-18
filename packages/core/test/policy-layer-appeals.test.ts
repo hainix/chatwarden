@@ -16,7 +16,7 @@ import { OWNER, world } from './reportingWorld.js';
 // The `appeals` and `names` sections in the layer (the owner's edits), through cw.policy and cw.profile.
 
 const APPEALS_OFF = { enabled: false, perPlayerPerWeek: 3, allowSelfReview: false };
-const NAMES_OFF = { profanity: false, keepBlocked: false, renames: false, maskInHub: true };
+const NAMES_OFF = { profanity: false, keepBlocked: false, renames: false, maskInHub: true, reserved: [], reservedAllow: [], reservedRule: 2 };
 const base = (): ModerationProfile => PRESETS.standard;
 
 function failure(fn: () => unknown): ProfileError {
@@ -32,7 +32,7 @@ const bad = (layer: unknown): ProfileError => failure(() => applyPolicyLayer(bas
 
 describe('appeals and names in the layer', () => {
   it('POLICY_SECTIONS appends appeals then names, after the 0.1.8 sections', () => {
-    expect([...POLICY_SECTIONS].slice(-4)).toEqual(['pace', 'signals', 'appeals', 'names']);
+    expect([...POLICY_SECTIONS].slice(10, 14)).toEqual(['pace', 'signals', 'appeals', 'names']);
   });
 
   it('a layer beats the code profile, which beats the defaults', () => {
@@ -40,7 +40,7 @@ describe('appeals and names in the layer', () => {
     expect(coded.appeals).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: false });
     const p = applyPolicyLayer(coded, { appeals: { perPlayerPerWeek: 2, allowSelfReview: true }, names: { profanity: false, maskInHub: false } });
     expect(p.appeals).toEqual({ enabled: true, perPlayerPerWeek: 2, allowSelfReview: true });
-    expect(p.names).toEqual({ profanity: false, keepBlocked: false, renames: false, maskInHub: false });
+    expect(p.names).toEqual({ ...NAMES_OFF, maskInHub: false });
     // the defaults, with no code profile value and no layer
     expect(applyPolicyLayer(base(), {}).appeals).toEqual(APPEALS_OFF);
     expect(applyPolicyLayer(base(), {}).names).toEqual(NAMES_OFF);

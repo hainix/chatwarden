@@ -31,7 +31,7 @@ function checkBase(base: string): Failure | undefined {
 }
 
 /** `--dir` to the posix, relative, normalised form; or an error. Whether the result is safe on disk is decided again when it is resolved (paths.ts). */
-function normaliseDir(raw: string): string | Failure {
+export function normaliseDir(raw: string): string | Failure {
   const bad: Failure = {
     error: `--dir must be a folder inside the project, like src/chatwarden: no .., no absolute path, no drive letter and no // (got ${show(raw)}).`,
   };

@@ -9,8 +9,15 @@ import type { CommunityRules, RuleRef } from './rules.js';
 import { APPEALS_START_TOKEN, isInternalSource, SANCTION_KINDS, SANCTION_SOURCES, validateSanctionInput, writeSanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
 import type { SubjectIndex } from './subjects.js';
-import { CONDUCT_LEVELS } from './types.js';
+import { CONDUCT_LEVELS, isOriginReport } from './types.js';
+import { isNonPersonReporter } from './privacy.js';
 import type { AiOutcomeInsert, Clock, ConductLevel, Logger, ReportExcerptLine, ReportRecord, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
+
+/** True when someone filed the report and still is somebody: not a report a system filed, and not one whose reporter was erased (`erased:<id>`). */
+/** The reason id of a report that someone may be at risk (see `DEFAULT_REPORT_REASONS`). A report under it is noted or dismissed, never upheld or marked bad faith. */
+const WELFARE_REASON_ID = 'welfare';
+
+const hasPersonReporter = (report: ReportRecord): boolean => !isOriginReport(report) && !isNonPersonReporter(report.reporterSubject);
 
 // The one path every moderator decision on a report takes. A decision closes the report, writes each sanction and
 // its player notice, and records itself, all in ONE store transaction: it lands whole or not at all. The same
@@ -23,13 +30,11 @@ export const DECISION_REASON_MAX = 500;
 /**
  * The reason stored for a `no_action` decision that has no actions and no typed reason (a one-click "nothing wrong
  * here"). One recognisable value, so "a human dismissed it and gave no reason" is told apart from a considered note.
- * @experimental
  */
 export const NO_ACTION_DEFAULT_REASON = 'No action needed';
 
 /**
  * True for the standard dismissal reason (trimmed); false for anything else, including null.
- * @experimental
  */
 export function isDefaultNoActionReason(reason: string | null | undefined): boolean {
   return typeof reason === 'string' && reason.trim() === NO_ACTION_DEFAULT_REASON;
@@ -91,7 +96,6 @@ export interface DecisionInput {
    * given (the server decides, from the stored read and the decision). It only tells the casebook which read the moderator saw, whether
    * they clicked accept, the conduct level of their form and their role. It never changes the decision, its key or its answer, and a
    * part that is not well formed is ignored. Agreement is computed from the stored read and the decision, never from this echo.
-   * @experimental
    */
   ai?: DecisionAiEcho;
 }
@@ -102,7 +106,6 @@ export interface DecisionInput {
  * it counts only when the decision is the pre-fill. `severity` is the conduct level their form settled on: it counts only when it fits
  * the verdict. Without the echo no example text is kept. `role` is the moderator's, for the `ai.outcome` audit row (without it none is
  * written).
- * @experimental
  */
 export interface DecisionAiEcho {
   readId?: string;
@@ -465,9 +468,17 @@ export class DecisionService {
   /** Check every action against the report, the rules and the sanction rules. Throws on the first problem. */
   private plan(norm: Normal, report: ReportRecord): Planned[] {
     const target = this.subjects.canonical(report.targetSubject);
-    const reporter = this.subjects.canonical(report.reporterSubject);
-    // A decision acts only on people in the report: its target, its reporter, or someone who wrote in the excerpt.
-    const scope = new Set<SubjectId>([target, reporter, ...report.people.map((p) => this.subjects.canonical(p))]);
+    // A decision acts only on people in the report: its target, its reporter (a report nobody filed, `origin`, has none), or someone who wrote in the excerpt.
+    const scope = new Set<SubjectId>([target, ...report.people.map((p) => this.subjects.canonical(p))]);
+    if (hasPersonReporter(report)) scope.add(this.subjects.canonical(report.reporterSubject));
+    // There is no reporter to blame for a report nobody filed.
+    if (norm.verdict === 'bad_faith' && isOriginReport(report)) throw new Error('bad_faith needs a reporter');
+    // A report about someone who may be at risk: a reporter is never marked for it, nobody is sanctioned over it (the verdict is `noted` or `no_action`), and it never writes a
+    // rule-gap row.
+    if (report.reportedReason === WELFARE_REASON_ID) {
+      if (norm.verdict === 'bad_faith' || norm.verdict === 'upheld') throw new Error('a welfare report is noted or dismissed');
+      if (norm.actions.some((a) => a.rule === 'uncovered')) throw new Error('a welfare report writes no rule gap');
+    }
 
     return norm.actions.map((a) => {
       if (!scope.has(a.subject)) return bad();
@@ -503,10 +514,13 @@ export class DecisionService {
     const now = this.clock.now();
     const pending = this.index !== undefined && !this.index.isEnabled();
     const reporter = this.subjects.canonical(report.reporterSubject);
+    const reporterTold = hasPersonReporter(report);
     const status = isDismissal(norm.verdict) ? 'dismissed' : 'actioned';
     const outcome = this.outcomeFor(norm, report, now);
 
     const done = this.store.transaction(() => {
+      // A decided report asks nobody for a second look: the escalation goes in the same transaction, so a failure keeps both as they were.
+      if (report.escalatedTo !== null && report.escalatedTo !== undefined) this.store.setEscalation?.(report.id, null);
       if (!this.store.closeReport(report.id, status, norm.verdict === 'bad_faith', norm.actor, now, norm.reason, norm.evidence)) {
         return null;
       }
@@ -549,7 +563,7 @@ export class DecisionService {
       }
       // Reporter feedback only on `upheld` with at least one NON-note action: a note is staff-only and must never
       // tell the reporter anything, however many of them sit beside the other actions.
-      if (this.reporterFeedback && norm.verdict === 'upheld' && plan.some(({ action }) => action.kind !== 'note')) {
+      if (reporterTold && this.reporterFeedback && norm.verdict === 'upheld' && plan.some(({ action }) => action.kind !== 'note')) {
         this.notices.createReportOutcome(reporter, { notify: false });
         told.add(reporter);
       }

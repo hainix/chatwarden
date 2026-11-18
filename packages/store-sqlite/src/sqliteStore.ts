@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, CONDUCT_LEVELS, ROLES } from '@chatwarden/core';
+import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, COMMENTS_PER_REPORT_MAX, CONDUCT_LEVELS, ROLES } from '@chatwarden/core';
 import type {
   AppealRow,
   AppealStatus,
@@ -32,9 +32,15 @@ import type {
   AuditListQuery,
   AuditRow,
   AuditTargetType,
+  FilterHitRow,
+  ReportOrigin,
+  ChatDayRow,
+  PaceStateRow,
   ClaimAttempt,
   ClaimMode,
   ClaimRow,
+  CommentRow,
+  InsightRow,
   DecisionRow,
   MuteRow,
   NoAutomationRow,
@@ -45,6 +51,7 @@ import type {
   ReasonRow,
   ReportActivity,
   ReportCategory,
+  ReportEntity,
   ReportListQuery,
   ReportRecord,
   ReporterDecision,
@@ -65,6 +72,13 @@ import type {
   SubjectIdKind,
   SubjectIdRecord,
   SubjectRecord,
+  ErasePlan,
+  ErasureCounts,
+  ErasureRow,
+  SubjectExport,
+  HeldSet,
+  HoldCode,
+  HoldRow,
 } from '@chatwarden/core';
 import type {
   AuditEntry,
@@ -74,6 +88,25 @@ import type {
   TermRecord,
   TermStore,
 } from '@chatwarden/matcher';
+import {
+  ERASURES_PURGE_SQL,
+  HELD_GROUP_IDS,
+  HELD_REPORT_IDS,
+  HOLD_LIST_SQL,
+  HOLD_LOAD_SQL,
+  HOLD_PLACE_SQL,
+  HOLD_RELEASE_SQL,
+  HELD_SET_GROUPS_SQL,
+  SANCTION_GROUPS_OF_REPORT_SQL,
+  HELD_SET_REPORTS_SQL,
+  eraseSubjects as eraseSubjectsSql,
+  erasureEpoch as erasureEpochSql,
+  exportSubjects as exportSubjectsSql,
+  finishErasure as finishErasureSql,
+  insertErasure as insertErasureSql,
+  loadPendingErasures as loadPendingErasuresSql,
+  purgeStrayRows as purgeStrayRowsSql,
+} from './privacy.js';
 
 /** A term-editor action name (`LiveTerms`) mapped to the audit union; the prefix is the row's subject type. */
 const LEGACY_ACTIONS: ReadonlyArray<readonly [string, string]> = [
@@ -125,7 +158,100 @@ function detailFromJson(json: unknown): { detail?: AuditDetail } {
   }
 }
 
+/**
+ * One report as the insert writes it: every column, one plain `?` each. Two conflicts are swallowed (and answer "nothing written"): the same
+ * reporter against the same target in the same room, and a second OPEN filter report for one (target, room) (the partial unique index
+ * `kit_reports_open_filter`, migration 26). A clashing primary key, or a CHECK that fails, still throws.
+ */
+export const REPORT_INSERT_SQL = `INSERT INTO kit_reports
+   (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
+    target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status, origin, origin_key, urgent, evidence_ref, scope, entity_json)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING
+ ON CONFLICT (target_subject, room_id) WHERE origin = 'filter' AND status = 'open' DO NOTHING`;
+/** The values `REPORT_INSERT_SQL` binds, one for each `?`, in order. */
+export const reportInsertArgs = (r: StoredReport): Array<string | number | null> => [
+  r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle, r.targetSubject, r.targetSeat, r.targetHandle,
+  r.category, r.reportedReason ?? null, r.note, r.lineId, JSON.stringify(r.excerpt), JSON.stringify(r.people), r.status, r.origin ?? null, r.originKey ?? null,
+  r.urgent === true ? 1 : 0, r.evidenceRef ?? null, r.scope ?? null, r.entity === undefined || r.entity === null ? null : JSON.stringify(r.entity),
+];
+/** Set an open report's urgent flag when it differs. Binds: the new value, the id, the new value. */
+export const REPORT_URGENT_SET_SQL = "UPDATE kit_reports SET urgent = ? WHERE id = ? AND status = 'open' AND urgent <> ?";
+/** Record the hand-off of a report that has none. Binds: the time, who, the id. */
+export const REPORT_HANDOFF_SET_SQL = 'UPDATE kit_reports SET handoff_at = ?, handoff_by = ? WHERE id = ? AND handoff_at IS NULL';
+/** Set or clear (three NULLs) the escalation of an open report when it differs. Binds: to, by, at, the id, then to, by, at again for the comparison. */
+export const REPORT_ESCALATION_SET_SQL =
+  "UPDATE kit_reports SET escalated_to = ?, escalated_by = ?, escalated_at = ? WHERE id = ? AND status = 'open' AND (escalated_to IS NOT ? OR escalated_by IS NOT ? OR escalated_at IS NOT ?)";
+/** The open urgent reports: served by `kit_reports_urgent_open`. */
+export const URGENT_COUNT_SQL = "SELECT COUNT(*) AS n FROM kit_reports INDEXED BY kit_reports_urgent_open WHERE urgent = 1 AND status = 'open'";
+/** The open escalated reports by the role asked. */
+export const ESCALATED_COUNT_SQL = "SELECT escalated_to AS role, COUNT(*) AS n FROM kit_reports WHERE status = 'open' AND escalated_to IS NOT NULL GROUP BY escalated_to";
+/** Add a thread entry to a report that exists and holds fewer than 50, in one statement. Binds: id, report, at, actor, role, kind, text, then the report (existence) and the report (count). */
+export const COMMENT_INSERT_SQL = `INSERT INTO kit_report_comments (id, report_id, at, actor, role, kind, text)
+ SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM kit_reports WHERE id = ?) AND (SELECT COUNT(*) FROM kit_report_comments WHERE report_id = ?) < ${COMMENTS_PER_REPORT_MAX}`;
+/** A report's thread, oldest first: served by `kit_report_comments_by_report`. Binds: the report. */
+export const COMMENT_LIST_SQL = 'SELECT id, report_id, at, actor, role, kind, text FROM kit_report_comments WHERE report_id = ? ORDER BY at, id';
+/** How many entries a thread holds. Binds: the report. */
+export const COMMENT_COUNT_SQL = 'SELECT COUNT(*) AS n FROM kit_report_comments WHERE report_id = ?';
+/** Delete one entry. Binds: its id. */
+export const COMMENT_DELETE_SQL = 'DELETE FROM kit_report_comments WHERE id = ?';
+/** Delete the thread entries of reports that no longer exist. */
+export const COMMENTS_ORPHAN_DELETE_SQL = 'DELETE FROM kit_report_comments WHERE report_id NOT IN (SELECT id FROM kit_reports)';
+/** The reports a reason purge deletes: the reason, older than the cutoff, not held. Binds: the reason, the cutoff. */
+export const REASON_PURGE_WHERE = `reported_reason = ? AND created_at < ? AND id NOT IN ${HELD_REPORT_IDS}`;
+/** Add to a day's line counts. Binds: the day, delivered, refused. */
+export const CHAT_COUNTS_ADD_SQL =
+  'INSERT INTO kit_chat_days (day, delivered, refused) VALUES (?, ?, ?) ON CONFLICT (day) DO UPDATE SET delivered = delivered + excluded.delivered, refused = refused + excluded.refused';
+/** The line counts of a day range, inclusive. Binds: the first day, the last day. */
+export const CHAT_COUNTS_LIST_SQL = 'SELECT day, delivered, refused FROM kit_chat_days WHERE day >= ? AND day <= ? ORDER BY day';
+/** Delete the line counts of days before a day. Binds: the day. */
+export const CHAT_COUNTS_PURGE_SQL = 'DELETE FROM kit_chat_days WHERE day < ?';
+/** The shared pacer's row of one player in one room. Binds: room, who. */
+export const PACE_LOAD_SQL = 'SELECT room_id, who, last_at, stamps_json, recent_json, flood_signal_at, touched_at FROM kit_pace WHERE room_id = ? AND who = ?';
+/** Store the pacer's row, replacing the one there. Binds: room, who, last_at, stamps_json, recent_json, flood_signal_at, touched_at. */
+export const PACE_UPSERT_SQL =
+  'INSERT INTO kit_pace (room_id, who, last_at, stamps_json, recent_json, flood_signal_at, touched_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (room_id, who) DO UPDATE SET last_at = excluded.last_at, stamps_json = excluded.stamps_json, recent_json = excluded.recent_json, flood_signal_at = excluded.flood_signal_at, touched_at = excluded.touched_at';
+/** Delete the pacer's rows not touched since a time (strictly before it). Binds: the time. */
+export const PACE_SWEEP_SQL = 'DELETE FROM kit_pace WHERE touched_at < ?';
+/** Delete one room's pacer rows. Binds: the room. */
+export const PACE_DROP_ROOM_SQL = 'DELETE FROM kit_pace WHERE room_id = ?';
+/** The reports Insights reads: since a time, newest first. Binds: the time, the limit. */
+export const INSIGHT_ROWS_SQL =
+  'SELECT created_at, actioned_at, status, reported_reason, urgent, bad_faith FROM kit_reports WHERE created_at >= ? ORDER BY created_at DESC, id DESC LIMIT ?';
+/** How many reports with an origin were filed since a time (the daily cap): the origin, then the time. Served by `kit_reports_by_origin`. */
+export const ORIGIN_REPORTS_COUNT_SQL = 'SELECT COUNT(*) AS n FROM kit_reports WHERE origin = ? AND created_at >= ?';
+/** The hit counter upsert: the day, key, action and the hits to add. */
+export const FILTER_HITS_ADD_SQL =
+  'INSERT INTO kit_filter_hits (day, key, action, hits) VALUES (?, ?, ?, ?) ON CONFLICT (day, key, action) DO UPDATE SET hits = hits + excluded.hits';
+/** The values `FILTER_HITS_ADD_SQL` binds, in order. */
+export const filterHitArgs = (r: FilterHitRow): [number, string, string, number] => [r.day, r.key, r.action, r.hits];
+/** The hit counter rows of a day range, inclusive: the first day, then the last. */
+export const FILTER_HITS_LIST_SQL = 'SELECT day, key, action, hits FROM kit_filter_hits WHERE day >= ? AND day <= ? ORDER BY day, key, action';
+/** Delete the counter rows of days before the one given. */
+export const FILTER_HITS_PURGE_SQL = 'DELETE FROM kit_filter_hits WHERE day < ?';
+
+/** A reporter value that can be a person. A filter's report names `filter:<report id>`, which no tally or outcome is ever kept under. */
+// A report a system filed (`origin` set) carries the reporter value `<origin>:<id>`, which is never a person: the reporter readers leave it out
+// (the memory store leaves out by `origin`; the columns the covering index of reporterOutcomes holds do not include it, so the value is read).
+const isPersonReporter = (reporter: string): boolean => !reporter.startsWith('filter:') && !reporter.startsWith('watch:');
+
+/** Upsert one identifier row, only for a subject that exists. Binds: subject, kind, value, first seen, last seen, subject (the existence check). */
+export const IDENTIFIER_UPSERT_SQL = `INSERT INTO kit_subject_ids (subject_id, kind, value, first_seen, last_seen)
+  SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM kit_subjects WHERE id = ?)
+  ON CONFLICT (subject_id, kind, value) DO UPDATE SET last_seen = max(last_seen, excluded.last_seen)`;
+
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
+/** The entity of a report row: the stored `{ kind, ref, label }`, or null for none and for a damaged value (a read never fails on it). */
+function entityFromJson(raw: unknown): ReportEntity | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    const v = JSON.parse(raw) as Record<string, unknown> | null;
+    return v !== null && typeof v === 'object' && typeof v.kind === 'string' && typeof v.ref === 'string' && typeof v.label === 'string' ? { kind: v.kind, ref: v.ref, label: v.label } : null;
+  } catch {
+    return null;
+  }
+}
+
 function reportFromRow(r: Record<string, unknown>): ReportRecord {
   return {
     id: String(r.id),
@@ -141,6 +267,17 @@ function reportFromRow(r: Record<string, unknown>): ReportRecord {
     category: String(r.category) as ReportCategory,
     reportedReason: r.reported_reason === null || r.reported_reason === undefined ? null : String(r.reported_reason),
     detailAt: r.detail_at === null || r.detail_at === undefined ? null : Number(r.detail_at),
+    origin: r.origin === null || r.origin === undefined ? null : (String(r.origin) as ReportOrigin),
+    originKey: r.origin_key === null || r.origin_key === undefined ? null : String(r.origin_key),
+    urgent: Number(r.urgent) === 1,
+    evidenceRef: r.evidence_ref === null || r.evidence_ref === undefined ? null : String(r.evidence_ref),
+    scope: r.scope === null || r.scope === undefined ? null : String(r.scope),
+    entity: entityFromJson(r.entity_json),
+    handoffAt: r.handoff_at === null || r.handoff_at === undefined ? null : Number(r.handoff_at),
+    handoffBy: r.handoff_by === null || r.handoff_by === undefined ? null : String(r.handoff_by),
+    escalatedTo: r.escalated_to === 'senior' || r.escalated_to === 'owner' ? r.escalated_to : null,
+    escalatedBy: r.escalated_by === null || r.escalated_by === undefined ? null : String(r.escalated_by),
+    escalatedAt: r.escalated_at === null || r.escalated_at === undefined ? null : Number(r.escalated_at),
     note: r.note === null ? null : String(r.note),
     lineId: r.line_id === null ? null : String(r.line_id),
     excerpt: JSON.parse(String(r.excerpt_json)) as ReportRecord['excerpt'],
@@ -526,8 +663,8 @@ export const aiActionListSql = (states: number, cursor: boolean): string =>
   } ORDER BY created_at DESC, id DESC LIMIT ?`;
 /** Rows created at or after a time, counted by state and refusal code. */
 /** Retention of the action rows (`retention.aiActionsMs`): by age through `kit_ai_actions_by_created`; a reviewer's private note goes with the report window. */
-export const AI_ACTION_PURGE_SQL = 'DELETE FROM kit_ai_actions WHERE created_at < ?';
-export const AI_ACTION_NOTES_SQL = 'UPDATE kit_ai_actions SET undo_note = NULL WHERE created_at < ? AND undo_note IS NOT NULL';
+export const AI_ACTION_PURGE_SQL = `DELETE FROM kit_ai_actions WHERE created_at < ? AND report_id NOT IN ${HELD_REPORT_IDS}`;
+export const AI_ACTION_NOTES_SQL = `UPDATE kit_ai_actions SET undo_note = NULL WHERE created_at < ? AND undo_note IS NOT NULL AND report_id NOT IN ${HELD_REPORT_IDS}`;
 export const AI_ACTION_COUNTS_SQL = 'SELECT state, refused_code, COUNT(*) AS n FROM kit_ai_actions WHERE created_at >= ? GROUP BY state, refused_code';
 /** The states in which an action acted (or, in shadow, would have). */
 const AI_ACTED_STATES = "('shadow', 'active', 'confirmed', 'undone')";
@@ -597,6 +734,31 @@ export function inSavepoint<T>(db: DatabaseSync, fn: () => T): T {
   return value;
 }
 
+/** A `kit_legal_holds` row as the facade's {@link HoldRow}. */
+function holdRowOf(r: Record<string, unknown>): HoldRow {
+  return {
+    reportId: String(r.report_id),
+    code: String(r.code) as HoldCode,
+    heldBy: String(r.held_by),
+    heldAt: Number(r.held_at),
+    releasedBy: r.released_by === null ? null : String(r.released_by),
+    releasedAt: r.released_at === null ? null : Number(r.released_at),
+  };
+}
+
+/** A `kit_pace` row as the facade's {@link PaceStateRow}. */
+function paceRowOf(r: Record<string, unknown>): PaceStateRow {
+  return {
+    roomId: String(r.room_id),
+    who: String(r.who),
+    lastAt: Number(r.last_at),
+    stamps: (JSON.parse(String(r.stamps_json)) as unknown[]).map(Number),
+    recent: (JSON.parse(String(r.recent_json)) as Array<{ h: unknown; at: unknown }>).map((e) => ({ h: String(e.h), at: Number(e.at) })),
+    floodSignalAt: r.flood_signal_at === null ? null : Number(r.flood_signal_at),
+    touchedAt: Number(r.touched_at),
+  };
+}
+
 /** A `kit_links` row as the facade's {@link LinkRow}. */
 function linkRowOf(r: Record<string, unknown>): LinkRow {
   return { system: String(r.system) as LinkSystem, ref: String(r.ref), external: String(r.external), state: String(r.state), at: Number(r.at) };
@@ -662,13 +824,8 @@ export class SqliteStore implements Store, TermStore {
 
   async saveIdentifier(record: SubjectIdRecord): Promise<void> {
     this.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO kit_subject_ids (subject_id, kind, value, first_seen, last_seen)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT (subject_id, kind, value) DO UPDATE SET last_seen = max(last_seen, excluded.last_seen)`,
-        )
-        .run(record.subjectId, record.kind, record.value, record.firstSeen, record.lastSeen);
+      // Conditional on the subject row: a subject erased by another process (or by this one a moment ago) is never recreated by a stale write.
+      this.db.prepare(IDENTIFIER_UPSERT_SQL).run(record.subjectId, record.kind, record.value, record.firstSeen, record.lastSeen, record.subjectId);
     });
   }
 
@@ -794,8 +951,14 @@ export class SqliteStore implements Store, TermStore {
   listSubjectSanctions(q: SanctionListQuery): SanctionRow[] {
     const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
     if (q.subjects !== undefined && q.subjects.length === 0) return [];
+    if (q.scope !== undefined && q.scope.length === 0) return [];
     const where: string[] = ["target_type = 'subject'"];
     const args: Array<string | number> = [];
+    // The rows made from a report in one of these scopes (kit_sanctions_by_report, then kit_reports_by_scope); a row with no report never matches.
+    if (q.scope !== undefined) {
+      where.push(`report_id IN (SELECT id FROM kit_reports WHERE scope IN (${q.scope.map(() => '?').join(', ')}))`);
+      args.push(...q.scope);
+    }
     if (q.subjects !== undefined) {
       where.push(`target_value IN (${q.subjects.map(() => '?').join(', ')})`);
       args.push(...q.subjects);
@@ -1310,11 +1473,11 @@ export class SqliteStore implements Store, TermStore {
 
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
     return this.transaction(() => {
-      const reads = Number(this.db.prepare('DELETE FROM kit_ai_reads WHERE created_at < ?').run(readsBefore).changes);
+      const reads = Number(this.db.prepare(`DELETE FROM kit_ai_reads WHERE created_at < ? AND report_id NOT IN ${HELD_REPORT_IDS}`).run(readsBefore).changes);
       this.db.prepare('DELETE FROM kit_ai_spend WHERE at < ?').run(readsBefore);
-      const outcomes = Number(this.db.prepare('DELETE FROM kit_ai_outcomes WHERE decided_at < ?').run(outcomesBefore).changes);
+      const outcomes = Number(this.db.prepare(`DELETE FROM kit_ai_outcomes WHERE decided_at < ? AND report_id NOT IN ${HELD_REPORT_IDS}`).run(outcomesBefore).changes);
       // The only chat text that outlives a report goes on its own, shorter clock; the row keeps its counts.
-      this.db.prepare('UPDATE kit_ai_outcomes SET example_json = NULL WHERE decided_at < ? AND example_json IS NOT NULL').run(examplesBefore);
+      this.db.prepare(`UPDATE kit_ai_outcomes SET example_json = NULL WHERE decided_at < ? AND example_json IS NOT NULL AND report_id NOT IN ${HELD_REPORT_IDS}`).run(examplesBefore);
       return { reads, outcomes };
     });
   }
@@ -1711,7 +1874,7 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() =>
       Number(
         this.db
-          .prepare("UPDATE kit_appeals SET statement = NULL WHERE status <> 'open' AND decided_at < ? AND statement IS NOT NULL")
+          .prepare(`UPDATE kit_appeals SET statement = NULL WHERE status <> 'open' AND decided_at < ? AND statement IS NOT NULL AND group_id NOT IN ${HELD_GROUP_IDS}`)
           .run(before).changes,
       ),
     );
@@ -1725,7 +1888,7 @@ export class SqliteStore implements Store, TermStore {
             // A decided appeal on a sanction still in force stays: no end, or an end after the cutoff, and not revoked. That row is what
             // stops a second appeal against it.
             `DELETE FROM kit_appeals
-             WHERE status <> 'open' AND decided_at < ?
+             WHERE status <> 'open' AND decided_at < ? AND group_id NOT IN ${HELD_GROUP_IDS}
                AND NOT EXISTS (
                  SELECT 1 FROM kit_sanctions s
                  WHERE s.group_id = kit_appeals.group_id AND s.target_type = 'subject' AND s.revoked_at IS NULL
@@ -1912,6 +2075,12 @@ export class SqliteStore implements Store, TermStore {
       where.push(`(${AUDIT_ACTION_SQL}) = ?`);
       args.push(q.action);
     }
+    if (q.targets !== undefined) {
+      const targets = q.targets.slice(0, 20);
+      // An empty list matches nothing.
+      where.push(targets.length === 0 ? '0 = 1' : `(${targets.map(() => '(subject_type = ? AND subject_ref = ?)').join(' OR ')})`);
+      for (const t of targets) args.push(t.type, t.ref);
+    }
     if (q.before !== undefined) {
       if (q.beforeId === undefined) {
         where.push('at < ?');
@@ -1930,7 +2099,80 @@ export class SqliteStore implements Store, TermStore {
   }
 
   purgeAudit(before: number): number {
-    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_audit WHERE at < ?').run(before).changes));
+    return this.transaction(() => {
+      // An erasure receipt lives as long as an audit row; one that still keeps a subject (a pending remainder) is never dropped.
+      this.db.prepare(ERASURES_PURGE_SQL).run(before);
+      // The audit rows that name a held report or one of its sanction groups stay with them.
+      return Number(
+        this.db
+          .prepare(
+            `DELETE FROM kit_audit WHERE at < ?
+               AND NOT (subject_type = 'report' AND subject_ref IN ${HELD_REPORT_IDS})
+               AND NOT (subject_type = 'sanction' AND subject_ref IN ${HELD_GROUP_IDS})`,
+          )
+          .run(before).changes,
+      );
+    });
+  }
+
+  // Privacy requests (0.2.0). The SQL lives in ./privacy.ts.
+
+  exportSubjects(subjects: readonly SubjectId[]): SubjectExport {
+    return exportSubjectsSql(this.db, (fn) => this.transaction(fn), subjects);
+  }
+
+  eraseSubjects(plan: ErasePlan): ErasureCounts {
+    return eraseSubjectsSql(this.db, (fn) => this.transaction(fn), plan, () => this.bump());
+  }
+
+  purgeStrayRows(before: number, only?: readonly SubjectId[]): number {
+    return purgeStrayRowsSql(this.db, (fn) => this.transaction(fn), before, only);
+  }
+
+  insertErasure(row: ErasureRow): void {
+    this.transaction(() => insertErasureSql(this.db, row));
+  }
+
+  loadPendingErasures(): ErasureRow[] {
+    return this.transaction(() => loadPendingErasuresSql(this.db));
+  }
+
+  finishErasure(id: string, at: number): boolean {
+    return finishErasureSql(this.db, (fn) => this.transaction(fn), id, at, () => this.bump());
+  }
+
+  erasureEpoch(): number {
+    return this.transaction(() => erasureEpochSql(this.db));
+  }
+
+  // Legal hold (0.2.0). A hold is a row; every purge and the erase read it themselves (see the statements in ./privacy.ts).
+
+  placeHold(row: HoldRow): boolean {
+    return this.transaction(() => Number(this.db.prepare(HOLD_PLACE_SQL).run(row.reportId, row.code, row.heldBy, row.heldAt).changes) > 0);
+  }
+
+  releaseHold(reportId: string, by: string, at: number): boolean {
+    return this.transaction(() => Number(this.db.prepare(HOLD_RELEASE_SQL).run(by, at, reportId).changes) > 0);
+  }
+
+  loadHold(reportId: string): HoldRow | null {
+    const r = this.transaction(() => this.db.prepare(HOLD_LOAD_SQL).get(reportId));
+    return r === undefined ? null : holdRowOf(r);
+  }
+
+  listHolds(): HoldRow[] {
+    return this.transaction(() => this.db.prepare(HOLD_LIST_SQL).all().map(holdRowOf));
+  }
+
+  sanctionGroupsOfReport(reportId: string): string[] {
+    return this.transaction(() => this.db.prepare(SANCTION_GROUPS_OF_REPORT_SQL).all(reportId).map((r) => String(r.group_id)));
+  }
+
+  heldSet(): HeldSet {
+    return this.transaction(() => ({
+      reportIds: this.db.prepare(HELD_SET_REPORTS_SQL).all().map((r) => String(r.report_id)),
+      groupIds: this.db.prepare(HELD_SET_GROUPS_SQL).all().map((r) => String(r.group_id)),
+    }));
   }
 
   // Webhook keys. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.
@@ -2001,10 +2243,10 @@ export class SqliteStore implements Store, TermStore {
     this.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO kit_mutes (viewer_id, target_id, created_at) VALUES (?, ?, ?)
-           ON CONFLICT (viewer_id, target_id) DO UPDATE SET created_at = excluded.created_at`,
+          `INSERT INTO kit_mutes (viewer_id, target_id, created_at, block) VALUES (?, ?, ?, ?)
+           ON CONFLICT (viewer_id, target_id) DO UPDATE SET created_at = excluded.created_at, block = MAX(block, excluded.block)`,
         )
-        .run(row.viewer, row.target, row.createdAt);
+        .run(row.viewer, row.target, row.createdAt, row.block === true ? 1 : 0);
     });
   }
 
@@ -2017,9 +2259,9 @@ export class SqliteStore implements Store, TermStore {
   loadMutes(since: number): MuteRow[] {
     return this.transaction(() =>
       this.db
-        .prepare('SELECT viewer_id, target_id, created_at FROM kit_mutes WHERE created_at >= ? ORDER BY rowid')
+        .prepare('SELECT viewer_id, target_id, created_at, block FROM kit_mutes WHERE created_at >= ? OR block = 1 ORDER BY rowid')
         .all(since)
-        .map((r) => ({ viewer: String(r.viewer_id), target: String(r.target_id), createdAt: Number(r.created_at) })),
+        .map((r) => ({ viewer: String(r.viewer_id), target: String(r.target_id), createdAt: Number(r.created_at), block: Number(r.block) === 1 })),
     );
   }
 
@@ -2030,8 +2272,9 @@ export class SqliteStore implements Store, TermStore {
       );
       const extra = total - Math.max(0, keep);
       if (extra <= 0) return [];
+      // Only mutes go, oldest first; a block is never dropped (blocks alone can leave more than `keep`).
       const doomed = this.db
-        .prepare('SELECT target_id FROM kit_mutes WHERE viewer_id = ? ORDER BY created_at, rowid LIMIT ?')
+        .prepare('SELECT target_id FROM kit_mutes WHERE viewer_id = ? AND block = 0 ORDER BY created_at, rowid LIMIT ?')
         .all(viewer, extra)
         .map((r) => String(r.target_id));
       const del = this.db.prepare('DELETE FROM kit_mutes WHERE viewer_id = ? AND target_id = ?');
@@ -2115,24 +2358,37 @@ export class SqliteStore implements Store, TermStore {
 
   insertReport(r: StoredReport): boolean {
     return this.transaction(() => {
-      // Only the (reporter, target, room) conflict is swallowed; a clashing primary key still throws.
-      const res = this.db
-        .prepare(
-          `INSERT INTO kit_reports
-             (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
-              target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING`,
-        )
-        .run(
-          r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle,
-          r.targetSubject, r.targetSeat, r.targetHandle, r.category, r.reportedReason ?? null, r.note, r.lineId, JSON.stringify(r.excerpt),
-          JSON.stringify(r.people), r.status,
-        );
+      // Only the (reporter, target, room) conflict and the one-open-filter-report-per-(target, room) conflict are swallowed; a clashing primary key still throws.
+      const res = this.db.prepare(REPORT_INSERT_SQL).run(...reportInsertArgs(r));
       if (Number(res.changes) === 0) return false;
       this.bump();
       return true;
     });
+  }
+
+  countOriginReports(origin: ReportOrigin, since: number): number {
+    return this.transaction(() => Number(this.db.prepare(ORIGIN_REPORTS_COUNT_SQL).get(origin, since)?.n ?? 0));
+  }
+
+  addFilterHits(rows: readonly FilterHitRow[]): void {
+    if (rows.length === 0) return;
+    this.transaction(() => {
+      const stmt = this.db.prepare(FILTER_HITS_ADD_SQL);
+      for (const r of rows) stmt.run(...filterHitArgs(r));
+    });
+  }
+
+  listFilterHits(sinceDay: number, untilDay: number): FilterHitRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(FILTER_HITS_LIST_SQL)
+        .all(sinceDay, untilDay)
+        .map((r) => ({ day: Number(r.day), key: String(r.key), action: String(r.action) as FilterHitRow['action'], hits: Number(r.hits) })),
+    );
+  }
+
+  purgeFilterHits(beforeDay: number): number {
+    return this.transaction(() => Number(this.db.prepare(FILTER_HITS_PURGE_SQL).run(beforeDay).changes));
   }
 
   loadReport(id: string): ReportRecord | null {
@@ -2142,12 +2398,22 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
-  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
-    if (subjects.length === 0) return [];
+  loadReportInScope(id: string, scope: readonly string[]): ReportRecord | null {
+    if (scope.length === 0) return null;
+    const sql = `SELECT * FROM kit_reports WHERE id = ? AND scope IN (${scope.map(() => '?').join(', ')})`;
+    return this.transaction(() => {
+      const r = this.db.prepare(sql).get(id, ...scope);
+      return r === undefined ? null : reportFromRow(r);
+    });
+  }
+
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[] {
+    if (subjects.length === 0 || (scope !== undefined && scope.length === 0)) return [];
     const n = Math.min(200, Math.max(1, Math.floor(limit)));
     const marks = subjects.map(() => '?').join(', ');
-    const sql = `SELECT * FROM kit_reports WHERE target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
-    return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+    const scoped = scope === undefined ? '' : ` AND scope IN (${scope.map(() => '?').join(', ')})`;
+    const sql = `SELECT * FROM kit_reports WHERE target_subject IN (${marks})${scoped} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...subjects, ...(scope ?? []), n).map(reportFromRow));
   }
 
   listOpenReports(q: OpenReportQuery): ReportRecord[] {
@@ -2163,6 +2429,14 @@ export class SqliteStore implements Store, TermStore {
       where.push('reported_reason = ?');
       args.push(q.reason);
     }
+    // Served by the partial index kit_reports_urgent_open (`urgent = 1 AND status = 'open'`, ordered by created_at, id).
+    if (q.urgent === true) where.push('urgent = 1');
+    // A staff scope is part of the query (kit_reports_by_scope), so the keyset paging below stays right; an empty list matches nothing.
+    if (q.scope !== undefined) {
+      if (q.scope.length === 0) return [];
+      where.push(`scope IN (${q.scope.map(() => '?').join(', ')})`);
+      args.push(...q.scope);
+    }
     if (q.after !== undefined) {
       if (q.afterId === undefined) {
         where.push('created_at > ?');
@@ -2172,22 +2446,28 @@ export class SqliteStore implements Store, TermStore {
         args.push(q.after, q.after, q.afterId);
       }
     }
-    const sql = `SELECT * FROM kit_reports WHERE ${where.join(' AND ')} ORDER BY created_at, id LIMIT ?`;
+    // The urgent scan reads the partial index, so it stays one index range however many reports are open.
+    // A scoped scan reads kit_reports_by_scope (scope, status, created_at): named, because without statistics the planner prefers the by-status index and filters every open report by scope.
+    // Any migration that drops or renames this index MUST change this SQL.
+    const index = q.scope !== undefined ? ' INDEXED BY kit_reports_by_scope' : q.urgent === true ? ' INDEXED BY kit_reports_urgent_open' : '';
+    const sql = `SELECT * FROM kit_reports${index} WHERE ${where.join(' AND ')} ORDER BY created_at, id LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
   }
 
-  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
-    if (subjects.length === 0) return [];
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number, scope?: readonly string[]): ReportRecord[] {
+    if (subjects.length === 0 || (scope !== undefined && scope.length === 0)) return [];
     const n = Math.min(201, Math.max(1, Math.floor(limit)));
     const marks = subjects.map(() => '?').join(', ');
-    const sql = `SELECT * FROM kit_reports WHERE status = 'open' AND target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
-    return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+    const scoped = scope === undefined ? '' : ` AND scope IN (${scope.map(() => '?').join(', ')})`;
+    const sql = `SELECT * FROM kit_reports WHERE status = 'open' AND target_subject IN (${marks})${scoped} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...subjects, ...(scope ?? []), n).map(reportFromRow));
   }
 
   listOpenReportsByReporter(reporters: readonly SubjectId[], limit: number): ReportRecord[] {
-    if (reporters.length === 0) return [];
     const n = Math.min(201, Math.max(1, Math.floor(limit)));
-    const unique = [...new Set(reporters)];
+    // A filter's own reporter value (`filter:<id>`) is never a person: leave it out.
+    const unique = [...new Set(reporters)].filter(isPersonReporter);
+    if (unique.length === 0) return [];
     const marks = unique.map(() => '?').join(', ');
     // Served by kit_reports_by_reporter_outcome (migration 19): the reporter, then the filing time, with `status` read from the index
     // before a row is fetched. Named, because without statistics the planner would walk the by-status index (every open report in the
@@ -2199,10 +2479,11 @@ export class SqliteStore implements Store, TermStore {
 
   reporterTally(reporters: readonly SubjectId[]): ReporterTally {
     const tally: ReporterTally = { open: 0, actioned: 0, dismissed: 0, badFaith: 0 };
-    if (reporters.length === 0) return tally;
-    const marks = reporters.map(() => '?').join(', ');
+    const people = reporters.filter(isPersonReporter);
+    if (people.length === 0) return tally;
+    const marks = people.map(() => '?').join(', ');
     const sql = `SELECT status, bad_faith, COUNT(*) AS n FROM kit_reports WHERE reporter_subject IN (${marks}) GROUP BY status, bad_faith`;
-    for (const r of this.transaction(() => this.db.prepare(sql).all(...reporters))) {
+    for (const r of this.transaction(() => this.db.prepare(sql).all(...people))) {
       const n = Number(r.n);
       const status = String(r.status);
       if (status === 'open' || status === 'actioned' || status === 'dismissed') tally[status] += n;
@@ -2213,7 +2494,7 @@ export class SqliteStore implements Store, TermStore {
 
   reporterOutcomes(reporters: readonly SubjectId[], since: number): ReporterOutcomeRow[] {
     // A repeated id would be counted once per chunk it lands in: ask for each reporter once.
-    const unique = [...new Set(reporters)];
+    const unique = [...new Set(reporters)].filter(isPersonReporter);
     if (unique.length === 0) return [];
     // SQLite caps the variables of one statement, so a long list is asked for in chunks. The columns after `reporter_subject` are
     // all in kit_reports_by_reporter_outcome (migration 19), so each chunk is answered from that index alone.
@@ -2229,6 +2510,7 @@ export class SqliteStore implements Store, TermStore {
                 SUM(status = 'dismissed' AND bad_faith = 1) AS bad_faith
          FROM kit_reports
          WHERE reporter_subject IN (${marks}) AND created_at >= ? AND status != 'open'
+           AND (reported_reason IS NULL OR reported_reason <> 'welfare')
          GROUP BY reporter_subject`;
         for (const r of this.db.prepare(sql).all(...part, since)) {
           out.push({ reporter: String(r.reporter), actioned: Number(r.actioned), noAction: Number(r.no_action), badFaith: Number(r.bad_faith) });
@@ -2254,6 +2536,12 @@ export class SqliteStore implements Store, TermStore {
         args.push(q.reason);
       }
     }
+    if (q.urgent === true) where.push('urgent = 1');
+    if (q.scope !== undefined) {
+      if (q.scope.length === 0) return [];
+      where.push(`scope IN (${q.scope.map(() => '?').join(', ')})`);
+      args.push(...q.scope);
+    }
     if (q.before !== undefined) {
       if (q.beforeId === undefined) {
         where.push('created_at < ?');
@@ -2265,11 +2553,13 @@ export class SqliteStore implements Store, TermStore {
         args.push(q.before, q.before, q.beforeId);
       }
     }
-    const sql = `SELECT * FROM kit_reports${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    const via = q.scope === undefined ? '' : ' INDEXED BY kit_reports_by_scope';
+    const sql = `SELECT * FROM kit_reports${via}${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY created_at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
   }
 
-  loadReporterDecisions(reporters: readonly SubjectId[]): ReporterDecision[] {
+  loadReporterDecisions(allReporters: readonly SubjectId[]): ReporterDecision[] {
+    const reporters = allReporters.filter(isPersonReporter);
     if (reporters.length === 0) return [];
     // SQLite caps the variables of one statement, so a long list is asked for in chunks.
     const CHUNK = 500;
@@ -2400,7 +2690,7 @@ export class SqliteStore implements Store, TermStore {
       this.db
         .prepare(
           `SELECT reporter_subject, target_subject, room_id, created_at FROM kit_reports
-           WHERE created_at >= ? ORDER BY created_at, rowid`,
+           WHERE created_at >= ? AND origin IS NULL ORDER BY created_at, rowid`,
         )
         .all(since)
         .map((r) => ({
@@ -2455,21 +2745,212 @@ export class SqliteStore implements Store, TermStore {
         .prepare(
           `DELETE FROM kit_ai_reads WHERE report_id IN (
              SELECT id FROM kit_reports
-             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?))`,
+             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?)
+               AND id NOT IN ${HELD_REPORT_IDS})`,
         )
         .run(before, keepBadFaithSince);
       const n = Number(
         this.db
           .prepare(
             `DELETE FROM kit_reports
-             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?)`,
+             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?)
+               AND id NOT IN ${HELD_REPORT_IDS}`,
           )
           .run(before, keepBadFaithSince).changes,
       );
       // A recorded decision outlives only its report.
+      if (n > 0) {
+        this.db.prepare('DELETE FROM kit_decisions WHERE report_id NOT IN (SELECT id FROM kit_reports)').run();
+        // The staff thread of a deleted report goes with it.
+        this.db.prepare(COMMENTS_ORPHAN_DELETE_SQL).run();
+      }
+      return n;
+    });
+  }
+
+  purgeReportsByReason(reason: string, before: number): number {
+    return this.transaction(() => {
+      // The same set every time: the reason, older than the cutoff (strict), not held. The side rows go first, in this transaction, so a failure undoes all of it.
+      this.db.prepare(`DELETE FROM kit_ai_reads WHERE report_id IN (SELECT id FROM kit_reports WHERE ${REASON_PURGE_WHERE})`).run(reason, before);
+      this.db.prepare(`DELETE FROM kit_report_comments WHERE report_id IN (SELECT id FROM kit_reports WHERE ${REASON_PURGE_WHERE})`).run(reason, before);
+      const n = Number(this.db.prepare(`DELETE FROM kit_reports WHERE ${REASON_PURGE_WHERE}`).run(reason, before).changes);
       if (n > 0) this.db.prepare('DELETE FROM kit_decisions WHERE report_id NOT IN (SELECT id FROM kit_reports)').run();
       return n;
     });
+  }
+
+  // The urgent lane, the staff workflow and Insights (synchronous, see the Store interface).
+
+  setReportUrgent(id: string, on: boolean): boolean {
+    return this.transaction(() => {
+      const v = on ? 1 : 0;
+      if (Number(this.db.prepare(REPORT_URGENT_SET_SQL).run(v, id, v).changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  setHandoff(id: string, by: string, at: number): boolean {
+    return this.transaction(() => {
+      if (Number(this.db.prepare(REPORT_HANDOFF_SET_SQL).run(at, by, id).changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  setEscalation(id: string, patch: { to: 'senior' | 'owner'; by: string; at: number } | null): boolean {
+    // Checked here as well as by the column's CHECK, so an unknown report and a bad value fail the same way in every store.
+    if (patch !== null && patch.to !== 'senior' && patch.to !== 'owner') throw new Error('setEscalation: to must be senior or owner');
+    return this.transaction(() => {
+      const to = patch === null ? null : patch.to;
+      const by = patch === null ? null : patch.by;
+      const at = patch === null ? null : patch.at;
+      if (Number(this.db.prepare(REPORT_ESCALATION_SET_SQL).run(to, by, at, id, to, by, at).changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  countOpenUrgent(scope?: readonly string[]): number {
+    if (scope === undefined) return this.transaction(() => Number(this.db.prepare(URGENT_COUNT_SQL).get()?.n ?? 0));
+    if (scope.length === 0) return 0;
+    // The scoped count reads the urgent partial index too and keeps the scope in the statement; the labels are bound, never part of the text.
+    const sql = `SELECT COUNT(*) AS n FROM kit_reports INDEXED BY kit_reports_urgent_open WHERE urgent = 1 AND status = 'open' AND scope IN (${scope.map(() => '?').join(', ')})`;
+    return this.transaction(() => Number(this.db.prepare(sql).get(...scope)?.n ?? 0));
+  }
+
+  countOpenEscalated(): Record<'senior' | 'owner', number> {
+    return this.transaction(() => {
+      const out = { senior: 0, owner: 0 };
+      for (const r of this.db.prepare(ESCALATED_COUNT_SQL).all()) {
+        if (r.role === 'senior' || r.role === 'owner') out[r.role] = Number(r.n);
+      }
+      return out;
+    });
+  }
+
+  insertComment(row: CommentRow): boolean {
+    return this.transaction(() => {
+      // One statement: the report must exist and the thread must hold fewer than 50. A clashing id or an unknown kind throws (the key and the CHECK).
+      const res = this.db.prepare(COMMENT_INSERT_SQL).run(row.id, row.reportId, row.at, row.actor, row.role, row.kind, row.text, row.reportId, row.reportId);
+      if (Number(res.changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  listComments(reportId: string): CommentRow[] {
+    return this.transaction(() =>
+      this.db.prepare(COMMENT_LIST_SQL).all(reportId).map((r) => ({
+        id: String(r.id),
+        reportId: String(r.report_id),
+        at: Number(r.at),
+        actor: String(r.actor),
+        role: String(r.role) as CommentRow['role'],
+        kind: String(r.kind) as CommentRow['kind'],
+        text: r.text === null ? null : String(r.text),
+      })),
+    );
+  }
+
+  deleteComment(id: string): boolean {
+    return this.transaction(() => {
+      if (Number(this.db.prepare(COMMENT_DELETE_SQL).run(id).changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  countComments(reportId: string): number {
+    return this.transaction(() => Number(this.db.prepare(COMMENT_COUNT_SQL).get(reportId)?.n ?? 0));
+  }
+
+  addChatCounts(day: string, delivered: number, refused: number): void {
+    this.transaction(() => {
+      this.db.prepare(CHAT_COUNTS_ADD_SQL).run(day, delivered, refused);
+    });
+  }
+
+  chatCounts(fromDay: string, toDay: string): ChatDayRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(CHAT_COUNTS_LIST_SQL)
+        .all(fromDay, toDay)
+        .map((r) => ({ day: String(r.day), delivered: Number(r.delivered), refused: Number(r.refused) })),
+    );
+  }
+
+  purgeChatCounts(beforeDay: string): number {
+    return this.transaction(() => Number(this.db.prepare(CHAT_COUNTS_PURGE_SQL).run(beforeDay).changes));
+  }
+
+  paceLoad(roomId: string, who: string): PaceStateRow | null {
+    const r = this.db.prepare(PACE_LOAD_SQL).get(roomId, who);
+    return r === undefined ? null : paceRowOf(r);
+  }
+
+  /**
+   * Read, decide and write as one step under the database's write lock, so two processes updating one player serialise and both updates count. A caller already inside a transaction
+   * (a savepoint nests) joins it instead. A busy database past `busy_timeout` throws the driver's "database is locked" error: the pacer catches it and fails open.
+   */
+  paceUpdate(roomId: string, who: string, fn: (prev: PaceStateRow | null) => PaceStateRow): PaceStateRow {
+    const step = (): PaceStateRow => {
+      const found = this.db.prepare(PACE_LOAD_SQL).get(roomId, who);
+      const next = { ...fn(found === undefined ? null : paceRowOf(found)), roomId, who };
+      this.db.prepare(PACE_UPSERT_SQL).run(roomId, who, next.lastAt, JSON.stringify(next.stamps), JSON.stringify(next.recent), next.floodSignalAt, next.touchedAt);
+      return structuredClone(next);
+    };
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+    } catch (err) {
+      // Already inside a transaction (the caller's): nest as a savepoint. Any other failure, a locked database included, is the caller's to catch.
+      if (/within a transaction/i.test(String((err as { message?: unknown }).message))) return this.transaction(step);
+      throw err;
+    }
+    let done: PaceStateRow;
+    try {
+      done = step();
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    try {
+      this.db.exec('COMMIT');
+    } catch (err) {
+      // A COMMIT that fails (a full disk) must not leave the transaction open: a later BEGIN would then nest and never commit.
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        /* the transaction is already gone */
+      }
+      throw err;
+    }
+    return done;
+  }
+
+  paceDropRoom(roomId: string): number {
+    return this.transaction(() => Number(this.db.prepare(PACE_DROP_ROOM_SQL).run(roomId).changes));
+  }
+
+  paceSweep(before: number): number {
+    return this.transaction(() => Number(this.db.prepare(PACE_SWEEP_SQL).run(before).changes));
+  }
+
+  insightRows(since: number, limit: number): InsightRow[] {
+    const n = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1;
+    return this.transaction(() =>
+      this.db
+        .prepare(INSIGHT_ROWS_SQL)
+        .all(since, n)
+        .map((r) => ({
+          createdAt: Number(r.created_at),
+          actionedAt: r.actioned_at === null ? null : Number(r.actioned_at),
+          status: String(r.status) as InsightRow['status'],
+          reportedReason: r.reported_reason === null ? null : String(r.reported_reason),
+          urgent: Number(r.urgent) === 1,
+          badFaith: Number(r.bad_faith) === 1,
+        })),
+    );
   }
 
   purgeSanctions(before: number): number {
@@ -2479,7 +2960,8 @@ export class SqliteStore implements Store, TermStore {
           .prepare(
             `DELETE FROM kit_sanctions
              WHERE ((ends_at IS NOT NULL AND ends_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?))
-               AND (gap_status IS NULL OR gap_status <> 'open')`
+               AND (gap_status IS NULL OR gap_status <> 'open')
+               AND group_id NOT IN ${HELD_GROUP_IDS}`
           )
           .run(before, before).changes,
       ),
@@ -2491,7 +2973,7 @@ export class SqliteStore implements Store, TermStore {
   }
 
   purgeMutes(before: number): number {
-    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_mutes WHERE created_at < ?').run(before).changes));
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_mutes WHERE created_at < ? AND block = 0').run(before).changes));
   }
 
   purgeNotices(before: number, unseen?: { appealBefore: number; renameBefore: number }): number {
@@ -2504,12 +2986,13 @@ export class SqliteStore implements Store, TermStore {
         this.db
           .prepare(
             `DELETE FROM kit_notices
-             WHERE (withdrawn_at IS NOT NULL AND created_at < ?)
+             WHERE ((withdrawn_at IS NOT NULL AND created_at < ?)
                 OR (acked_at IS NOT NULL AND created_at < ?
                     AND kind IN ('warning', 'report_outcome', 'rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'))
                 OR (acked_at IS NULL AND kind IN ('appeal_upheld', 'appeal_reduced', 'appeal_revoked') AND created_at < ?)
                 OR (acked_at IS NULL AND kind = 'rename_required' AND created_at < ?)
-                OR (until IS NOT NULL AND until < ?)`,
+                OR (until IS NOT NULL AND until < ?))
+               AND (group_id IS NULL OR group_id NOT IN ${HELD_GROUP_IDS})`,
           )
           .run(before, before, appealBefore, renameBefore, before).changes,
       ),
@@ -2612,10 +3095,11 @@ export class SqliteStore implements Store, TermStore {
   listTerms(): TermRecord[] {
     return this.db
       .prepare(
-        'SELECT id, term, language, active, note, added_by, added_at, updated_by, updated_at FROM kit_terms ORDER BY rowid',
+        'SELECT id, term, language, active, match_mode, note, added_by, added_at, updated_by, updated_at FROM kit_terms ORDER BY rowid',
       )
       .all()
-      .map((r) => ({ id: String(r.id), term: String(r.term), language: String(r.language), ...common(r) }));
+      // A row with no mode has no key (the shape every earlier row had).
+      .map((r) => ({ id: String(r.id), term: String(r.term), language: String(r.language), ...(r.match_mode === null || r.match_mode === undefined ? {} : { matchMode: String(r.match_mode) as 'word' | 'segment' | 'contains' }), ...common(r) }));
   }
 
   listExceptions(): ExceptionRecord[] {
@@ -2630,14 +3114,14 @@ export class SqliteStore implements Store, TermStore {
   insertTerm(r: TermRecord): void {
     this.db
       .prepare(
-        `INSERT INTO kit_terms (id, term, language, active, note, added_by, added_at, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO kit_terms (id, term, language, active, match_mode, note, added_by, added_at, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(r.id, r.term, r.language, r.active ? 1 : 0, r.note, r.addedBy, r.addedAt, r.updatedBy, r.updatedAt);
+      .run(r.id, r.term, r.language, r.active ? 1 : 0, r.matchMode ?? null, r.note, r.addedBy, r.addedAt, r.updatedBy, r.updatedAt);
   }
 
   updateTerm(id: string, patch: TermPatch): void {
-    this.patchRow('kit_terms', 'term', 'term', id, patch.term, patch);
+    this.patchRow('kit_terms', 'term', 'term', id, patch.term, patch, patch.matchMode);
   }
 
   setTermActive(id: string, active: boolean, by: string, at: number): void {
@@ -2686,12 +3170,18 @@ export class SqliteStore implements Store, TermStore {
     id: string,
     word: string | undefined,
     patch: { language?: string; note?: string | null; updatedBy: string; updatedAt: number },
+    matchMode?: 'word' | 'segment' | 'contains' | null,
   ): void {
     const sets: string[] = [];
     const args: (string | number | null)[] = [];
     if (word !== undefined) {
       sets.push(`${column} = ?`);
       args.push(word);
+    }
+    // Only a term has a mode: `null` clears it, absent leaves it.
+    if (matchMode !== undefined) {
+      sets.push('match_mode = ?');
+      args.push(matchMode);
     }
     if (patch.language !== undefined) {
       sets.push('language = ?');

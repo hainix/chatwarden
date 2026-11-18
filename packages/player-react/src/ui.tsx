@@ -2,14 +2,12 @@ import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { NoticeKind, PlayerNotice } from '@chatwarden/core';
-import { WARNING_DAYS } from './constants.js';
+import { bodyKey, isSanction, NOTICE_WORDS, noticeView, titleKey } from '@chatwarden/core/notice-copy';
+import type { NoticeView, NoticeWords, NoticeWordKey } from '@chatwarden/core/notice-copy';
 import type { PlayerError } from './client.js';
-import { dayText, timeLeft, untilText } from './format.js';
 import { createT, en } from './i18n.js';
 import type { PlayerT, PlayerText } from './i18n.js';
 import { safeHref } from './safeHref.js';
-
-const DAY = 86_400_000;
 
 /** What every component takes besides its own props. */
 export interface PlayerUiProps {
@@ -119,28 +117,6 @@ export function AppealLink({ ui, href }: { ui: Ui; href: string | undefined }) {
   );
 }
 
-const TITLE: Readonly<Record<string, PlayerText>> = {
-  warning: 'player.notice.title.warning',
-  chat: 'player.notice.title.chat',
-  area: 'player.notice.title.area',
-  ban: 'player.notice.title.ban',
-  report_outcome: 'player.notice.title.report_outcome',
-  rename_required: 'player.notice.title.rename_required',
-  appeal_upheld: 'player.notice.title.appeal_upheld',
-  appeal_reduced: 'player.notice.title.appeal_reduced',
-  appeal_revoked: 'player.notice.title.appeal_revoked',
-};
-const BODY: Readonly<Record<string, PlayerText>> = {
-  warning: 'player.notice.body.warning',
-  chat: 'player.notice.body.chat',
-  area: 'player.notice.body.area',
-  ban: 'player.notice.body.ban',
-  report_outcome: 'player.notice.body.report_outcome',
-  rename_required: 'player.notice.body.rename_required',
-  appeal_upheld: 'player.notice.body.appeal_upheld',
-  appeal_reduced: 'player.notice.body.appeal_reduced',
-  appeal_revoked: 'player.notice.body.appeal_revoked',
-};
 const KIND: Readonly<Record<string, PlayerText>> = {
   warning: 'player.record.kind.warning',
   chat: 'player.record.kind.chat',
@@ -148,38 +124,37 @@ const KIND: Readonly<Record<string, PlayerText>> = {
   ban: 'player.record.kind.ban',
 };
 
-export const titleKey = (kind: NoticeKind | string): PlayerText => (Object.hasOwn(TITLE, kind) ? (TITLE[kind] as PlayerText) : 'player.notice.title.fallback');
-export const bodyKey = (kind: NoticeKind | string): PlayerText => (Object.hasOwn(BODY, kind) ? (BODY[kind] as PlayerText) : 'player.notice.body.fallback');
+export { bodyKey, isSanction, titleKey };
 export const kindKey = (kind: NoticeKind | string): PlayerText => (Object.hasOwn(KIND, kind) ? (KIND[kind] as PlayerText) : 'player.record.kind.fallback');
 
-/** A sanction a player can contest (a thank-you for a report, a required rename and the outcome of an appeal are not one). */
-export const isSanction = (kind: string): boolean => kind === 'warning' || kind === 'chat' || kind === 'area' || kind === 'ban';
+const WORD_KEYS = Object.keys(NOTICE_WORDS) as NoticeWordKey[];
+const wordsOfT = new WeakMap<PlayerT, NoticeWords>();
+
+/** The shared notice words as this `t` words them (a catalog that lacks one reads the key, as it always did). Cached for each `t`. */
+function wordsOf(t: PlayerT): NoticeWords {
+  let words = wordsOfT.get(t);
+  if (words === undefined) {
+    words = Object.fromEntries(WORD_KEYS.map((key) => [key, t(key)])) as NoticeWords;
+    wordsOfT.set(t, words);
+  }
+  return words;
+}
+
+/** What a notice says: the one `noticeView` of core, with this `ui`'s words, locale, time zone and clock. `record` adds the day it was given. */
+export function viewOf(ui: Ui, notice: PlayerNotice, record = false): NoticeView {
+  return noticeView(notice, { words: wordsOf(ui.t), locale: ui.locale, ...(ui.timeZone === undefined ? {} : { timeZone: ui.timeZone }), now: ui.now, record });
+}
 
 /** The facts of a notice, as a term list: the rule, when it was given (the record only), until when, and the reference code. */
 export function Facts({ ui, notice, record = false }: { ui: Ui; notice: PlayerNotice; record?: boolean }) {
-  const { t, locale, timeZone } = ui;
-  const rows: Array<[string, ReactNode]> = [];
-  if (notice.ruleLabel !== null) rows.push([t('player.notice.rule'), notice.ruleLabel]);
-  if (record) rows.push([t('player.notice.given'), untilText(notice.createdAt, locale, timeZone)]);
-  if (notice.kind === 'warning') {
-    // A warning has no end of its own: it stays on the record for 90 days from when it was made.
-    rows.push([t('player.notice.onRecordUntil'), untilText(notice.createdAt + WARNING_DAYS * DAY, locale, timeZone)]);
-  } else if (isSanction(notice.kind) || notice.until !== null) {
-    if (notice.until === null) rows.push([t('player.notice.until'), t('player.notice.noEnd')]);
-    else {
-      const when = untilText(notice.until, locale, timeZone);
-      const left = timeLeft(notice.until, ui.now(), locale);
-      rows.push(left === null ? [t('player.notice.ended'), when] : [t('player.notice.until'), t('player.notice.untilLeft', { when, left })]);
-    }
-  }
-  if (notice.refCode !== null) rows.push([t('player.notice.ref'), notice.refCode]);
-  if (rows.length === 0) return null;
+  const { facts } = viewOf(ui, notice, record);
+  if (facts.length === 0) return null;
   return (
     <dl className="cw-facts">
-      {rows.map(([term, value]) => (
-        <div key={term} className="cw-fact">
-          <dt>{term}</dt>
-          <dd>{value}</dd>
+      {facts.map((fact) => (
+        <div key={fact.term} className="cw-fact">
+          <dt>{fact.term}</dt>
+          <dd>{fact.value}</dd>
         </div>
       ))}
     </dl>
@@ -188,16 +163,17 @@ export function Facts({ ui, notice, record = false }: { ui: Ui; notice: PlayerNo
 
 /** The player's own lines that led to a notice, as text with their day. Never HTML. */
 export function Lines({ ui, notice, id }: { ui: Ui; notice: PlayerNotice; id: string }) {
-  if (notice.excerpt.length === 0) return null;
+  const { linesLabel, lines } = viewOf(ui, notice);
+  if (linesLabel === null) return null;
   return (
     <>
       <p id={id} className="cw-lines-label">
-        {ui.t('player.notice.lines')}
+        {linesLabel}
       </p>
       <ul className="cw-lines" aria-labelledby={id}>
-        {notice.excerpt.map((line, i) => (
+        {lines.map((line, i) => (
           <li key={i}>
-            <span className="cw-line-day">{dayText(line.day, ui.locale)}</span>
+            <span className="cw-line-day">{line.day}</span>
             <span className="cw-line-text">{line.text}</span>
           </li>
         ))}

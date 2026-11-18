@@ -80,7 +80,6 @@ async function create(dir: string, file: string): Promise<Loaded> {
  * The installation's key: `publicKey` (32 bytes, base64url) and `sign(message)` (Ed25519, 64 bytes, base64url). Generated on the first
  * call and kept in `dir/installation.key`; the next call, and the next start, read the same one. A damaged key file is replaced. Rejects
  * (with an error that names no path) when the folder cannot be written, because a share cannot work without a key.
- * @experimental
  */
 export async function installationKey(dir: string): Promise<{ publicKey: string; sign(message: Uint8Array): Promise<string> }> {
   if (typeof dir !== 'string' || dir === '' || dir.includes(String.fromCharCode(0))) throw new TypeError('corpus: dir must be a folder path');

@@ -137,7 +137,6 @@ function handlePattern(handles: readonly string[], aliasOf: (h: string) => strin
  * and any bare domain), `[ip]` (the dots may be spaced), `[tag]` (`name#1234`), `[mention]`, `[token]` and `[phone]`. A handle under
  * 3 characters is replaced only as an @-mention. `aliasOf` returns the alias of a handle, or null to leave it. Pure and
  * deterministic.
- * @experimental
  */
 export function redactText(text: string, handles: readonly string[], aliasOf: (h: string) => string | null): string {
   let out = cleanText(text);
@@ -158,7 +157,6 @@ export function redactText(text: string, handles: readonly string[], aliasOf: (h
 /**
  * The reporter's note for a provider: redacted like a line, then cut to `max` characters (default 300) without splitting a
  * surrogate pair. Null when nothing is left.
- * @experimental
  */
 export function redactNote(
   note: string | null | undefined,

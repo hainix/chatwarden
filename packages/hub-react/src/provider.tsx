@@ -17,6 +17,9 @@ import { LeaveGuardContext } from './leaveGuard.js';
 import type { LeaveGuard } from './leaveGuard.js';
 import type { HubT } from './i18n.js';
 import { errorText } from './labels.js';
+import { intlTag } from './locales/intl.js';
+import { loadHubCatalog } from './locales/load.js';
+import { matchLocale } from './locales/match.js';
 import { QueueProvider } from './liveQueue.js';
 import { ModeProvider, useModeState } from './mode.js';
 import type { HubMode } from './mode.js';
@@ -28,7 +31,6 @@ import type { Me, PermissionKey } from './types.js';
 
 /**
  * What a provider takes besides where its controller comes from.
- * @experimental
  */
 export interface HubProviderOptions {
   /** `simple` or `detailed`: what a `CaseList` row shows. Left out, each moderator's last choice is kept in their browser, and a browser that cannot keep it gets `simple`. */
@@ -54,7 +56,6 @@ export interface HubProviderOptions {
 
 /**
  * Where the provider's controller comes from: exactly one of a client (the provider makes and owns the controller) or a controller (yours).
- * @experimental
  */
 export type HubControllerSource =
   | {
@@ -76,9 +77,32 @@ export type HubControllerSource =
 
 /**
  * The props of `HubProvider`: a `client` or a `controller` (never both), and the options.
- * @experimental
  */
 export type HubProviderProps = HubProviderOptions & HubControllerSource & { children?: ReactNode };
+
+/**
+ * The words for a locale the package ships (Spanish, Portuguese), loaded on demand when no `t` was given. `loading` is true until the first catalogue has
+ * arrived (the provider shows its loading state, with no English); after that a change of locale keeps the words on screen until the new ones are in. A failed
+ * load keeps English and says nothing outward. English, another language and a given `t` load nothing.
+ */
+function useCatalogT(given: HubT | undefined, locale: string): { t: HubT | undefined; loading: boolean } {
+  const want = given === undefined ? matchLocale(locale) : null;
+  const [state, setState] = useState<HubT | null>(null);
+  useEffect(() => {
+    if (want === null) return undefined;
+    let live = true;
+    const tag = intlTag(locale, want);
+    loadHubCatalog(want).then(
+      (catalog) => live && setState(() => createT(catalog, tag)),
+      () => live && setState(() => createT(en, tag)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [want, locale]);
+  if (want === null) return { t: undefined, loading: false };
+  return { t: state ?? undefined, loading: state === null };
+}
 
 /** `useLayoutEffect` where there is a page to lay out; on a server (which runs no effects) a plain effect, so React 18 does not warn. */
 const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
@@ -144,7 +168,8 @@ export interface HubRootProps extends HubProviderOptions {
 export function HubRoot({ client: clientProp, controller: given, mode: modeProp, t: tProp, locale = 'en', now, theme, shortcuts = true, primary = false, bare = false, className, shell, onController, children }: HubRootProps) {
   const client = given?.client ?? (clientProp as HubClient);
   const mode = useModeState(modeProp);
-  const t = useMemo(() => tProp ?? createT(en, locale), [tProp, locale]);
+  const catalog = useCatalogT(tProp, locale);
+  const t = useMemo(() => tProp ?? catalog.t ?? createT(en, locale), [tProp, catalog.t, locale]);
   const inert = useMemo(() => memoryRouter('/'), []);
   const router = shell?.router ?? inert;
   const routerRef = useRef(router);
@@ -224,7 +249,14 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
   }, [client, t, locale, now, router, session, shortcuts, me.data]);
 
   let content: ReactNode;
-  if (value === null) {
+  if (catalog.loading) {
+    // The words are on their way: a quiet loading state with no text, so nothing in English shows first.
+    content = (
+      <div className="cw-gate">
+        <p role="status" aria-busy="true"></p>
+      </div>
+    );
+  } else if (value === null) {
     content = <Gate t={t} error={me.error} loading={me.loading} onRetry={me.reload} page={shell !== undefined} />;
   } else {
     const reads = value.can('reports.read');
@@ -273,7 +305,6 @@ setRankLoader(ensureAi);
  *   <CaseList onOpenCase={(person, reportId) => router.push(`/cases/${reportId}`)} />
  * </HubProvider>
  * ```
- * @experimental
  */
 export function HubProvider(props: HubProviderProps) {
   const { client, controller, children, ...options } = props;
@@ -287,7 +318,6 @@ export function HubProvider(props: HubProviderProps) {
 /**
  * The hub's controller, for the part of your page that wants the headless API (`decide`, `open`, the stores) next to the pieces.
  * Throws outside a `<HubProvider>` or `<Hub>`.
- * @experimental
  */
 export function useHubController(): HubController {
   const controller = useOptionalController();

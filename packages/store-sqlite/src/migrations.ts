@@ -772,4 +772,127 @@ CREATE INDEX kit_ai_actions_by_group ON kit_ai_actions (group_id);
 CREATE INDEX kit_ai_actions_by_created ON kit_ai_actions (created_at);
 `,
   },
+  {
+    // Release 0.2.0. ONE migration for the whole release: each theme appends a labelled block below and nobody adds a 27. Additive throughout: no table is
+    // rebuilt and no row is touched, and the runner wraps this in one savepoint with the version bump, so a failure leaves version 25.
+    //
+    // Block 1 (chat filters): reports nobody filed. `origin` ('filter' now, 'watch' later; NULL for a player's report) and `origin_key` (the counter key
+    //   that made it, a closed shape, never text). `kit_reports_open_filter` is the one-open-filter-report-per-(person, room) rule, a partial unique index
+    //   the insert's second ON CONFLICT clause names; `kit_reports_by_origin` serves the daily cap (`origin = ? AND created_at >= ?`).
+    // Block 2 (chat filters): `kit_filter_hits`, one row per UTC day, counter key and applied action. No person, no room, no text; counts for tuning a rule.
+    //   `action` is what was applied: count, flag, mask, refuse, or flag_capped (the daily cap turned a flag into a count).
+    // Block 3 (legal hold): `kit_legal_holds`, one row per held report (report id, a code from the closed list, who and when, and the release). The row stays after a
+    //   release (the audit story) and a new hold on the same report replaces it. `kit_legal_holds_open` is the partial index the purges and the erase read to find the open
+    //   holds: every purge statement excludes the reports in it, and the sanction groups decided from them.
+    // Block 4 (privacy requests): `kit_erasures`, one receipt row per erase (counts as JSON, no subject, no text); `pending_subject` is set only while an erase keeps
+    //   a remainder (a sanction in force) and is cleared when it finishes, and its partial index serves `purge()`'s finish pass. One `kit_meta` row, `erasure_epoch`,
+    //   a counter every erase moves, which another process re-reads to learn that a person it has in memory is gone.
+    // Block 5 (privacy requests): the lookup indexes the erase paths need, so no erase scans a table by a person: `kit_mutes_by_target`, `kit_blocked_names_by_subject`,
+    //   `kit_signals_by_source` (rows the person caused) and `kit_sanctions_by_report` (the NULL-out when a report is deleted).
+    // Block 6 (urgent lane and desk): `kit_reports` gains `urgent` (a snapshot taken at filing, 0 on every existing row; `kit_reports_urgent_open` is the partial index
+    //   the urgent queue and its count read), the hand-off pair (`handoff_at`, `handoff_by`, the first mark only), the escalation triple (`escalated_to` senior or owner, by
+    //   whom, when; all NULL while none is asked) and `evidence_ref` (the game's opaque id). Staff ids only, never a player. `kit_report_comments` is the staff thread of a
+    //   report (a comment, an ask, an escalation, a look done), at most 50 a report, deleted with its report; `kit_chat_days` is one row per UTC day with two counts (lines
+    //   delivered and refused), written only when `desk.insights` is on: no player, room or text. `kit_reports_by_reporter_outcome_reason` is `kit_reports_by_reporter_outcome`
+    //   with the reason added, so the reporter-accuracy read (which leaves a welfare report out) is still answered from one covering index.
+    version: 26,
+    sql: `
+ALTER TABLE kit_reports ADD COLUMN origin TEXT CHECK (origin IS NULL OR origin IN ('filter', 'watch'));
+ALTER TABLE kit_reports ADD COLUMN origin_key TEXT;
+CREATE UNIQUE INDEX kit_reports_open_filter ON kit_reports (target_subject, room_id) WHERE origin = 'filter' AND status = 'open';
+CREATE INDEX kit_reports_by_origin ON kit_reports (origin, created_at) WHERE origin IS NOT NULL;
+
+CREATE TABLE kit_filter_hits (
+  day    INTEGER NOT NULL,
+  key    TEXT    NOT NULL,
+  action TEXT    NOT NULL CHECK (action IN ('count', 'flag', 'mask', 'refuse', 'flag_capped')),
+  hits   INTEGER NOT NULL,
+  PRIMARY KEY (day, key, action)
+) WITHOUT ROWID;
+
+CREATE TABLE kit_legal_holds (
+  report_id   TEXT PRIMARY KEY,
+  code        TEXT NOT NULL CHECK (code IN ('law_enforcement_request', 'legal_proceeding', 'platform_request', 'safety_review', 'other')),
+  held_by     TEXT NOT NULL,
+  held_at     INTEGER NOT NULL,
+  released_by TEXT,
+  released_at INTEGER
+);
+CREATE INDEX kit_legal_holds_open ON kit_legal_holds (released_at) WHERE released_at IS NULL;
+
+CREATE TABLE kit_erasures (
+  id              TEXT PRIMARY KEY,
+  at              INTEGER NOT NULL,
+  mode            TEXT NOT NULL CHECK (mode IN ('safety', 'none')),
+  actor           TEXT NOT NULL,
+  counts_json     TEXT NOT NULL,
+  pending_subject TEXT
+);
+CREATE INDEX kit_erasures_pending ON kit_erasures (pending_subject) WHERE pending_subject IS NOT NULL;
+INSERT OR IGNORE INTO kit_meta (key, value) VALUES ('erasure_epoch', '0');
+
+CREATE INDEX kit_mutes_by_target ON kit_mutes (target_id);
+CREATE INDEX kit_blocked_names_by_subject ON kit_blocked_names (subject_id);
+CREATE INDEX kit_signals_by_source ON kit_signals (by_subject) WHERE by_subject IS NOT NULL;
+CREATE INDEX kit_sanctions_by_report ON kit_sanctions (report_id) WHERE report_id IS NOT NULL;
+
+ALTER TABLE kit_reports ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX kit_reports_urgent_open ON kit_reports (created_at, id) WHERE urgent = 1 AND status = 'open';
+ALTER TABLE kit_reports ADD COLUMN handoff_at INTEGER;
+ALTER TABLE kit_reports ADD COLUMN handoff_by TEXT;
+ALTER TABLE kit_reports ADD COLUMN escalated_to TEXT CHECK (escalated_to IN ('senior', 'owner'));
+ALTER TABLE kit_reports ADD COLUMN escalated_by TEXT;
+ALTER TABLE kit_reports ADD COLUMN escalated_at INTEGER;
+ALTER TABLE kit_reports ADD COLUMN evidence_ref TEXT;
+
+CREATE TABLE kit_report_comments (
+  id        TEXT PRIMARY KEY,
+  report_id TEXT NOT NULL,
+  at        INTEGER NOT NULL,
+  actor     TEXT NOT NULL,
+  role      TEXT NOT NULL,
+  kind      TEXT NOT NULL CHECK (kind IN ('comment', 'ask', 'escalate', 'clear')),
+  text      TEXT
+);
+CREATE INDEX kit_report_comments_by_report ON kit_report_comments (report_id, at, id);
+CREATE INDEX kit_reports_by_reporter_outcome_reason ON kit_reports (reporter_subject, created_at, status, bad_faith, reported_reason);
+
+-- any-server-rooms-languages: kit_reports.scope. The staff scope of the room a report was filed in (its scope tag), kept in a column of its own so a scoped moderator's reads filter in the
+-- query. Null for a room with no scope; the backfill copies the tag from the reports already stored.
+ALTER TABLE kit_reports ADD COLUMN scope TEXT;
+CREATE INDEX kit_reports_by_scope ON kit_reports (scope, status, created_at);
+UPDATE kit_reports SET scope = json_extract(tags_json, '$.scope') WHERE json_extract(tags_json, '$.scope') IS NOT NULL;
+
+-- any-server-rooms-languages: kit_terms.match_mode. How a term is matched: word (a plain a-z term), segment (the default for a term in a script written without spaces) or contains; null means by script.
+ALTER TABLE kit_terms ADD COLUMN match_mode TEXT CHECK (match_mode IS NULL OR match_mode IN ('word', 'segment', 'contains'));
+
+-- any-server-rooms-languages: kit_reports.entity_json. The clan, guild or team a report is about, as { kind, ref, label }; null for a report about a player alone. It goes with its report.
+ALTER TABLE kit_reports ADD COLUMN entity_json TEXT;
+
+-- any-server-rooms-languages: kit_mutes.block. A block is a mute that is also two-way and never expires; one row per pair, the latest action wins (a mute never downgrades a block).
+ALTER TABLE kit_mutes ADD COLUMN block INTEGER NOT NULL DEFAULT 0 CHECK (block IN (0, 1));
+
+CREATE TABLE kit_chat_days (
+  day       TEXT PRIMARY KEY,
+  delivered INTEGER NOT NULL,
+  refused   INTEGER NOT NULL
+);
+
+-- any-server-rooms-languages: kit_pace. The shared pacer's state (spec 3.7): one row per (room, person), what the in-memory pacer keeps (the time of the last committed line, the times of the last
+-- committed lines, short fingerprints of the last lines, the last flood signal) so two processes judge one player's lines together. who is the canonical subject id, or seat:<id> for a guest. Times
+-- and fingerprints only, never text; operational state swept after an hour (kit_pace_by_touched), erased with the person (kit_pace_by_who serves the export and the erase, which look rows up by person, not by room).
+CREATE TABLE kit_pace (
+  room_id         TEXT    NOT NULL,
+  who             TEXT    NOT NULL,
+  last_at         INTEGER NOT NULL,
+  stamps_json     TEXT    NOT NULL,
+  recent_json     TEXT    NOT NULL,
+  flood_signal_at INTEGER,
+  touched_at      INTEGER NOT NULL,
+  PRIMARY KEY (room_id, who)
+) WITHOUT ROWID;
+CREATE INDEX kit_pace_by_touched ON kit_pace (touched_at);
+CREATE INDEX kit_pace_by_who ON kit_pace (who);
+`,
+  },
 ];

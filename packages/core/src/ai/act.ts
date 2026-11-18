@@ -113,7 +113,7 @@ export class ActPath {
     }
     // Every act call site passes a lookup; without one nobody may be acted on.
     facts.automationAllowed = automationAllowed(report.targetSubject, env.automationAllowed ?? (() => false));
-    const who = report.reporterSubject === '' ? { habitual: false, badFaith: false } : (env.reporter?.(report.reporterSubject) ?? { habitual: true, badFaith: true });
+    const who = isSystemReport(report) ? { habitual: false, badFaith: false } : (env.reporter?.(report.reporterSubject) ?? { habitual: true, badFaith: true });
     facts.reporterHabitual = who.habitual || who.badFaith;
     if (atDue) {
       const unreviewed = env.store.aiUnreviewed?.() ?? { n: Number.POSITIVE_INFINITY, oldestActedAt: null };

@@ -2,6 +2,7 @@ import { validateSanctionInput } from '@chatwarden/core';
 import type { Chatwarden, DecisionAction, DecisionInput, Role, SanctionInput, SanctionKind, Source, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { PermissionKey } from '../permissions.js';
+import type { ScopedLimits } from './context.js';
 import { bodyText, has, parseAction } from './validate.js';
 import type { AiEchoBody } from './validate.js';
 
@@ -16,7 +17,16 @@ const VERDICTS: readonly DecisionInput['verdict'][] = ['upheld', 'noted', 'no_ac
 
 /** Everyone a report names, as staff refs: the target, the reporter and the people who wrote in the excerpt. */
 export function peopleOf(report: StaffReport): string[] {
-  return [...new Set([report.targetPerson, report.reporterPerson, ...report.people])];
+  // A report nobody filed (a chat filter's flag) has no reporter.
+  return [...new Set([report.targetPerson, ...(report.reporterPerson === null ? [] : [report.reporterPerson]), ...report.people])];
+}
+
+/**
+ * The ids a decision or a suggestion may name for a report: the people it shows and the ids it was filed under (a stale ref after a merge
+ * still replays). A report nobody filed has a reporter value (`filter:<id>`) that is not a person: it is never named.
+ */
+export function namedIn(report: StaffReport): Set<string> {
+  return new Set([...peopleOf(report), report.targetSubject, ...((report.origin ?? null) === null ? [report.reporterSubject] : [])]);
 }
 
 /** A decision as the staff body carries it, checked for shape. */
@@ -31,9 +41,12 @@ export interface ParsedDecision {
 /**
  * Check a decision body's shape (`verdict`, `actions`, `reason?`, `evidence?`). A `reason` that is given must be a string of a sane
  * length; whether one is REQUIRED (every verdict but a `no_action` with no actions) is the facade's rule, so the staff route, the
- * incoming webhook and every other caller cannot disagree. Rules and limits stay with the facade.
+ * incoming webhook and every other caller cannot disagree. Rules and limits stay with the facade. A `rename` key is refused (400): only the
+ * staff decide route asks for one, and it strips it first.
  */
 export function parseDecision(body: Record<string, unknown>): ParsedDecision {
+  // A rename rides on the staff route only (`POST /reports/:id/decide` takes it out before this); the webhook and `decideAs` callers send none.
+  if (has(body, 'rename')) throw new ValidationError();
   const verdict = body.verdict;
   if (typeof verdict !== 'string' || !(VERDICTS as readonly string[]).includes(verdict)) throw new ValidationError();
   if (!Array.isArray(body.actions) || body.actions.length > MAX_ACTIONS) throw new ValidationError();
@@ -78,6 +91,20 @@ export function checkDurationsOffered(cw: Chatwarden, actions: readonly Decision
   if (lengths.some((a) => !offered.has(a.durationMs as number))) throw new HttpError('duration_not_offered');
 }
 
+/**
+ * What a scoped moderator may apply: only the kinds of `limits.kinds`, and a restriction or ban only for a length of at most `limits.maxDurationMs` (a permanent one, `durationMs: null`, never).
+ * A warning or a note has no length. Never `includeIp: true`: an IP row lands on every account behind that address, in every scope, which is more than the report's person. 400 `invalid_sanction`
+ * otherwise. Called after the report is known to be in scope, so an out-of-scope id is still the 404 of an unknown id.
+ */
+export function checkScopedLimits(actions: readonly DecisionAction[], limits: Readonly<ScopedLimits>): void {
+  for (const a of actions) {
+    if (a.includeIp === true) throw new HttpError('invalid_sanction');
+    if (!(limits.kinds as readonly string[]).includes(a.kind)) throw new HttpError('invalid_sanction');
+    if (a.kind === 'warning' || a.kind === 'note') continue;
+    if (a.durationMs === null || a.durationMs > limits.maxDurationMs) throw new HttpError('invalid_sanction');
+  }
+}
+
 /** What a decision DOES needs the right to do it: `need` throws 403. Call it before anything is read or written. */
 export function needForDecision(actions: readonly DecisionAction[], need: (permission: PermissionKey) => void): void {
   if (actions.length > 0) need('sanctions.apply');
@@ -103,12 +130,14 @@ export async function applyDecision(
   actor: string,
   ai?: { echo?: AiEchoBody; role: Role },
   source: Source = 'moderator',
+  scope?: readonly string[],
 ): Promise<DecisionOutcome> {
-  const report = cw.reports.get(reportId);
+  // With a staff scope an out-of-scope report is exactly an unknown one.
+  const report = cw.reports.get(reportId, scope === undefined ? undefined : { scope });
   if (report === null) throw new NotFoundError();
   // The staff refs the report shows, or the ids it was filed under (the facade makes them canonical, so a ref gone
   // stale through a later merge still replays).
-  const named = new Set([...peopleOf(report), report.targetSubject, report.reporterSubject]);
+  const named = namedIn(report);
   if (!decision.actions.every((a) => named.has(a.subject))) throw new ValidationError();
 
   const result = await cw.decide({
@@ -192,8 +221,9 @@ export async function applySanction(
   cw: Chatwarden,
   sanction: ParsedSanction,
   actor: string,
+  forReport?: string,
 ): Promise<{ groupId: string; refCode: string }> {
   checkSanction(cw, sanction, actor);
-  const done = await cw.sanctions.apply(sanctionInput(sanction, actor));
+  const done = await cw.sanctions.apply(sanctionInput(sanction, actor), forReport === undefined ? undefined : { forReport });
   return { groupId: done.groupId, refCode: done.refCode };
 }

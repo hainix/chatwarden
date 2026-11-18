@@ -25,11 +25,16 @@ const withoutNames = (layer: PolicyLayer): PolicyLayer => {
   return rest;
 };
 
-const SWITCHES: ReadonlyArray<{ key: keyof NamesDraft; label: HubText; hint: HubText }> = [
+const SWITCHES: ReadonlyArray<{ key: 'profanity' | 'keep' | 'renames' | 'mask'; label: HubText; hint: HubText }> = [
   { key: 'profanity', label: 'hub.settings.names.profanity', hint: 'hub.settings.names.profanity.hint' },
   { key: 'keep', label: 'hub.settings.names.keep', hint: 'hub.settings.names.keep.hint' },
   { key: 'renames', label: 'hub.settings.names.renames', hint: 'hub.settings.names.renames.hint' },
   { key: 'mask', label: 'hub.settings.names.mask', hint: 'hub.settings.names.mask.hint' },
+];
+
+const LISTS: ReadonlyArray<{ key: 'reserved' | 'allow'; label: HubText; hint: HubText }> = [
+  { key: 'reserved', label: 'hub.settings.names.reserved', hint: 'hub.settings.names.reserved.hint' },
+  { key: 'allow', label: 'hub.settings.names.reservedAllow', hint: 'hub.settings.names.reservedAllow.hint' },
 ];
 
 /** The panel. `state` and `policy` come from the Advanced screen, which reads the policy once for all its panels. */
@@ -49,7 +54,7 @@ export function NameSettings({ state, policy }: { state: PolicyState; policy: Us
     },
   });
 
-  const layer = useMemo((): PolicyLayer => ({ ...withoutNames(state.layer), names: namesLayer(draft) }), [draft, state.layer]);
+  const layer = useMemo((): PolicyLayer => ({ ...withoutNames(state.layer), names: namesLayer(draft, state.effective.names) }), [draft, state.layer, state.effective.names]);
   const isDirty = useMemo(() => namesDirty(draft, state.effective.names), [draft, state.effective.names]);
 
   const save = useSaveFlow({
@@ -120,6 +125,26 @@ export function NameSettings({ state, policy }: { state: PolicyState; policy: Us
                 </label>
               </div>
             ))}
+            {LISTS.map((l) => (
+              <div key={l.key} className="cw-field">
+                <label htmlFor={`${base}-${l.key}`}>{t(l.label)}</label>
+                <p id={`${base}-${l.key}-hint`} className="cw-hint">
+                  {t(l.hint)}
+                </p>
+                <textarea
+                  id={`${base}-${l.key}`}
+                  rows={3}
+                  value={draft[l.key]}
+                  data-field={l.key}
+                  spellCheck={false}
+                  aria-describedby={`${base}-${l.key}-hint ${base}-lists-note`}
+                  onChange={(e) => set({ [l.key]: e.target.value })}
+                />
+              </div>
+            ))}
+            <p id={`${base}-lists-note`} className="cw-hint">
+              {t('hub.settings.names.lists.note')}
+            </p>
           </fieldset>
           {editable && <SaveBar policy={policy} save={save} isDirty={isDirty} dirtyCount={1} refusedField={refusedField} idBase={base} label={t('hub.settings.names.save.form')} onDiscard={discard} onReload={reload} />}
         </div>

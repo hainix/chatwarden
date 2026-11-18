@@ -16,7 +16,7 @@ type W = Awaited<ReturnType<typeof world>>;
 const renameWorld = (names: Record<string, unknown> = { renames: true }, over: Parameters<typeof world>[0] = {}) =>
   world({ ...over, matcher, profanity, overrides: { names, ...(over.overrides ?? {}) } });
 
-const rename = (w: W, ref: string, body: unknown = { reason: REASON }, o: { role?: Role | null; actor?: string } = {}) =>
+const rename = (w: W, ref: string, body: unknown = { reason: REASON, rule: 1 }, o: { role?: Role | null; actor?: string } = {}) =>
   w.call('POST', `/people/${ref}/rename`, { role: o.role === undefined ? 'moderator' : o.role, actor: o.actor ?? 'ann', body });
 
 describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate (gateCase) and takeOver, audits name.rename_required best-effort, 404 when renames are off, 409 pending_rename, 400 for a bad reason', () => {
@@ -37,21 +37,33 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
     expect(JSON.stringify(notices)).not.toContain(REASON);
   });
 
-  it('a rule is optional and must be an active rule; the default is the slur filter\'s rule', async () => {
+  it('POST /people/:ref/rename without rule is 400; with rule 200; the rule is shown on the notice', async () => {
     const w = await renameWorld();
     const a = await w.file();
     const b = await w.file();
+    const missing = await w.call('POST', `/people/${a.target}/rename`, { role: 'moderator', body: { reason: REASON } });
+    expect(missing.status).toBe(400);
+    expect(errorOf(missing)).toBe('invalid_request');
+    expect(w.cw.names.pendingRename({ clientKey: a.key })).toBe(false);
+    expect(w.routeAudit()).toEqual([]);
     expect((await rename(w, a.target, { reason: REASON, rule: 2 })).status).toBe(200);
     expect(w.cw.notices.pending({ clientKey: a.key }).find((n) => n.kind === 'rename_required')?.rule).toBe(2);
-    expect((await rename(w, b.target)).status).toBe(200);
-    expect(w.cw.notices.pending({ clientKey: b.key }).find((n) => n.kind === 'rename_required')?.rule).toBe(1);
+    expect((await rename(w, b.target, { reason: REASON, rule: 7 })).status).toBe(200);
+    expect(w.cw.notices.pending({ clientKey: b.key }).find((n) => n.kind === 'rename_required')?.rule).toBe(7);
+  });
+
+  it('an unknown rule is 400 and nothing is written; no default rule stands in', async () => {
+    const w = await renameWorld();
+    const f = await w.file();
+    expect((await rename(w, f.target, { reason: REASON, rule: 9999 })).status).toBe(400);
+    expect(w.cw.names.pendingRename({ clientKey: f.key })).toBe(false);
   });
 
   it('needs sanctions.apply: with it locked to the owner a moderator and a senior are 403, the owner may; no authz is 401, before the body is read', async () => {
     const w = await renameWorld({ renames: true }, { permissions: { 'sanctions.apply': 'owner' } });
     const f = await w.file();
     for (const role of ['moderator', 'senior'] as const) {
-      const res = await rename(w, f.target, { reason: REASON }, { role });
+      const res = await rename(w, f.target, { reason: REASON, rule: 1 }, { role });
       expect(res.status, role).toBe(403);
       expect(errorOf(res)).toBe('forbidden');
     }
@@ -59,21 +71,21 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
     expect((await w.call('POST', `/people/${f.target}/rename`, { role: null, raw: '{nope' })).status).toBe(401);
     expect(w.routeAudit()).toEqual([]);
     expect(w.cw.names.pendingRename({ clientKey: f.key })).toBe(false);
-    expect((await rename(w, f.target, { reason: REASON }, { role: 'owner' })).status).toBe(200);
+    expect((await rename(w, f.target, { reason: REASON, rule: 1 }, { role: 'owner' })).status).toBe(200);
   });
 
   it('the default is a moderator: any role with sanctions.apply may ask', async () => {
     for (const role of ['moderator', 'senior', 'owner'] as const) {
       const w = await renameWorld();
       const f = await w.file();
-      expect((await rename(w, f.target, { reason: REASON }, { role })).status, role).toBe(200);
+      expect((await rename(w, f.target, { reason: REASON, rule: 1 }, { role })).status, role).toBe(200);
     }
   });
 
   it('audits name.rename_required with the person as target, the caller as actor, after the write; no reason, name or detail in the row', async () => {
     const w = await renameWorld();
     const f = await w.file();
-    await rename(w, f.target, { reason: REASON }, { actor: 'gus', role: 'senior' });
+    await rename(w, f.target, { reason: REASON, rule: 1 }, { actor: 'gus', role: 'senior' });
     const rows = w.routeAudit();
     expect(rows.map((r) => [r.actor, r.role, r.action, r.target])).toEqual([['gus', 'senior', 'name.rename_required', { type: 'person', ref: f.target }]]);
     expect(JSON.stringify(w.audit())).not.toContain(REASON);
@@ -107,7 +119,7 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
       const w = await renameWorld(names);
       const f = await w.file();
       for (const role of ['moderator', 'senior', 'owner'] as const) {
-        for (const body of [{ reason: REASON }, {}, { reason: '' }, 'nope']) {
+        for (const body of [{ reason: REASON, rule: 1 }, {}, { reason: '' }, 'nope']) {
           const res = await rename(w, f.target, body, { role });
           expect(res.status, `${JSON.stringify(names)} ${role}`).toBe(404);
           expect(res.body).toEqual({ error: 'not_found', message: 'Not found.' });
@@ -123,7 +135,8 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
     const f = await w.file();
     expect(((await w.call('GET', '/me')).body as { features?: { renames: boolean } }).features?.renames).toBe(true);
     (w.store as unknown as { withdrawNotice?: unknown }).withdrawNotice = undefined;
-    expect(Object.keys((await w.call('GET', '/me')).body as object)).not.toContain('features');
+    // `features` is always sent now (rooms is always true): the capability shows as `renames: false`, which is what hides the row in the hub.
+    expect(((await w.call('GET', '/me')).body as { features?: { renames: boolean } }).features?.renames).toBe(false);
     const res = await rename(w, f.target);
     expect(res.status).toBe(404);
     expect(w.cw.names.pendingRename({ clientKey: f.key })).toBe(false);
@@ -163,6 +176,8 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
     const f = await w.file();
     const bad: unknown[] = [
       {},
+      { reason: REASON },
+      { reason: REASON, rule: undefined },
       { reason: '' },
       { reason: '   \n\t ' },
       { reason: 5 },
@@ -177,8 +192,8 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
       { reason: REASON, rule: 'uncovered' },
       { reason: REASON, rule: null },
       { reason: REASON, rule: 9999 },
-      { reason: REASON, takeOver: 'yes' },
-      { reason: REASON, takeOver: 1 },
+      { reason: REASON, rule: 1, takeOver: 'yes' },
+      { reason: REASON, rule: 1, takeOver: 1 },
       [],
       'x',
       null,
@@ -192,13 +207,13 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
     expect(errorOf(await w.call('POST', `/people/${f.target}/rename`, { role: 'moderator' }))).toBe('invalid_request');
     expect(w.cw.names.pendingRename({ clientKey: f.key })).toBe(false);
     // 500 characters exactly is fine.
-    expect((await rename(w, f.target, { reason: 'x'.repeat(500) })).status).toBe(200);
+    expect((await rename(w, f.target, { reason: 'x'.repeat(500), rule: 1 })).status).toBe(200);
   });
 
   it('the actor is the authenticated caller, never the body', async () => {
     const w = await renameWorld();
     const f = await w.file();
-    await rename(w, f.target, { reason: REASON, actor: 'someone_else' } as never, { actor: 'gus' });
+    await rename(w, f.target, { reason: REASON, rule: 1, actor: 'someone_else' } as never, { actor: 'gus' });
     expect(w.routeAudit()[0]?.actor).toBe('gus');
   });
 
@@ -207,7 +222,7 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
       const w = await renameWorld();
       const f = await w.file();
       expect(w.cw.cases.claim(f.target, 'bob')).toMatchObject({ ok: true });
-      const res = await rename(w, f.target, { reason: REASON }, { actor: 'ann' });
+      const res = await rename(w, f.target, { reason: REASON, rule: 1 }, { actor: 'ann' });
       expect(res.status).toBe(409);
       expect(res.body).toMatchObject({ error: 'claimed', by: 'bob', until: expect.any(Number) });
       expect(w.cw.names.pendingRename({ clientKey: f.key })).toBe(false);
@@ -218,7 +233,7 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
       const w = await renameWorld();
       const f = await w.file();
       w.cw.cases.claim(f.target, 'bob');
-      const res = await rename(w, f.target, { reason: REASON, takeOver: true }, { role: 'moderator' });
+      const res = await rename(w, f.target, { reason: REASON, rule: 1, takeOver: true }, { role: 'moderator' });
       expect(res.status).toBe(409);
       expect(errorOf(res)).toBe('claimed');
       expect(w.cw.cases.holder(f.target)?.by).toBe('bob');
@@ -228,7 +243,7 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
       const w = await renameWorld();
       const f = await w.file();
       w.cw.cases.claim(f.target, 'bob');
-      const res = await rename(w, f.target, { reason: REASON, takeOver: true }, { role: 'senior', actor: 'sen_cy' });
+      const res = await rename(w, f.target, { reason: REASON, rule: 1, takeOver: true }, { role: 'senior', actor: 'sen_cy' });
       expect(res.status).toBe(200);
       expect(w.routeAudit().map((r) => r.action).sort()).toEqual(['case.takeover', 'name.rename_required']);
       expect(w.cw.cases.holder(f.target)?.by).toBe('sen_cy');
@@ -242,15 +257,15 @@ describe('POST /people/:ref/rename needs sanctions.apply, honours the claim gate
       const c = await w.file();
       w.cw.cases.claim(a.target, 'ann');
       w.cw.cases.claim(c.target, 'bob');
-      expect((await rename(w, a.target, { reason: REASON }, { actor: 'ann' })).status).toBe(200);
-      expect((await rename(w, b.target, { reason: REASON }, { actor: 'ann' })).status).toBe(200);
+      expect((await rename(w, a.target, { reason: REASON, rule: 1 }, { actor: 'ann' })).status).toBe(200);
+      expect((await rename(w, b.target, { reason: REASON, rule: 1 }, { actor: 'ann' })).status).toBe(200);
     });
 
     it('a takeover that cannot be recorded does not happen (500, the claim untouched)', async () => {
       const w = await renameWorld({ renames: true }, { wrap: (cw) => ({ ...cw, audit: { ...cw.audit, record: () => false } }) });
       const f = await w.file();
       w.cw.cases.claim(f.target, 'bob');
-      const res = await rename(w, f.target, { reason: REASON, takeOver: true }, { role: 'senior' });
+      const res = await rename(w, f.target, { reason: REASON, rule: 1, takeOver: true }, { role: 'senior' });
       expect(res.status).toBe(500);
       expect(w.cw.cases.holder(f.target)?.by).toBe('bob');
       expect(w.cw.names.pendingRename({ clientKey: f.key })).toBe(false);

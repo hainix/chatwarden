@@ -1,6 +1,14 @@
 // A language code, named for a person. `Intl.DisplayNames` does the naming; where it is missing, refuses the code or the locale,
 // or has no name for it, the code itself stands. Nothing here holds English.
 
+/** The language tags a term in a script written without spaces may carry: Chinese, Japanese, Thai, Lao, Khmer and Burmese. Offered when such a word is typed; named for a person like any other code. */
+export const UNSPACED_LANGUAGES: readonly string[] = ['zh', 'ja', 'th', 'lo', 'km', 'my'];
+
+/** Does a word hold a letter of a script written without spaces (Han, Hiragana, Katakana, Thai, Lao, Khmer, Myanmar)? Read after NFKC, so half-width and full-width forms count. */
+export function hasUnspacedLetters(word: string): boolean {
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u.test(word.normalize('NFKC'));
+}
+
 /** The part of `Intl.DisplayNames` this file uses, so a test can hand in one that throws. */
 export interface LanguageNames {
   of(code: string): string | undefined;

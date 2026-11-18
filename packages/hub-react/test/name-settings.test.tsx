@@ -1,4 +1,5 @@
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import axe from 'axe-core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { appealsHub } from './appealsWorld.js';
 import type { AppealsHub } from './appealsWorld.js';
@@ -38,7 +39,7 @@ describe('the panel', () => {
     await open(w);
     expect(within(panel()).getAllByRole('checkbox').map((c) => c.getAttribute('aria-labelledby') !== null)).toEqual([true, true, true, true]);
     for (const name of [PROFANITY, KEEP, RENAMES, MASK]) expect(sw(name)).toBeInTheDocument();
-    const names = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label') ?? within(r).queryByRole('heading')?.textContent);
+    const names = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label') ?? within(r).queryAllByRole('heading')[0]?.textContent);
     expect(names.indexOf('Names')).toBeGreaterThan(names.indexOf('Appeals'));
   });
 
@@ -92,7 +93,7 @@ describe('saving', () => {
     const body = puts(w)[0]!.body as { layer: Record<string, unknown>; reason: string };
     expect(body.layer).toEqual({ ai: { level: 1 }, names });
     expect(body.reason).toBe('Our game is for families');
-    expect((await w.client.policyProfile()).effective.names).toEqual(names);
+    expect((await w.client.policyProfile()).effective.names).toMatchObject(names);
     await screen.findByText('Names settings saved.');
   });
 
@@ -117,12 +118,12 @@ describe('saving', () => {
 
   it('turning renames on makes the server offer the rename (features.renames follows)', async () => {
     const w = await owner();
-    expect((await w.client.me()).features).toEqual({ appeals: true, renames: false, keepBlocked: false });
+    expect((await w.client.me()).features).toMatchObject({ appeals: true, renames: false, keepBlocked: false });
     const { user } = await open(w);
     await user.click(sw(RENAMES));
     await save(user);
     await waitFor(() => expect(puts(w)).toHaveLength(1));
-    await waitFor(async () => expect((await w.client.me()).features).toEqual({ appeals: true, renames: true, keepBlocked: false }));
+    await waitFor(async () => expect((await w.client.me()).features).toMatchObject({ appeals: true, renames: true, keepBlocked: false }));
   });
 
   it('a 409 offers to reload, and Reload shows what the other owner saved', async () => {
@@ -167,6 +168,145 @@ describe('saving', () => {
     const w = await owner();
     await open(w);
     expect(screen.getByRole('button', { name: 'Reset names' })).toHaveAttribute('aria-disabled', 'true');
+  });
+});
+
+const PROTECTED = 'Protected names';
+const ALLOWED = 'Allowed exceptions';
+const lists = (): { protectedBox: HTMLTextAreaElement; allowedBox: HTMLTextAreaElement } => ({
+  protectedBox: within(panel()).getByRole('textbox', { name: PROTECTED }) as HTMLTextAreaElement,
+  allowedBox: within(panel()).getByRole('textbox', { name: ALLOWED }) as HTMLTextAreaElement,
+});
+
+describe('the two lists of protected names', () => {
+  it('are two textareas inside the existing panel, empty by default, each with a sentence, and nothing is sent by opening them', async () => {
+    const w = await owner();
+    await open(w);
+    const { protectedBox, allowedBox } = lists();
+    expect(protectedBox.value).toBe('');
+    expect(allowedBox.value).toBe('');
+    expect(protectedBox).toHaveAccessibleDescription(/one name per line/i);
+    expect(allowedBox).toHaveAccessibleDescription(/one name per line/i);
+    expect(within(panel()).getAllByRole('checkbox')).toHaveLength(4);
+    expect(puts(w)).toHaveLength(0);
+  });
+
+  it('say what a dry run changes: nothing a player already has, only names checked from now on', async () => {
+    const w = await owner();
+    await open(w);
+    expect(within(panel()).getByText(/names that players already have are not changed/i)).toBeInTheDocument();
+  });
+
+  it('show what is in force, one name to a line', async () => {
+    const w = await owner({ names: { reserved: ['admin', 'game master'], reservedAllow: ['Admin Ann'] } });
+    await open(w);
+    const { protectedBox, allowedBox } = lists();
+    expect(protectedBox.value).toBe('admin\ngame master');
+    expect(allowedBox.value).toBe('Admin Ann');
+  });
+
+  it('are saved through the layer with a reason: the lines become the lists, trimmed, blanks dropped', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    const { protectedBox, allowedBox } = lists();
+    await user.type(protectedBox, '  admin  {Enter}{Enter}game master{Enter}   ');
+    await user.type(allowedBox, 'Admin Ann');
+    await save(user, 'Staff names are protected');
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    const body = puts(w)[0]!.body as { layer: { names: Record<string, unknown> }; reason: string };
+    expect(body.layer.names).toEqual({ profanity: false, keepBlocked: false, renames: false, maskInHub: true, reserved: ['admin', 'game master'], reservedAllow: ['Admin Ann'] });
+    expect(body.reason).toBe('Staff names are protected');
+    const effective = (await w.client.policyProfile()).effective.names;
+    expect(effective).toMatchObject({ reserved: ['admin', 'game master'], reservedAllow: ['Admin Ann'], reservedRule: 2 });
+    await screen.findByText('Names settings saved.');
+  });
+
+  it('a switch saved alone sends no list (the layer is what it was), and a saved list is kept when a switch changes', async () => {
+    const w = await owner({ names: { reserved: ['admin'] } });
+    const { user } = await open(w);
+    await user.click(sw(RENAMES));
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect((puts(w)[0]!.body as { layer: { names: Record<string, unknown> } }).layer.names).toMatchObject({ renames: true, reserved: ['admin'] });
+    cleanup();
+    const other = await owner();
+    const second = await open(other);
+    await second.user.click(sw(MASK));
+    await save(second.user);
+    await waitFor(() => expect(puts(other)).toHaveLength(1));
+    const names = (puts(other)[0]!.body as { layer: { names: Record<string, unknown> } }).layer.names;
+    expect(Object.hasOwn(names, 'reserved')).toBe(false);
+    expect(Object.hasOwn(names, 'reservedAllow')).toBe(false);
+  });
+
+  it('clearing a saved list saves an empty one', async () => {
+    const w = await owner({ names: { reserved: ['admin'] } });
+    const { user } = await open(w);
+    await user.clear(lists().protectedBox);
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect((puts(w)[0]!.body as { layer: { names: Record<string, unknown> } }).layer.names).toMatchObject({ reserved: [] });
+    expect((await w.client.policyProfile()).effective.names.reserved).toEqual([]);
+  });
+
+  it('typing and deleting the same text is no change: nothing to save', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.type(lists().protectedBox, 'admin');
+    await user.clear(lists().protectedBox);
+    expect(within(panel()).getByRole('button', { name: 'Save changes' })).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('an entry the server refuses (too short) keeps the draft', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.type(lists().protectedBox, 'x');
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    await screen.findByRole('alert');
+    expect(lists().protectedBox.value).toBe('x');
+  });
+
+  it('only the owner edits them: seniors and moderators read them, read-only', async () => {
+    for (const role of ['moderator', 'senior'] as const) {
+      cleanup();
+      const w = await appealsHub({ role, actor: `${role}@example.test`, names: { reserved: ['admin'] } });
+      await open(w);
+      const { protectedBox, allowedBox } = lists();
+      expect(protectedBox.value).toBe('admin');
+      expect(protectedBox).toBeDisabled();
+      expect(allowedBox).toBeDisabled();
+      expect(within(panel()).queryByRole('button', { name: 'Save changes' })).toBeNull();
+    }
+  });
+
+  it('the Names reset takes the lists back to the code', async () => {
+    const w = await owner();
+    const state = await w.direct.policyProfile();
+    await w.direct.savePolicyProfile({ layer: { names: { reserved: ['admin'] } }, version: state.version, reason: 'Staff names' });
+    const { user } = await open(w);
+    expect(lists().protectedBox.value).toBe('admin');
+    await user.click(screen.getByRole('button', { name: 'Reset names' }));
+    await user.type(screen.getByRole('textbox', { name: /Why are you resetting this/ }), 'Back to the code');
+    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(lists().protectedBox.value).toBe(''));
+  });
+
+  it('a name is text: markup in an entry is never made into markup', async () => {
+    const w = await owner({ names: { reserved: ['<img src=x onerror=alert(1)>'] } });
+    const { container } = await open(w);
+    expect(lists().protectedBox.value).toBe('<img src=x onerror=alert(1)>');
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('has no axe violations in the light and the dark theme', async () => {
+    for (const theme of ['light', 'dark'] as const) {
+      cleanup();
+      const w = await owner({ names: { reserved: ['admin'] } });
+      const { container } = await open(w, { theme });
+      const found = (await axe.run(container, { rules: { 'color-contrast': { enabled: false } }, resultTypes: ['violations'] })).violations.map((v) => `${v.id} ${v.nodes.map((n) => n.target.join(' ')).join('; ')}`);
+      expect(found, theme).toEqual([]);
+    }
   });
 });
 

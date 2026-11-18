@@ -12,8 +12,16 @@ const PARAM_RE = /^[A-Za-z0-9_-]{1,64}$/;
  * path words, not ids). Term and exception ids need it because a term pack's own ids use `:` (`syn:zorbak`).
  */
 export const REF_PARAM_RE = /^(?!\.+$)[A-Za-z0-9_.:-]{1,64}$/;
-/** The named param patterns a route may ask for, as `:name~ref`. A param with no `~` uses `PARAM_RE`. */
-const PATTERNS: ReadonlyMap<string, RegExp> = new Map([['ref', REF_PARAM_RE]]);
+/**
+ * A room id as the game gave it: any text of 1 to 2 000 characters once decoded (a room id may hold a space, a slash or non-ASCII text, sent percent-encoded). The route checks it further (length and control
+ * characters) and answers 400, so a bad room id is not a silent 404.
+ */
+export const ROOM_PARAM_RE = /^[\s\S]{1,2000}$/;
+/** The named param patterns a route may ask for, as `:name~ref` or `:name~room`. A param with no `~` uses `PARAM_RE`. */
+const PATTERNS: ReadonlyMap<string, RegExp> = new Map([
+  ['ref', REF_PARAM_RE],
+  ['room', ROOM_PARAM_RE],
+]);
 const SEGMENT = '(?:[A-Za-z0-9_.~-]+|:[A-Za-z0-9_]+(?:~[a-z]+)?)';
 const KEY_RE = new RegExp(`^([A-Z]+) (/${SEGMENT}(?:/${SEGMENT})*|/)$`);
 const BAD_ROUTE = 'router: a route must look like "GET /path/:param"';

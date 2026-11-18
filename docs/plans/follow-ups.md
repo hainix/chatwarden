@@ -2,6 +2,17 @@
 
 Things found while building, not yet done. Each one names where it came from.
 
+## Open: privacy requests and legal hold, parked (0.2.0)
+
+Found building `cw.privacy` and `cw.legal` (design: `docs/design/2026-11-17-filter-rules-and-privacy.md`, runbook: `docs/privacy-requests.md`). None of it is a claim about any law.
+
+- **A verifier command for bundles.** `verifyBundle` and `canonicalJson` are exported, but a requester or a court has no command to run. A small `chatwarden verify-bundle <file>` CLI (SHA-256 always, HMAC with a secret) is the next step.
+- **Trusted timestamps.** A bundle's signature proves it came from this kit and was not edited. It says when the kit signed it, by the kit's own clock; a timestamp authority or a notarisation is not built.
+- **Erase by a list of account ids.** One person at a time today. A batch from a file (with one receipt each and a dry run over the whole list) is parked.
+- **A batch names scan.** Finding every person whose handle matches a term, to review names in bulk, is parked.
+- **The audit's own retention of a person's actions.** The audit trail is kept (ids and codes only) and a person's references in it are rewritten to the receipt id; whether an adopter wants a shorter clock for those rows is a policy question.
+- **Hub: a real-browser pass.** The Data requests, the erase dialog, Privacy requests and Legal hold are checked under axe and in jsdom at both themes; a pass in a real browser at 360 px, light and dark, is still to do (the table scrolls in its own region).
+
 ## Done: `@chatwarden/matcher` shipped obscenity's English word list to browsers (issue #8)
 
 Found building the landing-page demo (K8b, 2026-11-10). Fixed in 0.1.3.
@@ -295,3 +306,71 @@ Found building R2 (shadow mode), 2026-11. Design: [design/2026-11-12-ai-levels-3
 - **Done in the final R2 round: the reserve INSERT and take-over UPDATE and the acting UPDATE are exported as constants and counted in `sql-placeholders.test.ts`.**
 - **Done in R2: retention of the action rows, `kit_ai_reads.purpose`, the store parity on a transition's edge input** (an empty patch is false, a state outside the closed set throws, an unknown key is ignored, in both stores).
 - **Migration 25 is open until 0.1.14 ships.** Anything that needs another index or column before then goes into migration 25; after the tag it is migration 26.
+
+## Urgent lane, desk and rooms (0.2.0), parked
+
+Found building the urgent lane, the desk and rooms (design: `docs/design/2026-11-17-urgent-desk-and-rooms.md`). The spec's own open items first.
+
+- **A per-moderator break reminder that syncs.** The careful view's counter and break note live in one browser (`localStorage`); a moderator on two machines has two counts. Syncing them would put a
+  count of what a person opened on a server, which the design refuses; if it is wanted, it needs its own design and the person's choice.
+- **Export of Insights.** The page has no export in 0.2.0 (a table of counts and times, no names). A CSV, if asked for, must stay team numbers only.
+- **Unlink for linked accounts.** `cw.people.links` counts only and there is no way to take a link back; a wrong link between two people (a shared device) can only be read as a hint.
+- **A pager integration.** The kit does not wake anyone; round-the-clock cover is the adopter's own on-call tool fed by `report.created` with `urgent: true`. A first-party Opsgenie, PagerDuty or similar
+  adapter is not built.
+- **Welfare is not diagnosed or answered by the kit.** The design refuses to tell the person reported anything; a game's own flow, fed by the event, may. No first-party example of such a flow exists.
+- **Room modes are per process and forgotten on a restart.** A durable or shared mode (several processes, a restart) would need a store method and a design for who may set it where.
+- **The retraction window is the evidence buffer** (15 minutes, 100 lines a room): an older line cannot be taken back, only reported and decided as usual.
+- **Insights `byRule` needs `countSanctionsByRule`** on the store; a custom store without it shows an empty table. The read fetches 90 days whatever the window.
+- **Linked accounts has no `firstLinkedAt`**: the kit holds no link time.
+- **Comments and a thread are plain text only**, 50 entries a report, no editing. Threads of more than that, mentions and notifications are not built.
+- **The break note and the careful view count an opened excerpt once per case**; an appeal's statement opened outside a case is counted but shows no break note.
+- **A real-browser check** of the urgent chip, the strip, the careful view, the Rooms panel and the thread at desktop and 360 px, light and dark.
+- **The Rooms panel's `Refresh` is manual**: the list is read when the panel opens and after a change, not on a timer.
+
+## Names and the preview (0.2.0), parked
+
+Found building the names-and-preview theme, 2026-11. Design: [design/2026-11-17-names-in-reports-and-player-preview.md](../design/2026-11-17-names-in-reports-and-player-preview.md); plan: [2026-11-17-names-and-preview.md](2026-11-17-names-and-preview.md).
+
+- A `previewWords` prop for the hub, so an adopter can preview its own translations (the panel is English and says so).
+- Hover or focus-driven previews of each one-tap button on Simple's card (each states its own effect in one line instead).
+- Telling the reporter when a decision only asks for a new name (the thank-you needs a non-note action).
+- Skipping the AI read for `name` reports, and showing the name itself to the AI.
+- A server-rendered preview route; previews in the Discord bot, Coop and EOS paths.
+- Exporting the panel as a piece for adopters' own pages.
+- Site copy: it flips a promise only after the release is on npm and has run in Moxgate.
+- A replay of a decision with `rename` answers `already` (not the first call's `asked`) once the rename was asked at or after the decision, whether or not the player has renamed since.
+- `PolicyDocs.notices` and `FlaggedReport.excerpt[].noticeText` are typed optional in hub-react and read as "thanked" and "no masked text" when absent; the release prep may make them required.
+- A real-browser check of the panel, the rename row and the appeal choice at desktop and 360 px, light and dark.
+
+
+## Service mode and shared pacing (0.2.0), parked
+
+Found building the service API, `chatwarden serve`, the Docker recipe and shared pacing (design: `docs/design/2026-11-17-any-server-rooms-languages.md`, sections 3 and 15).
+
+- **A real `docker build`.** The Dockerfile is verified by a static test and the C# job in CI; it is built and run for real only once the version is on npm (it installs the packages at the CLI's own version). The maintainer's check, then a smoke job.
+- **Regenerate the recipe at the release.** `examples/service/*` and `examples/service/cases/*` carry the version in the Dockerfile's `ARG`; after the version sync run `UPDATE_GOLDEN=1 npx vitest run packages/http/test/cli.service-golden.test.ts` and copy `cases/standard` over `examples/service`.
+- **The C# sample is not built by the contributors' tests.** A local test checks its paths against `SERVICE_OPENAPI`; the compile and the live run are CI's (`service-csharp`). A local .NET SDK was not available while it was written.
+- **A shared evidence buffer, Postgres and Redis (K14).** Seats, the evidence buffer, the fixed per-seat rate, the mute index and the idempotency table stay in the process, so several service processes need sticky routing by room.
+- **People first seen by another process.** A process learns the people the store holds when it starts; a person first seen by a sibling later is a person of its own there until its next start, so shared pacing does not yet share state for them. A reload on a miss would fix it for every table keyed by person.
+- **Idempotency is in memory.** Ten minutes, 20 000 entries, per process; persisting it needs a table and was judged not worth it for a single-process service.
+- **No per-route key scopes, request signing or mTLS.** One scope of bearer keys; a signature header can be added within `v1` later.
+- **The seat roster is unbounded.** The service keeps the game's seat ids per room to answer `hiddenFor`; a trusted caller can seat without limit. A cap would be a small change.
+- **The service has no appeals or chat-box transport routes**, no webhook `signal` action for non-Node games, and no engine SDKs (K14).
+- **Staff sign-in is the starter's shared token.** `CHATWARDEN_AUTH_MODULE` is the way to your own; no OIDC or per-moderator login ships.
+
+## Rooms, many players and unspaced scripts (0.2.0), parked
+
+Found building contexts, scope, block, phrases, reserved names and unspaced matching (design: `docs/design/2026-11-17-any-server-rooms-languages.md`, section 15 and what the build turned up).
+
+- **Block counts and a staff view of blocks.** Nothing counts how often a person is blocked and no staff screen lists blocks (a block is private to the pair; the game may ask `between` only). If it is wanted it needs a signal and its own design.
+- **Per-context ladders and reasons.** A context overrides only the chat-time sections; the ladder, durations, reporting reasons, appeals and names stay one policy. A kids ladder would need a layer-by-context matrix in the store and the hub.
+- **Editing contexts in the hub.** They are declared in code and the hub lists them read-only. An editor would need the stored layer to carry a context, a precedence story in the preview and a way to review a change.
+- **Creator features beyond scope.** Follower-only chat, a creator's own term list and a creator-facing page are not built; a scope only limits which reports a moderator sees and which sanctions they may apply.
+- **A scope on the other routes.** Terms, appeals, the audit trail and the AI are 403 for a scoped moderator until a route opts in with a design for what a scoped read of it means.
+- **Phrases.** A book is the same for everyone in a room: no per-player phrase list, no phrase with a blank to fill, no ordering by use, and no check that a viewer's `phrase.<id>` translation says what the original says (the game owns its catalogue).
+- **Age.** The kit has an account age signal and no age. A game that wants a kids context chosen by a verified age builds that in its own seat code; an age check inside the kit is not planned.
+- **Reserved names are Latin only.** A skeleton keeps `a-z` and `0-9`, so a protected name written in another script has an empty skeleton and is ignored (it is never a key that matches every name). Protecting a name in Cyrillic, Greek, Arabic or an unspaced script needs its own comparison.
+- **Entities have no first-party screen.** The kit records that a clan or guild was named in a report and emits `rename.required` with its `kind` and `ref`; the game's own UI asks the owner. Entity reports are not wired into the Discord, Coop and EOS paths, and the hub has no list of entities or filter by one.
+- **Unspaced terms.** `contains` and `segment` are the only modes; there is no stemming, no script conversion (traditional and simplified Han, kana and romaji are different words) and no spaced non-Latin script (Arabic, Cyrillic, Hebrew). How `Intl.Segmenter` cuts a Thai or Khmer run depends on the ICU data of the Node build, so a boundary can differ between builds; the dry run in the hub is the check.
+- **Match for exceptions.** An exception phrase has no mode; the choice is on terms only. The loader accepts a `matchMode` on a corpus term, but the published community list has no unspaced terms yet.
+- **A real-browser check** of the phrase picker (one layout test runs in a real browser; it does not cover every locale, theme or width), the entity row, the Match choice and the Room contexts list, light and dark.

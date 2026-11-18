@@ -7,6 +7,7 @@ import {
   MAX_REASON_RULES,
   MAX_REPORT_REASONS,
   OTHER_REASON_ID,
+  REPORT_EVIDENCE_URL_MAX,
   REPORT_FLOWS,
   REPORT_GROUP_MAX,
   REPORT_HINT_MAX,
@@ -19,6 +20,15 @@ import {
 } from './reporting.js';
 import type { ReportingSettings, ResolvedReporting } from './reporting.js';
 import { deepFreeze } from './freeze.js';
+import { mergeFilters, resolveFilters } from './filters.js';
+import type { FilterSettings, ResolvedFilters } from './filters.js';
+import { resolveDesk } from './desk.js';
+import type { DeskSettings, ResolvedDesk } from './desk.js';
+import { resolveRooms } from './roomSettings.js';
+import type { ResolvedRooms, RoomsSettings } from './roomSettings.js';
+import { resolveSafety } from './safety.js';
+import type { ResolvedSafety, SafetySettings } from './safety.js';
+import { httpsUrl } from './settingsCheck.js';
 import { mergePace, resolvePace } from './pace.js';
 import type { PaceSettings, ResolvedPace } from './pace.js';
 import { resolveAppeals } from './appeals.js';
@@ -27,6 +37,8 @@ import { resolveNames } from './names.js';
 import type { NameSettings, ResolvedNames } from './names.js';
 import { checkSignalFeeds, resolveSignals } from './signals.js';
 import type { ResolvedSignals, SignalFeeds, SignalSettings } from './signals.js';
+import { resolveContexts } from './contexts.js';
+import type { ContextSettings, ResolvedContexts } from './contexts.js';
 import { ProfileError } from './profileError.js';
 
 /**
@@ -163,7 +175,6 @@ export interface ModerationProfile extends ModerationProfileBase {
   /**
    * How a room paces a player's lines: a least gap between them (`slowModeMs`), a burst limit (`burst`) and no repeats
    * (`duplicateWindowMs`). Every setting is off until set, so a profile without `pace` changes nothing. See {@link PaceSettings}.
-   * @experimental
    */
   pace?: PaceSettings;
   /**
@@ -171,27 +182,49 @@ export interface ModerationProfile extends ModerationProfileBase {
    * only; `feeds` says where counts may be read (the Person page record, the ladder suggestion, the AI read's context, the queue
    * boost) and is editable in the hub. Nothing is unset-only: a profile without `signals` declares no kinds and has no feeds. A signal
    * never acts. See {@link SignalSettings}.
-   * @experimental
    */
   signals?: SignalSettings;
   /**
    * Appeals: whether players may appeal a sanction from its notice, how many a week, and whether the moderator who made the original
    * decision may decide its appeal. Off until set, so a profile without `appeals` changes nothing. See {@link AppealSettings}.
-   * @experimental
    */
   appeals?: AppealSettings;
   /**
    * Names: a profanity pass on the name check, kept evidence of blocked names, required renames, and masking a flagged name in the
    * hub (on by default; it changes only what the hub shows). See {@link NameSettings}.
-   * @experimental
    */
   names?: NameSettings;
+  /**
+   * Chat filters: links, personal info, phrases and caps or repeats, each with an action and the Community Rule it cites. Every block is
+   * off until set, so a profile without `filters` changes nothing. See {@link FilterSettings}.
+   */
+  filters?: FilterSettings;
+  /**
+   * The moderators' desk: staff comments and "ask for a look" (`workflow`), the Insights page (`insights`) and the report surge. All
+   * off until set. See {@link DeskSettings}.
+   */
+  desk?: DeskSettings;
+  /**
+   * Safety: the guidance and the contact line a moderator reads on an urgent case, and the resources a reporter is shown. The kit
+   * routes and surfaces; it never diagnoses or contacts anyone. See {@link SafetySettings}.
+   */
+  safety?: SafetySettings;
+  /**
+   * Rooms under attack: how long a lock or an emergency lasts, what emergency adds, probation for new accounts and unknown ages. See
+   * {@link RoomsSettings}.
+   */
+  rooms?: RoomsSettings;
+  /**
+   * Rules per room, by name: a room tagged `{ context: 'kids' }` at `cw.rooms.seat` runs with that context's chat-time settings
+   * (profanity, pace, filters, phrase-only chat, the least account age) over the profile's. Declared in code only: the stored layer
+   * never holds it and the hub only lists it. A room tagged with a name that is not declared refuses every line. See {@link ContextSettings}.
+   */
+  contexts?: Record<string, ContextSettings>;
 }
 
 /**
  * The AI levels and the casebook switch, as the profile holds them. The level in force is also bounded by the adapter and the
  * maximum level given in code, and is 0 when no adapter is configured.
- * @experimental
  */
 export interface AISettings {
   /** 0 off, 1 read, 2 recommend. Levels 3 and 4 are not set here: the owner takes them through the acting switch (`cw.ai.acting`), apart from the settings. */
@@ -206,7 +239,6 @@ export interface AISettings {
   /**
    * Rule numbers the AI may never act on (level 3), a restrict-only list: it can only take cells away from `aiAutoAct`, never add one. Whole numbers from 1, each once, at most
    * 100. Absent (the default) excludes none. Owner-editable in the hub like the rest of this section.
-   * @experimental
    */
   actExcludeRules?: number[];
 }
@@ -235,14 +267,24 @@ export interface ResolvedProfile extends ModerationProfileBase {
   reporting: ResolvedReporting;
   /** The AI settings in force, every field filled in. */
   ai: AISettings;
-  /** The pace settings in force, every field filled in (`null` is off). @experimental */
+  /** The pace settings in force, every field filled in (`null` is off). */
   pace: ResolvedPace;
-  /** The signal settings in force: the declared kinds merged over the built-ins, the guards filled in, the feeds as given. @experimental */
+  /** The signal settings in force: the declared kinds merged over the built-ins, the guards filled in, the feeds as given. */
   signals: ResolvedSignals;
-  /** The appeal settings in force, every field filled in. @experimental */
+  /** The appeal settings in force, every field filled in. */
   appeals: ResolvedAppeals;
-  /** The name settings in force, every field filled in. @experimental */
+  /** The name settings in force, every field filled in. */
   names: ResolvedNames;
+  /** The filter settings in force, every field filled in (`null` is off). */
+  filters: ResolvedFilters;
+  /** The desk settings in force, every field filled in. */
+  desk: ResolvedDesk;
+  /** The safety settings in force: the guidance (the default when unset), the contact line and the resources. */
+  safety: ResolvedSafety;
+  /** The room settings in force, every field filled in. */
+  rooms: ResolvedRooms;
+  /** The declared contexts, validated, with the labels filled in (`{}` when none). Code only: a stored layer never changes it. */
+  contexts: ResolvedContexts;
 }
 
 /** @deprecated The same as {@link ModerationProfile}, which now has the two fields optional. */
@@ -284,12 +326,17 @@ const TOP_KEYS = [
   'signals',
   'appeals',
   'names',
+  'filters',
+  'desk',
+  'safety',
+  'rooms',
+  'contexts',
   'levels',
   'guidelines',
 ] as const;
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
-const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names'];
+const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms', 'contexts'];
 const AI_KEYS = ['level', 'learn', 'dailyCalls', 'actExcludeRules'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
@@ -459,9 +506,9 @@ function validateGuidelines(v: unknown, path: string): void {
   }
 }
 
-const REPORTING_KEYS = ['flow', 'reasons', 'thanks'] as const;
-const REASON_KEYS = ['id', 'label', 'hint', 'group', 'rules', 'asksNote', 'enabled'] as const;
-const REASON_OPTIONAL: readonly string[] = ['hint', 'group', 'rules', 'asksNote', 'enabled'];
+const REPORTING_KEYS = ['flow', 'reasons', 'thanks', 'evidenceUrl'] as const;
+const REASON_KEYS = ['id', 'label', 'hint', 'group', 'rules', 'asksNote', 'enabled', 'urgent', 'thanks', 'showResources'] as const;
+const REASON_OPTIONAL: readonly string[] = ['hint', 'group', 'rules', 'asksNote', 'enabled', 'urgent', 'thanks', 'showResources'];
 
 /** A line of text of `min` to `max` characters (not blank when `min` is 1). */
 function lineOf(v: unknown, path: string, min: 0 | 1, max: number): void {
@@ -501,6 +548,7 @@ function validateReporting(v: unknown, path: string): void {
   const rep = obj(v, path, REPORTING_KEYS, REPORTING_KEYS);
   if (Object.hasOwn(rep, 'flow')) oneOf(rep['flow'], `${path}.flow`, REPORT_FLOWS, "must be 'one_tap', 'reason_first' or 'reason_required'");
   if (Object.hasOwn(rep, 'thanks')) lineOf(rep['thanks'], `${path}.thanks`, 1, REPORT_THANKS_MAX);
+  if (Object.hasOwn(rep, 'evidenceUrl') && rep['evidenceUrl'] !== null) httpsUrl(rep['evidenceUrl'], `${path}.evidenceUrl`, REPORT_EVIDENCE_URL_MAX, true);
   if (!Object.hasOwn(rep, 'reasons')) return;
 
   const rp = `${path}.reasons`;
@@ -526,7 +574,8 @@ function validateReporting(v: unknown, path: string): void {
         if (!positiveInt(n)) fail(`${ip}.rules[${j}]`, 'must be a whole rule number from 1');
       });
     }
-    for (const key of ['asksNote', 'enabled'] as const) {
+    if (Object.hasOwn(reason, 'thanks') && reason['thanks'] !== null) lineOf(reason['thanks'], `${ip}.thanks`, 1, REPORT_THANKS_MAX);
+    for (const key of ['asksNote', 'enabled', 'urgent', 'showResources'] as const) {
       if (Object.hasOwn(reason, key) && typeof reason[key] !== 'boolean') fail(`${ip}.${key}`, 'must be true or false');
     }
   });
@@ -582,6 +631,11 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   if (Object.hasOwn(p, 'signals')) resolveSignals(p['signals'] as SignalSettings, 'profile.signals');
   if (Object.hasOwn(p, 'appeals')) resolveAppeals(p['appeals'] as AppealSettings, 'profile.appeals');
   if (Object.hasOwn(p, 'names')) resolveNames(p['names'] as NameSettings, 'profile.names');
+  if (Object.hasOwn(p, 'filters')) resolveFilters(p['filters'] as FilterSettings, 'profile.filters');
+  if (Object.hasOwn(p, 'desk')) resolveDesk(p['desk'] as DeskSettings, 'profile.desk');
+  if (Object.hasOwn(p, 'safety')) resolveSafety(p['safety'] as SafetySettings, 'profile.safety');
+  if (Object.hasOwn(p, 'rooms')) resolveRooms(p['rooms'] as RoomsSettings, 'profile.rooms');
+  if (Object.hasOwn(p, 'contexts')) resolveContexts(p['contexts'] as Record<string, ContextSettings>, 'profile.contexts');
 
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
   oneOf(prof['mode'], 'profile.profanity.mode', PROFANITY_MODES, "must be 'allow', 'star' or 'refuse'");
@@ -698,6 +752,11 @@ function finalize(value: unknown): ResolvedProfile {
     setOwn(copy, 'signals', resolveSignals(copy['signals'] as SignalSettings | undefined, 'profile.signals'));
     setOwn(copy, 'appeals', resolveAppeals(copy['appeals'] as AppealSettings | undefined, 'profile.appeals'));
     setOwn(copy, 'names', resolveNames(copy['names'] as NameSettings | undefined, 'profile.names'));
+    setOwn(copy, 'filters', resolveFilters(copy['filters'] as FilterSettings | undefined, 'profile.filters'));
+    setOwn(copy, 'desk', resolveDesk(copy['desk'] as DeskSettings | undefined, 'profile.desk'));
+    setOwn(copy, 'safety', resolveSafety(copy['safety'] as SafetySettings | undefined, 'profile.safety'));
+    setOwn(copy, 'rooms', resolveRooms(copy['rooms'] as RoomsSettings | undefined, 'profile.rooms'));
+    setOwn(copy, 'contexts', resolveContexts(copy['contexts'] as Record<string, ContextSettings> | undefined, 'profile.contexts'));
   }
   return deepFreeze(copy as ResolvedProfile);
 }
@@ -717,6 +776,11 @@ export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
     signals: resolveSignals(p.signals),
     appeals: resolveAppeals(p.appeals),
     names: resolveNames(p.names),
+    filters: resolveFilters(p.filters),
+    desk: resolveDesk(p.desk),
+    safety: resolveSafety(p.safety),
+    rooms: resolveRooms(p.rooms),
+    contexts: resolveContexts(p.contexts),
   };
 }
 
@@ -1037,7 +1101,7 @@ export function defineProfile(p: ModerationProfile): ResolvedProfile {
  * The parts of a profile the hub may edit, and the order they are listed in. Everything else (identity, the written
  * levels, the AI context, profanity handling) stays in code: changing profanity means rebuilding the filter.
  */
-export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names'] as const;
+export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names', 'filters', 'desk', 'safety', 'rooms'] as const;
 export type PolicySection = (typeof POLICY_SECTIONS)[number];
 
 /** One ladder cell as the editor sends it: the label may be left out and is then generated ("Restrict chat 6 hours"). */
@@ -1075,18 +1139,29 @@ export interface PolicyLayer {
   ai?: Partial<AISettings>;
   /**
    * The pace settings: each field is optional and merges onto the profile's (a field left out inherits, `null` turns it off, a value sets
-   * it); `burst` replaces whole. @experimental
+   * it); `burst` replaces whole.
    */
   pace?: PaceSettings;
   /**
    * The signal feeds: only `feeds` may be edited (the kinds and the guards are declared in code). The layer's `feeds` REPLACE the
-   * profile's wholesale, like every other section: a feed left out is off. A feed names declared kinds only. @experimental
+   * profile's wholesale, like every other section: a feed left out is off. A feed names declared kinds only.
    */
   signals?: { feeds?: SignalFeeds };
-  /** The appeal settings: `enabled`, `perPlayerPerWeek` (1 to 20) and `allowSelfReview`. Each is optional and merges onto the profile's. @experimental */
+  /** The appeal settings: `enabled`, `perPlayerPerWeek` (1 to 20) and `allowSelfReview`. Each is optional and merges onto the profile's. */
   appeals?: AppealSettings;
-  /** The name settings: `profanity`, `keepBlocked`, `renames` and `maskInHub`. Each is optional and merges onto the profile's. @experimental */
+  /** The name settings: `profanity`, `keepBlocked`, `renames` and `maskInHub`. Each is optional and merges onto the profile's. */
   names?: NameSettings;
+  /**
+   * The chat filters: each block (`links`, `personalInfo`, `ratio`) is replaced whole when given, `null` turns it off, `phrases` and
+   * `ignore` replace whole, and a field left out inherits the profile's.
+   */
+  filters?: FilterSettings;
+  /** The desk settings: `workflow`, `insights` and the `surge` window. Each is optional and merges onto the profile's. */
+  desk?: DeskSettings;
+  /** The safety settings: `guidance`, `contact` and `resources` (a list replaces the whole list). Each is optional and merges onto the profile's. */
+  safety?: SafetySettings;
+  /** The room settings: `defaultModeMs`, `emergency`, `probation` and `unknownAge`. Each is optional and merges onto the profile's. */
+  rooms?: RoomsSettings;
 }
 
 /** The longest outcome text a layer may set on a guideline tier. */
@@ -1177,6 +1252,10 @@ function layerToOverrides(base: ModerationProfile, layer: unknown): Record<strin
       // Checked on its own so the error names layer.pace..., then merged here so `burst` replaces whole instead of merging by member.
       resolvePace(value as PaceSettings, 'profile.pace');
       setOwn(out, key, mergePace(resolvePace(base.pace, 'profile.pace'), value as PaceSettings));
+    } else if (key === 'filters') {
+      // Checked on its own so the error names layer.filters..., then merged here so a block replaces whole instead of merging by member.
+      resolveFilters(value as FilterSettings, 'profile.filters');
+      setOwn(out, key, mergeFilters(resolveFilters(base.filters, 'profile.filters'), value as FilterSettings, 'profile.filters'));
     } else if (key === 'ladder') setOwn(out, key, ladderOverride(value));
     else if (key === 'guidelines') setOwn(out, key, guidelinesOverride(base, value));
     else setOwn(out, key, value);

@@ -1,4 +1,4 @@
-import { ROLES } from '@chatwarden/core';
+import { isScopeLabel, MAX_SCOPE_LABELS, ROLES } from '@chatwarden/core';
 import type { Role } from '@chatwarden/core';
 import { HttpError } from './errors.js';
 import { PERMISSIONS, resolvePermissions, roleAtLeast } from './permissions.js';
@@ -8,10 +8,16 @@ import type { Authz, KitRequest, KitResponse, RouteParams } from './types.js';
 /** The adopter's auth hook: who is calling, or `null` for nobody. The kit never sees a password or a token. */
 export type Authenticate = (req: KitRequest) => Authz | null | Promise<Authz | null>;
 
+/** A staff scope: 1 to 20 labels of the grammar. Anything else, `null` included, is malformed (only an absent scope is global). */
+const isScopeList = (v: unknown): v is readonly string[] => Array.isArray(v) && v.length >= 1 && v.length <= MAX_SCOPE_LABELS && v.every((label) => isScopeLabel(label));
+
 const isAuthz = (v: unknown): v is Authz => {
   if (typeof v !== 'object' || v === null) return false;
-  const a = v as { actor?: unknown; role?: unknown };
-  return typeof a.actor === 'string' && a.actor.length > 0 && typeof a.role === 'string' && (ROLES as readonly string[]).includes(a.role);
+  const a = v as { actor?: unknown; role?: unknown; scope?: unknown };
+  if (!(typeof a.actor === 'string' && a.actor.length > 0 && typeof a.role === 'string' && (ROLES as readonly string[]).includes(a.role))) return false;
+  if (a.scope === undefined) return true;
+  // The owner is never limited to some rooms: an owner with a scope is a malformed Authz (a bug in the hook), refused rather than trusted either way.
+  return a.role !== 'owner' && isScopeList(a.scope);
 };
 
 /** Check that `authz` is a well-formed caller (no permission needed). A missing or malformed one fails closed: throws 401 `unauthorized`. */

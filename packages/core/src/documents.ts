@@ -53,7 +53,7 @@ export interface ModeratorGuideOptions {
 export interface PolicyJson {
   version: 1;
   /** With `durations` and `customDuration` filled in, so a profile written for 0.1.1 reads back with the two new keys. */
-  profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names'>;
+  profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms'>;
   /** Every rule, retired ones included, in number order. */
   rules: CommunityRule[];
 }
@@ -705,14 +705,28 @@ export function agentBrief(policy: DocumentPolicy): string {
  */
 export function policyJson(policy: DocumentPolicy): PolicyJson {
   const snapshot = checkPolicy(policy);
-  // The AI, pace, signal, appeal and name settings are runtime switches, not policy text: the document tools never carry them.
-  const profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names'> & { ai?: unknown; pace?: unknown; signals?: unknown; appeals?: unknown; names?: unknown } =
+  // The AI, pace, signal, appeal, name, filter, desk, safety and room settings are runtime switches, not policy text (the safety contact line is for staff only): the document tools never carry them.
+  const profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms'> & {
+    ai?: unknown;
+    pace?: unknown;
+    signals?: unknown;
+    appeals?: unknown;
+    names?: unknown;
+    filters?: unknown;
+    desk?: unknown;
+    safety?: unknown;
+    rooms?: unknown;
+  } =
     structuredClone(snapshot.profile);
   delete profile.ai;
   delete profile.pace;
   delete profile.signals;
   delete profile.appeals;
   delete profile.names;
+  delete profile.filters;
+  delete profile.desk;
+  delete profile.safety;
+  delete profile.rooms;
   return { version: 1, profile, rules: snapshot.rules.all() };
 }
 

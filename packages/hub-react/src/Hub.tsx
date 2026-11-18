@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { CaseProvider } from './case/CaseContext.js';
+import { toggleHideExcerpts } from './care.js';
 import { CaseSession, useCaseActions } from './cases.js';
 import type { CommandTarget } from './commands.js';
 import { useHub } from './context.js';
@@ -67,7 +68,6 @@ export interface HubProps {
    * Called with the hub's controller once it exists, and again if it is replaced (a new `client`). Keep it and call
    * `controller.refresh()` to have the hub read its queue now, when your page knows something just changed. The controller is the hub's own:
    * do not `dispose()` it. It is the same headless controller as `@chatwarden/hub-react/headless`, and `refresh` only reads.
-   * @experimental
    */
   onController?: (controller: HubController) => void;
 }
@@ -277,6 +277,7 @@ function CommandWindow({ shortcuts, onClose, onFailed, open }: { shortcuts: bool
     if (target.type === 'go') go(target.route);
     else if (target.type === 'shortcuts') open('shortcuts');
     else if (target.type === 'undo') undo();
+    else if (target.type === 'care') toggleHideExcerpts();
     else void actions.takeNext();
   };
   return <LazyCommandBar shortcuts={shortcuts} onClose={onClose} onChoose={choose} onFailed={onFailed} />;

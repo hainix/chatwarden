@@ -40,8 +40,8 @@ export const SYNTHETIC_TERMS: SyntheticTerm[] = [
       '$zorbak',
       '@zorbak',
       'zorbak,',
-      'zórbák',
-      'ｚｏｒｂａｋ',
+      'z\u00f3rb\u00e1k',
+      '\uff5a\uff4f\uff52\uff42\uff41\uff4b',
       'z0rbak',
     ],
     negative: ['zorba', 'zorbek', 'zorbakian', 'zorbaking', 'szorbak', 'zor bek', 'zorba!'],
@@ -117,6 +117,65 @@ export const SYNTHETIC_TERMS: SyntheticTerm[] = [
 
 /** Exceptions: a phrase containing a term whose match is suppressed. Two shapes, so both word-bounded edges
  *  are exercised: the term first ("tarvo lake") and the term last ("glarn zorbak"). */
+/** A synthetic term in a script written without spaces (Han, Hiragana, Katakana, Thai), with the mode it is matched in (absent: `segment`, the default for such a term). */
+export interface SyntheticUnspacedTerm extends SyntheticTerm {
+  matchMode?: 'segment' | 'contains';
+}
+
+// Terms in scripts written without spaces. Every string is invented: transliterations of the test word zorbak, and two fragments of ordinary place names (an Albanian-sounding Han sequence inside the Chinese name
+// of Albania, and the start of the Thai word for a country) that exist to show a term not hitting inside a longer dictionary word. Each ships lines it must hit and lines it must not hit, in its own script;
+// a negative line must not be blocked by ANY of these terms. How the dictionary segmenter cuts a line moves between ICU versions, so the corpus gate runs on every supported Node.
+export const SYNTHETIC_UNSPACED_TERMS: SyntheticUnspacedTerm[] = [
+  {
+    id: 'syn:han-zorbak',
+    term: '\u4f50\u5c14\u5df4\u514b',
+    language: 'zh',
+    mechanism: 'Han, segment: an unknown term the segmenter splits into single characters, so its edges are always segment edges; a space or a gap inside it ends the run',
+    positive: ['\u4f50\u5c14\u5df4\u514b', '\u4f60\u597d\u4f50\u5c14\u5df4\u514b\u518d\u89c1', '\u4f60\u597d\uff0c\u4f50\u5c14\u5df4\u514b\u3002'],
+    negative: ['\u4f60\u597d\u518d\u89c1', '\u4f50\u5c14\u5df4 \u514b', '\u4f50\u5c14\u5df4'],
+  },
+  {
+    id: 'syn:han-erbani',
+    term: '\u5c14\u5df4\u5c3c',
+    language: 'zh',
+    mechanism: 'Han, segment: the same characters inside the one dictionary word \u963f\u5c14\u5df4\u5c3c\u4e9a do not hit, because the term does not occupy whole segments there',
+    positive: ['\u5c14\u5df4\u5c3c', '\u4f60\u597d\uff0c\u5c14\u5df4\u5c3c\u3002\u518d\u89c1'],
+    negative: ['\u6211\u53bb\u8fc7\u963f\u5c14\u5df4\u5c3c\u4e9a\u65c5\u6e38', '\u963f\u5c14\u5df4\u5c3c\u4e9a'],
+  },
+  {
+    id: 'syn:kata-zorbak',
+    term: '\u30be\u30eb\u30d0\u30af',
+    language: 'ja',
+    mechanism: 'Katakana, segment: a katakana run is one segment, so the term hits as a whole word and not at the start of a longer one',
+    positive: ['\u30be\u30eb\u30d0\u30af', '\u3053\u308c\u306f\u30be\u30eb\u30d0\u30af\u3067\u3059', '\u30be\u30eb\u30d0\u30af\u3001\u30be\u30eb\u30d0\u30af'],
+    negative: ['\u30be\u30eb\u30d0\u30af\u30b9\u30ad\u30fc', '\u3053\u308c\u306f\u30be\u30eb\u30d0\u3067\u3059', '\u30be\u30eb \u30d0\u30af'],
+  },
+  {
+    id: 'syn:hira-zorbak',
+    term: '\u305e\u308b\u3070\u304f',
+    language: 'ja',
+    mechanism: 'Hiragana, segment: read as katakana, so the hiragana and the katakana spelling of one term both hit',
+    positive: ['\u305e\u308b\u3070\u304f', '\u3072\u3089\u304c\u306a\u306e\u305e\u308b\u3070\u304f\u3067\u3059', '\u3053\u308c\u306f\u30be\u30eb\u30d0\u30af\u3067\u3059'],
+    negative: ['\u305e\u308b\u3070\u304b', '\u305e \u308b\u3070\u304f'],
+  },
+  {
+    id: 'syn:thai-zorbak',
+    term: '\u0e0b\u0e2d\u0e23\u0e4c\u0e1a\u0e31\u0e01',
+    language: 'th',
+    mechanism: 'Thai, segment: a term with a vowel sign and a thanthakhat that NFKC keeps, found between words with no space',
+    positive: ['\u0e0b\u0e2d\u0e23\u0e4c\u0e1a\u0e31\u0e01', '\u0e09\u0e31\u0e19\u0e40\u0e2b\u0e47\u0e19\u0e0b\u0e2d\u0e23\u0e4c\u0e1a\u0e31\u0e01\u0e17\u0e35\u0e48\u0e19\u0e31\u0e48\u0e19', '\u0e0b\u0e2d\u0e23\u0e4c\u0e1a\u0e31\u0e01 \u0e0b\u0e2d\u0e23\u0e4c\u0e1a\u0e31\u0e01'],
+    negative: ['\u0e09\u0e31\u0e19\u0e40\u0e2b\u0e47\u0e19\u0e17\u0e35\u0e48\u0e19\u0e31\u0e48\u0e19', '\u0e0b\u0e2d\u0e23\u0e4c \u0e1a\u0e31\u0e01'],
+  },
+  {
+    id: 'syn:thai-prathe',
+    term: '\u0e1b\u0e23\u0e30\u0e40\u0e17',
+    language: 'th',
+    mechanism: 'Thai, segment: the start of the dictionary word \u0e1b\u0e23\u0e30\u0e40\u0e17\u0e28 is not a whole segment of it, so the term does not hit there',
+    positive: ['\u0e1b\u0e23\u0e30\u0e40\u0e17', '\u0e09\u0e31\u0e19 \u0e1b\u0e23\u0e30\u0e40\u0e17 \u0e2a\u0e27\u0e22'],
+    negative: ['\u0e1b\u0e23\u0e30\u0e40\u0e17\u0e28\u0e44\u0e17\u0e22\u0e2a\u0e27\u0e22\u0e07\u0e32\u0e21', '\u0e1b\u0e23\u0e30\u0e40\u0e17\u0e28'],
+  },
+];
+
 export const SYNTHETIC_EXCEPTIONS: SyntheticException[] = [
   { id: 'syn-ex:tarvo-lake', phrase: 'tarvo lake', language: 'en' },
   { id: 'syn-ex:glarn-zorbak', phrase: 'glarn zorbak', language: 'en' },

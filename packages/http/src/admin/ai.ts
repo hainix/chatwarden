@@ -32,19 +32,19 @@ export interface AiUnavailableBody {
  *   cacheHitRate, invalid, learn, stats }`. `state` is `ok`, `paused_budget`, `unavailable` or `off`; `level` is the effective level (the
  *   hub's setting held to the code's `maxLevel`; 0 without an adapter, where `available` is false); `invalid` counts answers core refused by
  *   code since the process started; `stats` is the casebook (`cw.ai.stats()`): totals, rates and a row per rule.
- * - `GET /ai/gates` (`policy.read`, audited as `policy.view`, `@experimental`): the gate dashboard's data, `cw.ai.gates()` as it is: a row per rule and conduct level
+ * - `GET /ai/gates` (`policy.read`, audited as `policy.view`): the gate dashboard's data, `cw.ai.gates()` as it is: a row per rule and conduct level
  *   the profile could ever act on, with each gate's number against its need and whether the cell is open, the reach preview, the counts and the appeals facts.
  *   Read-only and computed on the server from the store and the clock (no query or body can supply a number); no id, no text and no staff ref. `actingAvailable`
  *   is false in this release: nothing here lets the AI act.
- * - `GET /ai/acting` (`policy.read`, audited as `policy.view`, `@experimental`): where acting stands, `{ mode, paused, modeSince, shadowDaysDone, shadowWouldHaveActed, maxLevel }`: numbers,
+ * - `GET /ai/acting` (`policy.read`, audited as `policy.view`): where acting stands, `{ mode, paused, modeSince, shadowDaysDone, shadowWouldHaveActed, maxLevel }`: numbers,
  *   words and booleans, no staff ref. `off` with no AI.
- * - `POST /ai/acting/shadow|start|resume|off` (the OWNER's, fixed in code: the `permissions` option cannot lower them; `@experimental`) and `POST /ai/acting/pause` (`ai.pause`, a senior's,
+ * - `POST /ai/acting/shadow|start|resume|off` (the OWNER's, fixed in code: the `permissions` option cannot lower them) and `POST /ai/acting/pause` (`ai.pause`, a senior's,
  *   lowerable). Bodies: `shadow` and `start` `{ confirm: 'ACT', reason }` (`shadow` from acting needs no word), the rest `{ reason }`; any other key is 400 `forbidden_key`, the actor is the
  *   caller. 200 with the new state, or 409 `wrong_state` (not a state this step starts from, or another process moved it first), `too_early` (shadow has not run its days), `no_appeals`,
  *   `ai_level` (the hub's level is below 2), `acting_unavailable` (no AI, `maxLevel` below 3, `ai.act.enabled: false`, or a store that cannot keep the state), 400 `invalid_request` (a
  *   wrong word, a missing reason). Each transition leaves one `ai.acting` audit row (the sections `['ai']` and the reason; best-effort, after the write); a refusal leaves none. In this
  *   release nothing that acting leads to writes a sanction.
- * - `GET /ai/actions?state&limit&cursor` (`ai.review`, a moderator's by default, not audited on read, `@experimental`): what the AI did or, in shadow, would have done, newest first, `{ items, next }`. Each item is
+ * - `GET /ai/actions?state&limit&cursor` (`ai.review`, a moderator's by default, not audited on read): what the AI did or, in shadow, would have done, newest first, `{ items, next }`. Each item is
  *   the core's `AiActionView` (the step, the times, the person's ref: staff only). `state` is `shadow`, `active`, `confirmed`, `undone` or `all` (the default); `limit` 1..100 (default 50); `cursor` is the
  *   previous `next`. A bad state, limit or cursor is 400 `invalid_query`. In this release every row is `shadow`: nothing was written to a player.
  * - `POST /reports/:id/ai/read` (`reports.decide`, audited `ai.rerun`): "read again". 200 `{ status: 'ready', ai }` when the input has not

@@ -5,7 +5,7 @@ const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : us
 import type { KeyboardEvent } from 'react';
 import type { PlayerReporting, ReportResult } from '@chatwarden/core';
 import { PlayerError } from '../client.js';
-import { untilText } from '../format.js';
+import { clockText, untilText } from '../format.js';
 import { createT, en } from '../i18n.js';
 import type { PlayerT, PlayerText } from '../i18n.js';
 import { ReportDialog } from '../ReportDialog.js';
@@ -15,12 +15,14 @@ import { errorText, Root, useUi } from '../ui.js';
 import type { DialogHostProps, PlayerUiProps, Ui } from '../ui.js';
 import { OptionsButton, OptionsPanel } from './ChatOptions.js';
 import { Composer } from './Composer.js';
+import { PhrasePicker, phraseText } from './PhrasePicker.js';
 import { LineOptions } from './LineOptions.js';
 import { chatReducer, createChatState } from './state.js';
+import type { StateLine } from './state.js';
 import type { ChatClosedWhy, ChatStatus } from './status.js';
 import type { ChatConnection, ChatTransport } from './transport.js';
 import { enChat } from './words.js';
-import { readFrame } from './wire.js';
+import { isForeignHello, readFrame } from './wire.js';
 import type { WireLine, WireRefusal, WireRestriction } from './wire.js';
 
 /** What `onRefused` gets: the reason and the known fields. Never the text. */
@@ -88,7 +90,7 @@ function useChatUi(props: ChatBoxProps): Ui {
 }
 
 interface LineViewProps {
-  line: WireLine;
+  line: StateLine;
   /** The name is shown (the first of a run by one name). */
   first: boolean;
   you: string;
@@ -99,6 +101,7 @@ interface LineViewProps {
   onToggle: (id: string) => void;
   onReport: (line: WireLine) => void;
   onMute: (line: WireLine) => void;
+  onBlock: (line: WireLine) => void;
   register: (id: string, el: HTMLButtonElement | null) => void;
 }
 
@@ -112,10 +115,18 @@ function timeOf(at: number, locale: string, timeZone: string | undefined): { iso
 }
 
 /** One line: "name: text". The name once per run; a screen reader always hears it. Text is a text node, never markup. */
-const LineView = memo(function LineView({ line, first, you, t, locale, timeZone, open, onToggle, onReport, onMute, register }: LineViewProps) {
+const LineView = memo(function LineView({ line, first, you, t, locale, timeZone, open, onToggle, onReport, onMute, onBlock, register }: LineViewProps) {
   const mine = line.mine === true;
   const name = mine ? you : line.name;
   const when = timeOf(line.at, locale, timeZone);
+  // A line a moderator took back: the placeholder, in the line's place. No name, no time, no controls and no tab stop; `aria-live="off"` because the retraction is announced once, by the box's own note.
+  if (line.removed === true) {
+    return (
+      <li className="cw-chat-line cw-chat-line--removed" aria-live="off">
+        <span className="cw-chat-removed">{t('player.chat.removed')}</span>
+      </li>
+    );
+  }
   return (
     <li className="cw-chat-line" data-mine={mine ? 'true' : undefined} title={when === null ? undefined : when.title}>
       {first ? (
@@ -126,9 +137,9 @@ const LineView = memo(function LineView({ line, first, you, t, locale, timeZone,
       ) : (
         <span className="cw-chat-sr">{name}: </span>
       )}
-      <span className="cw-chat-text">{line.text}</span>
+      <span className="cw-chat-text">{line.phrase === undefined ? line.text : phraseText(t, line.phrase, line.text)}</span>
       {when !== null && <time hidden dateTime={when.iso} />}
-      {!mine && <LineOptions t={t} line={line} open={open} onToggle={onToggle} onReport={onReport} onMute={onMute} register={register} />}
+      {!mine && <LineOptions t={t} line={line} open={open} onToggle={onToggle} onReport={onReport} onMute={onMute} onBlock={onBlock} register={register} />}
     </li>
   );
 });
@@ -146,15 +157,18 @@ interface MuteNote {
   /** The refs held when the mute was made: the new one is the entry the next `state` frame adds under this name. */
   before: Set<string>;
   error: PlayerError | null;
-  /** The server answered but changed nothing (the line aged out, or the mute list is full): say so, with no Undo. */
+  /** The server answered but changed nothing (the line aged out): say so, with no Undo. */
   unchanged?: boolean;
+  /** This was a block, not a mute: the words say so. */
+  block?: true;
+  /** The viewer's list is full of blocks: nothing changed, and the words say why. */
+  limit?: true;
 }
 
 /**
  * A moderated chat for one room: the list, one input and Send. Lines are checked by the kit on the server; a refusal is shown to its
  * author only. A restricted player sees `RestrictedChatLine` in place of the input, and gets it back when the restriction ends. Per
  * line there is one quiet control (Report, Mute); the one door at the corner (Chat options) holds the muted players and the standard.
- * @experimental
  */
 export function ChatBox(props: ChatBoxProps) {
   const { transport, room, reporting, maxLines, autoFocus = false, readOnly = false, theme, className, container, returnFocusTo, onOpenRules } = props;
@@ -180,13 +194,15 @@ export function ChatBox(props: ChatBoxProps) {
   const [refusedClosed, setRefusedClosed] = useState<string | null>(null);
   const [, setTick] = useState(0);
   const [openLine, setOpenLine] = useState<string | null>(null);
-  const [reportFor, setReportFor] = useState<WireLine | null>(null);
+  // The line being reported, by id and name only: its text is read from the live list each time, so a line taken back mid-report is no longer quoted.
+  const [reportFor, setReportFor] = useState<{ id: string; name: string } | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [muteNote, setMuteNote] = useState<MuteNote | null>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const controls = useRef(new Map<string, HTMLButtonElement>());
   const doorControl = useRef<HTMLButtonElement | null>(null);
   const panelId = useId();
+  const modeId = useId();
 
   useEffect(() => {
     if (maxLines !== undefined) dispatch({ type: 'maxLines', maxLines });
@@ -205,7 +221,15 @@ export function ChatBox(props: ChatBoxProps) {
     const conn = transportRef.current.open(room, {
       frame: (raw) => {
         const frame = readFrame(raw);
-        if (frame === null) return;
+        if (frame === null) {
+          // A hello of another wire version: this server speaks something the box cannot read. Say so (the offline wording) and stop, rather than wait for a hello that never comes.
+          if (isForeignHello(raw)) {
+            connection.current?.close();
+            dispatch({ type: 'status', status: 'closed', why: 'unsupported' });
+            latest.current.onStatus?.('closed', 'unsupported');
+          }
+          return;
+        }
         if (frame.type === 'hello') {
           setLive(false);
           setSnapshots((n) => n + 1);
@@ -261,17 +285,35 @@ export function ChatBox(props: ChatBoxProps) {
   const serverNow = ui.now() + skew.current;
   useEffect(() => {
     // Look again when the restriction ends (by the server's clock), and when a hold ends.
-    const wait = [until === null ? null : until - (now.current() + skew.current), hold === null ? null : hold - now.current()].filter((ms): ms is number => ms !== null && ms > 0);
+    const wait = [
+      until === null ? null : until - (now.current() + skew.current),
+      hold === null ? null : hold - now.current(),
+      // A mode ends by itself too: look again when it does (the server also says so).
+      state.mode.until === null ? null : state.mode.until - (now.current() + skew.current),
+    ].filter((ms): ms is number => ms !== null && ms > 0);
     if (wait.length === 0) return;
     const id = setTimeout(() => setTick((n) => n + 1), Math.min(Math.max(...wait), MAX_TIMER_MS));
     return () => clearTimeout(id);
-  }, [until, hold, state.lines]);
+  }, [until, hold, state.lines, state.mode.until]);
   // A restricted refusal is the server's word: it holds for a minute whatever the player's clock says (a clock that runs ahead must not
   // hand the input back to a player the server just refused), and from then on the server's `until` decides.
   const active = restriction !== null && (restriction.until === null || restriction.until > serverNow || (hold !== null && hold > ui.now())) ? restriction : null;
   // What the countdown is read against: never past the end, so a held restriction says "in a minute", not "ended".
   const lineNow = (): number => (active === null || active.until === null ? ui.now() : Math.min(ui.now() + skew.current, active.until - 1000));
   const closed = state.closed === null ? refusedClosed : state.closed.why;
+  // The room's mode now: one that has run out by the server's clock is normal even if the frame that says so is still on its way.
+  const mode = state.mode.kind !== 'normal' && state.mode.until !== null && serverNow >= state.mode.until ? ({ kind: 'normal', until: null } as const) : state.mode;
+  const readOnlyByMode = mode.kind === 'normal' ? null : state.readOnly;
+  // A viewer who can still post in a lock (staff: the server sends no `readOnly` for them) is told the lock is for players, not "Chat is locked" above an input that works.
+  const canPostInLock = state.readOnly === null;
+  const modeText =
+    mode.kind === 'locked'
+      ? mode.until === null
+        ? t(canPostInLock ? 'player.chat.lockedForPlayersNoEnd' : 'player.chat.lockedNoEnd')
+        : t(canPostInLock ? 'player.chat.lockedForPlayers' : 'player.chat.locked', { time: clockText(mode.until, ui.locale, ui.timeZone) })
+      : mode.kind === 'emergency'
+        ? [t('player.chat.modeEmergency'), ...(readOnlyByMode === 'new_account' ? [t('player.chat.readOnlyNew')] : [])].join(' ')
+        : '';
 
   const onRefused = (refusal: WireRefusal): void => {
     if (refusal.reason === 'restricted') setRefusedRestriction({ until: refusal.until ?? null, byModerator: refusal.byModerator === true, hold: now.current() + HOLD_MS });
@@ -288,7 +330,7 @@ export function ChatBox(props: ChatBoxProps) {
   const toggleRow = useCallback((id: string): void => setOpenLine((open) => (open === id ? null : id)), []);
   const startReport = useCallback((line: WireLine): void => {
     setOpenLine(null);
-    setReportFor(line);
+    setReportFor({ id: line.id, name: line.name });
   }, []);
 
   const showNote = (note: MuteNote | null): void => {
@@ -299,26 +341,31 @@ export function ChatBox(props: ChatBoxProps) {
   const showNoteRef = useRef(showNote);
   showNoteRef.current = showNote;
 
-  const startMute = useCallback((line: WireLine): void => {
+  const startMute = useCallback((line: WireLine, block = false): void => {
     setOpenLine(null);
     const conn = connection.current;
     if (conn === null) return;
     const before = new Set(current.current.muted.map((m) => m.ref));
     void (async () => {
       try {
-        const answer = await conn.mute({ lineId: line.id }, true);
+        const answer = await (block ? conn.mute({ lineId: line.id }, true, { block: true }) : conn.mute({ lineId: line.id }, true));
         const changed = typeof answer === 'boolean' ? answer : answer.ok;
+        const kind = block ? { block: true as const } : {};
+        if (!changed && typeof answer !== 'boolean' && answer.limit === true) {
+          showNoteRef.current({ name: line.name, before, error: null, limit: true, ...kind });
+          return;
+        }
         if (changed) {
           // The clicked line goes at once, then exactly the lines the answer names (the same ids as the server's `hide` frame, which covers
           // a reconnect in the gap). Never by name: names are not unique.
           const named = typeof answer === 'boolean' || !Array.isArray(answer.hiddenIds) ? [] : answer.hiddenIds.filter((id) => typeof id === 'string');
           dispatch({ type: 'frame', frame: { type: 'hide', ids: [line.id, ...named] } });
-          showNoteRef.current({ name: line.name, before, error: null });
+          showNoteRef.current({ name: line.name, before, error: null, ...kind });
         } else {
-          showNoteRef.current({ name: line.name, before, error: null, unchanged: true });
+          showNoteRef.current({ name: line.name, before, error: null, unchanged: true, ...kind });
         }
       } catch (e) {
-        showNoteRef.current({ name: line.name, before, error: failureOf(e) });
+        showNoteRef.current({ name: line.name, before, error: failureOf(e), ...(block ? { block: true as const } : {}) });
       }
       // The control that had focus is gone with the line: keep focus in the box.
       const at = document.activeElement;
@@ -326,16 +373,18 @@ export function ChatBox(props: ChatBoxProps) {
     })();
   }, []);
 
+  const startBlock = useCallback((line: WireLine): void => startMute(line, true), [startMute]);
+
   const undoRef = muteNote === null ? undefined : state.muted.find((m) => m.name === muteNote.name && !muteNote.before.has(m.ref))?.ref;
   const unmute = (ref: string): void => {
     connection.current?.mute({ ref }, false).catch(() => undefined);
   };
 
-  const sendReport = (line: WireLine, draft: ReportDraft): Promise<ReportResult> => {
+  const sendReport = (lineId: string, draft: ReportDraft): Promise<ReportResult> => {
     const conn = connection.current;
     if (conn === null) return Promise.reject(new Error('closed'));
     // A line that aged out of the room, or one this viewer cannot see, is `not_found`: to the player that is a player who left.
-    return conn.report(line.id, draft).then((result) => (result.ok === false && (result.refused as string) === 'not_found' ? { ...result, refused: 'not_player' } : result));
+    return conn.report(lineId, draft).then((result) => (result.ok === false && (result.refused as string) === 'not_found' ? { ...result, refused: 'not_player' } : result));
   };
 
   const closeOpen = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -354,7 +403,10 @@ export function ChatBox(props: ChatBoxProps) {
   const lines = state.lines;
   const you = t('player.chat.you');
   const status = connectionText(ui, state.status, state.ready, closed);
-  const undo = muteNote !== null && muteNote.error === null && muteNote.unchanged !== true ? muteNote : null;
+  const undo = muteNote !== null && muteNote.error === null && muteNote.unchanged !== true && muteNote.limit !== true ? muteNote : null;
+  const reported = reportFor === null ? undefined : state.lines.find((l) => l.id === reportFor.id);
+  // The one polite announcement of a retraction, with how many lines it took out of view; nothing is announced for lines the box never held.
+  const removedNote = state.retractNote === null ? '' : t('player.chat.removedLive', { count: state.retractNote.count });
 
   return (
     <Root theme={theme} className={className}>
@@ -388,6 +440,7 @@ export function ChatBox(props: ChatBoxProps) {
                     onToggle={toggleRow}
                     onReport={startReport}
                     onMute={startMute}
+                    onBlock={startBlock}
                     register={register}
                   />
                 );
@@ -410,6 +463,13 @@ export function ChatBox(props: ChatBoxProps) {
         </div>
         <div role="status" className={closed === null ? 'cw-chat-conn' : 'cw-chat-conn cw-chat-conn--closed'}>
           {status}
+          {/* A lock or an emergency: one more line in the status above the input (polite, once per change), which is also the input's description. */}
+          {closed === null && modeText !== '' && (
+            <span id={modeId} className="cw-chat-mode">
+              {status === '' ? '' : ' '}
+              {modeText}
+            </span>
+          )}
           {closed !== null && closed !== 'banned' && (
             <>
               {' '}
@@ -424,11 +484,14 @@ export function ChatBox(props: ChatBoxProps) {
           )}
         </div>
         <div role="status" className="cw-chat-note">
+          {/* The one polite announcement of a retraction. */}
+          {removedNote !== '' && <p className="cw-chat-sr">{removedNote}</p>}
           {muteNote !== null && muteNote.error !== null && <p className="cw-chat-failure">{errorText(t, muteNote.error)}</p>}
-          {muteNote !== null && muteNote.unchanged === true && <p className="cw-chat-failure">{t('player.chat.muteUnchanged', { name: muteNote.name })}</p>}
+          {muteNote !== null && muteNote.unchanged === true && <p className="cw-chat-failure">{t(muteNote.block === true ? 'player.chat.blockUnchanged' : 'player.chat.muteUnchanged', { name: muteNote.name })}</p>}
+          {muteNote !== null && muteNote.limit === true && <p className="cw-chat-failure">{t('player.chat.blockLimit')}</p>}
           {undo !== null && (
             <p>
-              {t('player.chat.muted', { name: undo.name })}{' '}
+              {t(undo.block === true ? 'player.chat.blocked' : 'player.chat.muted', { name: undo.name })}{' '}
               <button
                 type="button"
                 className="cw-chat-undo"
@@ -458,6 +521,23 @@ export function ChatBox(props: ChatBoxProps) {
                     until={active.until}
                     byModerator={active.byModerator}
                   />
+                ) : state.phrases !== null ? (
+                  <PhrasePicker
+                    ui={ui}
+                    phrases={state.phrases}
+                    maxLength={state.maxLength}
+                    send={(phrase) => {
+                      const conn = connection.current;
+                      return conn === null || conn.sendPhrase === undefined ? Promise.reject(new Error('closed')) : conn.sendPhrase(phrase);
+                    }}
+                    onDelivered={(line) => {
+                      skew.current = line.at - now.current();
+                      dispatch({ type: 'sent', line });
+                    }}
+                    onRefused={onRefused}
+                    paused={readOnlyByMode !== null && modeText !== ''}
+                    modeLine={modeText === '' ? undefined : modeId}
+                  />
                 ) : (
                   <Composer
                     ui={ui}
@@ -469,6 +549,8 @@ export function ChatBox(props: ChatBoxProps) {
                       dispatch({ type: 'sent', line });
                     }}
                     onRefused={onRefused}
+                    paused={readOnlyByMode !== null && modeText !== ''}
+                    modeLine={modeText === '' ? undefined : modeId}
                   />
                 ))}
               <OptionsButton
@@ -513,8 +595,8 @@ export function ChatBox(props: ChatBoxProps) {
           {...(reporting === undefined ? {} : { reporting })}
           returnFocusTo={() => controls.current.get(reportFor.id) ?? log.current ?? returnFocusTo?.() ?? null}
           targetName={reportFor.name}
-          line={reportFor.text}
-          onSubmit={(draft) => sendReport(reportFor, draft)}
+          {...(reported === undefined || reported.removed === true ? {} : { line: reported.text })}
+          onSubmit={(draft) => sendReport(reportFor.id, draft)}
           onClose={() => setReportFor(null)}
         />
       )}

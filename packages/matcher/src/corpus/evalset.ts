@@ -24,7 +24,7 @@ import {
 // refusal is a CorpusError with a fixed message that never quotes a line, an id or a word from the archive. What a case may *say* is not
 // judged here (no handle, email or number checks: that is the service's `checkCase`); only its shape and its limits are.
 
-/** A line of a case: who said it, what, and whether the word filter stopped it. @experimental */
+/** A line of a case: who said it, what, and whether the word filter stopped it. */
 export interface EvalLineFile {
   who: 'reported' | 'reporter' | 'other';
   text: string;
@@ -32,7 +32,7 @@ export interface EvalLineFile {
   blocked?: boolean;
 }
 
-/** The reference label of a case: the consensus of the reviewers. @experimental */
+/** The reference label of a case: the consensus of the reviewers. */
 export interface EvalExpectFile {
   /** One level, or a band of acceptable levels. */
   severity: ConductLevelName | ConductLevelName[];
@@ -47,10 +47,10 @@ export interface EvalExpectFile {
   injection?: boolean;
 }
 
-/** `ConductLevel` of `@chatwarden/core`, spelled out so this folder needs no runtime import of it. @experimental */
+/** `ConductLevel` of `@chatwarden/core`, spelled out so this folder needs no runtime import of it. */
 export type ConductLevelName = 'banter' | 'rude' | 'hostile' | 'severe';
 
-/** What a case says about itself. Unknown keys are dropped when it is read. @experimental */
+/** What a case says about itself. Unknown keys are dropped when it is read. */
 export interface EvalMeta {
   language?: string;
   source?: 'synthetic' | 'contributed' | 'derived';
@@ -58,7 +58,7 @@ export interface EvalMeta {
   since?: string;
 }
 
-/** The AI eval's `EvalCase` plus an optional `meta` (design 6.10). @experimental */
+/** The AI eval's `EvalCase` plus an optional `meta` (design 6.10). */
 export interface EvalCaseFile {
   id: string;
   /** Any non-empty string: the eval's `CASE_GROUPS` list is advisory. */
@@ -74,7 +74,7 @@ export interface EvalCaseFile {
   meta?: EvalMeta;
 }
 
-/** The manifest of an eval release (6.10): the terms manifest's fields, with counts per language and per group and no matcher gate. `builtAt` is epoch ms. @experimental */
+/** The manifest of an eval release (6.10): the terms manifest's fields, with counts per language and per group and no matcher gate. `builtAt` is epoch ms. */
 export interface EvalManifest {
   schema: 'chatwarden-corpus-manifest/1';
   kind: 'eval';
@@ -88,7 +88,7 @@ export interface EvalManifest {
   files: Record<string, { bytes: number; sha256: string }>;
 }
 
-/** A parsed eval set. `cases` is every case in file order; `byLanguage` holds the same cases by the file they came from. @experimental */
+/** A parsed eval set. `cases` is every case in file order; `byLanguage` holds the same cases by the file they came from. */
 export interface EvalSet {
   manifest: EvalManifest;
   version: string;
@@ -291,7 +291,6 @@ const sameCounts = (a: Record<string, number>, b: Record<string, number>): boole
  * for the manifest, the hashes, the kind, the counts and what the index said it should be, `bad_pack` (stage `validate`) for a case that
  * does not meet the format (a duplicate id, an unknown key, a citation outside the lines, a limit). `expected` is what the index entry
  * says: the manifest's `version` must equal it and its `sequence` must not be above it.
- * @experimental
  */
 export function parseEvalSet(files: ReadonlyMap<string, Uint8Array>, expected?: { version?: string; sequence?: number }): EvalSet {
   try {

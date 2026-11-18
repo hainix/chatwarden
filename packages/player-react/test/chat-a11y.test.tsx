@@ -77,7 +77,8 @@ describe('the log', () => {
     act(() => {
       transport.inject({
         type: 'hello',
-        v: 1,
+        v: 2,
+        mode: { kind: 'normal', until: null },
         epoch: 'other-epoch',
         room: 'lobby',
         you: { name: 'snerp' },
@@ -87,6 +88,7 @@ describe('the log', () => {
         restriction: null,
         lines: [{ id: '1', at: 1, name: 'tarvo', text: 'replayed' }],
         muted: [],
+        phrases: null,
       });
     });
     await waitFor(() => expect(log()).toHaveAttribute('aria-live', 'polite'));
@@ -342,5 +344,50 @@ describe('the report dialog from the box', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(control).toHaveFocus();
+  });
+});
+
+describe('a room under a mode, and a line taken back', () => {
+  it('a locked box passes axe: the input is aria-disabled and read-only, in the tab order, described by the status line', async () => {
+    w.real.rooms.setMode('lobby', 'locked', { forMs: 30 * 60_000 });
+    const { container } = renderUi(box(w.transportFor('snerp')));
+    const input = await screen.findByRole('textbox', { name: 'Message' });
+    expect(input).toHaveAttribute('aria-disabled', 'true');
+    expect(input.getAttribute('aria-describedby')).toBeTruthy();
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the mode line and a retraction are announced in polite status regions, and nothing in the box is assertive', async () => {
+    const transport = w.transportFor('snerp');
+    const { container } = renderUi(box(transport));
+    await screen.findByRole('textbox', { name: 'Message' });
+    w.say('lobby', 'tarvo', 'rude line');
+    const id = (await within(log()).findByText('rude line')) && w.real.rooms.lineStates('lobby')[0]?.lineId;
+    await act(async () => {
+      w.real.rooms.setMode('lobby', 'emergency', { forMs: 30 * 60_000 });
+      w.real.rooms.retract('lobby', id ?? '');
+    });
+    expect(await screen.findByText('Slow mode is on.')).toBeInTheDocument();
+    expect(screen.getByText('A message was removed by a moderator.')).toBeInTheDocument();
+    for (const text of ['Slow mode is on.', 'A message was removed by a moderator.']) {
+      expect(screen.getByText(text).closest('[role="status"]'), text).not.toBeNull();
+    }
+    expect(container.querySelector('[aria-live="assertive"], [role="alert"]')).toBeNull();
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the placeholder is not focusable and is read as one short sentence', async () => {
+    const transport = w.transportFor('snerp');
+    renderUi(box(transport));
+    await screen.findByRole('textbox', { name: 'Message' });
+    w.say('lobby', 'tarvo', 'gone soon');
+    await within(log()).findByText('gone soon');
+    const id = w.real.rooms.lineStates('lobby')[0]?.lineId ?? '';
+    await act(async () => {
+      w.real.rooms.retract('lobby', id);
+    });
+    const placeholder = (await screen.findByText('Message removed by a moderator.')).closest('li') as HTMLElement;
+    expect(placeholder.querySelectorAll('button, a, [tabindex]')).toHaveLength(0);
+    expect(placeholder.textContent).toBe('Message removed by a moderator.');
   });
 });

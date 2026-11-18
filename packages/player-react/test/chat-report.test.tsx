@@ -121,14 +121,14 @@ describe('report', () => {
     await user.click(optionsOf('tarvo'));
     await user.click(within(log()).getByRole('button', { name: 'Report' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Report' }));
-    expect(await screen.findByText(/Thanks\. We got your report\./)).toBeInTheDocument();
+    expect(await screen.findByText(/Thanks for the report. We'll look into it./)).toBeInTheDocument();
     expect(screen.getByText(/You can send 9 more reports today\./)).toBeInTheDocument();
     expect(transport.reports).toHaveLength(1);
   });
 
   it('the thank-you from GET /rules is shown when reporting is given', async () => {
     w.say('lobby', 'tarvo', 'x');
-    const reporting = { flow: 'one_tap' as const, thanks: 'A moderator will look.', reasons: [] };
+    const reporting = { flow: 'one_tap' as const, thanks: 'A moderator will look.', reasons: [], resources: [] };
     const { user } = await join({ reporting });
     await user.click(optionsOf('tarvo'));
     await user.click(within(log()).getByRole('button', { name: 'Report' }));
@@ -236,7 +236,7 @@ describe('report', () => {
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByRole('combobox')).toBeNull();
     await second.user.click(within(dialog).getByRole('button', { name: 'Report' }));
-    expect(await screen.findByText(/Thanks\. We got your report\./)).toBeInTheDocument();
+    expect(await screen.findByText(/Thanks for the report. We'll look into it./)).toBeInTheDocument();
   });
 
   it('draws the dialog into a container when one is given', async () => {

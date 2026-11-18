@@ -1,3 +1,4 @@
+import { isOriginReport } from '../types.js';
 import type { ReportRecord, SanctionKind } from '../types.js';
 import type { AiActingMode } from './acting.js';
 import type { AiActCaps } from './caps.js';
@@ -14,7 +15,6 @@ export const AI_ACT_MAX_AGE_MS = 24 * 3_600_000;
 
 /**
  * When the AI may first act on a report made at `createdAt`: after the hold, which closes the reporter's follow-up window so the AI never acts on half a report.
- * @experimental
  */
 export function dueAt(createdAt: number, holdMs: number): number {
   return createdAt + holdMs;
@@ -22,7 +22,6 @@ export function dueAt(createdAt: number, holdMs: number): number {
 
 /**
  * A keyed hash of an input, as a hex string: the kit's secret is the key, so nobody outside can tell which reports are held back. Injected; the kit passes an HMAC.
- * @experimental
  */
 export type HoldbackHasher = (input: string) => string;
 
@@ -30,7 +29,6 @@ export type HoldbackHasher = (input: string) => string;
  * Whether this report is in the holdback (design 3 ruling 7): a fixed `share` of eligible cases a person decides as at level 2, chosen deterministically from the report id and the
  * kit's secret, so the same report is held back (or not) on every call, in every process and after a restart, and nobody can steer which ones. About `share` of any large set of ids.
  * A `share` of 0 or less holds back none, 1 or more all (the band, 10% to 50%, is held by `ai.act.caps`, not here).
- * @experimental
  */
 export function isHeldBack(reportId: string, hasher: HoldbackHasher, share: number): boolean {
   if (!(share > 0)) return false;
@@ -51,7 +49,6 @@ export interface ActStep {
  * Which ceiling a step breaks, or null (design 4.2 check 7): the kind first (a ban, an area ban, a note and no step at all are not a kind the AI may act with), then the length
  * (a warning has none, a chat restriction is more than 0 and at most 24 hours), then the cited line by the reported person. The last is `assertWithinCeilings`, the one function the
  * level 2 pre-fill calls too, so "never beyond 24 hours, never a ban, never without a line by the reported person" is one piece of code used twice.
- * @experimental
  */
 export function actCeiling(step: ActStep | null, cited: readonly string[], own: ReadonlySet<string>): 'ceiling_kind' | 'ceiling_duration' | 'ceiling_evidence' | null {
   if (step === null || !(AI_ACT_KINDS as readonly string[]).includes(step.kind)) return 'ceiling_kind';
@@ -66,8 +63,8 @@ export function actCeiling(step: ActStep | null, cited: readonly string[], own: 
 }
 
 /** A report nobody filed (the watch release's, or one with no reporter). Level 3 never acts on one (design 4.2 check 10). */
-export function isSystemReport(report: Pick<ReportRecord, 'reporterSubject'>): boolean {
-  return (report as { origin?: unknown }).origin === 'watch' || report.reporterSubject === '';
+export function isSystemReport(report: Pick<ReportRecord, 'reporterSubject'> & { origin?: ReportRecord['origin'] }): boolean {
+  return isOriginReport(report) || report.reporterSubject === '';
 }
 
 /** What the caps read (design 4.2 check 11): the actions in the last hour and the UTC day, and the unreviewed ones. */
@@ -85,7 +82,6 @@ export interface CapUse {
 /**
  * The blast-radius caps and review debt (ruling 10): the first of `cap_hour` (the hour already holds `perHour` actions), `cap_day`, `review_debt` (more than `reviewDebtMax`
  * unreviewed, or the oldest older than `reviewWithinMs`) that holds, else null. At the number is the limit: the 11th in an hour is the one refused, and 25 unreviewed is not yet debt.
- * @experimental
  */
 export function capsOk(use: CapUse, caps: Pick<AiActCaps, 'perHour' | 'perDay' | 'reviewDebtMax' | 'reviewWithinMs'>, now: number): 'cap_hour' | 'cap_day' | 'review_debt' | null {
   if (use.hour >= caps.perHour) return 'cap_hour';
@@ -132,7 +128,6 @@ export interface ActFacts {
 
 /**
  * The first refusal for these facts, in the order of design 4.2, or null when every known check holds. The codes are closed; none carries text.
- * @experimental
  */
 export function preFilter(f: ActFacts, caps: Pick<AiActCaps, 'perHour' | 'perDay' | 'reviewDebtMax' | 'reviewWithinMs' | 'holdMs'>, now: number): AiActRefusal | null {
   // 1. Acting is on (or shadow), not paused, and appeals exist.

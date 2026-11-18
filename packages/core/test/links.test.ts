@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createChatwarden } from '../src/chatwarden.js';
 import type { Chatwarden } from '../src/chatwarden.js';
@@ -278,17 +277,5 @@ describe('cw.links and retention', () => {
     const { cw } = await setup();
     await expect(cw.purge()).resolves.toBeDefined();
     expect(cw.links.list('coop-report')).toEqual([]);
-  });
-});
-
-describe('cw.links is documented as experimental', () => {
-  it('links and its members are tagged @experimental in the facade source', () => {
-    const src = readFileSync(new URL('../src/chatwarden.ts', import.meta.url), 'utf8');
-    const docAbove = (signature: string): string => {
-      const at = src.indexOf(`\n  ${signature}`);
-      expect(at, signature).toBeGreaterThan(-1);
-      return src.slice(src.lastIndexOf('/**', at), at);
-    };
-    expect(docAbove('links: {')).toContain('@experimental');
   });
 });

@@ -43,7 +43,6 @@ import type { AiPathPatch, AiStore, ReadEnd, WorkerEnv } from './worker.js';
 
 /**
  * What the code decides about the AI. The adapter and the ceilings on level and spend are code, never the hub's.
- * @experimental
  */
 export interface AiOptions {
   /** The model behind the reads. Runs on the server only. */
@@ -51,7 +50,6 @@ export interface AiOptions {
   /**
    * The highest level the hub may switch to. Default 2. 3 (act, within the gates) needs `act`; 4 (watch) needs `watch` and `act`. The hub's own level stays 0 to 2: levels
    * 3 and 4 are reached through the owner's acting switch (`cw.ai.acting`), never through the settings.
-   * @experimental
    */
   maxLevel?: 1 | 2 | 3 | 4;
   /** The most the AI may spend in a UTC day, in micro-dollars (1 = $0.000001). Default 1 000 000 ($1.00). Set in code: a hub cannot raise it. */
@@ -73,16 +71,14 @@ export interface AiOptions {
   /**
    * Level 3, in code (design 6.3). Without it, and with `maxLevel` below 3, nothing here exists. In this release the AI only runs in SHADOW: every step of acting runs and
    * records "would have acted"; nothing is written to a player.
-   * @experimental
    */
   act?: AiActOptions;
-  /** Level 4 (watch), design only in this release: required for `maxLevel: 4` and nothing more. @experimental */
+  /** Level 4 (watch), design only in this release: required for `maxLevel: 4` and nothing more. */
   watch?: { disclosed: true };
 }
 
 /**
  * The code-side options of level 3 (acting). Every number is held inside its band (design 5.4) or `createChatwarden` throws; the hub cannot move any.
- * @experimental
  */
 export interface AiActOptions {
   /** Default true when `act` is given. False is the kill switch in code: the acting state is pinned to `off`, whatever the store says. */
@@ -120,7 +116,6 @@ export interface AiStatus {
 
 /**
  * One AI action as the hub lists it (design 6.3). `state` is `shadow` for "would have applied" (nothing was written to a player). Carries a person ref: staff only, never a player.
- * @experimental
  */
 export interface AiActionView {
   reportId: string;
@@ -145,7 +140,6 @@ export interface AiActionView {
 
 /**
  * `cw.ai.actions`: read-only in the shadow release (confirming and undoing arrive with acting).
- * @experimental
  */
 export interface AiActionsFacade {
   /** Newest first. `state` is one of the four states an action can be viewed in, or `all` (the default). `after` is the cursor of the last row of the previous page. Never throws. */
@@ -250,7 +244,6 @@ export type AiReadAgain =
 /**
  * `cw.ai`. Every method is safe to call at any time: with the AI off, without an adapter or with a failing provider or store it
  * answers as if there were no AI (null, an empty map, `'off'`), and never throws.
- * @experimental
  */
 export interface AiFacade {
   /** The effective level now: what is read and recommended, 0 to 2. Levels 3 and 4 are {@link AiFacade.effectiveLevel}. */
@@ -316,7 +309,6 @@ export interface AiFacade {
 
 /**
  * What `cw.ai.gates()` answers (design 6.3). Every field is a number, a boolean, null or a fixed word: no identifier, no text, no report id.
- * @experimental
  */
 export interface AiGatesView {
   version: 1;
@@ -337,7 +329,6 @@ export interface AiGatesView {
 /**
  * One cell of {@link AiGatesView}. `excluded` is true for a rule the owner said the AI may never act on (`ai.actExcludeRules`): it is shown, with its
  * numbers, and never open.
- * @experimental
  */
 export type AiGateCell = AiCellGate & { reach: AiReach[]; counts: AiCellCounts; appeals: AiAppealFacts; actsToday: number; excluded: boolean };
 

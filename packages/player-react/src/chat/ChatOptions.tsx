@@ -44,8 +44,9 @@ export function OptionsPanel({ t, id, muted, summary, onUnmute, onOpenRules }: O
           {muted.map((m) => (
             <li key={m.ref}>
               <span className="cw-chat-text">{m.name}</span>
-              <button type="button" className="cw-btn cw-chat-optact" aria-label={t('player.chat.unmuteName', { name: m.name })} onClick={() => onUnmute(m.ref)}>
-                {t('player.chat.unmute')}
+              {m.block === true && <span className="cw-chat-panel-note">{t('player.chat.blockedTag')}</span>}
+              <button type="button" className="cw-btn cw-chat-optact" aria-label={t(m.block === true ? 'player.chat.unblockName' : 'player.chat.unmuteName', { name: m.name })} onClick={() => onUnmute(m.ref)}>
+                {t(m.block === true ? 'player.chat.unblock' : 'player.chat.unmute')}
               </button>
             </li>
           ))}

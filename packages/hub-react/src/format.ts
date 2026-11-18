@@ -9,7 +9,6 @@ export const PERSON_TAG_LENGTH = 8;
 
 /**
  * The short tag for a person: the first 8 characters of their ref.
- * @experimental
  */
 export function personTag(ref: string): string {
   return Array.from(ref).slice(0, PERSON_TAG_LENGTH).join('');
@@ -26,7 +25,6 @@ function safeLocale(locale: string): string {
 /**
  * "5 minutes ago", "3 days ago", in the locale. Under a minute, and any time in the future (a clock that is a little off),
  * reads as the locale's word for now ("now" in English): `numeric: 'auto'` gives it.
- * @experimental
  */
 export function relativeTime(at: number, now: number, locale: string): string {
   const rtf = new Intl.RelativeTimeFormat(safeLocale(locale), { numeric: 'auto' });
@@ -39,7 +37,6 @@ export function relativeTime(at: number, now: number, locale: string): string {
 
 /**
  * A date and time for a tooltip: `Jan 15, 2027, 8:00 AM`. Pass a time zone in tests; the default is the viewer's.
- * @experimental
  */
 export function absoluteTime(at: number, locale: string, timeZone?: string): string {
   return new Intl.DateTimeFormat(safeLocale(locale), {
@@ -51,7 +48,6 @@ export function absoluteTime(at: number, locale: string, timeZone?: string): str
 
 /**
  * An elapsed time in the largest whole unit up to days: `<1m`, `5m`, `2h`, `3d`.
- * @experimental
  */
 export function formatDuration(ms: number, locale: string): string {
   const loc = safeLocale(locale);
@@ -80,7 +76,6 @@ export type WaitTone = 'fresh' | 'aging' | 'stale';
 
 /**
  * How worried to look about a wait: under an hour is fresh, under a day aging, a day or more stale.
- * @experimental
  */
 export function waitTone(ms: number): WaitTone {
   if (ms < HOUR) return 'fresh';

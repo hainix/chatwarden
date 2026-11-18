@@ -70,8 +70,8 @@ describe('Chat options', () => {
   it('an empty list says so', async () => {
     const { user } = await join();
     await user.click(control());
-    expect(within(panel()).getByText('You have not muted anyone.')).toBeInTheDocument();
-    expect(within(panel()).getByText('Muted players')).toBeInTheDocument();
+    expect(within(panel()).getByText('You have not muted or blocked anyone.')).toBeInTheDocument();
+    expect(within(panel()).getByText('Muted and blocked players')).toBeInTheDocument();
     expect(within(panel()).queryByRole('list')).toBeNull();
   });
 
@@ -103,7 +103,7 @@ describe('Chat options', () => {
   it('Escape closes and returns focus to the control', async () => {
     const { user } = await join();
     await user.click(control());
-    within(panel()).getByText('Muted players').focus();
+    within(panel()).getByText('Muted and blocked players').focus();
     await user.keyboard('{Escape}');
     expect(panel()).toBeNull();
     expect(control()).toHaveFocus();

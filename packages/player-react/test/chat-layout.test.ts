@@ -18,7 +18,7 @@ const HARNESS = `
 import { createRoot } from 'react-dom/client';
 import { ChatBox } from './src/chat/ChatBox';
 window.__mount = (config) => {
-  const hello = { type: 'hello', v: 1, epoch: 'e', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, summary: 'Trash talk is part of the game.', restriction: null, lines: config.lines, muted: config.muted || [] };
+  const hello = { type: 'hello', v: 2, mode: { kind: 'normal', until: null }, epoch: 'e', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, summary: 'Trash talk is part of the game.', restriction: null, lines: config.lines, muted: config.muted || [] };
   const transport = {
     open(room, events) {
       events.status('connecting');

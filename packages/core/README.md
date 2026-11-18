@@ -110,28 +110,30 @@ For the moderators' screens and the player's notices, mount the routes in
 
 | Part | What it is for |
 | --- | --- |
-| `cw.rooms` | `seat`, `seatConnection`, `unseat`, `close`: who is in which seat of which room. `setPace(roomId, pace)` and `pace(roomId)` (`@experimental`) give one room its own slow mode, burst limit and repeat rule, in this process only. See "Slow mode and flood control". |
-| `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes. `restricted(who)` says whether a person is chat-restricted, for typing indicators; `restrictedBySubject(subject)` (`@experimental`) says the same for a subject id from `cw.rooms.subjectAt`, so a server that keeps a connection open need not keep the player's key to ask again. |
+| `cw.rooms` | `seat`, `seatConnection`, `unseat`, `close`: who is in which seat of which room. `setPace(roomId, pace)` and `pace(roomId)` give one room its own slow mode, burst limit and repeat rule, in this process only. See "Slow mode and flood control". |
+| `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes; `hiddenFor(room, senderSeat)` lists the seats it is false for, at a cost of the people who muted or blocked the sender rather than the seats in the room. `restricted(who)` says whether a person is chat-restricted, for typing indicators; `restrictedBySubject(subject)` says the same for a subject id from `cw.rooms.subjectAt`, so a server that keeps a connection open need not keep the player's key to ask again. |
 | `cw.mutes` | A player mutes another player for themselves only. |
-| `cw.signals` | `@experimental`. What your game records about a player, counted by distinct source: `record`, `counts`, `kinds`, `boosted`, `forRecord`. See "Signals". |
+| `cw.signals` | What your game records about a player, counted by distinct source: `record`, `counts`, `kinds`, `boosted`, `forRecord`. See "Signals". |
 | `cw.reports` | `submit` and `addDetail` (players; see "Reporting settings"), `list`, `get` and `reporterRecord` (staff). `reporterRecord(person)` is how the reports a person filed stand: `{ reports, open, actioned, dismissed, badFaith, suspendedUntil, reasonMatched, reasonDecided, accuracy }`. `reporterAccuracy(people)` is how often each person's recent reports turned out to be unfounded (see "Reporter accuracy"). |
 | `cw.decide(input)` | A moderator closes a report and writes the sanctions and notices in one transaction. Safe to send twice. `reason` is required, except for a `no_action` with no actions (a one-click dismissal): leave it out and the standard reason `NO_ACTION_DEFAULT_REASON` (`No action needed`) is stored. |
 | `cw.sanctions` | `apply` and `revoke`, for a moderator who acts without a report. `forPerson(subject)` and `list({ cursor?, limit?, source? })` (staff) read sanctions as `SanctionGroupView`s: one per group, built from the person's own row, so no IP, hash or stored value is in them. |
-| `cw.blocked` | `list({ days })` and `countsByTerm({ days })` (staff), with `days` 1, 7 or 30: the lines the slur filter blocked, with the raw text, and the strikes per term. `names({ days })` (`@experimental`) lists the blocked names kept as evidence with `names.keepBlocked`. |
-| `cw.reports.dismissMany(input)` | Staff, `@experimental`. "Nothing wrong here" for every open report about one person (`scope: { person }`, merged aliases included) or from one reporter (`scope: { reporter }`) in one call: at most 200 (`BULK_DISMISS_MAX`), `more: true` when there are more. Each report is closed like a single `no_action` decision with no actions and the standard reason (its own transaction, its own `report.closed` event); a bulk never marks bad faith and never counts toward a suspension. A case another moderator holds is skipped and counted unless `ignoreClaims`; `dryRun` counts and writes nothing. It writes no audit row: the staff layer does. Safe to run again. |
+| `cw.blocked` | `list({ days })` and `countsByTerm({ days })` (staff), with `days` 1, 7 or 30: the lines the slur filter blocked, with the raw text, and the strikes per term. `names({ days })` lists the blocked names kept as evidence with `names.keepBlocked`. |
+| `cw.reports.dismissMany(input)` | Staff. "Nothing wrong here" for every open report about one person (`scope: { person }`, merged aliases included) or from one reporter (`scope: { reporter }`) in one call: at most 200 (`BULK_DISMISS_MAX`), `more: true` when there are more. Each report is closed like a single `no_action` decision with no actions and the standard reason (its own transaction, its own `report.closed` event); a bulk never marks bad faith and never counts toward a suspension. A case another moderator holds is skipped and counted unless `ignoreClaims`; `dryRun` counts and writes nothing. It writes no audit row: the staff layer does. Safe to run again. |
 | `cw.cases` | The team workbench (staff): `claim(person, actor, { takeOver? })` and `release` a soft claim on a person's case (`releaseWhenDone` is what a decision does: it ends the claim only when the person has no other open report, so one case per person is held until its last report is decided), `next(actor, { category?, reason?, rankDownHabitual? })` to claim the oldest open case nobody holds (with `rankDownHabitual`, a case whose open reports all come from habitual false reporters and none has waited 24 hours is served after the ordinary ones, never skipped for good), `holder` / `holders` to read claims, and `view` / `viewers` for who has a case open. A claim lasts 10 minutes from the last beat on your clock, lives in the store (so several server processes on one database agree, and two moderators racing for one case never both win), and is a courtesy: the core never refuses a decision because of one (the HTTP routes do). Viewing is a 30 second hint kept in this process's memory and never stored; it tracks only people with an open report, and one actor keeps at most 20 cases open. A claimer that loses a database lock race to another process is retried (3 attempts) and gets the normal "claimed" answer. |
 | `cw.changes.token()` | A cheap, opaque change token for the queue. It differs after any report filed or decided, sanction applied or revoked, rule gap closed, claim taken, taken over or released, or saved reason changed, and is the same otherwise (a claim heartbeat does not move it). It is kept in the store, so a restart does not rewind it (the in-memory store is the exception: it starts again at "0"). |
 | `cw.reasons` | Saved decision reasons (staff): `list`, `add({ label, text })`, `update(id, patch)` and `setActive(id, active)`. A label is up to 40 characters, a text up to 500 (counted as characters, an emoji is one), at most 200 reasons; a label holds no control character, a text none but a newline. |
 | `cw.notices` | A player's pending notices, acknowledgements and "My record". Built so no identifier can leak. |
 | `cw.doors` | `check` a person at the door (login, join) against bans. |
-| `cw.names` | `check(text, opts?)`: may a player use this as a name? (`name_not_allowed`, and `name_profane` with `names.profanity`). `@experimental` since 0.1.9: `flagged`, `requireRename`, `pendingRename`, `renamed`, `renamesEnabled`, `renamesOf`. See "Names". |
-| `cw.appeals` | `@experimental`. Appeals against sanctions: `file`, `mine` (players), `list`, `get`, `decide`, `stats`, `openCount`, `forPerson` (staff). Off until `appeals.enabled`. See "Appeals". |
-| `cw.people` | `canonical`, `aliases`, and `accountIds(subject)` (`@experimental`, staff, server side only): the account ids you passed as `RawWho.accountId` for that person, so a game can find the player to rename. `automation` (`@experimental`, new in 0.1.13): `get(subject)` and `set(subject, { allowed, code?, actor })`, a senior's "do not automate" mark. See "AI levels 3 and 4: the seams and the gate dashboard". |
+| `cw.names` | `check(text, opts?)`: may a player use this as a name? (`name_not_allowed`, and `name_profane` with `names.profanity`). new in 0.1.9: `flagged`, `requireRename`, `pendingRename`, `renamed`, `renamesEnabled`, `renamesOf`. See "Names". |
+| `cw.appeals` | Appeals against sanctions: `file`, `mine` (players), `list`, `get`, `decide`, `stats`, `openCount`, `forPerson` (staff). Off until `appeals.enabled`. See "Appeals". |
+| `cw.people` | `canonical`, `aliases`, and `accountIds(subject)` (staff, server side only): the account ids you passed as `RawWho.accountId` for that person, so a game can find the player to rename. `automation` (new in 0.1.13): `get(subject)` and `set(subject, { allowed, code?, actor })`, a senior's "do not automate" mark. See "AI levels 3 and 4: the seams and the gate dashboard". |
 | `cw.history`, `cw.suggest` | A person's recent record, and what the preset suggests as the next step. |
 | `cw.rules`, `cw.profile`, `cw.limits`, `cw.summary`, `cw.documents` | The rules, standard and numbers in force, and the written code of conduct and guides. `cw.profile` and `cw.summary` are read live: the profile in force is your code's profile with the owner's stored edits on top (see "The editable profile"), so read it when you need it and never keep it. |
 | `cw.policy` | The editable profile: `get` (it also reports `limits`, read only: the chat rate in force and the signals retention), `save`, `preview`, `reset` and `refresh`. The lengths a moderator is offered, the ladder, the first offences, the repeat rule, the area and severe rules and the guideline outcome texts can be edited at runtime and are stored in your store. |
 | `cw.gaps`, `cw.audit` | Rule gaps for the periodic review, and the staff audit trail. |
-| `cw.on(type, listener)` | Events: `report.created`, `report.closed`, `sanction.applied`, `sanction.revoked`, `gap.created`, `auto.restricted`, and, new in 0.1.9, `appeal.created`, `appeal.decided` and `rename.required` (`@experimental`; ids, codes and times only, never a statement, a reason or a name). |
+| `cw.on(type, listener)` | Events: `report.created`, `report.closed`, `sanction.applied`, `sanction.revoked`, `gap.created`, `auto.restricted`, and, new in 0.1.9, `appeal.created`, `appeal.decided` and `rename.required` (ids, codes and times only, never a statement, a reason or a name). |
+| `cw.privacy` | Privacy requests: `find`, `export`, `erase` (a receipt, a dry run, a stated safety remainder) and `statement`. The owner's, and on no player route. See "Privacy requests and legal hold". |
+| `cw.legal` | Legal hold: `hold` a report for a closed code, `release`, `status` and a signed evidence `bundle`; `hold` emits `report.escalated`. See "Privacy requests and legal hold". |
 | `cw.purge`, `cw.ready`, `cw.flush`, `cw.close` | Housekeeping. |
 
 ## Deciding a report
@@ -200,7 +202,7 @@ cw.policy.reset('durations'); // put one section back to the base; reset() puts 
   `'invalid'` when it was read but a setting is not valid (a field from a newer kit, say). A save or a full `reset()` repairs either.
   `layer` is the layer in force: a stored signal feed that can no longer be used (its kind is no longer declared in code, or its window is longer
   than `retention.signalsMs` now allows) is dropped alone, the rest of the layer stays, and `dropped` (`[{ feed, reason }]`, a feed name and a reason
-  code, never a kind or a rule id; `@experimental`) says what went. Send `layer` back to `save` and it is accepted and repairs the stored row.
+  code, never a kind or a rule id) says what went. Send `layer` back to `save` and it is accepted and repairs the stored row.
 - **`save(layer, { version, actor, reason })`** stores the whole layer: a section you leave out goes back to the base. It answers
   `{ ok: true, version, changed }`, `{ ok: false, error: 'conflict' }` for a stale `version` (nothing is written),
   `{ ok: false, error: 'invalid', path }` for a layer that touches a setting that is not editable or would make the profile invalid
@@ -243,7 +245,7 @@ is required: a profile that says nothing about reporting gets the defaults.
   means: the first citable one is the rule a moderator is suggested, and a decision under any of them counts as "matched" for the reporter's
   accuracy. At least one reason must be on, and `other` can be relabelled and re-mapped but not removed or switched off. The defaults, in
   order: **Chat**: `harassment` (Insults or harassment, CR 2), `hate` (Hate, CR 1), `sexual` (Sexual content, CR 3), `threat` (Threats, CR 2),
-  `spam` (Spam or ads, CR 4), `personal_info` (Sharing personal info, CR 2); **Gameplay**: `cheating` (Cheating, CR 5), `griefing` (Throwing or
+  `spam` (Spam or ads, CR 4), `personal_info` (Sharing personal info, CR 2), `name` (Inappropriate name, CR 7); **Gameplay**: `cheating` (Cheating, CR 5), `griefing` (Throwing or
   griefing, CR 6), `afk` (Leaving or AFK, CR 6); then `other` (Something else, asks for a note).
 - **`thanks`**: what the reporter is told afterwards. Default "Thanks for the report. We'll look into it."
 
@@ -287,16 +289,16 @@ const res = await cw.reports.addDetail(reportId, 'seat-1', { reason: 'cheating',
 - **Your own store.** `addReportDetail` and `loadReporterDecisions` are optional on `Store`. Without the first, `addDetail` answers `off`; without the
   second, the accuracy counts are 0. `insertReport` must keep `reportedReason`, and `listReports` must apply the `reason` filter (`null` means none).
 
-## What is experimental in 0.1.8
+## What 0.1.8 added
 
-These may change before 0.2, and are marked `@experimental` in the types: `PaceSettings`, `ResolvedPace`, `resolvePace`, `mergePace`, `checkPace`,
+These are the names 0.1.8 added: `PaceSettings`, `ResolvedPace`, `resolvePace`, `mergePace`, `checkPace`,
 `PACE_SUGGESTIONS`, `cw.rooms.setPace`, `cw.rooms.pace`, `cw.signals` and every signal type (`SignalInput`, `SignalCount`, `SignalSettings`, the feeds,
 `PolicyDropped`, `PolicyLimits`, `PolicyState.limits` and `.dropped`), `SuggestContext.hideSignalText`, `Suggestion.signals`, `signalBoost` in
 `cw.cases.next`, `BUILTIN_SIGNAL_KINDS`, `withMemorySignals`, the `pace` prop of `RestrictedChatLine` and `secondsLeft` in `@chatwarden/player-react`.
 
-## What is experimental in 0.1.9
+## What 0.1.9 added
 
-These may change before 0.2, and are marked `@experimental` in the types: `AppealSettings`, `ResolvedAppeals`, `resolveAppeals`, `cw.appeals` and every appeal type
+These are the names 0.1.9 added: `AppealSettings`, `ResolvedAppeals`, `resolveAppeals`, `cw.appeals` and every appeal type
 (`PlayerAppeal`, `AppealFileResult`, `AppealRefusal`, `AppealDecision`, `AppealDecideResult`, `AppealSummary`, `AppealDetail`, `AppealPage`, `AppealStats`,
 `AppealRuleStats`, `AppealRow`), `normalizeStatement`, `NameSettings`, `ResolvedNames`, `resolveNames`, `cw.names.flagged`, `cw.names.requireRename`,
 `cw.names.pendingRename`, `cw.names.renamed`, `cw.names.renamesEnabled`, `cw.names.renamesOf`, `cw.blocked.names`, `BlockedNameRow`, `cw.people.accountIds`,
@@ -304,11 +306,38 @@ the `appeals` and `names` profile sections, the events `appeal.created`, `appeal
 blocked names and `withdrawNotice`, `withMemoryAppeals` and `withMemoryNames`, and, in the other packages, `AppealDialog`, `nameReasonText` and the
 `appeals` prop of `NoticeQueue` and `MyRecord` in `@chatwarden/player-react`, `appealsRateLimit` and `includeAccounts` in `@chatwarden/http`, and the
 Appeals and Names screens of `@chatwarden/hub-react`. The names a game already used (`cw.names.check` and its reasons, `cw.notices`, `cw.sanctions`) are
-not experimental, but some of their unions are wider now: see "Upgrading to 0.1.9".
+unchanged in contract, but some of their unions are wider now: see "Upgrading to 0.1.9".
+
+Also new in 0.2.0: the `desk`, `safety` and `rooms` profile sections (`DeskSettings`, `ResolvedDesk`, `resolveDesk`, `SurgeSettings`, `SafetySettings`,
+`ResolvedSafety`, `SafetyResource`, `SafetyResourceInput`, `resolveSafety`, `DEFAULT_SAFETY_GUIDANCE`, `RoomsSettings`, `ResolvedRooms`, `resolveRooms`, `EmergencySettings`,
+`ProbationSettings`, `UnknownAge`), the reporting reason fields `urgent`, `thanks` and `showResources`, `reporting.evidenceUrl`, the default `welfare` reason (switched off;
+`threat` is urgent by default), and the retention fields `welfareReportsMs` (30 days, never less than 1 day) and `chatCountsMs` (400 days, never less than 31).
+The vocabulary of this release: the audit actions `report.urgent`, `report.handoff`, `report.comment`, `report.comment_remove`, `report.escalate`, `room.mode`,
+`room.retract` and `insights.view`, the `room` audit target and `roomAuditRef` (a room id that is not a valid audit ref is recorded as `h-` and a keyed hash), and the events
+`report.handoff`, `case.escalated` (the desk's second look; the legal hold stays `report.escalated`), `room.mode`, `line.retracted` and `insights.digest` (`InsightsDigest`, `RoomMode`,
+`ROOM_MODES`). `report.created` now carries `urgent` and always a `reportedReason` (`string | null`).
+The store side: `StoredReport` gains optional `urgent` and `evidenceRef`; `ReportRecord` returns them, the hand-off and escalation fields (`handoffAt`, `handoffBy`, `escalatedTo`,
+`escalatedBy`, `escalatedAt`) and now always `reportedReason` and `detailAt` (a custom `Store` must supply them). `OpenReportQuery` and `ReportListQuery` take `urgent`. The optional
+`Store` methods `setReportUrgent`, `setHandoff`, `setEscalation`, `countOpenUrgent`, `countOpenEscalated`, `insertComment`, `listComments`, `deleteComment`, `countComments`,
+`purgeReportsByReason`, `addChatCounts`, `chatCounts`, `purgeChatCounts` and `insightRows` (with `CommentRow`, `ChatDayRow`, `InsightRow`, `COMMENTS_PER_REPORT_MAX`) back the urgent lane,
+the staff thread and Insights; `purgeReports` also deletes the staff comments of the reports it deletes.
+The urgent lane: `cw.cases.setUrgent`, `cw.cases.handoff` (`report.handoff`) and `cw.cases.urgentCount` (`CaseWorkflow`, `CaseMarkResult`); `cw.cases.next` serves the oldest free urgent case first
+(under the same `category` and `reason`, ignoring `rankDownHabitual` and `signalBoost`, never over a claim); `cw.reports.dismissMany` leaves urgent reports open and counts them in
+`skipped.urgent`; a `welfare` report refuses `bad_faith` and `upheld`, writes no rule gap and is left out of a reporter's accuracy; `retention.welfareReportsMs` deletes welfare
+reports on their own clock (`PurgeResult.welfareReports`).
+The staff workflow (`desk.workflow`, off by default): `cw.comments` (`add`, `list`, `remove`; `CommentService`, `ReportComment`, `COMMENT_MAX`) keeps a staff-only thread on each report (1 to 500 characters, at
+most 50 entries, deleted with the report); `cw.cases.escalate` and `clearEscalation` ask a senior or the owner for a second look (a flag and a thread entry; `case.escalated`; deciding clears it; the claim,
+the queue order and take next are untouched); `cw.cases.askedCount()` and `cw.desk.workflowEnabled()`. `createChatwarden` throws a plain message when the setting is on and the store lacks the thread methods.
+
+Insights (`desk.insights`, off by default): `cw.insights` (`enabled`, `read(days)`, `digest(days)`, `emitDigest(days)`, `flush`) reads how the team is doing over 7, 30 (default for `read`) or 90 days from rows the kit already holds, plus a daily count of lines delivered and refused (`kit_chat_days`: a date and two numbers, written at most once a minute and only while the setting is on; `retention.chatCountsMs` deletes old days and `PurgeResult.chatCounts` counts them). Counts and times only: the median and the 90th percentile of the time to a decision (`null` below 5 decided reports), the longest open wait and its backlog bands, volume by reason, outcome and Community Rule, and reports per 1 000 lines. Never a per-person figure. `partial` is true when the read hit its row cap inside the window or when an open report is older than the rows it took (the longest wait still counts it, the open count does not); `byRule` is `null`, not empty, when the store cannot count sanctions by rule. `computeInsights`, `INSIGHTS_DAYS`, `INSIGHTS_MIN_DECIDED`, `INSIGHTS_MIN_URGENT`, `INSIGHTS_READ_DAYS`, `INSIGHTS_ROW_CAP`, `InsightsResult` and `InsightsBacklog` are exported; `insights.digest` (`InsightsDigest`) is raised by `emitDigest`. The kit has no scheduler: call `emitDigest` (or the Discord feed's `postDigest`) from your own timer.
+
+Room modes (new in 0.2.0): `cw.rooms.setMode(roomId, mode, { forMs? })` puts a room in `normal`, `locked` or `emergency`; `cw.rooms.mode(roomId)` reads it, `cw.rooms.list()` lists up to 500 rooms (tags, seats held, mode, end; no seat id or handle) and `cw.rooms.postingState(roomId, seatId)` says `ok`, `locked` or `new_account` for a chat box. A locked room takes lines from staff only (`cw.chat.accept(roomId, seatId, text, { staff: true })`: the flag is your server's word, never a field of the line); an emergency room paces every player at the stricter of the room's own slow mode and `rooms.emergency.slowModeMs` (30 s) and makes accounts younger than `rooms.emergency.newAccountDays` (7; 0 is off) read-only, an account whose age is unknown following `rooms.unknownAge`. A refused line answers `locked` or `new_account` with `until`. The check runs after the person's own restriction and the length, before pacing, the rate budget and the matcher, so a refused line earns no strike and is not kept. Every mode but normal ends by itself (60 s to 24 h, default `rooms.defaultModeMs`, 30 minutes), per process and in memory like the pace; `room.mode` is raised on every change and expiry; `rooms.close` clears it. A mode is never a sanction. `cw.rooms.retract(roomId, lineId, { allFromAuthor? })` takes a delivered line (or, with `allFromAuthor`, every delivered line still in the buffer by the same person) back for everyone while it is in the evidence buffer (15 minutes, 100 lines a room): the line stays there with its text, flagged `retracted`, a report filed afterwards carries the flag on its excerpt line, a report already filed is not rewritten and a report on a retracted line is still valid; it answers `{ ok: true, lineIds }` or `{ ok: false, refused: 'not_found' }` and raises `line.retracted` (the room, the ids and a time). It is not a sanction: no notice, no strike, nothing said to the author.
+
+Probation, the surge hint, linked accounts and the evidence pointer (new in 0.2.0). `rooms.probation` (off by default) paces accounts younger than `ageDays` at `slowModeMs` or more between lines, whatever the room's own pace says (the stricter wins; the refusal is `probation` with `retryAfterMs` when the floor is what is longer): a pause, not a sanction, so no strike, notice, audit row, signal or record and nothing on "My record". The account age is your `signals.accountAgeDays` hook, asked at most once per person per ten minutes; an age the hook cannot give follows `rooms.unknownAge` (`allow` by default). `desk.surge` (off by default) lets `cw.reports.get(id)` carry `surge: { reports, reporters, windowMinutes, newAccounts, newAccountDays }` when at least `reports` reports reached the person inside `windowMinutes` (`newAccounts` is `null` with no age hook): a hint computed on read from at most 200 reports and 100 reporters, never an event, an order or a reason to set a report aside. `cw.people.links(subject)` answers counts only (`accounts`, `devices`, `merged`, `inForceOnLinked: { ban, area, chat }`: sanctions in force on a merged subject rather than the person's own), never an id, a key, a hash or an address, and never reads IPs; a shared device can link two different people, so it is a hint, not proof. `ReportInput.evidenceRef` (1 to 128 of `A-Za-z0-9_:-`, given by your game's server, never a player) is kept with the report; a bad one is dropped and logged by class and the report is still taken. `cw.reports.get` returns `evidence: { ref, url } | null`, `url` being `reporting.evidenceUrl` (an `https` template with one `{ref}`) with `encodeURIComponent(ref)` filled in (`evidenceLink`).
 
 ## Slow mode and flood control
 
-Optional and off until you set it, `@experimental` until 0.2 and new in 0.1.8. Three checks pace one player's lines in one room: **slow mode**
+Optional and off until you set it, new in 0.1.8. Three checks pace one player's lines in one room: **slow mode**
 (at least `slowModeMs` between lines, 500 to 600 000), a **burst limit** (at most `burst.lines` lines in any `burst.windowMs`: 2 to 100 lines
 in 1 000 to 600 000 ms) and **repeats** (the same line again inside `duplicateWindowMs`, 1 000 to 3 600 000, is refused). Set them in code with
 `overrides.pace`, or the owner sets them in the hub (Settings, Advanced, "Slow mode and flooding"); the stored layer wins over code. The presets set
@@ -351,9 +380,18 @@ console.log(cw.rooms.pace('tournament:final')); // the pace in force there: the 
   what the hub's "Use suggested values" button fills in; nothing applies them by itself. `resolvePace`, `mergePace` and `checkPace` validate and merge.
 - **To try it**, run `examples/tiny-chat` with `CW_DEMO_PACE=1` (a 2 second slow mode) and open the page.
 
+## Shared pacing
+
+Slow mode, the burst limit and repeat refusal (see Slow mode and flood control above) keep their state in the process. With several processes on one store, a player who alternates their lines between two of them is judged by each on its own half. `createChatwarden({ sharedPacing: true })` keeps that state in the store instead, so two processes judge one player's lines together. It is a property of how the game is deployed, not a moderation setting: it is not in the profile or the hub, and off it is the in-memory pacer exactly as before.
+
+- **The store.** It needs four optional methods, which the memory and SQLite stores have: `paceLoad(roomId, who)`, `paceUpdate(roomId, who, fn)` (read, run `fn` once, write, as one atomic step: in SQLite one `BEGIN IMMEDIATE` transaction, so two processes updating one player serialise and no update is lost), `paceDropRoom(roomId)` and `paceSweep(before)`. `createChatwarden` throws a plain message naming the first missing one. The row is `PaceStateRow`: the times of the player's last lines, the 16-character digests of the last eight (never their text), the last flood signal time and `touchedAt`; `who` is the canonical person, or `seat:<id>` for a guest. Migration 26 adds `kit_pace` (swept after an hour, and erased with the person: the privacy export counts the rooms, never the digests).
+- **What it costs.** One indexed read per line in a room where a check is on, one write per accepted line, and nothing at all for a room with every check off. The same pure functions (`decide` and `commitState`) decide for both pacers, and a test runs one script through both and compares every verdict.
+- **A flood is signalled once per burst window** across processes. `cw.rooms.close` drops the room's rows; `cw.purge` sweeps rows nobody touched for an hour and reports them in `PurgeResult.pace` (0 for a store without the methods).
+- **Honest limits.** A check and its commit are two steps, so two processes judging one player's lines in the same millisecond can both pass the check; the commit merges both and the next line is judged on both (the same strength as the in-memory pacer between its own two steps). A store failure fails open: the line goes on and `chatwarden.pace_failed` is logged by class, at most once a minute. `cw.rooms.setPace` overrides stay per process, so with several processes call it in each or rely on the profile's pace. The fixed `rate` window (3 lines per 5 seconds per seat) and the automatic-timeout memory stay in the process. A person first seen by another process after this one started is a person of its own here until the next start, as for every table keyed by person.
+
 ## Signals
 
-Optional, `@experimental` until 0.2 and new in 0.1.8. A signal is one fact your game records about a player ("muted by another player", "kicked from a
+Optional, new in 0.1.8. A signal is one fact your game records about a player ("muted by another player", "kicked from a
 room", "left mid-game"). The kit counts them by distinct source and shows the counts where a profile rule says so. **A signal never acts on its own: it
 never writes a sanction, a mute or a notice, and a person always decides.** Nothing is recorded or shown until you declare kinds and switch a feed on.
 
@@ -414,7 +452,7 @@ console.log(cw.signals.counts(cw.rooms.subjectAt('lobby-7', 'p1') ?? 's_unknown'
 
 ## Appeals
 
-Optional and off until you turn it on, `@experimental` until 0.2 and new in 0.1.9. A player who thinks a sanction was a mistake asks for a second look from
+Optional and off until you turn it on, new in 0.1.9. A player who thinks a sanction was a mistake asks for a second look from
 the notice they were sent. A moderator reads what they wrote and keeps the decision, makes it lighter or removes it, and the player gets a plain message with
 the outcome. Appeals are not a second queue: in the hub they are a view of the Cases screen.
 
@@ -500,7 +538,7 @@ if (waiting !== undefined) {
 
 ## Names
 
-Optional, `@experimental` until 0.2 and new in 0.1.9, except that `cw.names.check` has been here since 0.1.0 and keeps its contract. This part checks a name
+Optional, new in 0.1.9, except that `cw.names.check` has been here since 0.1.0 and keeps its contract. This part checks a name
 more closely, can keep a blocked name as evidence, lets a moderator ask a player to choose a new name, and hides a name the word list flags in the hub.
 
 ```ts
@@ -540,11 +578,12 @@ cw.names.renamed(who);
   per person and 200 an hour overall (in memory, per process), after which the check still answers and keeps nothing more. An allowed name is never stored and a
   name is never logged. Kept names are deleted after 30 days (`retention.blockedNamesMs`) and read by staff with `cw.blocked.names({ days })`. They need a store
   with the blocked-name methods (SQLite, or `withMemoryNames(store)`).
-- **Asking for a new name.** `cw.names.requireRename({ subject, actor, reason, rule? })` is for staff and needs `names.renames`. It writes one notice of kind
+- **Asking for a new name.** `cw.names.requireRename({ subject, actor, reason, rule })` is for staff and needs `names.renames`. A rename always cites a Community Rule: `rule` is required and must be an active whole-number rule (a missing or retired one is `invalid`; there is no default). It writes one notice of kind
   `rename_required` (it names no name, no reason and no excerpt; it is not a sanction, is not on "My record" and needs no acknowledgement) and then emits
   `rename.required`. It answers `{ ok: true, noticeId }` or `{ ok: false, error }` with `error` `off`, `not_found`, `pending` (a request is already waiting) or
   `invalid`. `cw.names.renamesEnabled()` says whether it can work now (the setting is on and the store can release a rename), and `cw.names.renamesOf(subject)`
   lists a person's requests for the hub.
+- **Seeing what a player would read.** `cw.notices.lineText(line)` (staff side) is the text a sanction notice stores for one report excerpt line: the delivered form, or the raw line with only the matched terms starred (all stars when the matcher cannot say where). It is never the raw text of a blocked line.
 - **A game must act on `rename.required` and call `renamed`.** The kit cannot make a game rename anyone. It never learns the new name and never checks that one was
   chosen. Listen for the event (or take it by webhook with `includeAccounts`, see `@chatwarden/http`), find the player with `cw.people.accountIds(event.target)`
   (the account ids you passed as `RawWho.accountId`; a guest has none; server side only), hold them with `cw.names.pendingRename(who)` at login, and call
@@ -557,6 +596,185 @@ cw.names.renamed(who);
 - **Your store.** The blocked-name methods are optional on `Store`. So is `withdrawNotice(id, at)`, which releases a rename notice (it has no sanction group): a
   store without it cannot release a rename, `renamesEnabled()` is `false` and `requireRename` answers `off`. The SQLite store has all of them; the in-memory store
   has `withdrawNotice` built in and the blocked-name methods through `withMemoryNames(store)`.
+
+### Reserved names and entity reports
+
+- **Reserved names.** `names.reserved` (under `overrides`) lists names the game protects (`admin`, `moderator`, `game master`, the first name a staff member plays under): at most 200 entries of 2 to 32 characters. A name that reads as one of them is refused with the third reason `name_reserved`, after `name_not_allowed` and `name_profane`, and it cites `names.reservedRule` (an active Community Rule; default 2). It is compared by `skeleton` over the whole words of the name (`Mod_Anna`, `M0derator` and `game master` match `moderator` and `game master`; `xXmodXx` does not), so a look-alike letter, a digit for a letter and a separator do not hide it. `names.reservedAllow` lists the exact names that pass although they read as a reserved one (a real player who is called like staff; at most 200, compared whole by skeleton). Both are empty until the owner says so, and they are checked on names only, never on chat. The answer never says which entry matched. Keep entries long and specific: a short one such as `mod` makes every name that holds that word (`Mod Squad`, `Mod_Anna`), or its letters spaced out (`M o D`), unavailable, while `Mad`, `Mood` and `xXmodXx` still pass; `reservedAllow` is the cure for a real player caught that way. Matching is Latin-only in 0.2.0: an entry in another script (Han, Cyrillic that does not fold to Latin letters) protects nothing, and the kit says so once in its log (`chatwarden.names_reserved_inert`, with how many and the position of the first, never the entry). `NameSettings` and `ResolvedNames` gain the three keys, `NameReason` gains `name_reserved`, and `checkNameRules` is the validation the profile uses.
+- **A name for an entity.** `cw.names.check(text, { kind: 'entity' })` is the same check for the name of a clan, guild, team, deck, pet or item (`NameKind` is `'player'` or `'entity'`; the default is `'player'`). A blocked entity name is kept as evidence only when the caller passes `who`.
+- **A report about an entity.** `ReportInput.entity` is `{ kind, ref, label }`: `kind` a word of the game's (`^[a-z][a-z_]{0,23}$`), `ref` its opaque id (1 to 64 of `A-Za-z0-9_:-`) and `label` its name (1 to 64 characters). The report is still filed against the owner's seat, so the person is the case; the entity is stored beside it (`StoredReport.entity`, `ReportRecord.entity`, in the privacy registry as `kit_reports.entity_json`) and shown to staff. A malformed entity is refused `entity_invalid` before anything is spent. No event, log line or webhook carries it. The reporting reason `impersonation` (CR 2) ships switched off: the owner turns it on in Settings, Reporting, and it then appears in the report dialog.
+- **A rename for an entity.** `cw.names.requireRename({ ..., entity: { kind, ref } })` asks for a new name for something the player owns. It is an entity rename: the kit writes no notice and sets no pending flag, so it never answers `pending` and may repeat; it emits `rename.required` with the `entity` (a `kind` and a `ref`, never the label), and the game tells the owner in its own UI. Audited like any rename.
+
+### The words of a notice: `@chatwarden/core/notice-copy`
+
+The text a player reads in a notice lives in one small module, so the game's notice card and a hub's preview of it cannot word a notice differently.
+Import it from the subpath (`import { noticeView, NOTICE_WORDS } from '@chatwarden/core/notice-copy'`); it is plain code with no Node module and no React,
+and a bundler that reads `sideEffects: false` takes only this file. It exports `NOTICE_WORDS` (39 keys: 36 notice words and the three restricted-chat words), the English words, keyed as `@chatwarden/player-react` keys
+them: `player.notice.title.warning`, `player.notice.gotIt`, `player.restricted.moderator.until`, and the rest, with `englishWords()` (a copy to spread under your
+own translation) and the types `NoticeWordKey` and `NoticeWords`; `titleKey`, `bodyKey`, `isSanction` and `WARNING_DAYS` (90); `dayText`, `untilText` and `timeLeft`;
+`noticeView(notice, { words, locale, timeZone?, now, record? })`, which returns a `NoticeView` (`kind`, `title`, `body`, `facts`, `refHint`, `linesLabel`, `lines`,
+`mustAcknowledge`, `todo`, `button`, `sanction`) as plain text, with the time passed in; `communityRuleLabel(ref, title?)`, the one place "Community Rule 2: Title"
+is built (`CommunityRules.label` calls it); and `restrictedChatText(say, { until, byModerator, now, locale, timeZone? })`, the one line that stands in place of a chat box that is
+turned off (who did it, until when and how long is left, or that it has ended), which the player kit's `RestrictedChatLine` and a hub's preview both draw. Its three extra words
+(`player.restricted.filter.until`, `player.restricted.filter.noEnd` and `player.restricted.ended`) are in `NOTICE_WORDS` too.
+
+The same subpath carries `planNotices(op, ctx)`: what a moderator's action sends to the player, worked out from the form alone, so a screen can show "What the
+player sees" before the action is taken. `op` is one of `{ op: 'decide', verdict, target, reporter, actions, rename }`, `{ op: 'sanction', kind, durationMs }`,
+`{ op: 'note' }`, `{ op: 'rename', rule }`, `{ op: 'revoke', kind }`, `{ op: 'appeal', outcome, original, to? }` and `{ op: 'dismiss' }` (the types are `NoticeOp`, `PlanAction`
+and `PlanLine`); `ctx` is `{ now, ruleLabel, reporterFeedback, appeals, refCode }` (`PlanContext`). It returns a `NoticePlan`: `notices` (the `PlayerNotice`s the services
+would write, each with its recipient `to`, in the order they are written: people and kinds in the core's order, then the reporter's thank-you, then a rename),
+`effects` (`EffectCode`s: what else changes for the player, for a screen to put into words) and `nothing` (`'note'`, `'dismissal'` or `'direct'`, why no notice is sent).
+The input types have no field for a reason, evidence, a gap note, an actor, a staff reference, a group id, the IP flag, an AI read or an appeal statement. It never
+throws: a malformed op is an empty plan. A test runs the real services over a matrix of decisions, direct sanctions, renames, revokes and appeal decisions and checks
+that what they write equals the plan. `appealReplacementEnd(original, to)` is the end of the sanction a reduction on appeal writes (never later than the original's end);
+the appeals service and the plan share it.
+
+## Chat filters
+
+A small, declarative rule set that sees a chat line after the slur matcher and before profanity (`profile.filters`, an editable policy section). Nothing is
+on until an owner turns a block on, and a filter never writes a strike, a sanction or a timeout. Four blocks, each with an action (`count`, `flag`, `mask`,
+`refuse`) and the Community Rule it cites:
+
+- `links`: a link candidate is found by its shape (a scheme, `www.`, a bare host ending in a link ending, an IPv4 address) and judged against `allow`, `deny`,
+  the built-in invite and shortener packs and `unlisted`. Nothing is fetched or resolved.
+- `personalInfo`: phone numbers, email addresses, card numbers (Luhn), "add me on" lines and, as a heuristic that can only count or flag, a street address.
+- `phrases`: up to 20 rules of patterns written in a fixed vocabulary (a word, `a|b`, `word*`, `*`, `~`), never a regular expression.
+- `ratio`: caps, one character repeated, too many emoji, too many mentions; `mask` softens the line.
+
+A refused author is told the kind (`link`, `personal_info`, `filter`) and the rule, never the matched part. Filters fail open: a throw inside them is logged by class and
+the line goes on. `cw.filters.test(text, candidate?)` tries a line, `cw.filters.check(candidate, lines)` runs candidate settings over recent lines, and
+`cw.filters.stats({ days: 7 | 30 })` reads what the filters did (counts by counter key and applied action, held in memory and written to the store every 30 seconds and on `close()`: a crash loses at most 30 seconds of counts, and the counts are for tuning, not for evidence). A day's rows are kept `retention.filterHitsMs` (90 days, at least 30).
+
+A `flag` files one report with no reporter through `cw.reports.fileSystem({ origin: 'filter', originKey, roomId, target, lineId, reportedReason })`: an ordinary open report (the room's evidence as its excerpt, `reporterPerson` null in the staff views, `report.created` with `origin: 'filter'`) that a person decides, and that touches no reporter machinery (no accuracy, notice, suspension, bulk dismissal or AI act). There is at most one open filter report for a person in a room, and at most `flagCapPerDay` (default 50) filter reports a UTC day across the instance, counted from the store so processes sharing it share the count. It answers `filed`, `open_exists`, `capped`, `no_subject` (a guest) or `off`, and the counters say what came of each flag: `flag`, `flag_capped` or `count`. A `Store` you write yourself needs `addFilterHits`, `listFilterHits`, `purgeFilterHits` and `countOriginReports`, and its `insertReport` answers false for a second open `'filter'` report against one person in one room (SQLite: migration 26, `kit_filter_hits` and the `origin` and `origin_key` columns of `kit_reports`).
+
+**New in 0.2.0:** `FilterSettings`, `LinkSettings`, `PersonalInfoSettings`, `PhraseRuleSettings`, `RatioSettings`, `ResolvedFilters` and its parts,
+`resolveFilters`, `checkFilters`, `mergeFilters`, `overlayFilters`, `FILTER_SUGGESTIONS`, `FILTER_ACTIONS`, `FILTER_LIMITS`, `SHARED_HOSTING_SUFFIXES`,
+`FilterVerdict`, `FilterHit`, `FilterRefusal`, `FilterStats`, `FilterTestResult`, `FilterCheckResult`, `FilterHitRow`, `ReportOrigin`, `SystemReportInput`, `SystemReportResult`, `cw.filters`, `cw.reports.fileSystem`, `ChatServiceDeps.filters` and the three new
+`RefuseReason` values `link`, `personal_info` and `filter` (an exhaustive `switch` over the reasons needs the new cases to compile).
+
+## Room contexts
+
+Rules per room, declared in code (`profile.contexts`, never in the stored layer, never in the hub) and picked by a room tag: `cw.rooms.seat(room, seat, who, handle, { context: 'kids' })`.
+
+```ts
+const cw = await createChatwarden({
+  // ...
+  overrides: {
+    contexts: {
+      kids: { label: 'Kids rooms', profanity: { mode: 'refuse' }, pace: { slowModeMs: 3000 } },
+      whisper: { chat: { minAccountAgeDays: 7 } },
+    },
+  },
+});
+```
+
+A context overrides only the chat-time sections (`CONTEXT_SECTIONS`: `profanity`, `pace`, `chat`, `filters`); the ladder, durations, reporting, appeals, signals and names stay the game's one policy. The precedence for a room is the profile in code, the stored layer, the context, then `cw.rooms.setPace`. A tag the profile does not declare refuses every line `gate` and logs one `chatwarden.context_unknown` per room, so a typo in a kids room fails shut. `chat.minAccountAgeDays` refuses a younger account, a guest or an age the game cannot tell with `account_too_new`. `cw.contexts.names()`, `of(roomId)` and `effective(name | null)` read it. The room tags `context` and `scope` are validated at `seat` (`checkRoomTags`, `RangeError`): at most 8 tags, a key that starts with a letter, a value of at most 64 characters, and a room's `context` and `scope` cannot change while it is open. Names: `ContextSettings`, `ResolvedContexts`, `EffectiveContext`, `CONTEXT_SECTIONS`, `ROOM_TAG_KEYS`, `checkRoomTags`, `resolveContexts`, `RefuseReason` gains `account_too_new`.
+
+### Phrase-only rooms
+
+A room for young players can allow only things the game wrote. Declare the books in code, point a context at one, and tag the room:
+
+```ts
+const cw = await createChatwarden({
+  // ...
+  phrases: { junior: [{ id: 'gg', text: 'Good game!' }, { id: 'help', text: 'Can you help me?', group: 'Ask' }] },
+  overrides: { contexts: { kids: { label: 'Kids rooms', chat: { phrases: 'junior' } } } },
+});
+cw.rooms.seat('room-1', 'seat-1', who, 'Mia', { context: 'kids' });
+cw.chat.acceptPhrase('room-1', 'seat-1', 'gg'); // { deliver: { lineId, text: 'Good game!', phrase: 'gg' } }
+```
+
+- **What it does.** `cw.chat.acceptPhrase(room, seat, id)` runs the accept pipeline without the text steps: the occupant and the gate, a restriction, the room's mode, the context's `minAccountAgeDays`, pace and the fixed rate, then deliver. There is no length check, matcher, filter or profanity step, because a book is trusted text. The line is kept as evidence with `raw` equal to the phrase's text, and `deliver.phrase` carries the id. Typed text in a phrase room (`cw.chat.accept`) is refused `phrases_only` and spends nothing. An id the book lacks is `phrase_unknown`; a room that is not phrase-only answers `gate`. Both are new `RefuseReason` values, so a `switch` that ends in `assertNever` must handle them.
+- **What it checks at start.** A book id is `^[a-z][a-z0-9_-]{0,31}$` (at most `MAX_PHRASE_BOOKS`, 20); a phrase id is `^[A-Za-z0-9_-]{1,32}$` and unique in its book; a book holds at most `MAX_PHRASES_PER_BOOK` (300) phrases of at most `PHRASE_TEXT_MAX` (100) characters, with an optional `group` of at most `PHRASE_GROUP_MAX` (24); no control or bidirectional character; an unknown key is refused. Every phrase is also run through the matcher and every profanity filter in force, and a hit (or a screen that throws) stops the start with a `PhraseBookError` that names the book and the phrase id, never the text. A context that names a book you did not declare stops the start too. `checkPhraseBooks(input, screens?)` is the same check, exported for a service or a test.
+- **Reading the books.** `cw.phrases.names()` lists the declared books and `cw.phrases.book(roomId)` returns the room's phrases (or `null` for a room that is not phrase-only). The kit ships no phrase text: the words and their translations are the game's own (`@chatwarden/player-react` shows a viewer's `phrase.<id>` catalogue entry in place of the text).
+- **Over HTTP.** `POST /rooms/:room/phrases` in `@chatwarden/http` calls it, and `hello.phrases` carries the book to the chat box. See the recipe `docs/recipes/kids-rooms.md`.
+
+### Staff scope
+
+A room can carry one more reserved tag, `scope` (`creator:alice`), and a report stores it (`ReportRecord.scope`, null when the room had none). The staff hook in `@chatwarden/http` may return `scope: string[]` for a caller who may see only those rooms; the reads take it: `cw.reports.list({ scope })`, `cw.reports.get(id, { scope })`, `cw.cases.next(actor, { scope })`, `cw.cases.claim(person, actor, { scope })`, `cw.cases.view(person, actor, scope)`, `cw.cases.inScope(person, scope, { open? })`, `cw.cases.urgentCount(scope)`, `cw.scopedHistory(person, scope)`, `cw.suggest(..., { scope })`, `cw.sanctions.list({ scope })`, `forPerson(person, { scope })` and `revoke(groupId, actor, reason, { scope, within })`, where `within: { kinds, maxDurationMs }` (a scoped moderator's limits) makes a revoke of a sanction outside them throw a `SanctionError` once the group is known to be in scope. The filter is part of the store query (`ReportListQuery.scope`, `OpenReportQuery.scope`, `SanctionListQuery.scope`, `Store.loadReportInScope`, and a `scope` argument on `listReportsByPerson`, `listOpenReportsByPerson` and `countOpenUrgent`), a report with no scope is never matched and an empty list matches nothing. A `Store` you write yourself must apply it: `test/contract` fails one that does not. `cw.sanctions.apply(input, { forReport })` stores the report on the sanction, so a scoped caller finds it. SQLite: migration 26 adds `kit_reports.scope` and `kit_reports_by_scope`, and copies the tag from the reports already stored.
+
+### Block
+
+`cw.blocks.set(room, viewerSeat, targetSeat, on)` blocks or unblocks: a mute that is also two-way and never expires (it shares the mute's row, `kit_mutes.block`; the retention purge and the 500 per viewer cap leave it alone, and with 500 blocks a new mute or block is refused with `limit`). `cw.chat.visibleTo` is false when either blocked the other. `cw.mutes.set` answers `ok`, `limit` or `none`, and muting a blocked pair changes nothing. `cw.mutes.blockedSeats(room, viewerSeat)` lists the seats a viewer blocked. `cw.blocks.between(whoA, whoB)` and `anyBetween(who, others)` (at most 50) tell a game whether any two players it is about to put together blocked each other; players are found, never created. There is no call that lists who blocked whom. A `Store` you write yourself reads `MuteRow.block`: `upsertMute` never turns a block into a mute, `loadMutes` returns every block whatever its age, and `purgeMutes` and `pruneMutes` never delete one. An export counts the blocks a person placed but never one placed on them.
+
+## Privacy requests and legal hold
+
+> Not legal advice, not a compliance claim. This describes what the kit stores and does. The adopter checks who is asking and decides what to answer; the kit never does either, never tells the player and never reports to anyone. The runbook is [docs/privacy-requests.md](https://github.com/hainix/chatwarden/blob/main/docs/privacy-requests.md).
+
+Optional, new in 0.2.0, and used only when you or a staff owner call it. `cw.privacy` finds a person by an account id or a client key (`find`, read-only: it creates no one),
+exports what the kit holds about them (`export`: one JSON-safe object, no hash, no other player, no reporter or staff reference, each section cut at 5 000 rows), erases them (`erase(person,
+{ keep: 'safety' | 'none', actor, dryRun? })` in one store transaction, then in memory, with a receipt of counts and words) and says what the kit keeps (`statement()`, from the registry and the
+retention in force; for the three report categories it also carries `retentionWelfareMs`, the shorter clock of a report filed under the `welfare` reason, never more than `retentionMs`). With `keep: 'safety'` a person with a sanction in force keeps their subject, identifiers and that sanction until retention removes it, and `purge()` then finishes the erase
+by itself (a sanction row a legal hold keeps does not hold the finish back once it is no longer in force). Every table the kit has is in `PRIVACY_REGISTRY` or `NO_PERSON_TABLES`, and every `_json` column that can carry a person is named in a rule's `jsonColumns` (the rest are in `NO_PERSON_JSON_COLUMNS`); a test fails when a migration adds a table or a JSON column that is in neither. The export says only how many held reports there are (`holds: { reports }`), never why. `cw.legal` holds one report (`hold` with one of five codes,
+no free text), releases it, and produces its evidence bundle (`bundle`), signed with `bundleSecret` when you give one. A hold keeps the report and what hangs on it out of every retention purge and
+every erase and emits `report.escalated` (ids and the code, never text). `canonicalJson`, `signBundle` and `verifyBundle` let anyone check a bundle.
+
+```ts
+import { createChatwarden, verifyBundle } from '@chatwarden/core';
+import { openStore } from '@chatwarden/store-sqlite';
+
+const cw = await createChatwarden({
+  store: openStore({ path: 'chatwarden.db' }),
+  secret: process.env.CHATWARDEN_SECRET as string,
+  platform: { identify: (ctx) => ctx as { clientKey: string } },
+  bundleSecret: process.env.BUNDLE_SECRET, // at least 32 characters; without one bundles are unsigned
+});
+
+const person = cw.privacy.find({ accountId: 'acct-123' });
+if (person !== null) {
+  const data = await cw.privacy.export(person);
+  const preview = await cw.privacy.erase(person, { keep: 'safety', actor: 'owner_ann', dryRun: true });
+  console.log(data, preview);
+}
+const held = await cw.legal.hold('report-id', { code: 'legal_proceeding', actor: 'senior_gus' });
+if (held.ok) {
+  const bundle = await cw.legal.bundle('report-id', { actor: 'owner_ann' });
+  if (!('ok' in bundle)) console.log(verifyBundle(bundle, process.env.BUNDLE_SECRET)); // { sha256: true, hmac: true }
+}
+```
+
+Retention: an erasure receipt lives on `retention.auditMs`; `purge()` also finishes pending erasures and drops stray rows (a strike, signal, notice or kept name whose subject does not exist and that is
+older than ten minutes): `PurgeResult.erasuresFinished` and `strayRows`. A held report, its decisions, its sanction groups (address rows too), their notices and appeals, its AI rows and its audit rows are
+skipped by every purge. Several processes on one database: an erase moves an epoch each process reads at most every 30 seconds.
+
+**Upgrading:** `Store` gains required methods (`exportSubjects`, `eraseSubjects`, `insertErasure`, `loadPendingErasures`, `finishErasure`, `erasureEpoch`, `purgeStrayRows`, `placeHold`, `releaseHold`,
+`loadHold`, `listHolds`, `heldSet`, `sanctionGroupsOfReport`) and `AuditListQuery` gains `targets`; a custom store implements them, and `saveIdentifier` for a subject that does not exist must write nothing and
+not throw. `AUDIT_ACTIONS` gains `privacy.find`, `privacy.export`, `privacy.erase`, `legal.hold`, `legal.release` and `legal.bundle`; `KIT_EVENT_TYPES` gains `report.escalated`; `PurgeResult` gains
+`erasuresFinished` and `strayRows`. SQLite migration 26 (shared by the whole release, one-way: back up first; the full list is in the `@chatwarden/store-sqlite` README) adds the tables `kit_filter_hits`, `kit_legal_holds`, `kit_erasures`, `kit_report_comments`, `kit_chat_days` and `kit_pace`, the columns for filter origin, urgent, hand-off, escalation, evidence, scope, entity, blocks and match modes, the erasure epoch and the lookup indexes.
+
+**New in 0.2.0:** `cw.privacy`, `cw.legal`, `PrivacyService`, `PrivacyStatement`, `PrivacyRefusal`, `PRIVACY_CATEGORIES`, `PRIVACY_REGISTRY`, `NO_PERSON_TABLES`, `NO_PERSON_JSON_COLUMNS`, `PrivacyCategory`, `PrivacyRule`, `PrivacyClock`, `PrivacyExport`,
+`SubjectExport`, `EraseMode`, `ErasePlan`, `ErasePreview`, `ErasureCounts`, `ErasureReceipt`, `ErasureRemoved`, `ErasureRow`, `PRIVACY_DISCLAIMER`, `ERASED_LINE`, `EXPORT_SECTION_MAX`, `erasedReporter`, `isNonPersonReporter`,
+`isRestrictingKind`, `LegalService`, `HoldCode`, `HOLD_CODES`, `isHoldCode`, `HoldRow`, `HeldSet`, `HoldResult`, `EvidenceBundle`, `BundlePerson`, `BundleIntegrity`, `BUNDLE_DISCLAIMER`, `CANONICALIZATION`,
+`canonicalJson`, `signBundle`, `verifyBundle`, the `bundleSecret` option, `retention`'s receipt clock, `PurgeResult.erasuresFinished` and `.strayRows`, the `report.escalated` event and the new required `Store` methods above.
+
+## Urgent cases, the desk and rooms under attack (0.2.0)
+
+Every switch in this section is off until an owner turns it on (the one exception: `threat` is an urgent reason out of the box).
+
+### What the kit does and does not do for safety
+
+The kit **does**: mark a report urgent from its reason (or by a moderator), sort it first, show one chip while any is open, post a role mention in the Discord feed if you set one, emit
+`report.created` with `urgent: true` (ids and the reason id only), show the moderator your own guidance and studio contact text, show the reporter your own thank-you and resource list,
+record when a moderator marked the case as passed to your safety team, and keep welfare reports for a shorter time.
+
+The kit **does not**: decide whether anyone is at risk or a threat is real; message the person reported or anyone else; ring, email or post anywhere by itself except the staff channels you
+wired; report to any authority; store, copy, fetch or forward images, link targets or media; or promise a response time. It is not a pager: for round-the-clock cover, route `report.created`
+with `urgent: true` into your own on-call tool. If anything involves a child in danger or sexual material involving minors, the moderator is told to stop, not to save, copy or forward it,
+and to follow your studio's legal procedure. The default guidance is a safe floor, not legal advice. The adopter guide is `docs/recipes/urgent-and-welfare.md`.
+
+### Where each part is
+
+- **The urgent lane.** The reason flag `reporting.reasons[].urgent`, `cw.cases.setUrgent`, `cw.cases.handoff` (an ids-only `report.handoff`), take next, the bulk dismissal and the `welfare`
+  reason are described under "What 0.1.9 added" below. Settings: `safety.guidance` (at most 1 500 characters), `safety.contact` (staff only, 300) and `safety.resources`
+  (at most five, https links only). A custom store written before the lane may lack `setReportUrgent`, `setHandoff` and `countOpenUrgent`: the kit warns once at start (`chatwarden.store_no_urgent_lane`,
+  naming them), `cw.cases.setUrgent` and `cw.cases.handoff` throw a `StoreCapabilityError` (not a `TypeError`; `hasUrgentMethods` and `missingUrgentMethods` tell a store apart) and the staff API answers 501
+  `not_supported`.
+- **The desk.** `desk.workflow` (comments, a second look, escalation: `cw.comments`, `cw.cases.escalate`), `desk.insights` (`cw.insights`) and `desk.surge`. The Insights numbers are team
+  numbers only: counts and times, never a per-person figure.
+- **Rooms under attack.** `cw.rooms.setMode`, `mode`, `list`, `postingState` and `retract`, `rooms.probation`, `rooms.emergency`, `cw.people.links` and `ReportInput.evidenceRef`. A mode is
+  per process, in memory, and always expires (see `docs/recipes/raids.md`). A retraction keeps the line as evidence and writes no sanction.
+- **Events.** `report.handoff`, `case.escalated`, `room.mode`, `line.retracted` and `insights.digest`. None carries a chat line, a comment, a note, a handle, an evidence ref or the studio contact.
+- **Retention.** `retention.welfareReportsMs` (30 days, never under 1 day) and `retention.chatCountsMs` (400 days, never under 31): see `docs/recipes/urgent-and-welfare.md`.
+- **A digest on a timer.** The kit has no scheduler: call `cw.insights.emitDigest()` from your own timer or cron (`docs/recipes/digest.md`).
 
 ## Upgrading to 0.1.9
 
@@ -576,7 +794,7 @@ cw.names.renamed(who);
 
 ## The AI (levels 1 and 2)
 
-Optional help for the moderator, `@experimental` until 0.2 and new in 0.1.7. With an adapter, the kit reads each new report after the player's
+Optional help for the moderator, new in 0.1.7. With an adapter, the kit reads each new report after the player's
 ack, in the background, and the hub shows what it found (level 1, Read); at level 2 (Recommend) the decision form opens pre-filled with a mild
 suggestion that the moderator accepts or edits. It is off until you give it an adapter, and the level is then the owner's to set in the hub
 (Settings > AI): 0 by default, held to the `maxLevel` you pass.
@@ -627,27 +845,27 @@ console.log(cw.ai.status()); // { available: true, level: 0, maxLevel: 2, state:
 
 ## AI levels 3 and 4: the seams and the gate dashboard
 
-New in 0.1.13 and `@experimental` until 0.2. **Nothing in this release lets the AI act.** It lays the seams that acting will need, and shows the numbers that would decide it. The AI still never writes a sanction, a strike, a mute or a notice.
+New in 0.1.13. **Nothing in this release lets the AI act.** It lays the seams that acting will need, and shows the numbers that would decide it. The AI still never writes a sanction, a strike, a mute or a notice.
 
 - **The seam.** Only code in `packages/core/src/aiActor` may write a sanction with `source: 'ai'` (in 0.1.14 it writes none: see the next section). A lint rule limits `packages/core/src/ai` to its own files and ten read-only modules, and forbids the store's writers there. The source `ai` is refused by `cw.decide` and `cw.sanctions.apply`, and by `applySanction`, `writeSanction` and `validateSanctionInput`, unless the kit's own actor holds a private key you cannot import. A decision made through the `api`, `coop` or `auto_filter` source is filed in the casebook as `service`, not as a person's decision.
-- **`cw.ai.gates()`** (`@experimental`) returns `AiGatesView`: one cell for each rule and conduct level your profile lists in `aiAutoAct`, each with every gate's number against its need (volume, breadth, agreement, overrides, recency, appeals on the rule, appeals on AI actions, and the keep gate), whether the cell is open, any cooling date, and what your ladder gives for a clean record (the reach). It is computed from the store and the clock, never from a client, and carries no id, no text and no staff ref. `actingAvailable` is false. The pure parts are exported: `evaluateCell`, `wilsonLower`, `wilsonUpper`, `checkGateConfig`, `AI_GATE_DEFAULTS`, `AI_GATE_BANDS`, `reachOf`, `AI_ACT_KINDS` and `stepWithinActCeilings`. The keep gate (G8) is a loss test: a cell loses its licence when the lower 95% bound of its "undone as not a violation" rate is above 0.05.
-- **`cw.people.automation`** (`@experimental`). A senior marks a person "do not automate" with one of five reason codes (`AUTOMATION_CODES`: `vulnerable`, `under_review`, `staff`, `sensitive_case`, `other`) and no free text. `get(subject)` answers `{ allowed, code, at }`; `set(subject, { allowed: false, code, actor })` marks and `set(subject, { allowed: true, actor })` clears. The mark is kept under the canonical person and follows a merge. Reads and drafts are still produced for a marked person. `automationAllowed(person, lookup?)` answers false for a marked person and fails closed if the lookup throws.
+- **`cw.ai.gates()`** returns `AiGatesView`: one cell for each rule and conduct level your profile lists in `aiAutoAct`, each with every gate's number against its need (volume, breadth, agreement, overrides, recency, appeals on the rule, appeals on AI actions, and the keep gate), whether the cell is open, any cooling date, and what your ladder gives for a clean record (the reach). It is computed from the store and the clock, never from a client, and carries no id, no text and no staff ref. `actingAvailable` is false. The pure parts are exported: `evaluateCell`, `wilsonLower`, `wilsonUpper`, `checkGateConfig`, `AI_GATE_DEFAULTS`, `AI_GATE_BANDS`, `reachOf`, `AI_ACT_KINDS` and `stepWithinActCeilings`. The keep gate (G8) is a loss test: a cell loses its licence when the lower 95% bound of its "undone as not a violation" rate is above 0.05.
+- **`cw.people.automation`**. A senior marks a person "do not automate" with one of five reason codes (`AUTOMATION_CODES`: `vulnerable`, `under_review`, `staff`, `sensitive_case`, `other`) and no free text. `get(subject)` answers `{ allowed, code, at }`; `set(subject, { allowed: false, code, actor })` marks and `set(subject, { allowed: true, actor })` clears. The mark is kept under the canonical person and follows a merge. Reads and drafts are still produced for a marked person. `automationAllowed(person, lookup?)` answers false for a marked person and fails closed if the lookup throws.
 - **Store and migration 24 (SQLite).** Five new columns and an index on the casebook (`kit_ai_outcomes`), and one new table, `kit_ai_noauto`. It is **one-way** (a 0.1.12 or older store refuses a database at version 24): **back up the file before upgrading**. The `Store` interface gains the optional `aiGateRows`, `setNoAutomation` and `loadNoAutomation`, and `AiOutcomeInsert` gains `aiRule`, `aiSeverity`, `aiConfidence`, `decidedBy` and `source`. The in-memory store has them through `withMemoryAi(store)`. A store without them yields an empty gate view and `{ ok: false, error: 'unsupported' }` from `set`; the AI still reads. `AUDIT_ACTIONS` gains `person.automation` (a person target, no detail): a `switch` over the audit actions needs a new case.
-- **Experimental names:** `cw.ai.gates`, `AiGatesView`, `AiGateCell`, `AiReach`, `evaluateCell`, `wilsonLower`, `wilsonUpper`, `checkGateConfig`, `AI_GATE_DEFAULTS`, `AI_GATE_BANDS`, `reachOf`, `AI_ACT_KINDS`, `stepWithinActCeilings`, `cw.people.automation`, `AUTOMATION_CODES`, `AutomationCode`, `AutomationFacade`, `AutomationMark`, `NoAutomationRow` and the optional `Store` methods above.
+- **Names:** `cw.ai.gates`, `AiGatesView`, `AiGateCell`, `AiReach`, `evaluateCell`, `wilsonLower`, `wilsonUpper`, `checkGateConfig`, `AI_GATE_DEFAULTS`, `AI_GATE_BANDS`, `reachOf`, `AI_ACT_KINDS`, `stepWithinActCeilings`, `cw.people.automation`, `AUTOMATION_CODES`, `AutomationCode`, `AutomationFacade`, `AutomationMark`, `NoAutomationRow` and the optional `Store` methods above.
 
 ## AI levels 3 and 4: shadow mode
 
-New in 0.1.14 and `@experimental` until 0.2. **Nothing in this release writes a sanction.** The AI still never writes a sanction, a strike, a mute, a notice or a decision. Shadow mode lets it read, decide what it would have done, ask a second reader and record "would have acted" in a table of its own, so a person can read that list before a later release lets it act.
+New in 0.1.14. **Nothing in this release writes a sanction.** The AI still never writes a sanction, a strike, a mute, a notice or a decision. Shadow mode lets it read, decide what it would have done, ask a second reader and record "would have acted" in a table of its own, so a person can read that list before a later release lets it act.
 
 - **Switch it on in code first.** Set `ai.maxLevel: 3` and give an `ai.act` block: `{ enabled?, confirmAdapter?, gates?, caps? }`. Every number is held to its band (`AI_GATE_BANDS`, `AI_ACT_CAPS_BANDS`) or `createChatwarden` throws, and `enabled: false` pins the acting state to `off` whatever the store holds. `maxLevel: 3` without `act` throws; `4` needs `watch: { disclosed: true }`. The hub's `ai.level` is still 0 to 2: a policy layer that says 3 or 4 is refused with "use the acting switch", and no layer can move the acting state. `cw.ai.effectiveLevel()` answers 0 to 4 for display; `cw.ai.level()` still answers 0 to 2.
-- **`cw.ai.acting`** (`@experimental`). `state()` answers `{ mode, paused, modeSince, shadowDaysDone, shadowWouldHaveActed, maxLevel }`, read from the store at every call, so a pause is seen by the very next act. `startShadow(actor, { confirm: 'ACT', reason })` needs level 2, `maxLevel` 3 or more, an adapter, `ai.act` enabled, a store with the acting methods and enabled appeals; the word is `ACT` and any other case is refused. `startActing` needs shadow to have run `ai.act.caps.shadowDays` (14 by default, 7 to 60) and the word again. `pause` takes effect before the next act; `resume` and `off` need a reason. A refusal is one of `invalid`, `unsupported`, `no_appeals`, `not_allowed`, `too_early` or `wrong_state`. An actor that starts with `ai:` is refused. Of two processes taking one step, exactly one moves the state. **In this release `on` records what the AI would have done exactly as `shadow` does.**
+- **`cw.ai.acting`**. `state()` answers `{ mode, paused, modeSince, shadowDaysDone, shadowWouldHaveActed, maxLevel }`, read from the store at every call, so a pause is seen by the very next act. `startShadow(actor, { confirm: 'ACT', reason })` needs level 2, `maxLevel` 3 or more, an adapter, `ai.act` enabled, a store with the acting methods and enabled appeals; the word is `ACT` and any other case is refused. `startActing` needs shadow to have run `ai.act.caps.shadowDays` (14 by default, 7 to 60) and the word again. `pause` takes effect before the next act; `resume` and `off` need a reason. A refusal is one of `invalid`, `unsupported`, `no_appeals`, `not_allowed`, `too_early` or `wrong_state`. An actor that starts with `ai:` is refused. Of two processes taking one step, exactly one moves the state. **In this release `on` records what the AI would have done exactly as `shadow` does.**
 - **What the AI module does with a read.** After a usable read it queues a candidate for the hold (10 minutes), or records it as held back (about one case in five, chosen by a keyed hash of the report id, so it is the same in every process; the share is `ai.act.caps.holdbackShare`, 10 to 50%), or records a hard stop as refused: a person marked do-not-automate, a reporter with a bad-faith mark or a habitual false reporter, a system report, a report marked bad faith. When the hold has run it asks a second reader (`confirmAdapter`, a clean prompt: no signals, no examples, no cautions, the instruction to look for the innocent reading) and hands the actor three ids. The actor, `packages/core/src/aiActor`, loads everything from the store again, runs every check, and records one `shadow` row and one `ai.act` audit row, or refuses with a closed code. A proposal that disagrees with what it recomputes is refused, never corrected. Any error leaves the report in the human queue as at level 2.
-- **`cw.ai.actions`** (`@experimental`, read-only): `list`, `get` and `due`, returning `AiActionView` (the rule, the level, the step, the times and the person; staff only). `cw.ai.gates().instance` now shows the caps and the review debt in use; `actingAvailable` stays false.
+- **`cw.ai.actions`** (read-only): `list`, `get` and `due`, returning `AiActionView` (the rule, the level, the step, the times and the person; staff only). `cw.ai.gates().instance` now shows the caps and the review debt in use; `actingAvailable` stays false.
 - **Store and migration 25 (SQLite).** One column, `kit_ai_reads.purpose` (`read` for every existing row), and two tables, `kit_ai_acting` (one row) and `kit_ai_actions` (one row per report, ever), with five indexes. It is **one-way** (a 0.1.13 or older store refuses a database at version 25): **back up the file before upgrading**. The `Store` interface gains the optional `aiActingState`, `setAiActingState`, `insertAiAction`, `loadAiAction`, `transitionAiAction`, `dueAiActions`, `listAiActions`, `aiActionCounts`, `aiActedCount`, `aiActionsOnSubjects`, `aiUnreviewed` and `purgeAiActions`, and the types `AiActingRow`, `AiActionRow`, `AiActionState` and `AiActionPatch`. The in-memory store has them through `withMemoryAi(store)`. A store without them leaves acting off.
 - **Retention.** `retention.aiActionsMs` (365 days by default, at least 90) and `purge()` returns `aiActions`. A reviewer's private note on a row goes with the report window and the row stays.
 - **Audit.** `AUDIT_ACTIONS` gains `ai.act`, `ai.acting` and `ai.undo_all` (reserved). The `ai:` actor may record `ai.read` and `ai.act` and nothing else.
 - **Prompt version 5: every AI-enabled kit reads its open reports once more.** `AI_PROMPT_VERSION` is 5 and the input hash includes the read's purpose, so every stored read is stale once after the upgrade. The sweeper brings them up to date at 5 a sweep, inside your daily call and spend caps. The case read's prompt text is unchanged; the confirming read has its own prompt (`AI_CONFIRM_PROMPT_VERSION` 1).
-- **Experimental names:** `cw.ai.acting`, `cw.ai.actions`, `cw.ai.effectiveLevel`, `AiActingFacade`, `AiActingState`, `AiActingMode`, `AiActingResult`, `AiActingError`, `AiActingRow`, `AiActionsFacade`, `AiActionView`, `AiActionRow`, `AiActionState`, `AiActionPatch`, `AiActOptions`, `AiActCaps`, `AI_ACT_CAPS_DEFAULTS`, `AI_ACT_CAPS_BANDS`, `checkActCaps`, `ACT_WORD`, `AI_SHADOW_DAYS_BAND`, `AI_SHADOW_DAYS_DEFAULT`, `retention.aiActionsMs`, `PurgeResult.aiActions`, `AiOptions.maxLevel`, `AiOptions.act`, `AiOptions.watch`, `AIReadInput.purpose`, the profile's `ai.actExcludeRules` and the optional `Store` methods above.
+- **Names:** `cw.ai.acting`, `cw.ai.actions`, `cw.ai.effectiveLevel`, `AiActingFacade`, `AiActingState`, `AiActingMode`, `AiActingResult`, `AiActingError`, `AiActingRow`, `AiActionsFacade`, `AiActionView`, `AiActionRow`, `AiActionState`, `AiActionPatch`, `AiActOptions`, `AiActCaps`, `AI_ACT_CAPS_DEFAULTS`, `AI_ACT_CAPS_BANDS`, `checkActCaps`, `ACT_WORD`, `AI_SHADOW_DAYS_BAND`, `AI_SHADOW_DAYS_DEFAULT`, `retention.aiActionsMs`, `PurgeResult.aiActions`, `AiOptions.maxLevel`, `AiOptions.act`, `AiOptions.watch`, `AIReadInput.purpose`, the profile's `ai.actExcludeRules` and the optional `Store` methods above.
 
 ## Typing indicators
 
@@ -707,6 +925,8 @@ in a browser.
 | `platform` | `identify(ctx)` returns `{ clientKey?, accountId?, ip? }` for a connection; optional `notify(subject, event)` tells you a player has notices waiting. |
 | `matcher` | Your slur matcher (`LiveTerms` from `@chatwarden/matcher`). Without one, nothing is ever blocked. |
 | `profanity` | A ready profanity filter. What happens to a profane line is the profile's call (`allow`, `star` or `refuse`). |
+| `phrases` | Phrase books for phrase-only rooms: `{ junior: [{ id: 'gg', text: 'Good game!' }, { id: 'help', text: 'Can you help me?', group: 'Ask' }] }`. A context with `chat: { phrases: 'junior' }` makes its rooms phrase-only: `cw.chat.acceptPhrase(room, seat, 'gg')` sends one (the same pipeline as `accept` without the text steps; the line is kept as evidence as its canonical text) and typed text is refused `phrases_only`. At most 20 books of 300 phrases; ids, texts (1 to 100 characters, no control or bidi character) and groups are checked at start-up, and each phrase goes through the matcher and the profanity filter: a hit throws `PhraseBookError` naming the book and the phrase id, never the text. A context naming a book that is not declared is a `ProfileError`. |
+| `sharedPacing` | `true` keeps the pacer's state (slow mode, the burst limit and repeat refusal) in the store, so several processes on one store judge one player's lines together; default `false`, the in-memory pacer exactly as before. It is a property of how the game is deployed, not a moderation setting, so it is not in the profile or the hub. The store needs `paceLoad`, `paceUpdate`, `paceDropRoom` and `paceSweep` (memory and SQLite have them); otherwise `createChatwarden` throws a plain message naming the missing one. One indexed read per line in a room where a check is on, one write per accepted line, nothing at all for a room with every check off. A store failure fails open (the line goes on) and is logged by class at most once a minute. `cw.rooms.setPace` overrides stay per process. A person first seen by another process after this one started is a person of its own here until the next start (as for every table keyed by person). |
 | `profanityPackage` | `{ createProfanityFilter }` from `@chatwarden/profanity`; the kit builds the filter from the profile. Not used when `profanity` is given. |
 | `clock` | `{ now() }`. Defaults to the system clock; tests pass their own. |
 | `enabled` | A kill switch, read on every call. Return false to stop enforcement and report intake. |
@@ -721,7 +941,8 @@ in a browser.
 | `rules` | The numbered Community Rules, from `defineRules`. Defaults to the preset's starter set. |
 | `autoRestrictRule` | The rule number the automatic slur filter cites (default 1). Must be an active rule. |
 | `ai` | `{ adapter, maxLevel?, dailyBudgetMicros?, ... }`: turns on AI reads (levels 1 and 2). Off without it. See "The AI (levels 1 and 2)" below. |
-| `signals` | `{ accountAgeDays? }`: the one hook the profile cannot hold (how old a player's account is, for the new-account guard). The kinds, guards and feeds are in `profile.signals`. Needs a store with the signal methods (SQLite; `withMemorySignals(store)` for the in-memory store). `@experimental`. |
+| `signals` | `{ accountAgeDays? }`: the one hook the profile cannot hold (how old a player's account is, for the new-account guard). The kinds, guards and feeds are in `profile.signals`. Needs a store with the signal methods (SQLite; `withMemorySignals(store)` for the in-memory store). |
+| `bundleSecret` | At least 32 characters: signs the evidence bundle of a held report (`cw.legal.bundle`) with an HMAC. Never logged, never echoed. Without one the bundle is produced unsigned (`hmacSha256: null`). A shorter one throws at creation. |
 
 Bad options throw at creation (`ProfileError`, `RangeError`), before the store is touched.
 

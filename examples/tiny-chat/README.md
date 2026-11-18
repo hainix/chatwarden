@@ -77,6 +77,36 @@ CW_DEMO_PACE=1 npm start -w @chatwarden/example-tiny-chat
   a `pace` in `overrides` wins field by field. A real app sets `pace` in its profile, or the owner sets it in the hub (Settings, Advanced).
 - It is per process, like the fixed rate limit: this demo is one process.
 
+## Rooms under attack (demo, optional)
+
+Off unless `CW_DEMO_ROOMS=1`. With it, a key that starts `demo-staff-` is a staff member (the game's word, never the player's) and can lock the lobby, unlock it and take a line back for
+everyone. Open the chat page with `?staff=mod` in one tab (it shows a small "Staff tools (demo)" box) and a plain tab beside it: lock the lobby and the plain tab's lines are refused (`locked`,
+with the end time) while the staff tab's are delivered; the lock ends by itself after 30 minutes. Paste a line's id into the box and "Remove the line": it disappears for everyone, and a report filed
+afterwards still holds its text, marked taken back. The routes are `POST /demo/rooms/lobby/lock { forMs? }`, `POST /demo/rooms/lobby/unlock` and
+`POST /demo/rooms/lobby/lines/:line/retract { allFromAuthor? }`; the real staff API does the same (`POST /admin/rooms/:room/mode`), and the hub's Rooms panel and a case's menu use it.
+
+```sh
+CW_DEMO_ROOMS=1 npm start -w @chatwarden/example-tiny-chat
+```
+
+- `startServer({ demoRooms })` takes the same switch as an option (`false` forces it off). Without it the three routes do not exist and no key is staff. A mode is per process and forgotten on a
+  restart. A real app marks staff from its own session. See `docs/recipes/raids.md`.
+
+## Chat filters (demo, optional)
+
+Off unless `CW_DEMO_FILTERS=1`. With it, tiny-chat turns on three chat filters (`overrides.filters`): a link is refused (the box says "Links are not allowed in
+chat here. Community Rule 4."), a phone number or an email is masked (the author sees the starred line, as everyone does), and a line with "buy gold" is
+delivered and files a report with no reporter. Open the moderator hub: the report is in the queue as "Filter: Gold ads", with no reporter, and a moderator
+decides it like any other. Settings, Advanced, "Chat filters" shows what each filter did. Without the variable none of it exists.
+
+```sh
+CW_DEMO_FILTERS=1 npm start -w @chatwarden/example-tiny-chat
+```
+
+- `startServer({ demoFilters })` takes the same switch as an option (an option that is passed wins over the environment; `false` forces it off), and a
+  `filters` in `overrides` wins block by block. A real app sets `filters` in its profile, or the owner sets them in the hub.
+- The WebSocket protocol sends `{ type: 'refused', reason: 'link', rule: 4 }` for a refused link, and never the matched part.
+
 ## Appeals and renames (demo, optional)
 
 Off unless `CW_DEMO_APPEALS=1`. With it, tiny-chat turns on appeals (`overrides.appeals.enabled`) and required renames (`overrides.names.renames`).
@@ -91,7 +121,7 @@ CW_DEMO_APPEALS=1 TINY_CHAT_ADMIN_TOKEN=demo npm start -w @chatwarden/example-ti
 - To get a sanction to appeal, type the synthetic blocked term (`zorbak`) three times in the chat page. The automatic timeout has no human decider,
   so the demo's staff login can decide its appeal. A decision the staff login made itself cannot be decided by it (`409 same_decider`): that is the
   rule working. Have another actor decide the report, as `examples/tiny-chat/appeals.test.ts` does.
-- The same switch lets a moderator ask a person for a new name (the Sanction form on their page, "Ask for a new name"). The demo has no rename screen:
+- The same switch lets a moderator ask a person for a new name (the Sanction form on their page, "Ask for a new name", which always cites a numbered rule; `POST /admin/people/:ref/rename` takes `{ reason, rule }`). The demo has no rename screen:
   a real game listens for `rename.required` and calls `cw.names.renamed(who)` afterwards (see the core README, "Names").
 - `startServer({ demoAppeals })` takes the same switch as an option (an option that is passed wins over the environment; `false` forces it off; only
   the exact value `1` turns the variable on), and an `appeals` or `names` in `overrides` wins field by field.

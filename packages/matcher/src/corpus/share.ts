@@ -11,10 +11,10 @@ import { signedMessage } from './sign.js';
 // says is passed on: an answer becomes a closed code. Nothing here throws once configured, and no error or log carries text.
 // Isomorphic; it is built in the adopter's server, which holds the installation key (`installationKey(dir)` in corpus/node).
 
-/** Where the project's service listens. @experimental */
+/** Where the project's service listens. */
 export const COMMUNITY_ENDPOINT = 'https://corpus.chatwarden.dev';
 
-/** What the person offers. Only these fields are read; anything else on the object is ignored and never sent. @experimental */
+/** What the person offers. Only these fields are read; anything else on the object is ignored and never sent. */
 export interface ShareInput {
   /** One word of plain letters (accents allowed), 40 characters at most, 3 or more letters once repeats collapse. */
   term: string;
@@ -27,26 +27,24 @@ export interface ShareInput {
   note?: string | null;
 }
 
-/** @experimental */
 export type ShareResult =
   | { ok: true; status: 'received' | 'known' | 'duplicate'; id?: string }
   | { ok: false; code: 'invalid' | 'too_large' | 'unsupported_language' | 'rate_limited' | 'offline' | 'rejected'; retryAfterMs?: number };
 
-/** Why a person reports a term of the shared list (design 10.6). A closed list: there is no free text. @experimental */
+/** Why a person reports a term of the shared list (design 10.6). A closed list: there is no free text. */
 export type ReportKind = 'innocent_sense' | 'wrong_category' | 'removal';
 
-/** What a report says: which term, and why. The id is the term's public id on the list (`CWT-2026-00042`); the word is never sent. @experimental */
+/** What a report says: which term, and why. The id is the term's public id on the list (`CWT-2026-00042`); the word is never sent. */
 export interface ReportInput {
   termId: string;
   kind: ReportKind;
 }
 
-/** The service takes a report as a ticket and answers with an acknowledgement id at most; the same report twice in a day is also `ok`. @experimental */
+/** The service takes a report as a ticket and answers with an acknowledgement id at most; the same report twice in a day is also `ok`. */
 export type ReportResult =
   | { ok: true; id?: string }
   | { ok: false; code: 'invalid' | 'rate_limited' | 'offline' | 'rejected'; retryAfterMs?: number };
 
-/** @experimental */
 export interface CommunityShare {
   /** Never throws: every failure is a closed code in the result. */
   share(input: ShareInput): Promise<ShareResult>;
@@ -102,7 +100,6 @@ function checkBody(body: unknown, who: string): Uint8Array {
 /**
  * A hashcash stamp for `body`: `<bits>:<nonce>`, where SHA-256 of the body followed by the nonce starts with at least `bits` zero bits.
  * Deterministic (the nonce counts up in base 36), synchronous, about a second of one core for 16 bits in the worst of a few cases.
- * @experimental
  */
 export function mintStamp(body: Uint8Array, bits: number): string {
   const bytes = checkBody(body, 'mintStamp');
@@ -127,7 +124,6 @@ async function mintStampSliced(body: Uint8Array, bits: number): Promise<string> 
 /**
  * Whether `stamp` is a good stamp for `body` at `bits` bits: well formed, claiming at least `bits`, and its hash really has the zero bits
  * it claims. A stamp one bit short, or one that claims more than it did, is false. Never throws for a bad stamp.
- * @experimental
  */
 export function checkStamp(body: Uint8Array, stamp: string, bits: number): boolean {
   const bytes = checkBody(body, 'checkStamp');
@@ -232,7 +228,7 @@ const base64url = (bytes: Uint8Array): string => {
   return btoa(out).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 };
 
-/** Options for {@link createCommunityShare}. @experimental */
+/** Options for {@link createCommunityShare}. */
 export interface CommunityShareOptions {
   /** Default {@link COMMUNITY_ENDPOINT}. `https` (or `http` for localhost), origin only. */
   endpoint?: string;
@@ -269,7 +265,6 @@ function originOf(endpoint: unknown): string {
 /**
  * The share client. `share(input)` validates, builds the closed-key payload, serialises it once, signs and stamps those bytes (16 bits)
  * and posts them; `status(id)` is a signed GET. Throws a `RangeError` (naming the option) only for a configuration that cannot work.
- * @experimental
  */
 export function createCommunityShare(options: CommunityShareOptions): CommunityShare {
   const o = options;

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { NOTICE_WORDS } from '@chatwarden/core/notice-copy';
 import { en as baseEn } from '../src/i18n.js';
 import { enChat } from '../src/chat/words.js';
 
@@ -22,8 +23,8 @@ function walk(dir: string): string[] {
 }
 const files = walk(src);
 const code = files.filter((f) => /\.tsx?$/.test(f));
-// The catalog itself and its comments name keys on purpose.
-const appCode = code.filter((f) => !f.endsWith('i18n.ts') && !f.endsWith('words.ts'));
+// The catalog itself and its comments name keys on purpose, and so do the translations (src/locales: every key of the catalog, in another language).
+const appCode = code.filter((f) => !f.endsWith('i18n.ts') && !f.endsWith('words.ts') && !f.replaceAll(String.fromCharCode(92), '/').includes('/locales/'));
 const read = (f: string): string => readFileSync(f, 'utf8');
 const rel = (f: string): string => f.slice(pkg.length).replaceAll('\\', '/');
 /** The public name of a private default: `--cwd-bg` is what `--cw-bg` falls back to. */
@@ -98,7 +99,9 @@ describe('no words outside the catalog', () => {
     const literalsUsed = new Set([...text.matchAll(/'(player\.[A-Za-z0-9_.]+)'/g)].map((m) => m[1] as string));
     const prefixes = [...text.matchAll(/`(player\.[A-Za-z0-9_.]*\.)\$\{/g)].map((m) => m[1] as string);
     const bases = [...new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
-    const dead = bases.filter((k) => !literalsUsed.has(k) && !prefixes.some((p) => k.startsWith(p)));
+    // The notice words are core's (`@chatwarden/core/notice-copy`): the shared view uses them, and core's own tests hold that every one is used.
+    const shared = new Set<string>(Object.keys(NOTICE_WORDS));
+    const dead = bases.filter((k) => !shared.has(k)).filter((k) => !literalsUsed.has(k) && !prefixes.some((p) => k.startsWith(p)));
     // A key the components stopped using stays in the exported catalogue for a patch release (nothing is removed in 0.1.x), marked
     // `@deprecated unused since 0.1.3`. So the dead words are exactly the marked ones: an unused key must be marked, and a marked
     // key must really be unused (otherwise the mark is a lie).
@@ -160,12 +163,13 @@ describe('imports', () => {
     for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).not.toMatch(/hub-react|packages\/hub|\.\.\/\.\.\//);
   });
 
-  it('imports the kit as types only: no run-time import of core or http, so the bundle needs no kit code', () => {
-    for (const f of code) for (const i of importsOf(f).filter((x) => x.spec.startsWith('@chatwarden/'))) expect(i.typeOnly, `${rel(f)} imports ${i.spec}`).toBe(true);
+  it('imports the kit as types only, except the one run-time subpath @chatwarden/core/notice-copy (pure words and functions, no engine)', () => {
+    for (const f of code)
+      for (const i of importsOf(f).filter((x) => x.spec.startsWith('@chatwarden/') && x.spec !== '@chatwarden/core/notice-copy')) expect(i.typeOnly, `${rel(f)} imports ${i.spec}`).toBe(true);
   });
 
   it('imports nothing but React, the kit types and its own files', () => {
-    for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react-dom$|react\/jsx-runtime$|@chatwarden\/core$)/);
+    for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react-dom$|react\/jsx-runtime$|@chatwarden\/core(\/notice-copy)?$)/);
   });
 });
 
@@ -600,6 +604,8 @@ describe('the public exports of the main entry are locked', () => {
         'timeLeft',
         'untilText',
         'nameReasonText',
+        'loadPlayerT',
+        'matchLocale',
       ].sort(),
     );
     expect(index).toMatch(/export const VERSION = /);
@@ -613,12 +619,12 @@ describe('the public exports of the main entry are locked', () => {
     }
   });
 
-  it('the new exports are marked @experimental where they are written, and the internals stay out', () => {
+  it('the appeal exports carry no @experimental tag any more, and the internals stay out of the index', () => {
     for (const [file, name] of [['AppealDialog.tsx', 'AppealDialog'], ['names.ts', 'nameReasonText'], ['client.ts', 'FileAppealOutcome']] as const) {
       const source = read(join(src, file));
       const at = source.indexOf(`export function ${name}`) >= 0 ? source.indexOf(`export function ${name}`) : source.indexOf(`export type ${name}`);
       expect(at, name).toBeGreaterThan(0);
-      expect(source.slice(Math.max(0, at - 1200), at), name).toMatch(/@experimental/);
+      expect(source.slice(Math.max(0, at - 1200), at), name).not.toMatch(/@experimental/);
     }
     for (const internal of ['AppealBody', 'AppealSlot', 'useAppeals', 'leaveAppeal', 'dateText', 'APPEAL_MAX']) expect(index, internal).not.toContain(internal);
   });

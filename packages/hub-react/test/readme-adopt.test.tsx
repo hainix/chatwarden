@@ -30,23 +30,21 @@ describe('the section', () => {
     expect(snippets[0]?.split('\n').length).toBeLessThan(8);
   });
 
-  it('says React is optional only for /headless, and lists the experimental names', () => {
+  it('says React is optional only for /headless, and lists the embedding names without calling them experimental', () => {
     expect(section).toMatch(/optional peer dependencies of this package for one reason only: the `\/headless` entry needs no React/);
-    expect(section).toMatch(/### Experimental until 0\.2/);
+    expect(section).toMatch(/### The embedding API/);
+    expect(section).not.toMatch(/xperimental/);
   });
 
-  it('lists exactly the names the API lock marks @experimental', () => {
-    const list = section.slice(section.indexOf('### Experimental until 0.2'));
+  it('lists the embedding names, every one the entry exports (the pieces, the hooks and the provider)', () => {
+    const list = section.slice(section.indexOf('### The embedding API'));
     const named = new Set([...list.matchAll(/`([A-Za-z*][A-Za-z0-9_.*]*)`/g)].map((m) => m[1] as string));
-    const marked = exportsOf('packages/hub-react/src/index.ts').experimental;
-    const wildcard = [...named].filter((n) => n.startsWith('*'));
-    // `*Props` stands for each piece's props type; everything else is named.
-    const ownProps = marked.filter((n) => /^(AuditLog|BlockedList|CaseCard|CaseList|CaseWorkbench|Guide|LadderSettings|PersonRecord|RecentActions|ReportingSettings|RuleGaps|TermsManager)Props$/.test(n));
-    expect(wildcard.length).toBe(1);
-    expect(ownProps).toHaveLength(12);
-    for (const name of marked.filter((n) => !ownProps.includes(n))) expect(named, name).toContain(name);
-    const headless = exportsOf('packages/hub-react/src/headless/index.ts');
-    for (const name of [...headless.experimental, ...headless.experimentalMembers]) expect(named, name).toContain(name);
+    const hub = exportsOf('packages/hub-react/src/index.ts');
+    const embedding = hub.values.filter((name) => /^(HubProvider|use(Cases?|Decide|Claim|Terms|Blocked|Person|Me|HubController)|CaseList|CaseCard|CaseWorkbench|PersonRecord|TermsManager|BlockedList|AuditLog|RuleGaps|Guide|RecentActions|LadderSettings|ReportingSettings)$/.test(name));
+    expect(embedding.length).toBeGreaterThan(15);
+    for (const name of embedding) expect(named, name).toContain(name);
+    // `*Props` stands for each piece's props type.
+    expect([...named].filter((n) => n.startsWith('*'))).toHaveLength(1);
   });
 });
 

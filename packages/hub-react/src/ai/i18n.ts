@@ -10,7 +10,6 @@ import type { HubParams, HubText } from '../i18n.js';
 //
 // Plural forms add the CLDR category as the last segment, as in the hub's catalog (`.one`, `.other`).
 
-/** @experimental */
 export const aiEn = {
   'hub.ai.tag': 'AI',
   'hub.ai.tick': 'Cited by the AI',

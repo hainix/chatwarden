@@ -9,6 +9,7 @@ import { NameToggle, NameValue } from '../names.js';
 import type { StaffReport } from '../types.js';
 import { Empty, Masked, Notice, Segmented, Tag } from '../ui.js';
 import { useCase } from './CaseContext.js';
+import { LineMenu } from './RoomActions.js';
 
 // The transcript: what was said, in order. The reported line has a red rail, the reported person's lines a neutral tint, and
 // blocked words stay hidden until a moderator chooses to see them (one line, or the whole case). A box in the margin of the
@@ -38,8 +39,11 @@ export interface SimpleLine {
  * `simple` draws the card's lighter line (no margin box, no tags but "Reported line"); without it this is the transcript's.
  */
 export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: LinePicks | null; name: (ref: string | null) => string; simple?: SimpleLine }) {
-  const { t, locale } = useHub();
-  const { reveal, aiRead } = useCase();
+  const { t, locale, can } = useHub();
+  const { reveal, aiRead, detail } = useCase();
+  // Taking a line back for the room (design 9.2): only a line the server says is removable, only for a role that manages rooms. Not in the Simple card.
+  const room = detail.data?.report.roomId ?? '';
+  const menu = simple === undefined && line.removable && room !== '' && can('rooms.manage');
   // A line the AI cited carries a small tick (a lazy part, drawn only when the case has a read).
   const tick = aiRead === null ? null : <LazyAiParts part="tick" lineId={line.id} />;
   const showDelivered = line.delivered !== null && line.delivered !== line.raw;
@@ -116,9 +120,11 @@ export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: 
       </time>
       {who}
       <span className="cw-line-text">{hidden ? <Masked /> : line.raw}{tick}</span>
-      {(line.reported || line.blocked || line.audience !== null || showDelivered) && (
+      {(line.reported || line.blocked || line.audience !== null || showDelivered || line.retracted || menu) && (
         <span className="cw-line-meta">
           {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}
+          {line.retracted && <Tag>{t('hub.rooms.removed')}</Tag>}
+          {menu && <LineMenu room={room} lineId={line.id} time={time} />}
           {line.blocked && <Tag>{t('hub.report.line.blocked')}</Tag>}
           {reveals && toggle}
           {line.audience !== null && <Tag>{t('hub.report.line.audience', { count: line.audience.length })}</Tag>}

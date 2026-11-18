@@ -30,7 +30,8 @@ describe('audit actions', () => {
     expect(AUDIT_ACTIONS.slice(AUDIT_ACTIONS.indexOf('term.share'), AUDIT_ACTIONS.indexOf('term.share') + 3)).toEqual(['term.share', 'community.apply', 'term.report']);
     // nothing before them moved: the 0.1.7 list is a prefix
     expect(AUDIT_ACTIONS.slice(AUDIT_ACTIONS.indexOf('ai.read'), AUDIT_ACTIONS.indexOf('ai.read') + 3)).toEqual(['ai.read', 'ai.rerun', 'ai.outcome']);
-    expect(AUDIT_ACTIONS).toHaveLength(36); // 0.1.13 appended person.automation; 0.1.14 appended ai.act, ai.acting and ai.undo_all
+    // later releases append after these (0.1.13 person.automation; 0.1.14 the AI acting actions; 0.2.0 privacy, legal hold, the urgent lane): the list only grows at the end
+    expect(AUDIT_ACTIONS.length).toBeGreaterThanOrEqual(36);
     expect(new Set(AUDIT_ACTIONS).size).toBe(AUDIT_ACTIONS.length);
     expectTypeOf<'appeal.view'>().toExtend<AuditAction>();
     expectTypeOf<'appeal.decide'>().toExtend<AuditAction>();
@@ -38,7 +39,8 @@ describe('audit actions', () => {
   });
 
   it('AUDIT_TARGET_TYPES holds appeal (then release, 0.1.11); old rows still list', async () => {
-    expect(AUDIT_TARGET_TYPES.slice(-2)).toEqual(['appeal', 'release']);
+    const at = AUDIT_TARGET_TYPES.indexOf('appeal');
+    expect(AUDIT_TARGET_TYPES.slice(at, at + 2)).toEqual(['appeal', 'release']);
     expect([...AUDIT_TARGET_TYPES].slice(0, 6)).toEqual(['report', 'sanction', 'person', 'term', 'exception', 'reason']);
     expectTypeOf<'appeal'>().toExtend<AuditTargetType>();
     const cw = await kit();
@@ -113,7 +115,8 @@ describe('audit actions', () => {
 
 describe('events', () => {
   it('KIT_EVENT_TYPES ends with the three new types; cw.on accepts them; an unknown type still throws', async () => {
-    expect(KIT_EVENT_TYPES.slice(-3)).toEqual(['appeal.created', 'appeal.decided', 'rename.required']);
+    const at = KIT_EVENT_TYPES.indexOf('appeal.created');
+    expect(KIT_EVENT_TYPES.slice(at, at + 3)).toEqual(['appeal.created', 'appeal.decided', 'rename.required']);
     expect(KIT_EVENT_TYPES.slice(0, 6)).toEqual(['report.created', 'report.closed', 'sanction.applied', 'sanction.revoked', 'gap.created', 'auto.restricted']);
     const cw = await kit();
     for (const type of ['appeal.created', 'appeal.decided', 'rename.required'] as const) {
@@ -142,10 +145,10 @@ describe('events', () => {
       outcome: AppealOutcome;
       rule: RuleRef | null;
     }>();
-    expectTypeOf<KitEventOf<'rename.required'>>().toEqualTypeOf<{ type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null }>();
+    expectTypeOf<KitEventOf<'rename.required'>>().toEqualTypeOf<{ type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null; entity?: { kind: string; ref: string } }>();
     // no field of any of them is free text of a player or a moderator
     type Keys = keyof KitEventOf<'appeal.created'> | keyof KitEventOf<'appeal.decided'> | keyof KitEventOf<'rename.required'>;
-    expectTypeOf<Extract<Keys, 'statement' | 'reason' | 'decisionReason' | 'handle' | 'name' | 'note' | 'accounts'>>().toEqualTypeOf<never>();
+    expectTypeOf<Extract<Keys, 'statement' | 'reason' | 'decisionReason' | 'handle' | 'name' | 'note' | 'accounts' | 'label'>>().toEqualTypeOf<never>();
     expectTypeOf<KitEventOf<'appeal.decided'>['outcome']>().toEqualTypeOf<'uphold' | 'reduce' | 'revoke'>();
     // and they are members of the union, so cw.on('*') hears them
     expectTypeOf<KitEvent['type']>().toExtend<string>();

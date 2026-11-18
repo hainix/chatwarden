@@ -24,7 +24,15 @@ const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 // Raised to 88 KB at 0.1.9 (appeals and names), by the owner's rule to raise generously and never trim code for bytes: the first load gains the wire types and
 // client methods, the hidden-name helpers (`displayName`, the Show control), the Appeals switch and route plumbing, and Person's appeal entries: 79,100 -> about
 // 83,300. The appeal card, the appeals list, the Appeals screen and the Settings panels are chunks loaded when used.
-const BUDGET = 88 * 1024;
+// Raised to 92 KB at 0.2.0 (names and "What the player sees"), by the same rule: the first load gains the form's `rename` field and its row and off-hint in the
+// decision bar, the client types, the op builders and the lazy wrapper, about 2 KB over the 88 KB it had reached (measured 90,661 gzipped). The panel, its hooks and its words are one lazy chunk.
+// Raised to 96 KB at 0.2.0 (privacy requests and legal hold), by the same rule: the first load gains the six audit labels, the wire types and client methods, the Person and
+// case plug-in points and the lazy wrappers, about 1.5 KB over the 92 KB it had reached (measured 94,498 gzipped before the raise). The Person page's Data requests, the erase
+// dialog, the Privacy requests panel, the case's hold dialogs and all their words (`privacy/i18n.ts`) are lazy chunks.
+// Raised to 112 KB at 0.2.0 (the urgent lane, the desk, the careful view and rooms), by the same rule: the first load gains the urgent chip and pin, the case menu and strip, the
+// staff-workflow row word, filter and Overview line, the second look's line and form, the care reader and the words of all of it (the English catalog is eager): about 6 KB over the
+// 96 KB it had reached (measured 102,330 gzipped after the desk). The "What to do" panel, the thread, Insights, the Safety, Desk and Rooms panels and the careful view's panel are lazy.
+const BUDGET = 112 * 1024;
 const ENTRY_BUDGET = 52 * 1024;
 
 async function bundle() {
@@ -112,6 +120,27 @@ describe('bundle size', () => {
     expect(eager.gzip).toBeGreaterThan(30 * 1024);
   });
 
+  it('the Chat filters panel is its own lazy chunk: a first load carries none of its cards, tools or draft model (only the words, the types, the client calls and the queue chip)', async () => {
+    const { eagerInputs, chunkRoots } = await bundle();
+    expect(chunkRoots.some((r) => r.endsWith('screens/FilterSettings.tsx'))).toBe(true);
+    expect(eagerInputs.filter((i) => ['src/filters/', 'screens/FilterSettings', 'policy/filters.ts'].some((part) => i.includes(part)))).toEqual([]);
+  });
+
+  it('the privacy and legal-hold parts are their own lazy chunks: a first load carries none of their dialogs, panel or words (only the types, the client calls and the plug-in points)', async () => {
+    const { eagerInputs, chunkRoots } = await bundle();
+    for (const root of ['person/Privacy.tsx', 'screens/PrivacySettings.tsx', 'case/Hold.tsx']) expect(chunkRoots.some((r) => r.endsWith(root)), root).toBe(true);
+    expect(eagerInputs.filter((i) => ['person/Privacy', 'person/ErasePreview', 'screens/PrivacySettings', 'case/Hold', 'privacy/i18n', 'privacy/download'].some((part) => i.includes(part)))).toEqual([]);
+  });
+
+  it('the Spanish and Portuguese catalogues are lazy chunks: each is its own chunk, and a first load carries none of their words (the budgets above are unchanged)', async () => {
+    const { eagerInputs, entryInputs, chunkRoots, text } = await bundle();
+    for (const root of ['locales/es.ts', 'locales/pt.ts']) expect(chunkRoots.some((r) => r.endsWith(root)), root).toBe(true);
+    expect(eagerInputs.filter((i) => /src\/locales\/(es|pt)\.ts$/.test(i))).toEqual([]);
+    expect(entryInputs.filter((i) => /src\/locales\/(es|pt)\.ts$/.test(i))).toEqual([]);
+    // Only the matching and loading code (a few hundred bytes) is in the first load, not a word of either language.
+    expect(text).not.toMatch(/Resumen|Regla de la comunidad|Regra da comunidade/);
+  });
+
   it('bundles none of React, React DOM or the kit', async () => {
     const { inputs } = await bundle();
     expect(inputs.filter((i) => /node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(i))).toEqual([]);
@@ -120,7 +149,8 @@ describe('bundle size', () => {
 
   it('imports only what the peers provide: React, and the kit core for the ladder table', async () => {
     const { all } = await bundle();
-    const peers = new Set(['react', 'react/jsx-runtime', '@chatwarden/core']);
+    // 0.2.0: and the shared notice words and plan, `@chatwarden/core/notice-copy` (pure functions; the panel is a lazy chunk that draws them).
+    const peers = new Set(['react', 'react/jsx-runtime', '@chatwarden/core', '@chatwarden/core/notice-copy']);
     // `import ... from "x"` only: a catalog phrase that happens to end in "from" is not an import. A `./chunk-...` import is the bundle's own.
     const importsOf = (text: string): string[] => [...text.matchAll(/\bimport\b[^;"]*?\bfrom\s*"([^"]+)"/g)].map((m) => m[1] as string).filter((i) => !i.startsWith('./'));
     // The entry and its chunks together use all three (which file holds the kit import moves with how the bundler splits shared code); none reaches for
@@ -181,6 +211,17 @@ describe('bundle size', () => {
     expect(chunkRoots.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toHaveLength(1);
   });
 
+  it('keeps the "What the player sees" panel, its hooks and its words out of the first load: one chunk, loaded when an action first shows it (0.2.0)', async () => {
+    const { entryInputs, eagerInputs, chunkRoots } = await bundle();
+    for (const file of ['preview/PlayerPreview.tsx', 'preview/usePreview.ts', 'preview/effects.ts']) {
+      expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
+      expect(eagerInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the first load`).toEqual([]);
+    }
+    expect(chunkRoots.filter((i) => i.endsWith('src/preview/PlayerPreview.tsx'))).toHaveLength(1);
+    // The one thing of the preview that is eager is the small op builders (types only from core).
+    expect(eagerInputs.filter((i) => /src\/preview\//.test(i)).map((i) => i.slice(i.indexOf('src/'))).sort()).toEqual(['src/preview/ops.ts']);
+  });
+
   it('keeps the appeal card, the appeals list and the Appeals screen out of the first load: each a chunk of its own, loaded when appeals are used (0.1.9)', async () => {
     const { entryInputs, eagerInputs, chunkRoots } = await bundle();
     for (const file of ['case/AppealCard.tsx', 'appeals/AppealList.tsx', 'screens/Appeals.tsx']) {
@@ -211,6 +252,7 @@ describe('bundle size', () => {
     // And 18 KB at 7j: every one of the 960 token reads now carries its private default, `var(--cw-x, var(--cwd-x))`, which is what lets a
     // page theme the hub from any element above it (owner-approved, 2026-11-10): +20 KB raw, about +1 KB gzipped. The fallbacks are not
     // folded away at build time: that is the transform this task removed from the element.
-    expect(gzip).toBeLessThan(18 * 1024);
+    // And 20 KB at 0.2.0 (the "What the player sees" panel, its notice box and its lines): about +0.9 KB gzipped over the 18 KB it had reached.
+    expect(gzip).toBeLessThan(20 * 1024);
   });
 });

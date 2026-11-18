@@ -41,7 +41,7 @@ describe('names.renamesEnabled', () => {
     expect(k.cw.names.renamesEnabled()).toBe(false);
     const p = await k.seat('k1');
     // The same capability requireRename uses: the two never disagree.
-    expect(k.cw.names.requireRename({ subject: p.subject, actor: ACTOR, reason: REASON })).toEqual({ ok: false, error: 'off' });
+    expect(k.cw.names.requireRename({ subject: p.subject, actor: ACTOR, reason: REASON, rule: 1 })).toEqual({ ok: false, error: 'off' });
   });
 
   it('is read live: turning the setting on in the policy takes effect at once', async () => {
@@ -66,13 +66,13 @@ describe('names.renamesOf', () => {
     const k = await namesKit({ renames: true });
     const p = await k.seat('k1');
     const t1 = k.clock.now();
-    expect(k.cw.names.requireRename({ subject: p.subject, actor: ACTOR, reason: REASON })).toMatchObject({ ok: true });
+    expect(k.cw.names.requireRename({ subject: p.subject, actor: ACTOR, reason: REASON, rule: 1 })).toMatchObject({ ok: true });
     expect(k.cw.names.renamesOf(p.subject)).toEqual([{ at: t1, pending: true }]);
     expect(k.cw.names.renamed(p.who)).toBe(true);
     expect(k.cw.names.renamesOf(p.subject)).toEqual([{ at: t1, pending: false }]);
     k.clock.t += HOUR;
     const t2 = k.clock.now();
-    k.cw.names.requireRename({ subject: p.subject, actor: ACTOR, reason: REASON });
+    k.cw.names.requireRename({ subject: p.subject, actor: ACTOR, reason: REASON, rule: 1 });
     const rows = k.cw.names.renamesOf(p.subject);
     expect(rows).toEqual([
       { at: t2, pending: true },
@@ -86,10 +86,10 @@ describe('names.renamesOf', () => {
     const k = await namesKit({ renames: true });
     const a = await k.seat('ka', { accountId: 'acct-m' });
     const other = await k.seat('kz');
-    k.cw.names.requireRename({ subject: other.subject, actor: ACTOR, reason: REASON });
+    k.cw.names.requireRename({ subject: other.subject, actor: ACTOR, reason: REASON, rule: 1 });
     expect(k.cw.names.renamesOf(a.subject)).toEqual([]);
     const b = await k.seat('kb', { accountId: 'acct-m' });
-    k.cw.names.requireRename({ subject: b.subject, actor: ACTOR, reason: REASON });
+    k.cw.names.requireRename({ subject: b.subject, actor: ACTOR, reason: REASON, rule: 1 });
     expect(k.cw.names.renamesOf(a.subject)).toHaveLength(1);
     expect(k.cw.names.renamesOf(b.subject)).toHaveLength(1);
   });
@@ -99,7 +99,7 @@ describe('names.renamesOf', () => {
     const p = await k.seat('k1');
     for (let i = 0; i < 25; i++) {
       k.clock.t += 1000;
-      k.cw.names.requireRename({ subject: p.subject, actor: ACTOR, reason: REASON });
+      k.cw.names.requireRename({ subject: p.subject, actor: ACTOR, reason: REASON, rule: 1 });
       k.cw.names.renamed(p.who);
     }
     const rows = k.cw.names.renamesOf(p.subject);
