@@ -394,9 +394,19 @@ export interface SubjectExport {
   blockedNames: Array<{ at: number; name: string; reason: string }>;
   /**
    * `overturnedAt` is when a granted appeal overturned the decision (null when none did); `reasonCode` the fixed reason the decision gave (null when it gave none or
-   * is not decided). The moderator's free text is never exported.
+   * is not decided). Both are optional (0.2.1 added them to a published 0.2.0 contract): a store that omits a key means none, and the kit's own stores always emit both.
+   * The moderator's free text is never exported.
    */
-  appeals: Array<{ createdAt: number; kind: string; rule: string | null; status: string; statement: string | null; decidedAt: number | null; overturnedAt: number | null; reasonCode: string | null }>;
+  appeals: Array<{
+    createdAt: number;
+    kind: string;
+    rule: string | null;
+    status: string;
+    statement: string | null;
+    decidedAt: number | null;
+    overturnedAt?: number | null;
+    reasonCode?: string | null;
+  }>;
   signals: Array<{ at: number; kind: string }>;
   mutes: { placed: number; received: number };
   ai: { noAutomation: string | null; reads: number; outcomes: Array<{ verdict: string; agreement: string }> };
