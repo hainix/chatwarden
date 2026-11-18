@@ -136,6 +136,8 @@ describe('startup refusals: one sentence, the variable named, no value repeated'
       expect(message, value.slice(0, 40)).toMatch(/CHATWARDEN_LANDING_ORIGINS/);
       expect(message).not.toContain('SEEDED-VALUE');
       expect(message).not.toContain('game.example');
+      expect(message).toContain('at most 20 origins');
+      expect(message).not.toMatch(/https?:\/\//i);
     }
   });
 

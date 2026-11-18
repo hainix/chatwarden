@@ -266,6 +266,15 @@ describe('ChatwardenOptions.appeals', () => {
     if (Array.isArray(value) && typeof value[0] === 'string' && value[0].length > 3) expect(m).not.toContain(value[0]);
   });
 
+  it('the landingOrigins refusal names no web address: the site bundles core and its dist scan refuses any host that is not its own', async () => {
+    for (const value of [null, 'x', ['https://game.example/path'], Array.from({ length: 21 }, (_, i) => `https://g${i}.example`)]) {
+      const m = await message({ landingOrigins: value });
+      expect(m, JSON.stringify(value).slice(0, 30)).toContain('at most 20 origins');
+      expect(m).not.toMatch(/https?:\/\//i);
+      expect(m).not.toMatch(/[a-z0-9-]+\.(test|example|com|dev)\b/i);
+    }
+  });
+
   it('landingOrigins: 20 origins are accepted; an empty list is fine', async () => {
     const twenty = Array.from({ length: 20 }, (_, i) => `https://g${i}.example`);
     expect((await create({ landingOrigins: twenty })).cw.appeals.landingOrigins()).toHaveLength(20);

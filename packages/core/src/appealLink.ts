@@ -108,7 +108,7 @@ export function resolveLandingOptions(input: unknown): LandingOptions {
   let landingOrigins: readonly string[] = Object.freeze([]);
   if (origins !== undefined) {
     const fail = (): never => {
-      throw new RangeError('createChatwarden: appeals.landingOrigins must be a list of at most 20 origins such as https://your-game.test (no path, no trailing slash)');
+      throw new RangeError('createChatwarden: appeals.landingOrigins must be a list of at most 20 origins, each a scheme and a host with no path and no trailing slash');
     };
     if (!Array.isArray(origins) || origins.length > LANDING_ORIGINS_MAX) fail();
     const list: string[] = [];

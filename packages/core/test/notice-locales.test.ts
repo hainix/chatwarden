@@ -305,3 +305,14 @@ describe('fillWords', () => {
     expect(fillWords('no values', { a: 'b' })).toBe('no values');
   });
 });
+
+describe('the words the site demo bundles', () => {
+  // The site's dist scan reads every string of the demo bundle against an English deny set, and a Portuguese "analis..." begins like one of its words.
+  // The notice titles and the report outcome line are in the demo (the hub previews a notice), so they say "revis..." instead.
+  it.each(['player.notice.title.appeal_upheld', 'player.notice.title.appeal_reduced', 'player.notice.title.appeal_revoked', 'player.notice.body.report_outcome'])('%s in Portuguese avoids an "anal" prefix', (key) => {
+    const text = (NOTICE_WORDS_PT as Readonly<Record<string, string>>)[key] as string;
+    expect(text).toBeDefined();
+    expect(text.toLowerCase()).not.toMatch(/\banal/);
+    expect(text).toMatch(/\brevis/i);
+  });
+});

@@ -133,7 +133,7 @@ export function resolveServeConfig(flags: ServeFlags, env: Env): ServeConfig {
 }
 
 const PUBLIC_URL_MESSAGE = 'CHATWARDEN_PUBLIC_URL must be an http or https address of at most 1900 characters with no credentials, no query string and no fragment.';
-const LANDING_ORIGINS_MESSAGE = 'CHATWARDEN_LANDING_ORIGINS must be a comma separated list of at most 20 origins such as https://your-game.test (no path, no trailing slash).';
+const LANDING_ORIGINS_MESSAGE = 'CHATWARDEN_LANDING_ORIGINS must be a comma separated list of at most 20 origins, each a scheme and a host with no path and no trailing slash.';
 
 /**
  * The address of the appeal page from `CHATWARDEN_PUBLIC_URL`: that address (trailing slashes dropped) plus `/appeal`. Whether it is a good address (http or https, no credentials, query
