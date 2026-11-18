@@ -11,7 +11,7 @@ import type {
   WireRefusal as HttpRefusal,
   WireRestriction as HttpRestriction,
 } from '@chatwarden/http';
-import { CHAT_WIRE_VERSION, readFrame, readLine, readRefusal } from '../src/chat/wire.js';
+import { CHAT_WIRE_VERSION, readFrame, readLine, readMuteResult, readRefusal } from '../src/chat/wire.js';
 import type { ChatFrame, MuteResult, MuteTarget, SendResult, WireLine, WireMuted, WireRefusal, WireRestriction } from '../src/chat/wire.js';
 import { createSseParser } from '../src/chat/sse.js';
 
@@ -82,6 +82,8 @@ describe('readFrame accepts what encodeFrame writes, for every frame type', () =
     { type: 'hide', ids: ['3', '4'] },
     { type: 'state', restriction: null, muted: [] },
     { type: 'state', restriction: { until: 5, byModerator: false }, muted: [{ ref: 'r', name: 'vlemmo' }] },
+    { type: 'state', restriction: null, muted: [{ ref: 'b1', name: 'tarvo', block: true }, { ref: 'm2', name: 'quissel' }] },
+    hello({ muted: [{ ref: 'b2', name: 'fenrisk', block: true }] }),
     { type: 'notices' },
     { type: 'bye', reason: 'banned', until: 1_800_000_000_000 },
     { type: 'bye', reason: 'banned', until: null },
@@ -343,5 +345,35 @@ describe('readLine and readRefusal (the answer to a POST)', () => {
     expect(readRefusal({})).toBeNull();
     expect(readRefusal(null)).toBeNull();
     expect(readRefusal({ reason: 7 })).toBeNull();
+  });
+});
+
+describe('blocks on the wire (M4)', () => {
+  it('a muted entry keeps block true and drops anything else a server might send as block', () => {
+    const out = readFrame(hello({ muted: [{ ref: 'a', name: 'x', block: true }, { ref: 'b', name: 'y', block: false }, { ref: 'c', name: 'z', block: 1 }, { ref: 'd', name: 'w', block: 'true' }, { ref: 'e', name: 'v' }] }));
+    expect(out).toMatchObject({ type: 'hello' });
+    if (out === null || out.type !== 'hello') throw new Error('not a hello');
+    expect(out.muted).toEqual([{ ref: 'a', name: 'x', block: true }, { ref: 'b', name: 'y' }, { ref: 'c', name: 'z' }, { ref: 'd', name: 'w' }, { ref: 'e', name: 'v' }]);
+    expect(Object.keys(out.muted[1] as object)).toEqual(['ref', 'name']);
+  });
+
+  it('a state frame reads block the same way', () => {
+    const out = readFrame({ type: 'state', restriction: null, muted: [{ ref: 'a', name: 'x', block: true }, { ref: 'b', name: 'y' }] });
+    expect(out).toEqual({ type: 'state', restriction: null, muted: [{ ref: 'a', name: 'x', block: true }, { ref: 'b', name: 'y' }] });
+  });
+
+  it('a mute result reads limit true, and only true', () => {
+    expect(readMuteResult({ ok: false, hiddenIds: [], limit: true })).toEqual({ ok: false, hiddenIds: [], limit: true });
+    expect(readMuteResult({ ok: true, hiddenIds: ['1'] })).toEqual({ ok: true, hiddenIds: ['1'] });
+    expect(readMuteResult({ ok: false, hiddenIds: [], limit: false })).toEqual({ ok: false, hiddenIds: [] });
+    expect(readMuteResult({ ok: false, hiddenIds: [], limit: 'yes' })).toEqual({ ok: false, hiddenIds: [] });
+  });
+
+  it('the wire version is 2 on both sides and the two WireMuted types carry the same optional block', () => {
+    expect(CHAT_WIRE_VERSION).toBe(HTTP_VERSION);
+    expectTypeOf<WireMuted>().toEqualTypeOf<HttpMuted>();
+    expectTypeOf<WireMuted['block']>().toEqualTypeOf<true | undefined>();
+    expectTypeOf<MuteResult['limit']>().toEqualTypeOf<true | undefined>();
+    expectTypeOf<HttpMuteResult['limit']>().toEqualTypeOf<true | undefined>();
   });
 });

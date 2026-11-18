@@ -24,7 +24,7 @@ function tmpPath(): string {
   return join(dir, 'kit.db');
 }
 
-const mute = (viewer: string, target: string, createdAt = NOW): MuteRow => ({ viewer, target, createdAt });
+const mute = (viewer: string, target: string, createdAt = NOW, block = false): MuteRow => ({ viewer, target, createdAt, block });
 
 function env() {
   const db = new DatabaseSync(':memory:');
@@ -44,7 +44,8 @@ describe('migration 4: kit_mutes', () => {
     const { db, store } = env();
     expect(store.schemaVersion()).toBeGreaterThanOrEqual(4);
     const cols = db.prepare('PRAGMA table_info(kit_mutes)').all().map((c) => String(c.name));
-    expect(cols).toEqual(['viewer_id', 'target_id', 'created_at']);
+    // The release adds the block flag in migration 26 (any-server block 2): this test is about the first three, in order.
+    expect(cols.slice(0, 3)).toEqual(['viewer_id', 'target_id', 'created_at']);
     db.close();
   });
 
@@ -305,5 +306,116 @@ describe('MuteService over the SQLite store', () => {
     await b.mutes.load();
     expect(b.mutes.isMuted(v, t)).toBe(false);
     b.db.close();
+  });
+});
+
+describe('migration 26, the block flag (any-server block 2)', () => {
+  const UP_TO_25 = MIGRATIONS.slice(0, 25);
+  const colsOf = (db: DatabaseSync): string[] => db.prepare('PRAGMA table_info(kit_mutes)').all().map((c) => String(c.name));
+
+  it('a 25 database upgrades: kit_mutes.block defaults 0 for old rows, and the rows keep their ids and times', () => {
+    const db = new DatabaseSync(':memory:');
+    openStore({ db, migrations: UP_TO_25 });
+    expect(colsOf(db)).not.toContain('block');
+    db.prepare('INSERT INTO kit_mutes (viewer_id, target_id, created_at) VALUES (?, ?, ?)').run('s_v', 's_t', 123);
+    db.prepare('INSERT INTO kit_mutes (viewer_id, target_id, created_at) VALUES (?, ?, ?)').run('s_v', 's_u', 456);
+    const store = openStore({ db });
+    expect(colsOf(db)).toContain('block');
+    expect(db.prepare('SELECT viewer_id, target_id, created_at, block FROM kit_mutes ORDER BY created_at').all().map((r) => ({ ...r }))).toEqual([
+      { viewer_id: 's_v', target_id: 's_t', created_at: 123, block: 0 },
+      { viewer_id: 's_v', target_id: 's_u', created_at: 456, block: 0 },
+    ]);
+    expect(store.loadMutes(0)).toEqual([mute('s_v', 's_t', 123, false), mute('s_v', 's_u', 456, false)]);
+    db.close();
+  });
+
+  it('the column is NOT NULL DEFAULT 0 and refuses anything but 0 and 1', () => {
+    const db = new DatabaseSync(':memory:');
+    openStore({ db });
+    const info = db.prepare('PRAGMA table_info(kit_mutes)').all().find((c) => c.name === 'block');
+    expect(Number(info?.notnull)).toBe(1);
+    expect(String(info?.dflt_value)).toBe('0');
+    const ins = db.prepare('INSERT INTO kit_mutes (viewer_id, target_id, created_at, block) VALUES (?, ?, 1, ?)');
+    ins.run('a', 'b', 1);
+    ins.run('a', 'c', 0);
+    expect(() => ins.run('a', 'd', 2)).toThrow();
+    expect(() => ins.run('a', 'e', -1)).toThrow();
+    db.close();
+  });
+
+  it('a block row survives purgeMutes at any age while a mute older than 180 days goes', () => {
+    const { db, store } = env();
+    store.upsertMute(mute('s_v', 's_b', NOW - 900 * DAY, true));
+    store.upsertMute(mute('s_v', 's_m', NOW - 900 * DAY, false));
+    expect(store.purgeMutes(NOW - 180 * DAY)).toBe(1);
+    expect(store.loadMutes(0)).toEqual([mute('s_v', 's_b', NOW - 900 * DAY, true)]);
+    db.close();
+  });
+
+  it('a block over a mute keeps one row; a mute over a block keeps the block', () => {
+    const { db, store } = env();
+    store.upsertMute(mute('s_v', 's_t', 1, false));
+    store.upsertMute(mute('s_v', 's_t', 2, true));
+    store.upsertMute(mute('s_v', 's_t', 3, false));
+    expect(db.prepare('SELECT created_at, block FROM kit_mutes').all().map((r) => ({ ...r }))).toEqual([{ created_at: 3, block: 1 }]);
+    db.close();
+  });
+
+  it('the cap drops the oldest MUTE in the real table and never a block; with 500 blocks the service refuses a new one', () => {
+    const { db, store } = env();
+    const clock = { t: NOW, now: () => NOW };
+    const subjects = new SubjectIndex(store, clock, { logger: { warn() {} } });
+    const mutes = new MuteService(store, clock, subjects, { logger: { warn() {} } });
+    const v = subjects.resolve(who('vk')) as string;
+    const targets: string[] = [];
+    for (let i = 0; i < MAX_MUTES_PER_VIEWER; i += 1) {
+      const t = subjects.resolve(who(`tk-${i}`)) as string;
+      targets.push(t);
+      mutes.set(v, t, true, i === 0 ? 'block' : 'mute');
+    }
+    const extra = subjects.resolve(who('extra')) as string;
+    expect(mutes.set(v, extra, true)).toBe('ok');
+    const rows = store.loadMutes(0).filter((r) => r.viewer === v);
+    expect(rows).toHaveLength(MAX_MUTES_PER_VIEWER);
+    expect(rows.find((r) => r.target === targets[0])?.block).toBe(true);
+    expect(rows.some((r) => r.target === targets[1])).toBe(false);
+    db.close();
+    const full = env();
+    const sub2 = new SubjectIndex(full.store, clock, { logger: { warn() {} } });
+    const svc = new MuteService(full.store, clock, sub2, { logger: { warn() {} } });
+    const v2 = sub2.resolve(who('v2')) as string;
+    for (let i = 0; i < MAX_MUTES_PER_VIEWER; i += 1) svc.set(v2, sub2.resolve(who(`b-${i}`)) as string, true, 'block');
+    expect(svc.set(v2, sub2.resolve(who('one-more')) as string, true, 'block')).toBe('limit');
+    expect(full.store.loadMutes(0).filter((r) => r.viewer === v2)).toHaveLength(MAX_MUTES_PER_VIEWER);
+    full.db.close();
+  });
+
+  it('a rerun of the block is refused: its statement fails on a database that already has the column', () => {
+    const { db } = env();
+    const sql = MIGRATIONS.find((m) => m.version === 26)?.sql ?? '';
+    expect(sql).toMatch(/ALTER TABLE kit_mutes ADD COLUMN block/);
+    expect(() => db.exec(sql)).toThrow();
+    expect(() => openStore({ db })).not.toThrow();
+    db.close();
+  });
+
+  it('a database migrated from 25 has the same kit_mutes schema as a fresh one', () => {
+    const a = new DatabaseSync(':memory:');
+    openStore({ db: a });
+    const b = new DatabaseSync(':memory:');
+    openStore({ db: b, migrations: UP_TO_25 });
+    openStore({ db: b });
+    expect(colsOf(b)).toEqual(colsOf(a));
+    a.close();
+    b.close();
+  });
+
+  it('the export counts a block a person placed with their mutes and never one placed on them (SQL statement, bound values)', async () => {
+    const { db, store } = env();
+    for (const id of ['s_me', 's_a']) await store.saveSubject({ id, createdAt: NOW, mergedInto: null });
+    store.upsertMute(mute('s_me', 's_a', NOW, true));
+    store.upsertMute(mute('s_a', 's_me', NOW, true));
+    expect(store.exportSubjects(['s_me']).mutes).toEqual({ placed: 1, received: 0 });
+    db.close();
   });
 });

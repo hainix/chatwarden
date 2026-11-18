@@ -115,7 +115,7 @@ describe('the public exports an adapter author needs', () => {
     expectTypeOf<http.SendResult>().toEqualTypeOf<wire.SendResult>();
     expectTypeOf<http.MuteTarget>().toEqualTypeOf<wire.MuteTarget>();
     expectTypeOf<http.MuteResult>().toEqualTypeOf<wire.MuteResult>();
-    expectTypeOf<wire.MuteResult>().toEqualTypeOf<{ ok: boolean; hiddenIds: string[] }>();
+    expectTypeOf<wire.MuteResult>().toEqualTypeOf<{ ok: boolean; hiddenIds: string[]; limit?: true }>();
     expectTypeOf<http.ReportOutcome>().toEqualTypeOf<wire.ReportOutcome>();
     // types have no run-time binding
     for (const name of ['ChatFrame', 'WireLine', 'WireRestriction', 'WireMuted', 'WireRefusal', 'SendResult', 'MuteTarget', 'MuteResult', 'ReportOutcome']) {

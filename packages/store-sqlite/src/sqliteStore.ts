@@ -2207,10 +2207,10 @@ export class SqliteStore implements Store, TermStore {
     this.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO kit_mutes (viewer_id, target_id, created_at) VALUES (?, ?, ?)
-           ON CONFLICT (viewer_id, target_id) DO UPDATE SET created_at = excluded.created_at`,
+          `INSERT INTO kit_mutes (viewer_id, target_id, created_at, block) VALUES (?, ?, ?, ?)
+           ON CONFLICT (viewer_id, target_id) DO UPDATE SET created_at = excluded.created_at, block = MAX(block, excluded.block)`,
         )
-        .run(row.viewer, row.target, row.createdAt);
+        .run(row.viewer, row.target, row.createdAt, row.block === true ? 1 : 0);
     });
   }
 
@@ -2223,9 +2223,9 @@ export class SqliteStore implements Store, TermStore {
   loadMutes(since: number): MuteRow[] {
     return this.transaction(() =>
       this.db
-        .prepare('SELECT viewer_id, target_id, created_at FROM kit_mutes WHERE created_at >= ? ORDER BY rowid')
+        .prepare('SELECT viewer_id, target_id, created_at, block FROM kit_mutes WHERE created_at >= ? OR block = 1 ORDER BY rowid')
         .all(since)
-        .map((r) => ({ viewer: String(r.viewer_id), target: String(r.target_id), createdAt: Number(r.created_at) })),
+        .map((r) => ({ viewer: String(r.viewer_id), target: String(r.target_id), createdAt: Number(r.created_at), block: Number(r.block) === 1 })),
     );
   }
 
@@ -2236,8 +2236,9 @@ export class SqliteStore implements Store, TermStore {
       );
       const extra = total - Math.max(0, keep);
       if (extra <= 0) return [];
+      // Only mutes go, oldest first; a block is never dropped (blocks alone can leave more than `keep`).
       const doomed = this.db
-        .prepare('SELECT target_id FROM kit_mutes WHERE viewer_id = ? ORDER BY created_at, rowid LIMIT ?')
+        .prepare('SELECT target_id FROM kit_mutes WHERE viewer_id = ? AND block = 0 ORDER BY created_at, rowid LIMIT ?')
         .all(viewer, extra)
         .map((r) => String(r.target_id));
       const del = this.db.prepare('DELETE FROM kit_mutes WHERE viewer_id = ? AND target_id = ?');
@@ -2884,7 +2885,7 @@ export class SqliteStore implements Store, TermStore {
   }
 
   purgeMutes(before: number): number {
-    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_mutes WHERE created_at < ?').run(before).changes));
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_mutes WHERE created_at < ? AND block = 0').run(before).changes));
   }
 
   purgeNotices(before: number, unseen?: { appealBefore: number; renameBefore: number }): number {

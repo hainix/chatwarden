@@ -404,8 +404,8 @@ export class ChatService {
 
   /**
    * Should `viewerSeat` be shown a line `senderSeat` sent? The sender's own seat always sees it. Otherwise the
-   * line is hidden when the viewer's current occupant has muted the sender's current occupant. Any internal
-   * error means visible: a broken mute store must not silence a room.
+   * line is hidden when the viewer's current occupant has muted or blocked the sender's current occupant, or the sender has blocked the viewer
+   * (a block is two-way). Any internal error means visible: a broken mute store must not silence a room.
    */
   visibleTo(roomId: string, viewerSeat: string, senderSeat: string): boolean {
     if (viewerSeat === senderSeat) return true;
@@ -413,7 +413,7 @@ export class ChatService {
       const viewer = this.roster.occupant(roomId, viewerSeat);
       const sender = this.roster.occupant(roomId, senderSeat);
       if (viewer === null || sender === null) return true;
-      return !this.mutes.isMuted(viewer.subject, sender.subject);
+      return !this.mutes.isMuted(viewer.subject, sender.subject) && !this.mutes.isBlocked(sender.subject, viewer.subject);
     } catch (err) {
       this.warn('chat.visibility_failed', { error: errName(err) });
       return true;

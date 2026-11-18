@@ -162,7 +162,7 @@ export const EXPORT_STRIKES_SQL = `SELECT at, room_id, raw_line FROM kit_strikes
 export const EXPORT_NAMES_SQL = `SELECT at, name, reason FROM kit_blocked_names WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
 export const EXPORT_APPEALS_SQL = `SELECT created_at, kind, rule, status, statement, decided_at FROM kit_appeals WHERE subject_id IN ${IN_ARG} ORDER BY created_at DESC, id DESC LIMIT ?`;
 export const EXPORT_SIGNALS_SQL = `SELECT at, kind FROM kit_signals WHERE subject_id IN ${IN_ARG} ORDER BY at DESC, id DESC LIMIT ?`;
-export const EXPORT_MUTES_SQL = `SELECT SUM(viewer_id IN ${IN_ARG}) AS placed, SUM(target_id IN ${IN_ARG}) AS received FROM kit_mutes WHERE viewer_id IN ${IN_ARG} OR target_id IN ${IN_ARG}`;
+export const EXPORT_MUTES_SQL = `SELECT SUM(viewer_id IN ${IN_ARG}) AS placed, SUM(target_id IN ${IN_ARG} AND block = 0) AS received FROM kit_mutes WHERE viewer_id IN ${IN_ARG} OR target_id IN ${IN_ARG}`;
 export const EXPORT_NOAUTO_SQL = `SELECT code FROM kit_ai_noauto WHERE subject_id IN ${IN_ARG} ORDER BY set_at DESC LIMIT 1`;
 export const EXPORT_AI_READS_SQL = `SELECT COUNT(*) AS n FROM kit_ai_reads WHERE report_id IN (SELECT id FROM kit_reports WHERE target_subject IN ${IN_ARG})`;
 export const EXPORT_AI_OUTCOMES_SQL = `SELECT verdict, agreement FROM kit_ai_outcomes WHERE report_id IN (SELECT id FROM kit_reports WHERE target_subject IN ${IN_ARG})

@@ -632,6 +632,11 @@ export interface MuteRow {
   viewer: SubjectId;
   target: SubjectId;
   createdAt: number;
+  /**
+   * True for a block: a mute that is also two-way and never expires (the retention purge, the 180 day cut of `loadMutes` and the per-viewer cap all leave it alone). A mute never
+   * downgrades a block: a store keeps `block` true when a row for the pair is written again with false.
+   */
+  block: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1157,19 +1162,19 @@ export interface Store {
   // Mutes. SYNCHRONOUS on purpose (like sanctions): `MuteService.set` writes inside
   // `transaction`, then updates its in-memory index in the same tick.
 
-  /** Insert the (viewer, target) mute, or set its `createdAt` when it already exists. */
+  /** Insert the (viewer, target) mute or block, or set its `createdAt` when it already exists. `block` becomes true when either the stored row or this one has it (a mute never downgrades a block). */
   upsertMute(row: MuteRow): void;
 
   /** Delete the (viewer, target) mute exactly as stored. Returns whether a row was removed. */
   deleteMute(viewer: SubjectId, target: SubjectId): boolean;
 
-  /** Every mute created at or after `since` (epoch ms): the live ones, for rebuilding the index. */
+  /** Every mute created at or after `since` (epoch ms) and every block whatever its age: the live ones, for rebuilding the index. */
   loadMutes(since: number): MuteRow[];
 
   /**
-   * Keep only the `keep` newest mutes of this stored viewer id (by `createdAt`; on a
-   * tie the one written last survives) and delete the rest. Returns the target ids of
-   * the deleted rows, oldest first.
+   * Keep only the `keep` newest rows of this stored viewer id (by `createdAt`; on a
+   * tie the one written last survives) and delete the rest, but never a block: only mutes are dropped (oldest first), so more than `keep`
+   * rows can remain when blocks fill the list. Returns the target ids of the deleted rows, oldest first.
    */
   pruneMutes(viewer: SubjectId, keep: number): SubjectId[];
 

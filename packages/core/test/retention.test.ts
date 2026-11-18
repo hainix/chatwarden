@@ -382,9 +382,9 @@ describe('purge: strikes', () => {
 describe('purge: mutes', () => {
   it('purges mutes past the 180-day TTL (ruling R27) and keeps the rest', async () => {
     const { store } = setup();
-    store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 180 * DAY - 1 });
-    store.upsertMute({ viewer: 'v', target: 'edge', createdAt: NOW - 180 * DAY });
-    store.upsertMute({ viewer: 'v', target: 'new', createdAt: NOW - DAY });
+    store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 180 * DAY - 1, block: false });
+    store.upsertMute({ viewer: 'v', target: 'edge', createdAt: NOW - 180 * DAY, block: false });
+    store.upsertMute({ viewer: 'v', target: 'new', createdAt: NOW - DAY, block: false });
     const res = await purge(store, NOW);
     expect(res.mutes).toBe(1);
     expect(store.rawMutes().map((m) => m.target).sort()).toEqual(['edge', 'new']);
@@ -392,8 +392,8 @@ describe('purge: mutes', () => {
 
   it('a refreshed mute (same pair muted again) is judged by its new time', async () => {
     const { store } = setup();
-    store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 400 * DAY });
-    store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - DAY });
+    store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 400 * DAY, block: false });
+    store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - DAY, block: false });
     expect((await purge(store, NOW)).mutes).toBe(0);
     expect(store.rawMutes()).toHaveLength(1);
   });
@@ -405,7 +405,7 @@ describe('purge: result, policy and scope', () => {
     t.store.insertReport(report('r1', NOW - 100 * DAY));
     t.store.insertReport(report('r2', NOW - 100 * DAY));
     t.store.insertStrike(strike('s1', NOW - 40 * DAY));
-    t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY });
+    t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY, block: false });
     await t.sanction(t.subject('k1'), NOW - 200 * DAY, DAY);
     expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, erasuresFinished: 0, strayRows: 0 });
   });
@@ -478,7 +478,7 @@ describe('purge: result, policy and scope', () => {
     const t = setup();
     t.store.insertReport(report('r1', NOW - 100 * DAY));
     t.store.insertStrike(strike('s1', NOW - 40 * DAY));
-    t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY });
+    t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY, block: false });
     await t.sanction(t.subject('k1'), NOW - 200 * DAY, DAY);
     t.store.purgeMutes = () => {
       throw new Error('disk full');

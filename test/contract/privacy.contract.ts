@@ -212,9 +212,9 @@ export async function seedWorld(s: Store, o: WorldOptions = {}): Promise<void> {
   s.insertStrike(strike('st1', 's_pp', WHO.line));
   s.insertStrike(strike('st2', 's_pp2', WHO.line2));
   s.insertStrike(strike('st3', 's_qq', OTHER.line));
-  s.upsertMute({ viewer: 's_pp', target: 's_qq', createdAt: NOW - DAY });
-  s.upsertMute({ viewer: 's_qq', target: 's_pp2', createdAt: NOW - DAY });
-  s.upsertMute({ viewer: 's_qq', target: 's_xx', createdAt: NOW - DAY });
+  s.upsertMute({ viewer: 's_pp', target: 's_qq', createdAt: NOW - DAY, block: false });
+  s.upsertMute({ viewer: 's_qq', target: 's_pp2', createdAt: NOW - DAY, block: false });
+  s.upsertMute({ viewer: 's_qq', target: 's_xx', createdAt: NOW - DAY, block: false });
   x.insertBlockedName({ id: 'bn1', subject: 's_pp', name: WHO.name, termId: null, reason: 'name_profane', at: NOW - DAY });
   x.insertBlockedName({ id: 'bn2', subject: 's_qq', name: 'qqname', termId: null, reason: 'name_profane', at: NOW - DAY });
   x.insertAppeal(appeal('ap-pp', 's_pp', 'gEnded'));
@@ -498,7 +498,7 @@ export function privacyContract(name: string, make: () => Store, dump?: (s: Stor
         expect((await s.loadSubjects()).ids.map((r) => r.subjectId).sort()).toEqual(['s_qq', 's_qq', 's_qq', 's_xx']);
         expect(s.loadNotices(['s_pp', 's_pp2'])).toEqual([]);
         expect(s.loadStrikes(0).map((r) => r.subject)).toEqual(['s_qq']);
-        expect(s.loadMutes(0)).toEqual([{ viewer: 's_qq', target: 's_xx', createdAt: NOW - DAY }]);
+        expect(s.loadMutes(0)).toEqual([{ viewer: 's_qq', target: 's_xx', createdAt: NOW - DAY, block: false }]);
         expect(s.loadReport('rAbout')).toBeNull();
         expect(s.loadReport('rFilter')).toBeNull();
         expect(s.findDecision('d-about')).toBeNull();

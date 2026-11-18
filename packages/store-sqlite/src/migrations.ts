@@ -863,6 +863,9 @@ ALTER TABLE kit_reports ADD COLUMN scope TEXT;
 CREATE INDEX kit_reports_by_scope ON kit_reports (scope, status, created_at);
 UPDATE kit_reports SET scope = json_extract(tags_json, '$.scope') WHERE json_extract(tags_json, '$.scope') IS NOT NULL;
 
+-- any-server-rooms-languages: kit_mutes.block. A block is a mute that is also two-way and never expires; one row per pair, the latest action wins (a mute never downgrades a block).
+ALTER TABLE kit_mutes ADD COLUMN block INTEGER NOT NULL DEFAULT 0 CHECK (block IN (0, 1));
+
 CREATE TABLE kit_chat_days (
   day       TEXT PRIMARY KEY,
   delivered INTEGER NOT NULL,

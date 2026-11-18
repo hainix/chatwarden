@@ -81,10 +81,10 @@ export interface ChatSession {
   canOpen(): boolean;
   /** Check a line with the kit and, if it passes, deliver it to the room. Never throws. */
   send(input: { text: string }): SendResult;
-  /** Mute or unmute a player, named by one of their lines or by the token from `muted`. `false`: nothing to do. */
-  mute(input: MuteTarget & { on: boolean }): boolean;
+  /** Mute or unmute a player, named by one of their lines or by the token from `muted`. `false`: nothing to do. With `block` (and `on`) it is a block: two-way, lasting. */
+  mute(input: MuteTarget & { on: boolean; block?: boolean }): boolean;
   /** `mute`, with the ids of the lines it hid from this player (see `MuteResult`). The routes answer a mute with this. */
-  muteResult(input: MuteTarget & { on: boolean }): MuteResult;
+  muteResult(input: MuteTarget & { on: boolean; block?: boolean }): MuteResult;
   /** Report a line. The reporter is this session; the person is the line's author. Never rejects for a kit refusal. */
   report(input: { lineId: string; reason?: string; note?: string }): Promise<ReportOutcome>;
 }
@@ -497,6 +497,15 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     }
   }
 
+  function blockedSeatsOf(room: RoomRec, member: MemberRec): string[] {
+    try {
+      return cw.mutes.blockedSeats(room.id, member.seat);
+    } catch (err) {
+      warn('chatwarden.chat_mutes_failed', err);
+      return [];
+    }
+  }
+
   /** Note that `viewerSeat` mutes `targetSeat`, so that seat is kept for them if its player leaves. */
   function hold(room: RoomRec, viewerSeat: string, targetSeat: string): void {
     let set = room.holders.get(targetSeat);
@@ -545,11 +554,12 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     // A token for a seat the kit no longer lists (undone in another tab, or expired) is dropped: the maps stay as small as the mute list.
     const still = new Set(listed);
     for (const target of [...member.refByTarget.keys()]) if (!still.has(target)) dropRef(member, target);
+    const blocked = new Set(blockedSeatsOf(room, member));
     for (const seat of listed) {
       const name = room.members.get(seat)?.name ?? room.ghosts.get(seat);
       if (name === undefined) continue;
       hold(room, member.seat, seat);
-      out.push({ ref: refFor(member, seat), name });
+      out.push({ ref: refFor(member, seat), name, ...(blocked.has(seat) ? { block: true as const } : {}) });
     }
     return out;
   }
@@ -864,6 +874,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         if (found === null || typeof input !== 'object' || input === null || typeof input.on !== 'boolean') return none;
         const { room, member } = found;
         const on = input.on;
+        const asBlock = on && input.block === true;
         let target: string | undefined;
         if ('lineId' in input && typeof input.lineId === 'string') {
           target = room.ring.byId(input.lineId)?.seat;
@@ -874,23 +885,34 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         }
         if (target === undefined || target === member.seat || !(room.members.has(target) || room.ghosts.has(target))) return none;
         const before = mutedSeatsOf(room, member).includes(target);
+        const blockedBefore = blockedSeatsOf(room, member).includes(target);
         try {
-          cw.mutes.set(room.id, member.seat, target, on);
+          const outcome = asBlock ? cw.blocks.set(room.id, member.seat, target, true) : cw.mutes.set(room.id, member.seat, target, on);
+          // The viewer's list holds as many blocks as is allowed: nothing was written, and the client is told in words.
+          if (outcome === 'limit') return { ok: false, hiddenIds: [], limit: true };
         } catch (err) {
           warn('chatwarden.chat_mute_failed', err);
           return none;
         }
         const after = mutedSeatsOf(room, member).includes(target);
-        if (after !== on) return none; // the kit did nothing (a seat with no person, or the viewer's list is full)
+        const blockedAfter = blockedSeatsOf(room, member).includes(target);
+        if (after !== on) return none; // the kit did nothing (a seat with no person)
         if (on) hold(room, member.seat, target);
         else {
           release(room, member.seat, target);
           dropRef(member, target);
         }
         const ids = on ? room.ring.bySeat(target).map((l) => l.id) : [];
-        if (before !== after) {
-          if (ids.length > 0) writeAll(member, () => ({ type: 'hide', ids: [...ids] }));
+        if (before !== after || blockedBefore !== blockedAfter) {
+          if (before !== after && ids.length > 0) writeAll(member, () => ({ type: 'hide', ids: [...ids] }));
           writeAll(member, () => stateFor(room, member));
+        }
+        // A new block also hides the blocker's lines already in the room from the blocked player's streams (ids only: no name, no token, no state), so history on their screen goes too.
+        // They are told nothing else; later lines in both directions are filtered by `visibleTo`.
+        if (!blockedBefore && blockedAfter) {
+          const mine = room.ring.bySeat(member.seat).map((l) => l.id);
+          const blockedMember = room.members.get(target);
+          if (mine.length > 0 && blockedMember !== undefined) writeAll(blockedMember, () => ({ type: 'hide', ids: [...mine] }));
         }
         return { ok: true, hiddenIds: [...ids] };
       },

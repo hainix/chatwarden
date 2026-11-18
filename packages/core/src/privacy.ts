@@ -161,7 +161,7 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
   {
     category: 'mutes',
     tables: ['kit_mutes'],
-    export: 'How many players the person muted and how many muted them, never who.',
+    export: 'How many players the person muted or blocked and how many muted them, never who. A block placed on them is not counted: nobody is told they were blocked.',
     eraseSafety: 'Deleted, in both directions.',
     eraseNone: 'Deleted, in both directions.',
     retention: null,

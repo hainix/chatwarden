@@ -13,7 +13,8 @@ import { describe, expect, it } from 'vitest';
 const pkg = fileURLToPath(new URL('..', import.meta.url));
 // Raised 9 to 12 KB for 0.2.0 (room modes, retraction, the v2 frame readers: measured 9.8 KB).
 const MARGINAL_BUDGET = 12 * 1024; // measured 9.8 KB
-const ENTRY_BUDGET = 17 * 1024; // measured 15.0 KB
+// Raised to 20 KB at 0.2.0 (Block: the confirm row, the block words and the list's tag and Unblock), by the rule to raise generously: measured 17.8 KB.
+const ENTRY_BUDGET = 20 * 1024;
 const CSS_BUDGET = 2.5 * 1024; // measured 2.1 KB
 
 async function bundle(contents: string) {

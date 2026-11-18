@@ -4,7 +4,8 @@ import type { MuteRow, Store } from '@chatwarden/core';
 // The contract of the mute methods of the Store. One suite, run against every Store.
 
 const T = 1_800_000_000_000;
-const mute = (viewer: string, target: string, createdAt = T): MuteRow => ({ viewer, target, createdAt });
+const mute = (viewer: string, target: string, createdAt = T, block = false): MuteRow => ({ viewer, target, createdAt, block });
+const DAY = 86_400_000;
 const pairs = (rows: MuteRow[]) => rows.map((r) => `${r.viewer}>${r.target}`).sort();
 
 export function mutesContract(name: string, make: () => Store): void {
@@ -210,6 +211,138 @@ export function mutesContract(name: string, make: () => Store): void {
         }),
       ).toThrow('boom');
       expect(s.loadMutes(0).sort((a, b) => a.createdAt - b.createdAt)).toEqual([mute('v', 'old', T - 5), mute('v', 'keep', T)]);
+    });
+
+    describe('blocks: the block flag of a row', () => {
+      it('a block round-trips with block true and a mute with block false', () => {
+        const s = make();
+        s.upsertMute(mute('v', 'b', T, true));
+        s.upsertMute(mute('v', 'm', T + 1));
+        expect(s.loadMutes(0)).toEqual([mute('v', 'b', T, true), mute('v', 'm', T + 1, false)]);
+      });
+
+      it('a block over a mute makes the row a block, one row; a mute over a block keeps the block (a mute never downgrades a block); deleteMute removes it either way', () => {
+        const s = make();
+        s.upsertMute(mute('v', 't', T, false));
+        s.upsertMute(mute('v', 't', T + 1, true));
+        expect(s.loadMutes(0)).toEqual([mute('v', 't', T + 1, true)]);
+        s.upsertMute(mute('v', 't', T + 2, false));
+        expect(s.loadMutes(0).map((r) => r.block)).toEqual([true]);
+        expect(s.deleteMute('v', 't')).toBe(true);
+        expect(s.loadMutes(0)).toEqual([]);
+      });
+
+      it('loadMutes keeps a block whatever its age, and a mute only from since', () => {
+        const s = make();
+        s.upsertMute(mute('v', 'oldblock', T - 900 * DAY, true));
+        s.upsertMute(mute('v', 'oldmute', T - 900 * DAY, false));
+        s.upsertMute(mute('v', 'newmute', T + 1, false));
+        expect(pairs(s.loadMutes(T))).toEqual(['v>newmute', 'v>oldblock']);
+        expect(pairs(s.loadMutes(T + 5))).toEqual(['v>oldblock']);
+      });
+
+      it('purgeMutes skips a block at any age and counts only the mutes it deletes', () => {
+        const s = make();
+        s.upsertMute(mute('v', 'oldblock', T - 900 * DAY, true));
+        s.upsertMute(mute('v', 'oldmute', T - 900 * DAY, false));
+        s.upsertMute(mute('w', 'oldmute2', T - 10, false));
+        s.upsertMute(mute('w', 'new', T + 1, false));
+        expect(s.purgeMutes(T)).toBe(2);
+        expect(pairs(s.loadMutes(0))).toEqual(['v>oldblock', 'w>new']);
+        expect(s.purgeMutes(T + 1000 * DAY)).toBe(1);
+        expect(pairs(s.loadMutes(0))).toEqual(['v>oldblock']);
+      });
+
+      it('pruneMutes drops the oldest mutes and never a block, even the oldest row; it may leave more than N when only blocks remain', () => {
+        const s = make();
+        s.upsertMute(mute('v', 'b1', T, true));
+        s.upsertMute(mute('v', 'm1', T + 1));
+        s.upsertMute(mute('v', 'b2', T + 2, true));
+        s.upsertMute(mute('v', 'm2', T + 3));
+        expect(s.pruneMutes('v', 3)).toEqual(['m1']);
+        expect(pairs(s.loadMutes(0))).toEqual(['v>b1', 'v>b2', 'v>m2']);
+        expect(s.pruneMutes('v', 0)).toEqual(['m2']);
+        expect(pairs(s.loadMutes(0))).toEqual(['v>b1', 'v>b2']);
+        expect(s.pruneMutes('v', 1)).toEqual([]);
+        expect(pairs(s.loadMutes(0))).toEqual(['v>b1', 'v>b2']);
+      });
+
+      it("pruneMutes of one viewer never touches another viewer's blocks or mutes", () => {
+        const s = make();
+        s.upsertMute(mute('v', 'a', T));
+        s.upsertMute(mute('w', 'b', T - 5, true));
+        s.upsertMute(mute('w', 'c', T - 6));
+        expect(s.pruneMutes('v', 0)).toEqual(['a']);
+        expect(pairs(s.loadMutes(0))).toEqual(['w>b', 'w>c']);
+      });
+
+      it('a rolled-back block write, delete or purge puts the block back, flag included', () => {
+        const s = make();
+        s.upsertMute(mute('v', 'b', T - 900 * DAY, true));
+        expect(() =>
+          s.transaction(() => {
+            s.deleteMute('v', 'b');
+            s.upsertMute(mute('v', 'n', T, true));
+            s.upsertMute(mute('v', 'b2', T, false));
+            s.purgeMutes(T + 100);
+            throw new Error('boom');
+          }),
+        ).toThrow('boom');
+        expect(s.loadMutes(0)).toEqual([mute('v', 'b', T - 900 * DAY, true)]);
+        expect(() =>
+          s.transaction(() => {
+            s.upsertMute(mute('v', 'b', T, false));
+            s.upsertMute(mute('v', 'm', T, false));
+            throw new Error('boom');
+          }),
+        ).toThrow('boom');
+        expect(s.loadMutes(0)).toEqual([mute('v', 'b', T - 900 * DAY, true)]);
+      });
+    });
+
+    describe('blocks: privacy (both directions, in export and erase)', () => {
+      const plan = (subjects: string[]) => ({ subjects, mode: 'none' as const, heldReportIds: new Set<string>(), receiptId: 'e_blocks', at: T });
+
+      it("erasing a person deletes the blocks and mutes they placed and the ones placed on them, and nobody else's", async () => {
+        const s = make();
+        for (const id of ['s_me', 's_a', 's_b', 's_c']) await s.saveSubject({ id, createdAt: T, mergedInto: null });
+        s.upsertMute(mute('s_me', 's_a', T, true));
+        s.upsertMute(mute('s_me', 's_b', T, false));
+        s.upsertMute(mute('s_a', 's_me', T, true));
+        s.upsertMute(mute('s_b', 's_me', T, false));
+        s.upsertMute(mute('s_a', 's_b', T, true));
+        s.upsertMute(mute('s_c', 's_a', T, false));
+        const counts = s.eraseSubjects(plan(['s_me']));
+        expect(counts.removed.mutes).toBe(4);
+        expect(pairs(s.loadMutes(0))).toEqual(['s_a>s_b', 's_c>s_a']);
+        expect(s.loadMutes(0).find((r) => r.viewer === 's_a')?.block).toBe(true);
+      });
+
+      it('a dry run counts the blocks and writes nothing', async () => {
+        const s = make();
+        for (const id of ['s_me', 's_a']) await s.saveSubject({ id, createdAt: T, mergedInto: null });
+        s.upsertMute(mute('s_me', 's_a', T, true));
+        s.upsertMute(mute('s_a', 's_me', T, true));
+        const counts = s.eraseSubjects({ ...plan(['s_me']), dryRun: true });
+        expect(counts.removed.mutes).toBe(2);
+        expect(s.loadMutes(0)).toHaveLength(2);
+      });
+
+      it('the export counts the blocks a person placed with their mutes, and never says they were blocked: a block placed on them is not in what they receive', async () => {
+        const s = make();
+        for (const id of ['s_me', 's_a', 's_b']) await s.saveSubject({ id, createdAt: T, mergedInto: null });
+        s.upsertMute(mute('s_me', 's_a', T, true));
+        s.upsertMute(mute('s_me', 's_b', T, false));
+        s.upsertMute(mute('s_a', 's_me', T, true));
+        s.upsertMute(mute('s_b', 's_me', T, false));
+        const out = s.exportSubjects(['s_me']);
+        expect(out.mutes).toEqual({ placed: 2, received: 1 });
+        expect(Object.keys(out.mutes)).toEqual(['placed', 'received']);
+        const onlyBlocked = make();
+        for (const id of ['s_me', 's_a']) await onlyBlocked.saveSubject({ id, createdAt: T, mergedInto: null });
+        onlyBlocked.upsertMute(mute('s_a', 's_me', T, true));
+        expect(onlyBlocked.exportSubjects(['s_me']).mutes).toEqual({ placed: 0, received: 0 });
+      });
     });
   });
 }

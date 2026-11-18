@@ -62,6 +62,7 @@ import type { PaceSettings, ResolvedPace } from './pace.js';
 import { ProfileError, resolveProfile } from './profile.js';
 import type { ModerationProfile, PolicyLayer, PolicySection, PresetName, ProfanityConfig, ProfileOverrides, ResolvedProfile } from './profile.js';
 import { MuteService } from './mutes.js';
+import type { MuteOutcome } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
 import { ReportService } from './reports.js';
@@ -437,10 +438,27 @@ export interface Chatwarden {
     effective(name: string | null): EffectiveContext;
   };
   mutes: {
-    /** `viewerSeat`'s occupant mutes (`on`) or unmutes `targetSeat`'s occupant. Does nothing if either seat has no subject. */
-    set(roomId: string, viewerSeat: string, targetSeat: string, on: boolean): void;
-    /** The seats whose current occupant the viewer has muted. Seat ids only. */
+    /**
+     * `viewerSeat`'s occupant mutes (`on`) or unmutes `targetSeat`'s occupant (a block is undone too: the row goes). Answers `ok`, `limit` (the viewer's list holds 500 blocks, so
+     * nothing can be added) or `none` (either seat has no subject, or it is one person). Muting someone already blocked changes nothing.
+     */
+    set(roomId: string, viewerSeat: string, targetSeat: string, on: boolean): MuteOutcome;
+    /** The seats whose current occupant the viewer has muted or blocked. Seat ids only. */
     mutedSeats(roomId: string, viewerSeat: string): string[];
+    /** The seats whose current occupant the viewer has BLOCKED (a subset of `mutedSeats`). Seat ids only. */
+    blockedSeats(roomId: string, viewerSeat: string): string[];
+  };
+  /**
+   * Blocks: a mute the viewer makes lasting and two-way. The row is the mute's (one per pair, never purged by age); `chat.visibleTo` is false when either blocked the other, so neither sees the
+   * other's lines. The kit holds only hashes and has no call that lists who blocked whom: a game asks about the pairs it is about to put together.
+   */
+  blocks: {
+    /** `viewerSeat`'s occupant blocks (`on`) or unblocks `targetSeat`'s occupant. Answers as `mutes.set` does; two guests (no person) are never blocked (`none`). */
+    set(roomId: string, viewerSeat: string, targetSeat: string, on: boolean): MuteOutcome;
+    /** Has either of these two players blocked the other? Found, never created: a player the kit does not know is not blocked. A merged person's blocks follow the merge. */
+    between(whoA: RawWho, whoB: RawWho): boolean;
+    /** `between(who, other)` for each of `others`, in order. At most 50 (`RangeError` otherwise). */
+    anyBetween(who: RawWho, others: readonly RawWho[]): boolean[];
   };
   reports: {
     /**
@@ -1121,6 +1139,9 @@ function buildPackageFilter(pkg: NonNullable<ChatwardenOptions['profanityPackage
   }
   return built;
 }
+
+/** The most players one `blocks.anyBetween` call asks about. */
+const BLOCKS_ASKED_MAX = 50;
 
 /**
  * Wire every component and return the kit. This is the recommended entry point: the component classes stay
@@ -1963,10 +1984,26 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       set: (roomId, viewerSeat, targetSeat, on) => {
         const viewer = roster.occupant(roomId, viewerSeat)?.subject ?? null;
         const target = roster.occupant(roomId, targetSeat)?.subject ?? null;
-        if (viewer === null || target === null) return;
-        mutes.set(viewer, target, on);
+        if (viewer === null || target === null) return 'none';
+        return mutes.set(viewer, target, on);
       },
       mutedSeats: (roomId, viewerSeat) => mutes.mutedSeats(roomId, viewerSeat, roster),
+      blockedSeats: (roomId, viewerSeat) => mutes.blockedSeats(roomId, viewerSeat, roster),
+    },
+    blocks: {
+      set: (roomId, viewerSeat, targetSeat, on) => {
+        const viewer = roster.occupant(roomId, viewerSeat)?.subject ?? null;
+        const target = roster.occupant(roomId, targetSeat)?.subject ?? null;
+        if (viewer === null || target === null) return 'none';
+        return mutes.set(viewer, target, on, 'block');
+      },
+      between: (whoA, whoB) => mutes.blockedBetween(personOf(whoA), personOf(whoB)),
+      anyBetween: (who, others) => {
+        if (!Array.isArray(others)) throw new TypeError('blocks.anyBetween: others must be a list');
+        if (others.length > BLOCKS_ASKED_MAX) throw new RangeError(`blocks.anyBetween: at most ${BLOCKS_ASKED_MAX} players at a time`);
+        const me = personOf(who);
+        return others.map((other) => mutes.blockedBetween(me, personOf(other)));
+      },
     },
     reports: {
       submit: async (input) => {

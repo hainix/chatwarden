@@ -395,7 +395,7 @@ export async function loadChatBox(): Promise<(props: ChatBoxProps) => unknown> {
 ### What the player sees
 
 The always-visible box is the list, one input and Send, and one small control at the corner (Chat options). A line from another player
-has one quiet control (visible on hover and focus, and always, dimmed, on a touch screen) that opens Report and Mute. Chat options holds
+has one quiet control (visible on hover and focus, and always, dimmed, on a touch screen) that opens Report, Mute and Block (Block asks one confirm: they will not see your messages either; it is undone in Chat options, which lists muted and blocked players). Chat options holds
 the muted players (each with Unmute), the profile's one-line standard and, when you pass `onOpenRules`, a Read the rules button. Nothing
 else is added.
 

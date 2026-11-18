@@ -603,13 +603,16 @@ export class MemoryStore implements Store {
     const key = muteKey(row.viewer, row.target);
     const existing = this.mutes.get(key);
     if (existing === undefined) {
-      this.mutes.set(key, { row: { ...row }, seq: ++this.muteSeq });
+      this.mutes.set(key, { row: { ...row, block: row.block === true }, seq: ++this.muteSeq });
       this.undoWith(() => this.mutes.delete(key));
     } else {
-      const before = existing.row.createdAt;
+      const before = { at: existing.row.createdAt, block: existing.row.block };
       existing.row.createdAt = row.createdAt;
+      // A mute never downgrades a block.
+      existing.row.block = existing.row.block || row.block === true;
       this.undoWith(() => {
-        existing.row.createdAt = before;
+        existing.row.createdAt = before.at;
+        existing.row.block = before.block;
       });
     }
   }
@@ -626,16 +629,16 @@ export class MemoryStore implements Store {
   loadMutes(since: number): MuteRow[] {
     // In write order (a refresh keeps its place, and so does a row an undo puts back), like SQLite's rowid.
     return [...this.mutes.values()]
-      .filter((m) => m.row.createdAt >= since)
+      .filter((m) => m.row.block || m.row.createdAt >= since)
       .sort((a, b) => a.seq - b.seq)
       .map((m) => ({ ...m.row }));
   }
 
   pruneMutes(viewer: SubjectId, keep: number): SubjectId[] {
-    const mine = [...this.mutes.entries()]
-      .filter(([, m]) => m.row.viewer === viewer)
-      .sort(([, a], [, b]) => a.row.createdAt - b.row.createdAt || a.seq - b.seq);
-    const drop = mine.slice(0, Math.max(0, mine.length - keep));
+    const mine = [...this.mutes.entries()].filter(([, m]) => m.row.viewer === viewer);
+    // Only mutes go, oldest first, until the list is down to `keep`; a block is never dropped (so blocks alone can leave more than `keep`).
+    const mutesOnly = mine.filter(([, m]) => !m.row.block).sort(([, a], [, b]) => a.row.createdAt - b.row.createdAt || a.seq - b.seq);
+    const drop = mutesOnly.slice(0, Math.max(0, Math.min(mutesOnly.length, mine.length - Math.max(0, keep))));
     for (const [key, m] of drop) {
       this.mutes.delete(key);
       this.undoWith(() => this.mutes.set(key, m));
@@ -1190,7 +1193,8 @@ export class MemoryStore implements Store {
   purgeMutes(before: number): number {
     let n = 0;
     for (const [key, m] of [...this.mutes]) {
-      if (m.row.createdAt >= before) continue;
+      // A block is never purged by age.
+      if (m.row.block || m.row.createdAt >= before) continue;
       this.mutes.delete(key);
       this.undoWith(() => this.mutes.set(key, m));
       n++;
@@ -1789,7 +1793,8 @@ export class MemoryStore implements Store {
         (hooks.privacyExportAppeals?.(set) ?? []).map((r) => ({ createdAt: r.createdAt, kind: r.kind, rule: r.rule, status: r.status, statement: r.statement, decidedAt: r.decidedAt })),
       ),
       signals: cap('signals', hooks.privacyExportSignals?.(set) ?? []),
-      mutes: { placed: mutes.filter((m) => set.has(m.row.viewer)).length, received: mutes.filter((m) => set.has(m.row.target)).length },
+      // `received` leaves blocks out: a person is never told they were blocked.
+      mutes: { placed: mutes.filter((m) => set.has(m.row.viewer)).length, received: mutes.filter((m) => set.has(m.row.target) && !m.row.block).length },
       ai: {
         noAutomation: hooks.privacyExportNoAutomation?.(set) ?? null,
         reads: this.aiReads.filter((r) => aboutIds.has(r.reportId)).length,

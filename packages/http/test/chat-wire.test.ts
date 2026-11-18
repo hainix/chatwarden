@@ -262,7 +262,7 @@ describe('the wire types', () => {
       { ok: true; remaining: number } | { ok: false; refused: ReportRefusal | 'not_found'; remaining?: number }
     >();
     expectTypeOf<WireRestriction>().toEqualTypeOf<{ until: number | null; byModerator: boolean }>();
-    expectTypeOf<WireMuted>().toEqualTypeOf<{ ref: string; name: string }>();
+    expectTypeOf<WireMuted>().toEqualTypeOf<{ ref: string; name: string; block?: true }>();
     expectTypeOf<WireLine['mine']>().toEqualTypeOf<true | undefined>();
     expectTypeOf<typeof CHAT_WIRE_VERSION>().toEqualTypeOf<2>();
     expectTypeOf<typeof HEARTBEAT>().toBeString();

@@ -27,10 +27,11 @@ export interface WireRestriction {
   byModerator: boolean;
 }
 
-/** A player the viewer muted, by an opaque token only the viewer can use to undo it. */
+/** A player the viewer muted or blocked, by an opaque token only the viewer can use to undo it. `block` is true for a block; a mute has no key. */
 export interface WireMuted {
   ref: string;
   name: string;
+  block?: true;
 }
 
 /**
@@ -103,9 +104,9 @@ export type SendResult = { ok: true; line: WireLine } | { ok: false; refused: Wi
 export type MuteTarget = { lineId: string } | { ref: string };
 /**
  * The answer to a mute: `ok` is whether anything changed; `hiddenIds` are the ids of the muted player's lines still in the room history
- * (oldest first, the same ids as the `hide` frame), so a client hides exactly those. `[]` for an unmute or a no-op.
+ * (oldest first, the same ids as the `hide` frame), so a client hides exactly those. `[]` for an unmute or a no-op. `limit: true` (with `ok` false): the list is full of blocks.
  */
-export type MuteResult = { ok: boolean; hiddenIds: string[] };
+export type MuteResult = { ok: boolean; hiddenIds: string[]; limit?: true };
 export type ReportOutcome =
   | { ok: true; remaining: number }
   | { ok: false; refused: ReportRefusal | 'not_found'; remaining?: number };
@@ -177,7 +178,7 @@ function mutedOf(raw: unknown): WireMuted[] | undefined {
     if (o === null) continue;
     const ref = own(o, 'ref');
     const name = own(o, 'name');
-    if (isStr(ref) && ref !== '' && isStr(name)) out.push({ ref, name: cut(name, MAX_NAME) });
+    if (isStr(ref) && ref !== '' && isStr(name)) out.push({ ref, name: cut(name, MAX_NAME), ...(own(o, 'block') === true ? { block: true as const } : {}) });
   }
   return out;
 }
@@ -207,7 +208,7 @@ export function readMuteResult(raw: unknown): MuteResult | null {
     if (o === null || typeof own(o, 'ok') !== 'boolean') return null;
     const ids = own(o, 'hiddenIds');
     const hiddenIds = Array.isArray(ids) ? (ids as unknown[]).filter((id): id is string => isStr(id) && id !== '' && id.length <= MAX_ID).slice(0, MAX_HIDDEN) : [];
-    return { ok: own(o, 'ok') as boolean, hiddenIds };
+    return { ok: own(o, 'ok') as boolean, hiddenIds, ...(own(o, 'limit') === true ? { limit: true as const } : {}) };
   } catch {
     return null;
   }

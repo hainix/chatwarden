@@ -26,7 +26,7 @@ export interface ChatConnection {
    * Mute or unmute. Resolves with `{ ok, hiddenIds }` (the lines the server hid, see `MuteResult`); a custom transport that cannot name
    * them may resolve a plain boolean (`true` when it changed something), and then only the line that was clicked is hidden at once.
    */
-  mute(target: MuteTarget, on: boolean): Promise<boolean | MuteResult>;
+  mute(target: MuteTarget, on: boolean, options?: { block?: true }): Promise<boolean | MuteResult>;
   /** File a report on a line. Resolves with the dialog's `ReportResult` shape. */
   report(lineId: string, draft: ReportDraft): Promise<ReportResult>;
   /** Stop, and do not reconnect. */
@@ -300,8 +300,8 @@ export function createSseTransport(options: SseTransportOptions, internals: SseT
           }
           throw bad();
         },
-        mute: async (target, on) => {
-          const body = await callRoute(rest, { method: 'POST', path: `${roomPath}/mute`, body: { ...target, on } });
+        mute: async (target, on, options) => {
+          const body = await callRoute(rest, { method: 'POST', path: `${roomPath}/mute`, body: { ...target, on, ...(on && options?.block === true ? { block: true } : {}) } });
           const result = readMuteResult(body);
           if (result === null) throw bad();
           return result;

@@ -41,12 +41,14 @@ export interface WireRestriction {
 }
 
 /**
- * A player the viewer muted, by an opaque token only the viewer can use to undo it.
+ * A player the viewer muted or blocked, by an opaque token only the viewer can use to undo it. `block` is true for a block (the viewer and that player see none of each other's lines); a mute
+ * has no key. A player is never told they were blocked: this list is the blocker's own.
  * @experimental
  */
 export interface WireMuted {
   ref: string;
   name: string;
+  block?: true;
 }
 
 /**
@@ -111,7 +113,7 @@ export type ChatFrame =
       muted: WireMuted[];
     }
   | { type: 'line'; line: WireLine }
-  /** Lines to remove from view (the viewer muted their author). */
+  /** Lines to remove from view (the viewer muted their author, or a player who blocked the viewer: it carries ids only and never says which). */
   | { type: 'hide'; ids: string[] }
   /** The viewer's own state changed (a sanction landed, a mute was made from another tab). */
   | { type: 'state'; restriction: WireRestriction | null; muted: WireMuted[] }
@@ -135,12 +137,13 @@ export type SendResult = { ok: true; line: WireLine } | { ok: false; refused: Wi
 /** @experimental */
 export type MuteTarget = { lineId: string } | { ref: string };
 /**
- * The answer to a mute. `ok`: the kit holds the mute (or the unmute) now. `hiddenIds`: when it muted, the ids of the muted player's lines that are
+ * The answer to a mute or a block. `ok`: the kit holds the mute or block (or the unmute) now. `hiddenIds`: when it muted, the ids of the muted player's lines that are
  * still in the room's history, oldest first (the same ids as the `hide` frame), so a client can hide exactly those without waiting for the
- * stream; empty for an unmute and for anything that did nothing. At most the history size.
+ * stream; empty for an unmute and for anything that did nothing. At most the history size. `limit: true` (with `ok` false): the viewer's list holds as many blocks
+ * as is allowed, so nothing more can be muted or blocked until one is undone.
  * @experimental
  */
-export type MuteResult = { ok: boolean; hiddenIds: string[] };
+export type MuteResult = { ok: boolean; hiddenIds: string[]; limit?: true };
 /** @experimental */
 export type ReportOutcome =
   | { ok: true; remaining: number }

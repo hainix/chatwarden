@@ -134,7 +134,7 @@ export interface LocalTransport extends ChatTransport {
   /** Every report call: line id and draft. */
   readonly reports: Array<{ lineId: string; draft: unknown }>;
   /** Every mute call. */
-  readonly mutes: Array<{ target: MuteTarget; on: boolean }>;
+  readonly mutes: Array<{ target: MuteTarget; on: boolean; block?: true }>;
   options: LocalOptions;
   /** Hand the open connection(s) a frame as if the server wrote it. */
   inject(frame: ChatFrame): void;
@@ -191,9 +191,9 @@ export function localChatTransport(chat: RoomBroadcaster, who: RawWho, member: C
           if (t.options.failSend === true) return Promise.reject(new Error('Failed to fetch'));
           return Promise.resolve(structuredClone(session().send({ text })));
         },
-        mute: (target, on) => {
-          t.mutes.push({ target, on });
-          return Promise.resolve(session().mute({ ...target, on }));
+        mute: (target, on, opts) => {
+          t.mutes.push({ target, on, ...(opts?.block === true ? { block: true as const } : {}) });
+          return Promise.resolve(session().muteResult({ ...target, on, ...(opts?.block === true ? { block: true } : {}) }));
         },
         report: async (lineId, draft) => {
           t.reports.push({ lineId, draft });

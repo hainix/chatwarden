@@ -100,6 +100,7 @@ interface LineViewProps {
   onToggle: (id: string) => void;
   onReport: (line: WireLine) => void;
   onMute: (line: WireLine) => void;
+  onBlock: (line: WireLine) => void;
   register: (id: string, el: HTMLButtonElement | null) => void;
 }
 
@@ -113,7 +114,7 @@ function timeOf(at: number, locale: string, timeZone: string | undefined): { iso
 }
 
 /** One line: "name: text". The name once per run; a screen reader always hears it. Text is a text node, never markup. */
-const LineView = memo(function LineView({ line, first, you, t, locale, timeZone, open, onToggle, onReport, onMute, register }: LineViewProps) {
+const LineView = memo(function LineView({ line, first, you, t, locale, timeZone, open, onToggle, onReport, onMute, onBlock, register }: LineViewProps) {
   const mine = line.mine === true;
   const name = mine ? you : line.name;
   const when = timeOf(line.at, locale, timeZone);
@@ -137,7 +138,7 @@ const LineView = memo(function LineView({ line, first, you, t, locale, timeZone,
       )}
       <span className="cw-chat-text">{line.text}</span>
       {when !== null && <time hidden dateTime={when.iso} />}
-      {!mine && <LineOptions t={t} line={line} open={open} onToggle={onToggle} onReport={onReport} onMute={onMute} register={register} />}
+      {!mine && <LineOptions t={t} line={line} open={open} onToggle={onToggle} onReport={onReport} onMute={onMute} onBlock={onBlock} register={register} />}
     </li>
   );
 });
@@ -155,8 +156,12 @@ interface MuteNote {
   /** The refs held when the mute was made: the new one is the entry the next `state` frame adds under this name. */
   before: Set<string>;
   error: PlayerError | null;
-  /** The server answered but changed nothing (the line aged out, or the mute list is full): say so, with no Undo. */
+  /** The server answered but changed nothing (the line aged out): say so, with no Undo. */
   unchanged?: boolean;
+  /** This was a block, not a mute: the words say so. */
+  block?: true;
+  /** The viewer's list is full of blocks: nothing changed, and the words say why. */
+  limit?: true;
 }
 
 /**
@@ -336,32 +341,39 @@ export function ChatBox(props: ChatBoxProps) {
   const showNoteRef = useRef(showNote);
   showNoteRef.current = showNote;
 
-  const startMute = useCallback((line: WireLine): void => {
+  const startMute = useCallback((line: WireLine, block = false): void => {
     setOpenLine(null);
     const conn = connection.current;
     if (conn === null) return;
     const before = new Set(current.current.muted.map((m) => m.ref));
     void (async () => {
       try {
-        const answer = await conn.mute({ lineId: line.id }, true);
+        const answer = await (block ? conn.mute({ lineId: line.id }, true, { block: true }) : conn.mute({ lineId: line.id }, true));
         const changed = typeof answer === 'boolean' ? answer : answer.ok;
+        const kind = block ? { block: true as const } : {};
+        if (!changed && typeof answer !== 'boolean' && answer.limit === true) {
+          showNoteRef.current({ name: line.name, before, error: null, limit: true, ...kind });
+          return;
+        }
         if (changed) {
           // The clicked line goes at once, then exactly the lines the answer names (the same ids as the server's `hide` frame, which covers
           // a reconnect in the gap). Never by name: names are not unique.
           const named = typeof answer === 'boolean' || !Array.isArray(answer.hiddenIds) ? [] : answer.hiddenIds.filter((id) => typeof id === 'string');
           dispatch({ type: 'frame', frame: { type: 'hide', ids: [line.id, ...named] } });
-          showNoteRef.current({ name: line.name, before, error: null });
+          showNoteRef.current({ name: line.name, before, error: null, ...kind });
         } else {
-          showNoteRef.current({ name: line.name, before, error: null, unchanged: true });
+          showNoteRef.current({ name: line.name, before, error: null, unchanged: true, ...kind });
         }
       } catch (e) {
-        showNoteRef.current({ name: line.name, before, error: failureOf(e) });
+        showNoteRef.current({ name: line.name, before, error: failureOf(e), ...(block ? { block: true as const } : {}) });
       }
       // The control that had focus is gone with the line: keep focus in the box.
       const at = document.activeElement;
       if (at === null || at === document.body) log.current?.focus();
     })();
   }, []);
+
+  const startBlock = useCallback((line: WireLine): void => startMute(line, true), [startMute]);
 
   const undoRef = muteNote === null ? undefined : state.muted.find((m) => m.name === muteNote.name && !muteNote.before.has(m.ref))?.ref;
   const unmute = (ref: string): void => {
@@ -391,7 +403,7 @@ export function ChatBox(props: ChatBoxProps) {
   const lines = state.lines;
   const you = t('player.chat.you');
   const status = connectionText(ui, state.status, state.ready, closed);
-  const undo = muteNote !== null && muteNote.error === null && muteNote.unchanged !== true ? muteNote : null;
+  const undo = muteNote !== null && muteNote.error === null && muteNote.unchanged !== true && muteNote.limit !== true ? muteNote : null;
   const reported = reportFor === null ? undefined : state.lines.find((l) => l.id === reportFor.id);
   // The one polite announcement of a retraction, with how many lines it took out of view; nothing is announced for lines the box never held.
   const removedNote = state.retractNote === null ? '' : t('player.chat.removedLive', { count: state.retractNote.count });
@@ -428,6 +440,7 @@ export function ChatBox(props: ChatBoxProps) {
                     onToggle={toggleRow}
                     onReport={startReport}
                     onMute={startMute}
+                    onBlock={startBlock}
                     register={register}
                   />
                 );
@@ -474,10 +487,11 @@ export function ChatBox(props: ChatBoxProps) {
           {/* The one polite announcement of a retraction. */}
           {removedNote !== '' && <p className="cw-chat-sr">{removedNote}</p>}
           {muteNote !== null && muteNote.error !== null && <p className="cw-chat-failure">{errorText(t, muteNote.error)}</p>}
-          {muteNote !== null && muteNote.unchanged === true && <p className="cw-chat-failure">{t('player.chat.muteUnchanged', { name: muteNote.name })}</p>}
+          {muteNote !== null && muteNote.unchanged === true && <p className="cw-chat-failure">{t(muteNote.block === true ? 'player.chat.blockUnchanged' : 'player.chat.muteUnchanged', { name: muteNote.name })}</p>}
+          {muteNote !== null && muteNote.limit === true && <p className="cw-chat-failure">{t('player.chat.blockLimit')}</p>}
           {undo !== null && (
             <p>
-              {t('player.chat.muted', { name: undo.name })}{' '}
+              {t(undo.block === true ? 'player.chat.blocked' : 'player.chat.muted', { name: undo.name })}{' '}
               <button
                 type="button"
                 className="cw-chat-undo"
