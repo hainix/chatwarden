@@ -501,6 +501,32 @@
   color: var(--cw-ink-muted, var(--cwd-ink-muted));
 }
 
+/* ---- The appeal page (AppealPage, @chatwarden/player-react/appeal): a page, not a dialog ------------------------------------ */
+.cw-player.cw-appeal-page {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  align-content: start;
+  max-width: 40rem;
+  min-width: 0;
+  margin-inline: auto;
+  padding: var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-player .cw-appeal-card {
+  min-width: 0;
+  padding: var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius, var(--cwd-radius));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-player .cw-appeal-form {
+  min-width: 0;
+}
+@media (max-width: 30rem) {
+  .cw-player.cw-appeal-page .cw-actions .cw-btn {
+    inline-size: 100%;
+  }
+}
+
 /* ---- Motion and forced colours ----------------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   .cw-player .cw-dialog {

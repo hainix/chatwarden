@@ -163,7 +163,7 @@ export async function handler(request: Request): Promise<Response | null> {
 }
 ```
 
-The handler cannot see the socket, so it has no player address of its own. Behind your own reverse proxy, and only there, set `CHATWARDEN_TRUST_PROXY=1` to read the first `X-Forwarded-For` value.
+The handler cannot see the socket, so it has no player address of its own. Behind your own reverse proxy, and only there, set `CHATWARDEN_TRUST_PROXY` to the number of proxies of your own in front of the app (`1` for one) and the address is the `X-Forwarded-For` entry that many places from the right, the same rule `chatwarden serve` uses. The entries to its left are the client's own claim and are never read.
 
 ## Safe by default
 

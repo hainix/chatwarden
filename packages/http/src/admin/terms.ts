@@ -120,9 +120,11 @@ const note = (v: unknown): string | null => {
 
 /**
  * The term and exception routes, built only when the adopter passes `terms` (staff only):
- * - `GET /terms`: the rows, `{ terms, exceptions, blocks30d }`, text and metadata included (`terms.read`). Each row also has
+ * - `GET /terms`: the rows, `{ terms, exceptions, blocks30d, reviewFlags }`, text and metadata included (`terms.read`). Each row also has
  *   `note`, `addedBy`, `addedAt`, `updatedBy` and `updatedAt` (null when unknown), and `blocks30d` maps every listed term id to
- *   the number of lines it blocked in the last 30 days. Writes no audit row.
+ *   the number of lines it blocked in the last 30 days. `reviewFlags` (0.2.1) is `cw.terms.reviewFlags()`: the terms whose automatic restrictions were overturned on appeal at least twice in the last
+ *   90 days, `{ termId, overturned, lastAt }`, worth a second look; ONLY a term that is listed in this response (a community row the response hides never gets a count), and `[]` when none, or when the
+ *   store cannot say. Writes no audit row.
  * - `POST /terms/check { term, language, matchMode? }`: the dry run, `{ hits }` (`terms.read`), and for a term in a script written without spaces `matchMode`, the mode it was read in (`segment`, or `contains` when asked). Writes no
  *   audit row. A `matchMode` of `word`, `segment` or `contains` (or null) is read; any other value is 400 `invalid_term`.
  * - `POST /terms/test { text }`: would the live list block this chat line? `{ verdict: 'blocked' | 'clean' | 'too_long', termId }`
@@ -176,6 +178,14 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
       // No prototype, so a term id of `__proto__` is kept as a key like any other.
       const blocks30d: Record<string, number> = Object.create(null) as Record<string, number>;
       for (const t of rows.terms) blocks30d[t.id] = counts[t.id] ?? 0;
+      // Terms worth a second look, over the rows this answer lists and no others.
+      const listed = new Set(rows.terms.map((t) => t.id));
+      let reviewFlags: Array<{ termId: string; overturned: number; lastAt: number }> = [];
+      try {
+        reviewFlags = cw.terms.reviewFlags().filter((f) => listed.has(f.termId)).map((f) => ({ termId: f.termId, overturned: f.overturned, lastAt: f.lastAt }));
+      } catch (err) {
+        safeWarn(ctx.logger, 'chatwarden.http_review_flags_failed', { error: err instanceof Error ? err.name : typeof err });
+      }
       return {
         status: 200,
         body: {
@@ -183,6 +193,7 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
           terms: rows.terms.map((t) => ({ id: t.id, term: t.term, language: t.language, active: t.active, ...(t.matchMode === null || t.matchMode === undefined ? {} : { matchMode: t.matchMode }), ...meta(t) })),
           exceptions: rows.exceptions.map((e) => ({ id: e.id, phrase: e.phrase, language: e.language, active: e.active, ...meta(e) })),
           blocks30d,
+          reviewFlags,
           ...(community === undefined ? {} : { community: { hidden } }),
         },
       };

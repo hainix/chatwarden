@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../src/cli/index.js';
@@ -10,6 +10,8 @@ import { createWorld } from './cli-world.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const cliDir = join(root, 'src', 'cli');
+/** True for src/cli itself or a file under it: a sibling that merely starts with the same letters (src/clientAddress.ts) is not in it. */
+const inCli = (path: string): boolean => path === cliDir || path.startsWith(cliDir + sep);
 
 function sourcesIn(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -149,7 +151,7 @@ describe('what it reaches', () => {
     }
     // The relative imports out of src/cli are the VERSION constant of this package, from src/version.ts (not the package root, which loads core), and `chatwarden serve`'s launcher,
     // service/launch.ts, which holds only types and loads the process (and the kit with it) with a dynamic import when `serve` is the command.
-    const outside = files.flatMap((file) => specifiers(textOf(file)).filter((spec) => spec.startsWith('..') && !resolve(dirname(file), spec).startsWith(cliDir)).map((spec) => `${rel(file)} -> ${spec}`));
+    const outside = files.flatMap((file) => specifiers(textOf(file)).filter((spec) => spec.startsWith('..') && !inCli(resolve(dirname(file), spec))).map((spec) => `${rel(file)} -> ${spec}`));
     expect(outside.length).toBeGreaterThan(0);
     expect(outside.every((line) => line.endsWith(' -> ../version.js') || line.endsWith(' -> ../service/launch.js')), outside.join('\n')).toBe(true);
   });
@@ -169,7 +171,7 @@ describe('what it reaches', () => {
       }
     };
     walk(join(cliDir, 'bin.ts'));
-    const outside = [...seen].filter((file) => !file.startsWith(cliDir)).map((file) => relative(join(root, 'src'), file).replaceAll('\\', '/'));
+    const outside = [...seen].filter((file) => !inCli(file)).map((file) => relative(join(root, 'src'), file).replaceAll('\\', '/'));
     expect(outside.sort()).toEqual(['service/launch.ts', 'version.ts']);
     expect([...external]).toEqual([]);
     expect(seen.size).toBeGreaterThan(20);
@@ -199,6 +201,15 @@ describe('what it reaches', () => {
     };
     for (const entry of entries) walk(entry);
     expect(seen.size).toBeGreaterThan(10);
-    expect([...seen].filter((file) => file.startsWith(cliDir))).toEqual([]);
+    expect([...seen].filter(inCli)).toEqual([]);
+  });
+
+  it('the src/cli prefix check is by directory: a sibling file named like it is outside, a file under it is inside', () => {
+    expect(inCli(join(root, 'src', 'clientAddress.ts'))).toBe(false);
+    expect(inCli(join(root, 'src', 'cli.ts'))).toBe(false);
+    expect(inCli(join(root, 'src', 'cli-extra', 'a.ts'))).toBe(false);
+    expect(inCli(join(root, 'src', 'cli', 'bin.ts'))).toBe(true);
+    expect(inCli(join(root, 'src', 'cli', 'templates', 'auth.ts'))).toBe(true);
+    expect(inCli(cliDir)).toBe(true);
   });
 });

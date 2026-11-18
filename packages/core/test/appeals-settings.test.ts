@@ -6,7 +6,7 @@ import { defineProfile, PRESETS, ProfileError, resolveProfile, validateProfile }
 
 // The `appeals` settings: in the profile (code), resolved with every field filled, refused with a path and never the value.
 
-const DEFAULTS = { enabled: false, perPlayerPerWeek: 3, allowSelfReview: false };
+const DEFAULTS = { enabled: false, perPlayerPerWeek: 3, allowSelfReview: false, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} };
 const NAME_DEFAULTS = { profanity: false, keepBlocked: false, renames: false, maskInHub: true, reserved: [], reservedAllow: [], reservedRule: 2 };
 
 function failure(fn: () => unknown): ProfileError {
@@ -33,7 +33,7 @@ describe('appeals settings', () => {
   it('every field set is read back; a field left out keeps its default', () => {
     expect(resolveAppeals({ enabled: true })).toEqual({ ...DEFAULTS, enabled: true });
     expect(resolveAppeals({ perPlayerPerWeek: 7 })).toEqual({ ...DEFAULTS, perPlayerPerWeek: 7 });
-    expect(resolveAppeals({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: true })).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: true });
+    expect(resolveAppeals({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: true })).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: true, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
     expect(resolveAppeals({ enabled: undefined, perPlayerPerWeek: undefined })).toEqual(DEFAULTS);
   });
 
@@ -96,10 +96,10 @@ describe('appeals in the profile', () => {
 
   it('a code profile with appeals resolves it, frozen, and overrides merge key by key', () => {
     const p = resolveProfile('standard', { appeals: { enabled: true, perPlayerPerWeek: 5 } });
-    expect(p.appeals).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: false });
+    expect(p.appeals).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: false, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
     expect(Object.isFrozen(p.appeals)).toBe(true);
     const coded = defineProfile({ ...PRESETS.standard, appeals: { enabled: true, allowSelfReview: true } });
-    expect(resolveProfile(coded, { appeals: { perPlayerPerWeek: 9 } }).appeals).toEqual({ enabled: true, perPlayerPerWeek: 9, allowSelfReview: true });
+    expect(resolveProfile(coded, { appeals: { perPlayerPerWeek: 9 } }).appeals).toEqual({ enabled: true, perPlayerPerWeek: 9, allowSelfReview: true, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
     expect(PRESETS.standard.appeals).toEqual(DEFAULTS);
   });
 

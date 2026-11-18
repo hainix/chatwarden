@@ -16,6 +16,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./packages/core/src/noticeCopy.ts', import.meta.url)),
       },
       {
+        find: '@chatwarden/core/notice-locales',
+        replacement: fileURLToPath(new URL('./packages/core/src/noticeLocales.ts', import.meta.url)),
+      },
+      {
         find: '@chatwarden/core',
         replacement: fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
       },

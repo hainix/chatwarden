@@ -394,14 +394,14 @@ export function reportsContract(name: string, make: () => Store): void {
       it('splits decided reports by outcome: actioned, dismissed, dismissed with the bad-faith mark', () => {
         const s = make();
         for (const how of ['upheld', 'noted', 'dismissed', 'dismissed', 'dismissed', 'bad_faith'] as const) filed(s, 's_a', how);
-        expect(outcomes(s, ['s_a'], 0)).toEqual([{ reporter: 's_a', actioned: 2, noAction: 3, badFaith: 1 }]);
+        expect(outcomes(s, ['s_a'], 0)).toEqual([{ reporter: 's_a', actioned: 2, noAction: 3, badFaith: 1, overturned: 0 }]);
       });
 
       it('bad-faith dismissals are badFaith, not noAction', () => {
         const s = make();
         filed(s, 's_a', 'bad_faith');
         filed(s, 's_a', 'bad_faith');
-        expect(outcomes(s, ['s_a'], 0)).toEqual([{ reporter: 's_a', actioned: 0, noAction: 0, badFaith: 2 }]);
+        expect(outcomes(s, ['s_a'], 0)).toEqual([{ reporter: 's_a', actioned: 0, noAction: 0, badFaith: 2, overturned: 0 }]);
       });
 
       it('excludes open reports (a reporter with only open reports has no row)', () => {
@@ -410,7 +410,7 @@ export function reportsContract(name: string, make: () => Store): void {
         filed(s, 's_a', 'open');
         filed(s, 's_b', 'open');
         filed(s, 's_b', 'dismissed');
-        expect(outcomes(s, ['s_a', 's_b'], 0)).toEqual([{ reporter: 's_b', actioned: 0, noAction: 1, badFaith: 0 }]);
+        expect(outcomes(s, ['s_a', 's_b'], 0)).toEqual([{ reporter: 's_b', actioned: 0, noAction: 1, badFaith: 0, overturned: 0 }]);
       });
 
       it('honours since on the filing time: a report filed exactly at since counts, one a millisecond earlier does not', () => {
@@ -418,9 +418,9 @@ export function reportsContract(name: string, make: () => Store): void {
         filed(s, 's_a', 'dismissed', NOW - 1);
         filed(s, 's_a', 'dismissed', NOW);
         filed(s, 's_a', 'upheld', NOW + 1);
-        expect(outcomes(s, ['s_a'], NOW)).toEqual([{ reporter: 's_a', actioned: 1, noAction: 1, badFaith: 0 }]);
+        expect(outcomes(s, ['s_a'], NOW)).toEqual([{ reporter: 's_a', actioned: 1, noAction: 1, badFaith: 0, overturned: 0 }]);
         expect(outcomes(s, ['s_a'], NOW + 2)).toEqual([]);
-        expect(outcomes(s, ['s_a'], NOW - 1)).toEqual([{ reporter: 's_a', actioned: 1, noAction: 2, badFaith: 0 }]);
+        expect(outcomes(s, ['s_a'], NOW - 1)).toEqual([{ reporter: 's_a', actioned: 1, noAction: 2, badFaith: 0, overturned: 0 }]);
       });
 
       it('an empty list gives []', () => {
@@ -436,8 +436,8 @@ export function reportsContract(name: string, make: () => Store): void {
         filed(s, 's_a2', 'dismissed');
         filed(s, 's_other', 'dismissed');
         expect(sorted(outcomes(s, ['s_a', 's_a2'], 0))).toEqual([
-          { reporter: 's_a', actioned: 1, noAction: 1, badFaith: 0 },
-          { reporter: 's_a2', actioned: 0, noAction: 1, badFaith: 0 },
+          { reporter: 's_a', actioned: 1, noAction: 1, badFaith: 0, overturned: 0 },
+          { reporter: 's_a2', actioned: 0, noAction: 1, badFaith: 0, overturned: 0 },
         ]);
       });
 
@@ -455,7 +455,7 @@ export function reportsContract(name: string, make: () => Store): void {
         const s = make();
         for (let i = 0; i < 3; i++) filed(s, 's_a', 'dismissed');
         const many = Array.from({ length: 700 }, (_, i) => `s_none${i}`);
-        expect(outcomes(s, [...many, 's_a'], 0)).toEqual([{ reporter: 's_a', actioned: 0, noAction: 3, badFaith: 0 }]);
+        expect(outcomes(s, [...many, 's_a'], 0)).toEqual([{ reporter: 's_a', actioned: 0, noAction: 3, badFaith: 0, overturned: 0 }]);
       });
     });
 

@@ -62,7 +62,7 @@ The `@chatwarden/http` package also ships a command, `chatwarden` (the `bin` in 
 
 1. **Describe the change.** In the pull request that changes a package, run `npx changeset`. Pick the packages (the group
    moves together; the text goes into the `CHANGELOG.md` of each package you pick), the bump (patch, minor or major) and write
-   plain sentences. Commit the file it creates under `.changeset/`. Every `@chatwarden/*` peer range is `^0.2.0` since 0.2.0 (that release reset the floors by hand, which is why it was a minor), so a patch or a minor inside 0.2.x
+   plain sentences. Commit the file it creates under `.changeset/`. Every `@chatwarden/*` peer range is `^0.2.0` since 0.2.0 (that release reset the floors by hand, which is why it was a minor), except the six that 0.2.1 raised to `^0.2.1` by hand because their packages use new API (the table of floors is in `scripts/manifests.test.ts`), so a patch or a minor inside 0.2.x
    stays inside every range. The next 0.x minor (0.3.0) falls outside every `^0.2.x` peer range, so changesets would take it as a breaking change for every
    dependent and make them major bumps (a fixed group moves together, so that would be 1.0.0): set every peer range to `^0.3.0` by hand first (see "When a peer floor
    must rise"), then run `npm run version`, as 0.2.0 did. A release that only fixes things is a patch.
@@ -81,7 +81,7 @@ The `@chatwarden/http` package also ships a command, `chatwarden` (the `bin` in 
    The `peerDependencies` ranges stay where they are through a compatible release: `.changeset/config.json` sets
    `onlyUpdatePeerDependentsWhenOutOfRange`, so changesets only raises a peer range when the new version falls outside it.
    `scripts/manifests.test.ts` fails CI if a range moves unexpectedly: it holds the set of `@chatwarden/*` peers (the four optional peers of `http`, `store-sqlite`,
-   `matcher`, `profanity` and `hub-element`, included) and their floor, `^0.2.0`. `http` does not dev-depend on `hub-element` (its tests dev-depend on `http`), so
+   `matcher`, `profanity` and `hub-element`, included) and their floors, `^0.2.0` and, for the six ranges that 0.2.1 raised (below), `^0.2.1`. `http` does not dev-depend on `hub-element` (its tests dev-depend on `http`), so
    the dev dependencies close no cycle, and `scripts/http-optional-peers.test.ts` fails CI if an `http` entry point imports an optional peer statically. The exact
    `devDependencies` pins and the tiny-chat versions do move with the release.
 
@@ -90,17 +90,19 @@ The `@chatwarden/http` package also ships a command, `chatwarden` (the `bin` in 
    A peer floor is the oldest version of a package we promise to work with. The setting above never raises one inside a compatible
    release, which is right when a release only fixes things. It is wrong when a package starts to use something that is new in
    `@chatwarden/core` (or `http`): the old floor would let `npm` install it beside a core that lacks the API, and it would break at
-   run time or in the consumer's type check. 0.1.2 was that case (since 0.2.0 every `@chatwarden/*` peer is `^0.2.0`): `cw.policy`, `ResolvedProfile`, `reporting`, `reportedReason`,
+   run time or in the consumer's type check. 0.1.2 was that case (since 0.2.0 the floor is `^0.2.0`, with the six exceptions below): `cw.policy`, `ResolvedProfile`, `reporting`, `reportedReason`,
    `addDetail`, `releaseWhenDone`, the take-next `reason`, `detailUntil` and the store methods for the policy layer, claims, reasons and
    report details were new, so `store-memory`, `store-sqlite`, `http`, `hub-react` and `player-react` peered on `@chatwarden/core`
    `^0.1.2` (`hub-react` also on `http`, `hub-element` on `hub-react`), while `core`, `matcher`, `profanity` and `discord` stayed at
    `^0.1.0`.
 
+   0.2.1 was that case again, and it stayed a patch: `http`, `discord`, `hub-react` and `player-react` use new API of `@chatwarden/core` (the appeal link calls, the `sanction.overturned` event, `AppealDetail.cause`, `@chatwarden/core/notice-locales`), `hub-react` also uses new `http` routes, and `hub-element` bundles the new hub, so six peer ranges are `^0.2.1` (`core` for those four, `http` for `hub-react`, `hub-react` for `hub-element`), while the stores, `matcher`, `profanity` and the optional peers of `http` stay at `^0.2.0`. The release stays a patch only because the ranges were already `^0.2.1`, a version the new group satisfies, when `npm run version` ran: set them by hand before `npm run version`, so that changesets never sees one out of range. The table of floors is in `scripts/manifests.test.ts` (`RAISED`), each entry with the API that forced it.
+
    This deliberately overrides `onlyUpdatePeerDependentsWhenOutOfRange`, by hand, for correctness. For a 0.x minor, set every range to the new minor
    before `npm run version` (as 0.2.0 did), so that changesets never sees one out of range and turns the fixed group into a major. When a release makes a package use a
-   new API: after `npm run version`, set that package's peer range to the version that introduced the API, run
-   `npm install --package-lock-only`, and change the expectation in `scripts/manifests.test.ts` (`NEEDS_NEW_KIT`, or the `peerRangeOf`
-   rule) in the same commit, so the floor is a decision somebody wrote down. Name each package and the API that forced it in the
+   new API: before `npm run version`, set that package's peer range by hand to the version this release will have (the new group version satisfies it, so changesets
+   keeps a patch a patch), run `npm install --package-lock-only` after the version run, and change the expectation in `scripts/manifests.test.ts` (the `RAISED` table: one
+   entry per range, with the API that forced it) in the same commit, so the floor is a decision somebody wrote down. Name each package and the API that forced it in the
    changeset's upgrade notes. Never raise a floor to the current version just because the group moved.
 3. **Merge.** Open a pull request with those changes and merge it once CI is green.
 4. **Dry run first (recommended).** See the next section. It runs every check and `npm publish --dry-run` for all ten.
@@ -164,7 +166,7 @@ Until the packages are on npm, an adopter can build the exact tarballs from a ch
 
    Add `profanity` and `discord` the same way if you use them. `$@chatwarden/core` means "the version named in my own
    `dependencies`". Run `npm install`; `npm ls @chatwarden/core` should show exactly one copy.
-4. When the packages reach npm, replace each `file:` line with `^0.2.0` and delete the `overrides` block.
+4. When the packages reach npm, replace each `file:` line with `^0.2.1` and delete the `overrides` block.
 
 ### Docker
 

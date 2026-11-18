@@ -594,3 +594,130 @@ describe('the 0.2.0 notes (the release with breaking changes), in all ten CHANGE
     expect(readdirSync(join(root, '.changeset')).sort()).toEqual(['config.json']);
   });
 });
+
+describe('the 0.2.1 notes (appeals landing, delivery and feedback; a patch), in all ten CHANGELOGs', () => {
+  const section0201 = (dir: string): string => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    const at = text.indexOf('## 0.2.1');
+    const end = text.indexOf('\n## 0.2.0', at);
+    return at < 0 ? '' : text.slice(at, end < 0 ? undefined : end);
+  };
+  const flat = (dir: string): string => section0201(dir).replace(/\s+/g, ' ');
+  /** The text from `from` up to `to` (or the end of the section when `to` is omitted), with white space collapsed. */
+  const block = (dir: string, from: string, to?: string): string => {
+    const s = section0201(dir);
+    const at = s.indexOf(from);
+    const end = to === undefined ? -1 : s.indexOf(to, at + from.length);
+    return at < 0 ? '' : s.slice(at, end < 0 ? undefined : end).replace(/\s+/g, ' ');
+  };
+
+  it.each(dirs)('%s: has a 0.2.1 section above 0.2.0, as a patch change', (dir) => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    expect(text.indexOf('## 0.2.1'), dir).toBeGreaterThan(-1);
+    expect(text.indexOf('## 0.2.1'), dir).toBeLessThan(text.indexOf('## 0.2.0'));
+    expect(section0201(dir), dir).toMatch(/### Patch Changes/);
+    expect(section0201(dir), dir).not.toMatch(/### (Minor|Major) Changes/);
+  });
+
+  it('all ten carry exactly the same text', () => {
+    const first = section0201(dirs[0] as string);
+    expect(first.length).toBeGreaterThan(3500);
+    for (const dir of dirs) expect(section0201(dir), dir).toBe(first);
+  });
+
+  it.each(dirs)('%s: says it is additive and that nothing in it breaks a 0.2.0 input, and has no breaking-changes list', (dir) => {
+    const s = flat(dir);
+    expect(s, dir).toMatch(/additive/i);
+    expect(s, dir).toMatch(/Nothing in this release breaks code, data or settings written for 0\.2\.0/);
+    expect(s, dir).toMatch(/every new setting is off or unset by default/i);
+    expect(s, dir).not.toContain('Breaking changes for adopters');
+  });
+
+  it.each(dirs)('%s: says migration 27 is one-way and to back up the database file, and says what the release is for', (dir) => {
+    const s = flat(dir);
+    expect(s, dir).toMatch(/migration 27 is one-way/i);
+    expect(s, dir).toMatch(/back up the database file/i);
+    for (const needle of ['appeal link', 'landing page', 'delivery', 'fixed reason', 'overturned', 'terms', 'filters', 'reporters', 'service', 'AppealPage']) expect(s.toLowerCase(), needle).toContain(needle.toLowerCase());
+  });
+
+  it.each(dirs)('%s: lists the new public names by package, and names this package in the list', (dir) => {
+    const names = block(dir, '**New public names, by package**', '**Turning it on**');
+    expect(names.length, dir).toBeGreaterThan(800);
+    expect(names, dir).toContain(`@chatwarden/${dir}`);
+  });
+
+  it('the new public names of core, http and player-react are really exported (read from the source)', () => {
+    const names = block('core', '**New public names, by package**', '**Turning it on**');
+    const read = (...parts: string[]): string => readFileSync(join(root, ...parts), 'utf8');
+    const coreIndex = read('packages', 'core', 'src', 'index.ts');
+    for (const name of ['AppealCase', 'AppealCaseResult', 'AppealCause', 'AppealReasonCode', 'APPEAL_REASONS', 'APPEAL_REASON_CODES', 'APPEAL_REASON_DEFAULT', 'NoticeDelivery', 'NoticeDeliveryOptions', 'OverturnInput', 'resolveLandingOptions', 'LandingOptions']) {
+      expect(names, name).toContain(`\`${name}\``);
+      expect(coreIndex, name).toContain(name);
+    }
+    expect(names).toContain('`@chatwarden/core/notice-locales`');
+    expect(Object.keys(JSON.parse(read('packages', 'core', 'package.json')).exports)).toContain('./notice-locales');
+    const httpIndex = read('packages', 'http', 'src', 'index.ts');
+    for (const name of ['appealLandingRoutes', 'AppealLandingOptions', 'createDeliveryWebhook', 'DeliveryWebhook', 'DeliveryWebhookOptions', 'APPEAL_PAGE_CSP']) {
+      expect(names, name).toContain(`\`${name}\``);
+      expect(httpIndex, name).toContain(name);
+    }
+    const appealIndex = read('packages', 'player-react', 'src', 'appeal', 'index.ts');
+    for (const name of ['AppealPage', 'AppealPageProps', 'createAppealPageClient', 'readAppealToken', 'AppealPageClient']) {
+      expect(names, name).toContain(`\`${name}\``);
+      expect(appealIndex, name).toContain(name);
+    }
+    expect(names).toContain('`@chatwarden/player-react/appeal`');
+    expect(Object.keys(JSON.parse(read('packages', 'player-react', 'package.json')).exports)).toContain('./appeal');
+  });
+
+  it.each(dirs)('%s: names the raised floors and the API that forced each, and says the others stay ^0.2.0', (dir) => {
+    const s = block(dir, '**Peer floors**', '**New optional `Store` methods**');
+    expect(s.length, dir).toBeGreaterThan(500);
+    for (const needle of [
+      '`@chatwarden/http` asks for `@chatwarden/core` `^0.2.1`', '`cw.appeals.caseByLink`',
+      '`@chatwarden/discord`', '`sanction.overturned`',
+      '`@chatwarden/hub-react`', '`AppealDetail.cause`', '`@chatwarden/http` `^0.2.1`',
+      '`@chatwarden/player-react`', '`@chatwarden/core/notice-locales`',
+      '`@chatwarden/hub-element`', '`@chatwarden/hub-react` `^0.2.1`',
+      '`@chatwarden/store-memory`', '`@chatwarden/store-sqlite`', '`@chatwarden/matcher`', '`@chatwarden/profanity`', '`^0.2.0`',
+    ]) expect(s, needle).toContain(needle);
+  });
+
+  it('the new optional Store methods named are really on the Store interface, optional, and the list is the whole set', () => {
+    const { optional } = storeMethods();
+    const s = block('store-sqlite', '**New optional `Store` methods**', '**Types the kit produces');
+    const named = [...s.matchAll(/`([a-zA-Z]+)`/g)].map((m) => m[1] as string).filter((n) => /^[a-z]/.test(n) && n !== 'Store');
+    const wanted = ['loadAppealByGroup', 'loadNotice', 'latestAutoChatStart', 'overturnedFilterCounts', 'overturnedTermCounts', 'purgeOverturns', 'recordOverturn'];
+    expect([...new Set(named)].sort()).toEqual(wanted.sort());
+    for (const name of wanted) expect(optional, name).toContain(name);
+    expect(s).toMatch(/optional/);
+    expect(s).toMatch(/needs none of it/);
+  });
+
+  it.each(dirs)('%s: names the members that are now required on types the kit produces (R3 minor 4)', (dir) => {
+    const s = block(dir, '**Types the kit produces', '**New public names, by package**');
+    for (const needle of [
+      '`appeal.decided`', '`reason`', '`AppealDetail.cause`', '`AppealDetail.decided.reasonCode`', '`ReporterAccuracy.overturned`', '`ResolvedAppeals`', '`linkTtlMs`', '`contact`', '`emailsOutcome`', '`words`',
+      "`'invalid_reason'`", '`AppealDecideResult`', '`Chatwarden`', 'build one of these by hand',
+    ]) expect(s, needle).toContain(needle);
+  });
+
+  it('turns on in four lines and says what stays the adopter\'s', () => {
+    const s = block('core', '**Turning it on**');
+    for (const needle of ['`appeals.enabled`', '`landingUrl`', '`notices.deliver`', '`chatwarden serve`', '`CHATWARDEN_PUBLIC_URL`', '`CHATWARDEN_DELIVERY_URL`', '`CHATWARDEN_TRUST_PROXY`', 'What stays yours', 'never sends email']) expect(s, needle).toContain(needle);
+  });
+
+  it('uses no em dash, no emoji and no real term (synthetic only)', () => {
+    const s = section0201('core');
+    expect(s).not.toContain('\u2014');
+    expect(s).not.toMatch(/[\u{1F300}-\u{1FAFF}\u2600-\u27bf]/u);
+  });
+
+  it('the 0.2.0 section is still there, once, and so is the 0.2.1 one', () => {
+    for (const dir of dirs) {
+      const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8');
+      expect(text.split('\n## 0.2.0').length - 1, dir).toBe(1);
+      expect(text.split('\n## 0.2.1').length - 1, dir).toBe(1);
+    }
+  });
+});

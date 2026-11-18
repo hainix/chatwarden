@@ -16,7 +16,7 @@ npm install @chatwarden/player-react @chatwarden/core react react-dom
 
 `react` and `react-dom` (18.3 or 19) are peer dependencies, so your game has one copy of React. The components use only APIs that
 exist in 18.3 (`useId`, `useRef`). The unit and interaction tests run on React 19; the consumer smoke test installs React 18.3, type-checks against
-`@types/react` 18 and renders every component on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` is a peer too (`^0.2.0`), for its types
+`@types/react` 18 and renders every component on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` is a peer too (`^0.2.1`), because `AppealPage` reads its words from `@chatwarden/core/notice-locales`, and for its types
 (`AppealRefusal`, `PlayerAppeal` and `NameReason` are new in 0.1.9) and for one run-time subpath, `@chatwarden/core/notice-copy` (the notice words and the view of a notice, pure functions with no engine behind them); no other run-time import of core, and none of the HTTP package, is in the bundle. Node 22.13 or newer for the tooling; the components
 themselves run in a browser and import no `node:` module.
 
@@ -471,6 +471,53 @@ player components, the chat entry on its own is about 15 KB, and `chat.css` is a
 `enChat`, and the types `ChatBoxProps`, `ChatRefusal`, `ChatTransport`, `ChatConnection`, `ChatTransportEvents`, `ChatStatus`,
 `ChatClosedWhy`, `SseTransportOptions`, `ChatFrame`, `WireLine`, `WireMode`, `WireMuted`, `WirePhrase`, `WirePhrases`, `WireReadOnly`, `WireRefusal`, `WireRestriction`, `SendResult`,
 `MuteResult`, `MuteTarget`, `ChatState`, `StateLine` and `ChatAction`. All are part of the API.
+
+## Appeal page
+
+New in 0.2.1. When a sanction has an appeal link (`appealUrl` on a notice, or the link in the message your game sent), the link opens a page that shows the sanction as the player
+was shown it, the appeal form, and later the outcome. `@chatwarden/http` serves that page itself at `/appeal` (see its README); `AppealPage` is the same page as a component, for a game
+that wants it inside its own screens. It lives at its own subpath, `@chatwarden/player-react/appeal`, so the main entry and its size are untouched: a page that never shows an appeal
+page never loads it (about 4.2 KB gzipped, React and the kit external). Every name here is part of the API.
+
+```tsx
+import '@chatwarden/player-react/styles.css';
+import { AppealPage, readAppealToken } from '@chatwarden/player-react/appeal';
+
+export function AppealScreen() {
+  const token = readAppealToken(location.search);
+  return token === null ? <p>This link is not valid.</p> : <AppealPage endpoint="https://game.example/appeal/case" token={token} />;
+}
+```
+
+- **Props.** `endpoint` is the full address of the case route your server mounts (`GET` and `POST` `/appeal/case`); `token` is the link's `t`; `client` replaces the client made from
+  `endpoint` (for a test, or to send your own way); `fetch` is the `fetch` that client uses; `words` is your own wording by language (`appeals.words` in the profile); `contact` is the line
+  shown under "this link is no longer valid" (the case that would carry the contact did not open). It also takes `t`, `locale`, `now`, `timeZone`, `theme` and `className`. The times are
+  written in UTC, as on the served page, unless you pass another `timeZone`; then the sentence that says "UTC" is left out.
+- **The token.** The token is a capability: whoever holds the link can appeal that sanction, so never log it, put it in a shared place or send it to analytics. `readAppealToken(location.search)`
+  reads the `t` of an address and returns `null` unless it is up to 512 of the characters a token has (letters, digits, `.`, `_`, `-`). The page writes the token nowhere into its markup.
+- **The client.** `createAppealPageClient` (`{ endpoint, fetch? }`) makes a client with `load(token)` (the case, or `'invalid'` for a link that does not open; any other failure rejects) and `send(token, statement)` (a value for
+  every answer: `ok`, or a refusal `invalid`, `already`, `rate` with `retryAfterMs`, `link` or `failed`). Each request is made with no cookie, no `Authorization` header, no referrer and no cache, and it keeps only
+  the documented fields of the answer. There is no sign-in and the page does not identify the player: the link is the whole proof.
+```ts
+import { createAppealPageClient, readAppealToken } from '@chatwarden/player-react/appeal';
+
+/** `search` is `location.search` of your appeal page. */
+export async function readCase(search: string) {
+  const token = readAppealToken(search);
+  if (token === null) return 'invalid';
+  const client = createAppealPageClient({ endpoint: 'https://game.example/appeal/case' });
+  return client.load(token);
+}
+```
+
+- **CORS.** When the page and the server are on different origins, the server must list the page's origin in `appeals.landingOrigins` (`CHATWARDEN_LANDING_ORIGINS` on `chatwarden serve`); it never answers `*`
+  and never sends credentials. A game that does not want any of this sends the player to the served `/appeal` page instead, which works without a script.
+- **What it shows.** The same states, in the same order and the same words, as the served page: Loading, the notice (the sanction, its facts and the player's own lines, as text), the form
+  (a labelled field, the hint with the limit, a live count and Send), or "Appeal sent", or the decision with the reason and "As it stands now", then when the link works until and the contact line. A refusal is
+  read out in an alert and keeps what was typed; a second click while a send is on its way does nothing; focus goes to the heading when the case loads, to the alert on a refusal and to the "Appeal sent" line after a send.
+- **Words.** They come from `noticeWordsFor` (`(locale, words)`) of `@chatwarden/core/notice-locales` (English, Spanish and Portuguese, with your own over them), not from the catalog of this package. A `t` you pass must carry the
+  `player.appealPage.*` words too; the English ones are `APPEAL_WORDS` in the same subpath. Spanish and Portuguese are machine-drafted (by an AI model) and have not been reviewed by a person: have someone who speaks the language read
+  the appeal page words and the nine reasons (`player.appeal.reason.*`), and the line that says a decision is final, before you turn them on for players.
 
 ## Languages
 

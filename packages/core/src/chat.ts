@@ -17,7 +17,7 @@ import type { RoomModeState } from './roomModes.js';
 import type { ResolvedRooms } from './roomSettings.js';
 import type { SlidingWindow } from './rateLimit.js';
 import { parseRuleRef } from './rules.js';
-import { applySanction } from './sanctions.js';
+import { APPEALS_START_TOKEN, applySanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
 import type { StrikeService } from './strikes.js';
 import type { SubjectIndex } from './subjects.js';
@@ -172,6 +172,8 @@ export interface ChatServiceDeps {
    * changes the verdict.
    */
   notices?: NoticeService;
+  /** Told, after the notice of an automatic restriction was committed and announced, so the game can deliver it (the delivery hook). Never throws. */
+  delivery?: { sanctionNoticed(noticeId: string): void };
   /**
    * The Community Rule the automatic filter cites: on a `blocked` refusal, on the automatic timeout it earns (the
    * stored sanction, the in-memory fallback and the player's notice). Default 1. The caller checks it is an active
@@ -322,6 +324,7 @@ export class ChatService {
   private readonly onAutoRestricted: ChatServiceDeps['onAutoRestricted'];
   private readonly logger: Logger | undefined;
   private readonly notices: NoticeService | undefined;
+  private readonly delivery: ChatServiceDeps['delivery'];
   private readonly autoRestrictRule: number;
   private readonly maxLength: number;
   private readonly rate: SlidingWindow;
@@ -382,6 +385,7 @@ export class ChatService {
     this.filterWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.pacer = deps.pace === undefined ? undefined : (deps.pace.pacer ?? createPacer({ clock: deps.clock, settings: deps.pace.settings, ...(deps.pace.floorMax === undefined ? {} : { floorMax: deps.pace.floorMax }) }));
     this.notices = deps.notices;
+    this.delivery = deps.delivery;
     this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
     this.maxLength = deps.limits?.maxLength ?? MAX_LEN;
     this.rate = slidingWindow({
@@ -966,7 +970,7 @@ export class ChatService {
       // The kill switch: the strike is kept and the line was blocked, but nothing is enforced, so no row is
       // written (it would go live when the switch flips back), nothing is held in memory and nobody is told.
       if (!this.sanctions.isEnabled()) return;
-      this.applyTimeout(roomId, seatId, subject, autoRestrict.durationMs, autoRestrict.second === true, line);
+      this.applyTimeout(roomId, seatId, subject, autoRestrict.durationMs, autoRestrict.second === true, line, termId);
     } catch (err) {
       this.warn('chat.strike_failed', { error: errName(err) });
     }
@@ -979,6 +983,7 @@ export class ChatService {
     durationMs: number,
     second: boolean,
     line: BlockedLine,
+    termId: string,
   ): void {
     // Read after the strike was written, so the restriction starts at or after every strike it consumed. The
     // strike service reads the same clock, so with one instant per call (as in tests) the two are identical;
@@ -1002,6 +1007,10 @@ export class ChatService {
             source: 'auto_filter',
             automated: true,
             rule: this.autoRestrictRule,
+            // The term of the strike that tipped it (the one just recorded), kept on the subject row for the appeal that may overturn it. The kit's own key. A custom matcher's
+            // empty (or non-string) term id is not a term: it is left off, so a bad value there can never stop the restriction.
+            ...(typeof termId === 'string' && termId !== '' ? { termId } : {}),
+            startsAtToken: APPEALS_START_TOKEN,
           },
           now,
           this.sanctions,
@@ -1072,11 +1081,13 @@ export class ChatService {
         audience: line.audience,
         p: 0,
       };
-      notices.createForSanction(
+      const id = notices.createForSanction(
         { groupId: found.groupId, refCode: found.refCode, kind: 'chat', until: found.until, rule: this.autoRestrictRule, subject },
         [excerpt],
         { notify: true },
       );
+      // The notice is committed and announced: tell the game (fenced; the restriction and its notice stand whatever the hook does).
+      this.delivery?.sanctionNoticed(id);
     } catch (err) {
       this.warn('chat.notice_failed', { error: errName(err) });
     }

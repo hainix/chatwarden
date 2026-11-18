@@ -29,6 +29,14 @@ const H_MS = 3_600_000;
 /** An appeal's outcome in a word staff read at a glance. */
 const APPEAL_OUTCOME_WORDS: Readonly<Record<string, string>> = Object.freeze({ uphold: 'upheld', reduce: 'lighter', revoke: 'revoked' });
 
+/** The chat filter families a counter key starts with, in a few words for staff. The key itself never reaches a post. */
+const FILTER_FAMILY_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  link: 'the links filter',
+  personal_info: 'the personal information filter',
+  ratio: 'the caps and repeats filter',
+  phrase: 'a phrase rule',
+});
+
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 /** `Case <5 Crockford base32 characters>`, random: it names no one and is derived from nothing. */
@@ -164,7 +172,10 @@ type Job = PostJob | EditJob;
  * - `appeal.created`: "Appeal filed against a 24-hour chat restriction, Rule 2." and a link into the hub on the person (the length from the
  *   appeal's sanction when `cw.appeals` can say; no length otherwise). `appeal.decided`: "Appeal decided: lighter." (`upheld`, `lighter` for a
  *   reduction, `revoked`) and the same link. Both go to the person's thread, ping no one, and never carry the statement, the reason, a handle or an
- *   id except inside the hub link. An appeal made moot announces nothing (the kit raises no event for it). `rename.required` is not posted: it is
+ *   id except inside the hub link. `sanction.overturned` (0.2.1) posts one line to the shared thread, because the event names no person: "Overturned on appeal: an automatic restriction
+ *   from the slur list." (a term or an auto filter decision), "...: a decision that came from the links filter." (also "the personal information filter", "the caps and repeats filter",
+ *   "a phrase rule" or "a chat filter": the family of the filter key and nothing more), "...: a decision made by the AI." or "...: a moderator decision."; it names no term, filter key,
+ *   group or person, pings no one, and `severeOnly` does not hold it back (the event carries no rule). An appeal made moot announces nothing (the kit raises no event for it). `rename.required` is not posted: it is
  *   for the game, not for staff. `report.escalated` (a legal hold, 0.2.0) is not posted either: the kit forwards a hold to no one, and the game reads it from `cw.on` or a webhook.
  * - Severe means category `hate`, or the rule (the report's default rule, or the sanction's) is in
  *   `cw.profile.severeRules` (default Community Rule 1). Only a severe report or sanction pings `mentionRoleId`;
@@ -695,6 +706,19 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     toPerson(e.type, person, UNATTRIBUTED, message);
   };
 
+  /**
+   * `sanction.overturned`: one line in the shared thread (the event names no person), saying where the decision came from in a few words: a chat filter (its family only), the slur
+   * list, the AI, or a moderator. Never the term, the term id, the filter key beyond its family, the group id or any person. Not held back by `severeOnly`: the event carries no rule.
+   */
+  const onOverturned = (e: KitEventOf<'sanction.overturned'>): void => {
+    let origin: string;
+    if (typeof e.filterKey === 'string') origin = `a decision that came from ${labelOf(FILTER_FAMILY_WORDS, e.filterKey.split('.', 1)[0]) ?? 'a chat filter'}`;
+    else if (e.termId !== undefined || e.source === 'auto_filter') origin = 'an automatic restriction from the slur list';
+    else if (e.source === 'ai') origin = 'a decision made by the AI';
+    else origin = 'a moderator decision';
+    toPerson(e.type, null, UNATTRIBUTED, compose(`Overturned on appeal: ${origin}.`, [], [], false));
+  };
+
   /** Fence a handler: a sync throw is logged by class and goes no further. It returns at once; delivery is queued. */
   const fenced =
     <E extends KitEvent>(handler: (e: E) => void) =>
@@ -734,6 +758,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     cw.on('auto.restricted', fenced(onAuto)),
     cw.on('appeal.created', fenced(onAppealCreated)),
     cw.on('appeal.decided', fenced(onAppealDecided)),
+    cw.on('sanction.overturned', fenced(onOverturned)),
   );
 
   return {

@@ -5,6 +5,7 @@ import type {
   AiBrief,
   AppealDetail as KitAppealDetail,
   AppealOutcome as KitAppealOutcome,
+  AppealReasonCode,
   AppealRuleStats as KitAppealRuleStats,
   AppealStats as KitAppealStats,
   AppealStatus as KitAppealStatus,
@@ -53,6 +54,8 @@ export type { PolicyLayer, PolicySection };
 export interface FilterStatsView {
   days: 7 | 30;
   keys: Record<string, FilterKeyCounts & { label?: string }>;
+  /** Per counter key, how many filter reports were overturned on appeal over the last 90 days (fixed); a key with none is absent. Absent from an older server. */
+  overturned?: Record<string, number>;
 }
 /** `POST /filters/test`: the verdict for one line, with ranges, and the line as it would be sent (`null` when it would not be). */
 export type FilterTestView = FilterTestResult;
@@ -517,6 +520,8 @@ export interface TermsList {
   terms: TermRow[];
   exceptions: ExceptionRow[];
   blocks30d: Record<string, number>;
+  /** Terms whose automatic restrictions were overturned on appeal at least twice in 90 days (a hint to review the term, never a rule). Absent from an older server. */
+  reviewFlags?: Array<{ termId: string; overturned: number; lastAt: number }>;
   /** With the shared term list wired: how many untouched community rows the list left out. The hub never shows it. */
   community?: { hidden: number };
 }
@@ -684,6 +689,8 @@ export interface AppealDecisionInput {
   outcome: AppealOutcome;
   /** Private: 1 to 500 characters, never shown to the player. */
   reason: string;
+  /** The fixed reason the player is shown, one of the three for the outcome. The hub always sends it. */
+  reasonCode?: AppealReasonCode;
   to?: { kind: 'warning' | 'chat' | 'area' | 'ban'; durationMs: number | null };
 }
 

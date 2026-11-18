@@ -1,14 +1,14 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { APPEAL_OUTCOMES } from '../src/appeals.js';
-import type { AppealOutcome, AppealStatus } from '../src/appeals.js';
+import type { AppealOutcome, AppealReasonCode, AppealStatus } from '../src/appeals.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES } from '../src/audit.js';
 import type { AuditAction, AuditTargetType } from '../src/audit.js';
 import { createChatwarden } from '../src/chatwarden.js';
 import { KIT_EVENT_TYPES } from '../src/events.js';
 import type { KitEvent, KitEventOf, StaffRef } from '../src/events.js';
 import type { RuleRef } from '../src/rules.js';
-import type { Platform, RawWho, SanctionKind } from '../src/types.js';
+import type { Platform, RawWho, SanctionKind, Source } from '../src/types.js';
 
 // The vocabulary of the appeals and names release: the audit actions and target type, the three events, and the appeal enums they use.
 
@@ -128,6 +128,25 @@ describe('events', () => {
     expect(() => cw.on('appeal.create' as never, () => undefined)).toThrow(TypeError);
   });
 
+  it('sanction.overturned (0.2.1) is appended at the end of KIT_EVENT_TYPES, once, and cw.on accepts it', async () => {
+    expect(KIT_EVENT_TYPES.at(-1)).toBe('sanction.overturned');
+    expect(KIT_EVENT_TYPES.filter((t) => t === 'sanction.overturned')).toHaveLength(1);
+    // every earlier type is where it was
+    expect(KIT_EVENT_TYPES.slice(0, 6)).toEqual(['report.created', 'report.closed', 'sanction.applied', 'sanction.revoked', 'gap.created', 'auto.restricted']);
+    expect(KIT_EVENT_TYPES.at(-2)).toBe('insights.digest');
+    const cw = await kit();
+    const off = cw.on('sanction.overturned', () => undefined);
+    expect(typeof off).toBe('function');
+    off();
+    expect(() => cw.on('sanction.overturn' as never, () => undefined)).toThrow(TypeError);
+  });
+
+  it('the sanction.overturned shape is ids, a source and optional codes: no person, no text (a type-level check)', () => {
+    expectTypeOf<KitEventOf<'sanction.overturned'>>().toEqualTypeOf<{ type: 'sanction.overturned'; groupId: string; at: number; source: Source; termId?: string; filterKey?: string }>();
+    expectTypeOf<Extract<keyof KitEventOf<'sanction.overturned'>, 'target' | 'subject' | 'person' | 'statement' | 'reason' | 'text'>>().toEqualTypeOf<never>();
+    expectTypeOf<'sanction.overturned'>().toExtend<KitEvent['type']>();
+  });
+
   it('the new event shapes hold no statement, reason or handle', () => {
     expectTypeOf<KitEventOf<'appeal.created'>>().toEqualTypeOf<{
       type: 'appeal.created';
@@ -144,11 +163,15 @@ describe('events', () => {
       target: StaffRef;
       outcome: AppealOutcome;
       rule: RuleRef | null;
+      /** The fixed reason code (0.2.1), never the moderator's free text. */
+      reason: AppealReasonCode;
     }>();
     expectTypeOf<KitEventOf<'rename.required'>>().toEqualTypeOf<{ type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null; entity?: { kind: string; ref: string } }>();
     // no field of any of them is free text of a player or a moderator
     type Keys = keyof KitEventOf<'appeal.created'> | keyof KitEventOf<'appeal.decided'> | keyof KitEventOf<'rename.required'>;
-    expectTypeOf<Extract<Keys, 'statement' | 'reason' | 'decisionReason' | 'handle' | 'name' | 'note' | 'accounts' | 'label'>>().toEqualTypeOf<never>();
+    // (`reason` on `appeal.decided` is a code from a closed list of seven, since 0.2.1; the free text of the decision is `decisionReason`, which no event has)
+    expectTypeOf<Extract<Keys, 'statement' | 'decisionReason' | 'handle' | 'name' | 'note' | 'accounts' | 'label'>>().toEqualTypeOf<never>();
+    expectTypeOf<KitEventOf<'appeal.decided'>['reason']>().toEqualTypeOf<'rule_applies' | 'evidence_clear' | 'context_considered' | 'first_offence' | 'lighter_fits' | 'mistake' | 'not_a_violation'>();
     expectTypeOf<KitEventOf<'appeal.decided'>['outcome']>().toEqualTypeOf<'uphold' | 'reduce' | 'revoke'>();
     // and they are members of the union, so cw.on('*') hears them
     expectTypeOf<KitEvent['type']>().toExtend<string>();

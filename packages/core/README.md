@@ -536,6 +536,65 @@ if (waiting !== undefined) {
   the next purge, not at the decision), and the second argument of `purgeNotices(before, unseen?)`, the ceiling for an unseen message notice (a store that
   ignores it keeps an unseen appeal outcome or rename request until the player sees it).
 
+## Appeal links, delivery and feedback (0.2.1)
+
+New in 0.2.1 and additive: nothing here changes a 0.2.0 contract, and every new option, field and `Store` method is optional. A sanction can carry a signed link to a page where the player reads the decision and files one appeal; the kit hands your game the words
+of the message (`notices.deliver`) so it can email them; and a granted appeal teaches the kit what to stop counting. **The kit never sends email and never stores an email address.** The guide for the person who runs moderation is
+[docs/recipes/appeal-emails.md](https://github.com/hainix/chatwarden/blob/main/docs/recipes/appeal-emails.md).
+
+Appeals must be enabled in the profile (`appeals.enabled`) for any of the link calls to answer: with appeals off `link` returns `null` and the page routes answer as if they did not exist.
+
+```ts
+import { createChatwarden } from '@chatwarden/core';
+import type { NoticeDelivery, RawWho } from '@chatwarden/core';
+import { openStore } from '@chatwarden/store-sqlite';
+
+declare function enqueueMail(d: NoticeDelivery): Promise<void>;
+
+const cw = await createChatwarden({
+  store: openStore({ path: './chatwarden.db' }),
+  secret: process.env.CHATWARDEN_SECRET as string,
+  platform: { identify: (ctx) => ctx as RawWho },
+  overrides: { appeals: { enabled: true, contact: 'support@game.example' } },
+  appeals: { landingUrl: 'https://game.example/appeal' },
+  notices: { deliver: (d) => enqueueMail(d) },
+});
+```
+
+- **The link.** `cw.appeals.link(noticeId, { ttlMs? })` is the signed address of the appeal page for one sanction notice, or `null` (appeals off, no `appeals.landingUrl`, a notice that does not exist, is not a sanction, has ended, or was withdrawn with no decided appeal; it never throws for a bad id). It is `appeals.landingUrl` plus `?t=<token>`. The token holds the notice id and an expiry and nothing else, and is checked in constant time before it is read. The link is a capability for one sanction, not a login: whoever holds it can read that sanction and file one appeal, so never log it or post it in a public channel, and keep query strings out of your access logs. It works until `min(now + appeals.linkTtlMs, the end of the appealable window)`; `ttlMs` replaces the setting (one hour to 365 days, else `RangeError`). A sanction notice from `cw.notices.pending` and `cw.notices.record` carries it as `PlayerNotice.appealUrl`, and a refused door carries it as `DoorRefusal.appealUrl`; both are left off when there is no link.
+- **The calls behind the page.** `cw.appeals.openLink(token)` checks a token's signature and expiry and reads nothing. `cw.appeals.caseByLink(token)` answers `{ ok: true, case }` or `{ ok: false, reason: 'invalid' }` (one identical answer for a forged, expired, gone or moot link and for appeals off). `cw.appeals.fileByLink(token, { statement })` files through the same rules as `cw.appeals.file` and answers an `AppealFileResult` (the same refusals, with `not_found` for any bad link). `AppealCase` (and `AppealCaseResult`) is built field by field: the notice as the player was shown it (kind, rule and its label, end, reference code, time, the lines they were shown), `canAppeal`, the appeal (status, times, the fixed reason), `standing` (the sanction as it stands now: `{ kind, until, state: 'active' | 'ended' | 'lifted' }`, or `null`), `expiresAt`, `emailsOutcome`, `contact` and `statementMax`. It holds no notice id, group, person, moderator, private reason or statement. `cw.appeals.landingOrigins()` is the one list of origins (frozen, exact origins) a script may read the case from; `@chatwarden/http` serves the page and the json from these calls.
+- **The options.** `ChatwardenOptions.appeals` takes `landingUrl` and `landingOrigins` (code or environment, never the profile; `resolveLandingOptions` is the check `createChatwarden` runs, and `chatwarden serve` runs it on its variables). The profile's `appeals` section gains `appeals.linkTtlMs` (default 30 days), `appeals.contact` (one line of up to 200 characters, shown on the page), `appeals.emailsOutcome` (default `false`: the page then tells the player to come back instead of promising an email; set it only when your hook really emails) and `appeals.words` (your own wording by language, over the built-in `en`, `es` and `pt`). The origin list above is the `landingOrigins` option of `createChatwarden`'s `appeals` (named `appeals.landingOrigins` in errors), not a profile key.
+- **The delivery hook.** `ChatwardenOptions.notices` takes `deliver` and `localeOf`. The hook is `notices.deliver`: it is called after the commit, fenced and never awaited, once per notice: for a moderator's decision, for the automatic restriction, and for the outcome of an appeal (once, also for a reduction; a replay delivers nothing). `d` is a `NoticeDelivery`: `kind`, `noticeId` (the key for your dedupe and retry), `to.accountId` (the account id the person was most recently seen with: never a key, an address or a subject id), `locale`, `subject`, `text`, `html` (no chat line, no excerpt, no moderator, no private reason), `appealUrl`, the `sanction` and, for an outcome, `outcome`. With no account id nothing is delivered and `chatwarden.delivery_skipped_no_account` is logged at most once a minute with a count. A throw or a rejection is logged by class (`chatwarden.delivery_failed`) and never fails the sanction. `notices.localeOf` (given `{ accountId }`) picks the language.
+- **The words.** `@chatwarden/core/notice-locales` holds the notice, reason, page and delivery words in English, Spanish and Portuguese (`noticeWordsFor`, `chooseLocale`, `APPEAL_WORDS` and the rest); `@chatwarden/http` and `@chatwarden/player-react` read them from there. Spanish and Portuguese are machine-drafted (by an AI model) and have not been reviewed by a person: have someone who speaks the language read them, the nine reasons below first.
+
+### Fixed reasons
+
+A decision now carries one of three fixed reasons for its outcome, in addition to the private reason a moderator writes (which is never shown). `cw.appeals.decide({ ..., reasonCode })` takes an `AppealReasonCode` from `APPEAL_REASONS[outcome]`; a code that is not one of the outcome's three is refused `invalid_reason`, and a decision without one is stored with `context_considered`, the default, so a 0.2.0 caller is unchanged. The code is what the player reads (`player.appeal.reason.<outcome>.<code>` in the words), it is in the `appeal.decided` event as `reason` (a code, never the moderator's text) and in `AppealDetail.decided.reasonCode`.
+
+| Outcome | Code | The player reads (English) |
+| --- | --- | --- |
+| `uphold` | `rule_applies` | The rule applies to what was said. |
+| `uphold` | `evidence_clear` | The chat record shows the rule was broken. |
+| `uphold` | `context_considered` | We looked at the whole conversation, and the decision stands. |
+| `reduce` | `first_offence` | We lightened it because this was a first offence. |
+| `reduce` | `lighter_fits` | A lighter action fits what happened. |
+| `reduce` | `context_considered` | We looked at the whole conversation and lightened it. |
+| `revoke` | `mistake` | This was our mistake. We are sorry. |
+| `revoke` | `not_a_violation` | What was said does not break the rules. |
+| `revoke` | `context_considered` | We looked at the whole conversation and lifted it. |
+
+### What a granted appeal teaches the kit
+
+A revoke or a reduction overturns the original decision. The kit records it (one row in `kit_overturns`: the sanction group, the time, the person, the source, and the term id or filter key that made the decision, no text), then:
+
+- **Strikes.** An overturned automatic restriction no longer counts toward the next restriction: the strikes that earned it stop counting and the person's last automatic start is put back. Strike forgiveness is per process, like the strike tally itself: the process that decides the appeal forgives at once; another process serving chat over the same database keeps counting until it restarts, so its next restriction for that person can be the longer repeat length. Route one person's chat to one process, as pacing already advises.
+- **The event.** `sanction.overturned` is announced once after the commit: `{ groupId, at, source, termId?, filterKey? }`, ids and codes only (`KIT_EVENT_TYPES` lists it, so a webhook endpoint may subscribe to it, and `@chatwarden/discord` posts one line for it).
+- **Terms and filters.** `cw.terms.reviewFlags({ days?, min? })` lists the terms whose restrictions were overturned at least `min` times (default 2) in `days` (default 90): `{ termId, overturned, lastAt }`, a term id and never the term text. `cw.filters.overturned({ days? })` counts overturns by filter key over 7, 30 or 90 days. The hub shows both, quietly. The kit never changes a term by itself: a person reads the flag and decides.
+- **The reporter.** A report whose decision was overturned is counted in `ReporterAccuracy.overturned`, not as confirmed and never as a false report; `ReporterRecord.actioned` leaves it out.
+- **The cause.** `AppealDetail.cause` (an `AppealCause`) says why the sanction was made, for the staff read only: a report (decided by a human or by the AI), a term (its id, never its text), a chat filter report, or another source (`coop` or `api`).
+
+**Upgrading from 0.2.0.** SQLite migration 27 (one-way: back up first; the full list is in the `@chatwarden/store-sqlite` README) adds `kit_overturns` and a few columns; a store you wrote needs none of it, because every new `Store` method (`recordOverturn`, `loadAppealByGroup`, `latestAutoChatStart`, `overturnedTermCounts`, `overturnedFilterCounts`, `purgeOverturns` and `loadNotice` reads) is optional and the kit falls back without it. `SubjectExport.appeals` rows gain optional `overturnedAt` and `reasonCode`. New public names: `AppealCase`, `AppealCaseResult`, `AppealCause`, `AppealReasonCode`, `APPEAL_REASONS`, `APPEAL_REASON_CODES`, `APPEAL_REASON_DEFAULT`, `NoticeDelivery`, `NoticeDeliveryOptions`, `OverturnInput`, `resolveLandingOptions`, `LandingOptions`, the subpath `@chatwarden/core/notice-locales`, `cw.appeals.link`, `.openLink`, `.caseByLink`, `.fileByLink` and `.landingOrigins`, `cw.terms.reviewFlags`, `cw.filters.overturned`, the event `sanction.overturned`, and the fields `PlayerNotice.appealUrl`, `DoorRefusal.appealUrl`, `ReporterAccuracy.overturned` and `AppealSettings.linkTtlMs`, `.contact`, `.emailsOutcome` and `.words`.
+
 ## Names
 
 Optional, new in 0.1.9, except that `cw.names.check` has been here since 0.1.0 and keeps its contract. This part checks a name
@@ -736,6 +795,8 @@ Retention: an erasure receipt lives on `retention.auditMs`; `purge()` also finis
 older than ten minutes): `PurgeResult.erasuresFinished` and `strayRows`. A held report, its decisions, its sanction groups (address rows too), their notices and appeals, its AI rows and its audit rows are
 skipped by every purge. Several processes on one database: an erase moves an epoch each process reads at most every 30 seconds.
 
+**Overturned appeals (0.2.1).** `kit_overturns` holds one row for each decision overturned on appeal: the sanction group, the time, the source, the person's subject id, and the term id or filter key that made the decision, never a word, a line or a statement. The export shows the time of the overturn on the appeal (`overturnedAt`, with its fixed `reasonCode`), an erase removes the person's overturn rows, and retention deletes them on the appeals clock (`retention.appealsMs`); an overturn on a sanction group held for legal reasons stays with the hold.
+
 **Upgrading:** `Store` gains required methods (`exportSubjects`, `eraseSubjects`, `insertErasure`, `loadPendingErasures`, `finishErasure`, `erasureEpoch`, `purgeStrayRows`, `placeHold`, `releaseHold`,
 `loadHold`, `listHolds`, `heldSet`, `sanctionGroupsOfReport`) and `AuditListQuery` gains `targets`; a custom store implements them, and `saveIdentifier` for a subject that does not exist must write nothing and
 not throw. `AUDIT_ACTIONS` gains `privacy.find`, `privacy.export`, `privacy.erase`, `legal.hold`, `legal.release` and `legal.bundle`; `KIT_EVENT_TYPES` gains `report.escalated`; `PurgeResult` gains
@@ -927,6 +988,8 @@ in a browser.
 | `profanity` | A ready profanity filter. What happens to a profane line is the profile's call (`allow`, `star` or `refuse`). |
 | `phrases` | Phrase books for phrase-only rooms: `{ junior: [{ id: 'gg', text: 'Good game!' }, { id: 'help', text: 'Can you help me?', group: 'Ask' }] }`. A context with `chat: { phrases: 'junior' }` makes its rooms phrase-only: `cw.chat.acceptPhrase(room, seat, 'gg')` sends one (the same pipeline as `accept` without the text steps; the line is kept as evidence as its canonical text) and typed text is refused `phrases_only`. At most 20 books of 300 phrases; ids, texts (1 to 100 characters, no control or bidi character) and groups are checked at start-up, and each phrase goes through the matcher and the profanity filter: a hit throws `PhraseBookError` naming the book and the phrase id, never the text. A context naming a book that is not declared is a `ProfileError`. |
 | `sharedPacing` | `true` keeps the pacer's state (slow mode, the burst limit and repeat refusal) in the store, so several processes on one store judge one player's lines together; default `false`, the in-memory pacer exactly as before. It is a property of how the game is deployed, not a moderation setting, so it is not in the profile or the hub. The store needs `paceLoad`, `paceUpdate`, `paceDropRoom` and `paceSweep` (memory and SQLite have them); otherwise `createChatwarden` throws a plain message naming the missing one. One indexed read per line in a room where a check is on, one write per accepted line, nothing at all for a room with every check off. A store failure fails open (the line goes on) and is logged by class at most once a minute. `cw.rooms.setPace` overrides stay per process. A person first seen by another process after this one started is a person of its own here until the next start (as for every table keyed by person). |
+| `appeals` | `{ landingUrl?, landingOrigins? }`: where the appeal page lives (0.2.1). `landingUrl` is its address (an `http:` or `https:` URL of at most 2000 characters, no credentials, no fragment, no query string); the kit adds `?t=<token>` to make a signed link for one sanction (`cw.appeals.link`, `appealUrl` on a sanction notice and on a door refusal). `landingOrigins` lists the origins a script may read `GET /appeal/case` from (at most 20, each exactly an origin such as `https://game.example`: no path, no trailing slash, never `*`); `cw.appeals.landingOrigins()` is the one list the HTTP layer reads. Code or environment only, never the profile. Without `landingUrl` no link is made and nothing else changes. A bad value is a `RangeError` naming the option and never echoing it. The link lives `appeals.linkTtlMs` (profile, default 30 days), never longer than the sanction stays appealable. |
+| `notices` | `{ deliver?, localeOf? }`: tell the game what a person was told (0.2.1), so it can send it by email or any channel. `deliver(d)` is called after the commit, fenced and never awaited, once per notice: when a sanction is given (a moderator's decision, the automatic restriction) and when an appeal is decided (once, also for a reduction). `d` is a `NoticeDelivery`: `kind`, `noticeId` (the stable key for dedupe and retry), `to.accountId` (the account id the person was most recently seen with, never an address hash), `locale`, `subject`, `text`, `html` (no line the person wrote), `appealUrl` and the `sanction`. Without an account id nothing is delivered and `chatwarden.delivery_skipped_no_account` is logged at most once a minute with a count. A throw or rejection is logged by class (`chatwarden.delivery_failed`) and never fails the sanction. `localeOf({ accountId })` picks the language (`es-MX`; nothing is English). The kit has no email address and sends nothing itself. Code only. A `deliver` or `localeOf` that is not a function is a `TypeError` at creation. |
 | `profanityPackage` | `{ createProfanityFilter }` from `@chatwarden/profanity`; the kit builds the filter from the profile. Not used when `profanity` is given. |
 | `clock` | `{ now() }`. Defaults to the system clock; tests pass their own. |
 | `enabled` | A kill switch, read on every call. Return false to stop enforcement and report intake. |

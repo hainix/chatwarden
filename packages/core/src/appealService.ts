@@ -2,19 +2,29 @@ import {
   APPEAL_OUTCOMES,
   APPEAL_RATE_ELEVATED,
   APPEAL_RATE_HIGH,
+  APPEAL_REASON_CODES,
+  APPEAL_REASON_DEFAULT,
+  APPEAL_REASONS,
   APPEAL_STATEMENT_MAX,
   APPEAL_STATS_MIN_SANCTIONS,
+  LINK_TTL_MAX_MS,
+  LINK_TTL_MIN_MS,
   normalizeStatement,
   SANCTION_KIND_ORDER,
   statementLength,
 } from './appeals.js';
+import { mintAppealToken, verifyAppealToken } from './appealLink.js';
 import type {
+  AppealCase,
+  AppealCaseResult,
+  AppealCause,
   AppealDecideResult,
   AppealDecision,
   AppealDetail,
   AppealFileResult,
   AppealOutcome,
   AppealPage,
+  AppealReasonCode,
   AppealRuleStats,
   AppealStats,
   AppealSummary,
@@ -26,7 +36,7 @@ import { randomId } from './crypto.js';
 import type { KitEvent } from './events.js';
 import { safeWarn } from './log.js';
 import { appealReduction } from './noticePlan.js';
-import { appliesInRecord } from './notices.js';
+import { appealableUntil, appliesInRecord, NOTICE_RECORD_WINDOW_MS } from './notices.js';
 import type { NoticeService } from './notices.js';
 import { parseRuleRef } from './rules.js';
 import type { RuleRef } from './rules.js';
@@ -34,7 +44,8 @@ import { APPEALS_START_TOKEN, MAX_SANCTION_DURATION_MS, writeSanction } from './
 import type { SanctionIndex } from './sanctions.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
 import type { SubjectIndex } from './subjects.js';
-import type { AppealRow, Clock, Logger, Matcher, RawWho, Store, SubjectId } from './types.js';
+import type { DeliveryService } from './delivery.js';
+import type { AppealRow, Clock, Logger, Matcher, NoticeRow, RawWho, SanctionRow, Store, SubjectId } from './types.js';
 
 // The appeals service: filing (the player side) here; deciding and the staff reads are added to the same class. It holds no state of its own:
 // every fact is in the store, so two processes on one database agree.
@@ -87,6 +98,23 @@ export interface AppealServiceDeps {
    * report: the AI's casebook marks that decision reversed. A throw is logged and never fails the decision.
    */
   onGranted?: (appeal: AppealRow, outcome: 'reduce' | 'revoke') => void;
+  /** The strike count that tips an automatic restriction (`limits.strikes.count`), read live: the cause of an appeal on one says it. */
+  strikesCount: () => number;
+  /** The strike window (`limits.strikes.windowMs`): the strikes of an overturned automatic restriction are the ones in the window before its start. */
+  strikeWindowMs: number;
+  /**
+   * Told, after the commit and fenced, that an automatic restriction (`source: 'auto_filter'`) was overturned and recorded: the in-memory strike tally forgets the
+   * strikes that earned it (`StrikeService.forgive`). A throw is logged by class and never fails the decision.
+   */
+  forgive?: (subject: SubjectId, startsAt: number) => void;
+  /** The kit's secret: keys the signed appeal link. */
+  secret: string;
+  /** The appeal page's address (`ChatwardenOptions.appeals.landingUrl`), or null: without it no link is made. */
+  landingUrl: string | null;
+  /** The origins the appeal page may be read from by a script (`ChatwardenOptions.appeals.landingOrigins`). Frozen. */
+  landingOrigins: readonly string[];
+  /** Told, after the commit and fenced, that an appeal was decided (the delivery hook). A moot close and a refused decision tell it nothing. */
+  delivery?: Pick<DeliveryService, 'appealDecided'> | undefined;
 }
 
 /** A decision step that must roll the transaction back and answer something other than success. */
@@ -101,17 +129,24 @@ class Stop extends Error {
 const OUTCOME_STATUS = { uphold: 'upheld', reduce: 'reduced', revoke: 'revoked' } as const;
 const OUTCOME_NOTICE = { uphold: 'appeal_upheld', reduce: 'appeal_reduced', revoke: 'appeal_revoked' } as const;
 const INVALID = { ok: false, error: 'invalid' } as const;
+const INVALID_REASON = Symbol('invalid_reason');
 
 interface CheckedDecision {
   appealId: string;
   outcome: AppealOutcome;
   actor: string;
   reason: string;
+  /** The fixed reason, resolved: the one given, or the default when the key was absent. */
+  reasonCode: AppealReasonCode;
   to: { kind: 'warning' | 'chat' | 'area' | 'ban'; durationMs: number | null } | null;
 }
 
-/** The decision as the service reads it, or null when it is not well formed. Each field is read once. */
-function checkDecision(input: AppealDecision): CheckedDecision | null {
+/**
+ * The decision as the service reads it: null when it is not well formed (`invalid`), the marker {@link INVALID_REASON} when the shape is fine but the
+ * reason code is not one the outcome offers (`invalid_reason`), else the checked decision. Each field is read once, and the code is read only after the
+ * shape passed (an absent key, or `undefined`, is the one way to ask for the default; `null` is not).
+ */
+function checkDecision(input: AppealDecision): CheckedDecision | typeof INVALID_REASON | null {
   if (typeof input !== 'object' || input === null) return null;
   const { appealId, outcome, actor, reason, to } = input as unknown as Record<string, unknown>;
   if (typeof appealId !== 'string' || appealId === '') return null;
@@ -119,16 +154,39 @@ function checkDecision(input: AppealDecision): CheckedDecision | null {
   if (!isValidAuditActor(actor)) return null;
   const why = typeof reason === 'string' ? reason.trim() : '';
   if (why === '' || why.length > 500) return null;
-  if (outcome !== 'reduce') return to === undefined ? { appealId, outcome: outcome as AppealOutcome, actor, reason: why, to: null } : null;
-  if (typeof to !== 'object' || to === null) return null;
-  const { kind, durationMs } = to as Record<string, unknown>;
-  if (typeof kind !== 'string' || !(SANCTION_KIND_ORDER as readonly string[]).includes(kind)) return null;
-  if (kind === 'warning') {
-    if (durationMs !== null) return null;
-  } else if (durationMs !== null && (typeof durationMs !== 'number' || !Number.isSafeInteger(durationMs) || durationMs <= 0 || durationMs > MAX_SANCTION_DURATION_MS)) {
-    return null;
+  // The outcome-specific shape first: a stray or malformed `to` is `invalid` whatever the reason code says.
+  let checkedTo: CheckedDecision['to'] = null;
+  if (outcome !== 'reduce') {
+    if (to !== undefined) return null;
+  } else {
+    if (typeof to !== 'object' || to === null) return null;
+    const { kind, durationMs } = to as Record<string, unknown>;
+    if (typeof kind !== 'string' || !(SANCTION_KIND_ORDER as readonly string[]).includes(kind)) return null;
+    if (kind === 'warning') {
+      if (durationMs !== null) return null;
+    } else if (durationMs !== null && (typeof durationMs !== 'number' || !Number.isSafeInteger(durationMs) || durationMs <= 0 || durationMs > MAX_SANCTION_DURATION_MS)) {
+      return null;
+    }
+    checkedTo = { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs: durationMs as number | null };
   }
-  return { appealId, outcome: 'reduce', actor, reason: why, to: { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs: durationMs as number | null } };
+  // The reason code last (read once): an absent key or `undefined` is the default; anything else must be a code this outcome offers.
+  let code: AppealReasonCode;
+  const given: unknown = (input as unknown as Record<string, unknown>).reasonCode;
+  if (given === undefined) {
+    code = APPEAL_REASON_DEFAULT;
+  } else {
+    // A string that is one of the seven AND one this outcome offers: compared against the frozen lists, never by property lookup (so 'toString' is not a code).
+    if (typeof given !== 'string' || !(APPEAL_REASON_CODES as readonly string[]).includes(given)) return INVALID_REASON;
+    if (!(APPEAL_REASONS[outcome as AppealOutcome] as readonly string[]).includes(given)) return INVALID_REASON;
+    code = given as AppealReasonCode;
+  }
+  return { appealId, outcome: outcome as AppealOutcome, actor, reason: why, reasonCode: code, to: checkedTo };
+}
+
+/** The stored reason code of a decided appeal when it is one the kit knows (a moot appeal, an older row and anything else read null). */
+function knownReasonCode(r: AppealRow): AppealReasonCode | null {
+  const code = r.reasonCode;
+  return r.status !== 'moot' && typeof code === 'string' && (APPEAL_REASON_CODES as readonly string[]).includes(code) ? (code as AppealReasonCode) : null;
 }
 
 /** A refusal that must roll the filing's transaction back (the row was written to test the unique group and the rate). */
@@ -196,17 +254,25 @@ export class AppealService {
     if (subject === null || typeof noticeId !== 'string' || noticeId === '') return NOT_FOUND;
     const notice = this.d.notices.ownRow(subject, noticeId);
     if (notice === null) return NOT_FOUND;
+    return this.fileFor(this.d.subjects.canonical(subject), notice, input.statement);
+  }
+
+  /**
+   * The filing itself, once the notice is known to be the person's (found by their own details in {@link file}, or read from a signed link in {@link fileByLink}): the one body
+   * both entrances run, so the order of the checks and the weekly cap are one code path. `person` is canonical. Checks: not_appealable, statement_invalid, the sanction still
+   * standing, then in one transaction already_appealed and rate.
+   */
+  private fileFor(person: SubjectId, notice: NoticeRow, rawStatement: unknown): AppealFileResult {
     const now = this.d.clock.now();
     if (notice.groupId === null || !appliesInRecord(notice, now)) return { ok: false, refused: 'not_appealable' };
 
-    const statement = normalizeStatement(input.statement);
+    const statement = normalizeStatement(rawStatement);
     if (statement === '' || statementLength(statement) > APPEAL_STATEMENT_MAX) return { ok: false, refused: 'statement_invalid' };
 
     const group = this.d.store.loadSanctionSubjectRow?.(notice.groupId) ?? null;
     // The notice outlived its sanction rows (retention): there is nothing left to appeal.
     if (group === null || group.revokedAt !== undefined) return { ok: false, refused: 'not_appealable' };
 
-    const person = this.d.subjects.canonical(subject);
     const aliases = this.d.subjects.aliasesOf(person);
     const cap = this.d.settings().perPlayerPerWeek;
     const row: AppealRow = {
@@ -254,6 +320,161 @@ export class AppealService {
     return { ok: true, appeal: toPlayerAppeal(row) };
   }
 
+  // --- the signed link -------------------------------------------------------------------------------------------------------
+
+  /** Is this notice one a link can be about: it has a sanction group and is one of the four sanction kinds. */
+  private static isSanctionNotice(row: NoticeRow): row is NoticeRow & { groupId: string; kind: 'warning' | 'chat' | 'area' | 'ban' } {
+    return row.groupId !== null && (row.kind === 'warning' || row.kind === 'chat' || row.kind === 'area' || row.kind === 'ban');
+  }
+
+  /**
+   * The appeal filed for the notice's sanction (a moot one too), or null when there is none: one lookup by the sanction's group, so it never depends on how many appeals the person has.
+   * A store without `loadAppealByGroup` (a custom one written for 0.2.0) is read the old way, among the person's newest appeals, which can miss an older one and never sees a moot one.
+   */
+  private appealOf(row: NoticeRow): AppealRow | null {
+    const direct = this.d.store.loadAppealByGroup;
+    if (typeof direct === 'function') return direct.call(this.d.store, row.groupId as string);
+    const aliases = this.d.subjects.aliasesOf(this.d.subjects.canonical(row.subject));
+    return (this.d.store.listAppealsBy?.(aliases, MINE_MAX) ?? []).find((r) => r.groupId === row.groupId) ?? null;
+  }
+
+  /**
+   * The one rule behind every use of a link, read from the store now. A notice is LIVE when it is on the person's record, or a DECIDED VIEW when it was withdrawn and its sanction
+   * has a decided appeal (so the person can still read the outcome). Anything else (a notice that is gone, not a sanction, ended, withdrawn with no decided appeal, or whose appeal
+   * is moot) is null.
+   */
+  private linkState(row: NoticeRow | null, now: number): { row: NoticeRow & { groupId: string; kind: 'warning' | 'chat' | 'area' | 'ban' }; live: boolean; appeal: AppealRow | null } | null {
+    if (row === null || !AppealService.isSanctionNotice(row)) return null;
+    const appeal = this.appealOf(row);
+    if (appeal !== null && appeal.status === 'moot') return null;
+    const live = appliesInRecord(row, now);
+    const decided = row.withdrawnAt !== null && appeal !== null && appeal.status !== 'open';
+    return live || decided ? { row, live, appeal } : null;
+  }
+
+  /**
+   * A signed link to the appeal page for one sanction notice, or null: appeals off, no `appeals.landingUrl`, a notice that does not exist, is not a sanction, has ended, or was withdrawn
+   * with no decided appeal. The link is a capability for that one sanction, not a login: it works until `min(now + linkTtlMs, the end of the appealable window)`. A withdrawn notice whose
+   * sanction has a decided appeal still gets a link, to read the outcome. `opts.ttlMs` replaces the setting (a whole number of ms from one hour to 365 days, else `RangeError`). Never
+   * throws for a bad `noticeId`; a store failure is logged by class and answers null.
+   */
+  link(noticeId: unknown, opts?: { ttlMs?: number }): string | null {
+    const given: unknown = typeof opts === 'object' && opts !== null ? opts.ttlMs : undefined;
+    if (given !== undefined && (typeof given !== 'number' || !Number.isSafeInteger(given) || given < LINK_TTL_MIN_MS || given > LINK_TTL_MAX_MS)) {
+      throw new RangeError(`appeals.link: ttlMs must be a whole number from ${LINK_TTL_MIN_MS} to ${LINK_TTL_MAX_MS}`);
+    }
+    const landing = this.d.landingUrl;
+    if (landing === null || !this.enabled() || typeof noticeId !== 'string' || noticeId === '' || noticeId.length > 64) return null;
+    try {
+      const now = this.d.clock.now();
+      const state = this.linkState(this.d.store.loadNotice?.(noticeId) ?? null, now);
+      if (state === null) return null;
+      const end = state.live ? appealableUntil(state.row) : now + NOTICE_RECORD_WINDOW_MS;
+      const ttl = (given as number | undefined) ?? this.d.settings().linkTtlMs;
+      const expiresAt = Math.min(now + ttl, end ?? Infinity);
+      if (!(expiresAt > now)) return null;
+      const url = new URL(landing);
+      url.searchParams.set('t', mintAppealToken(this.d.secret, state.row.id, expiresAt));
+      return url.toString();
+    } catch (err) {
+      this.warn(err);
+      return null;
+    }
+  }
+
+  /** Open a token: its signature and expiry only (nothing is read from the store). Never throws. */
+  openLink(token: unknown): { ok: true; noticeId: string; expiresAt: number } | { ok: false; reason: 'invalid' } {
+    const opened = verifyAppealToken(this.d.secret, token, this.d.clock.now());
+    return opened.ok ? opened : { ok: false, reason: 'invalid' };
+  }
+
+  /**
+   * The one validity rule shared by {@link caseByLink} and {@link fileByLink}: appeals off, a forged or expired token, a notice that is gone, one that is neither live nor a decided
+   * view, and a moot appeal all give null, so the caller cannot tell them apart. May throw when the store does (the callers catch it).
+   */
+  private resolveLink(token: unknown): { row: NoticeRow & { groupId: string; kind: 'warning' | 'chat' | 'area' | 'ban' }; expiresAt: number; live: boolean; appeal: AppealRow | null } | null {
+    if (!this.enabled()) return null;
+    const now = this.d.clock.now();
+    const opened = verifyAppealToken(this.d.secret, token, now);
+    if (!opened.ok) return null;
+    const state = this.linkState(this.d.store.loadNotice?.(opened.noticeId) ?? null, now);
+    return state === null ? null : { ...state, expiresAt: opened.expiresAt };
+  }
+
+  /**
+   * What the appeal page shows for a signed link, or `{ ok: false, reason: 'invalid' }`: one answer for a forged, expired, erased, purged, withdrawn or moot link and for appeals being off.
+   * Read only. A store failure is logged by class and answers invalid.
+   */
+  caseByLink(token: unknown): AppealCaseResult {
+    try {
+      const link = this.resolveLink(token);
+      if (link === null) return { ok: false, reason: 'invalid' };
+      const { row, live, appeal } = link;
+      const view = this.d.notices.viewOf(row);
+      const group = this.d.store.loadSanctionSubjectRow?.(row.groupId) ?? null;
+      // The sanction as it stands now: its kind and end, and whether it is in force, over, or lifted (a revoked group, whoever revoked it).
+      const now = this.d.clock.now();
+      const standing = (kind: 'warning' | 'chat' | 'area' | 'ban', until: number | null, revoked: boolean): NonNullable<AppealCase['standing']> => {
+        const end = kind === 'warning' ? null : until;
+        return { kind, until: end, state: revoked ? 'lifted' : end !== null && end <= now ? 'ended' : 'active' };
+      };
+      let stands: AppealCase['standing'] = null;
+      if (appeal !== null && (appeal.status === 'upheld' || appeal.status === 'revoked')) {
+        // The original: still in force (upheld), lifted by the decision (revoked), or lifted by a moderator after an upheld one.
+        stands = group === null ? null : standing(row.kind, row.until, appeal.status === 'revoked' || group.revokedAt !== undefined);
+      } else if (appeal !== null && appeal.status === 'reduced' && appeal.replacementGroupId !== null) {
+        const replacement = this.d.store.loadSanctionSubjectRow?.(appeal.replacementGroupId) ?? null;
+        const kind = replacement?.kind;
+        stands = replacement !== null && (kind === 'warning' || kind === 'chat' || kind === 'area' || kind === 'ban') ? standing(kind, replacement.endsAt, replacement.revokedAt !== undefined) : null;
+      }
+      const settings = this.d.settings();
+      return {
+        ok: true,
+        case: {
+          notice: {
+            kind: row.kind,
+            rule: view.rule,
+            ruleLabel: view.ruleLabel,
+            until: view.until,
+            refCode: view.refCode,
+            createdAt: view.createdAt,
+            excerpt: view.excerpt.map((l) => ({ text: l.text, day: l.day })),
+          },
+          canAppeal: live && group !== null && group.revokedAt === undefined && appeal === null,
+          appeal:
+            appeal === null
+              ? null
+              : { status: appeal.status as 'open' | 'upheld' | 'reduced' | 'revoked', createdAt: appeal.createdAt, decidedAt: appeal.decidedAt, reason: knownReasonCode(appeal) },
+          standing: stands,
+          expiresAt: link.expiresAt,
+          emailsOutcome: settings.emailsOutcome,
+          contact: settings.contact,
+          statementMax: APPEAL_STATEMENT_MAX,
+        },
+      };
+    } catch (err) {
+      this.warn(err);
+      return { ok: false, reason: 'invalid' };
+    }
+  }
+
+  /**
+   * File an appeal from a signed link: for the person on the notice (never one a caller names), with the same checks in the same order as {@link file} (one code path), so an invalid
+   * link is `not_found`, a notice no longer on the record (a decided view) `not_appealable`, then the statement, `already_appealed` and the weekly `rate` per person. Never throws; a store
+   * failure is logged by class and answers `not_found`.
+   */
+  fileByLink(token: unknown, input: { statement: string }): AppealFileResult {
+    if (!this.enabled()) return { ok: false, refused: 'off' };
+    try {
+      const link = this.resolveLink(token);
+      if (link === null || typeof input !== 'object' || input === null) return NOT_FOUND;
+      return this.fileFor(this.d.subjects.canonical(link.row.subject), link.row, input.statement);
+    } catch (err) {
+      this.warn(err);
+      return NOT_FOUND;
+    }
+  }
+
   /**
    * Decide an open appeal, once. One store transaction: the sanction is revoked (reduce, revoke), the replacement written (reduce), the
    * player's notices made, and the appeal moved from open only, so a second decision, or one made while another process decides, finds it
@@ -266,6 +487,7 @@ export class AppealService {
     if (!this.enabled()) return { ok: false, error: 'not_found' };
     const d = checkDecision(input);
     if (d === null) return INVALID;
+    if (d === INVALID_REASON) return { ok: false, error: 'invalid_reason' };
     try {
       return this.decideChecked(d);
     } catch (err) {
@@ -293,6 +515,10 @@ export class AppealService {
     const clear = this.d.clearStatements();
     const pending = !this.d.index.isEnabled();
     let written: ReturnType<typeof writeSanction> | null = null;
+    // What the overturn record said, for the announcements after the commit (null: none was recorded).
+    let overturn: { termId: string | null; filterKey: string | null } | null = null;
+    // The id of the outcome message the decision wrote, for the delivery after the commit.
+    let outcomeNoticeId: string | null = null;
     try {
       store.transaction(() => {
         if (d.outcome !== 'uphold') {
@@ -329,16 +555,18 @@ export class AppealService {
             { notify: false },
           );
         }
-        notices.createMessage(person, OUTCOME_NOTICE[d.outcome], { rule: ruleRefOf(appeal.rule), refCode: group.refCode, notify: false });
+        outcomeNoticeId = notices.createMessage(person, OUTCOME_NOTICE[d.outcome], { rule: ruleRefOf(appeal.rule), refCode: group.refCode, notify: false });
         const moved = store.decideAppeal?.(appeal.id, {
           status: OUTCOME_STATUS[d.outcome],
           at: now,
           by: d.actor,
           reason: d.reason,
+          reasonCode: d.reasonCode,
           replacementGroupId: written === null ? null : (written as ReturnType<typeof writeSanction>).groupId,
           ...(clear ? { clearStatement: true } : {}),
         });
         if (moved !== true) throw new Stop('already_decided');
+        if (d.outcome !== 'uphold') overturn = this.recordOverturn(appeal, group, person, now);
         if (d.outcome !== 'uphold' && appeal.reportId !== null) {
           try {
             this.d.onGranted?.(appeal, d.outcome);
@@ -371,8 +599,68 @@ export class AppealService {
     const made = written as ReturnType<typeof writeSanction> | null;
     if (made !== null) fenced(() => this.d.index.add(made.rows, now));
     fenced(() => notices.announce(person));
-    fenced(() => this.d.emit({ type: 'appeal.decided', appealId: appeal.id, at: now, target: person, outcome: d.outcome, rule: ruleRefOf(appeal.rule) }));
+    // An automatic restriction that was overturned: the live tally forgets the strikes that earned it (the store already set them aside).
+    const recorded = overturn as { termId: string | null; filterKey: string | null } | null;
+    if (recorded !== null && group.source === 'auto_filter') fenced(() => this.d.forgive?.(person, group.startsAt));
+    if (recorded !== null) {
+      fenced(() =>
+        this.d.emit({
+          type: 'sanction.overturned',
+          groupId: appeal.groupId,
+          at: now,
+          source: group.source,
+          ...(recorded.termId === null ? {} : { termId: recorded.termId }),
+          ...(recorded.filterKey === null ? {} : { filterKey: recorded.filterKey }),
+        }),
+      );
+    }
+    fenced(() => this.d.emit({ type: 'appeal.decided', appealId: appeal.id, at: now, target: person, outcome: d.outcome, rule: ruleRefOf(appeal.rule), reason: d.reasonCode }));
+    // Tell the game, once: the outcome message (never the replacement's own notice, which was made without a push).
+    const outcomeId = outcomeNoticeId as string | null;
+    if (outcomeId !== null) {
+      fenced(() => {
+        const original = { kind: group.kind, until: group.kind === 'warning' ? null : group.endsAt };
+        const replacement = made === null || plan === null ? null : { kind: plan.kind, until: plan.kind === 'warning' ? null : made.endsAt };
+        const sanction = replacement === null ? { ...original, rule: ruleRefOf(group.rule), source: group.source, automated: group.automated } : { ...replacement, rule: ruleRefOf(group.rule), source: 'moderator' as const, automated: false };
+        this.d.delivery?.appealDecided({
+          noticeId: outcomeId,
+          originalNoticeId: appeal.noticeId,
+          person,
+          status: OUTCOME_STATUS[d.outcome],
+          reason: d.reasonCode,
+          sanction,
+          standing: d.outcome === 'revoke' ? null : (replacement ?? original),
+          refCode: group.refCode,
+        });
+      });
+    }
     return { ok: true, status: OUTCOME_STATUS[d.outcome], ...(made === null ? {} : { replacementGroupId: made.groupId }) };
+  }
+
+  /**
+   * Record the overturn of a granted appeal, inside the decision's transaction: the group, the strikes that earned an automatic restriction, and the report a
+   * decision came from. Null when the store cannot record it, or already had (another process recorded this group first); a throw is the store failing and rolls
+   * the decision back like any other store failure.
+   */
+  private recordOverturn(appeal: AppealRow, group: SanctionRow, person: SubjectId, now: number): { termId: string | null; filterKey: string | null } | null {
+    const { store, subjects } = this.d;
+    if (store.recordOverturn === undefined) return null;
+    const automatic = group.source === 'auto_filter';
+    const termId = automatic ? (group.termId ?? null) : null;
+    const report = appeal.reportId === null ? null : store.loadReport(appeal.reportId);
+    const filterKey = report !== null && report.origin === 'filter' && typeof report.originKey === 'string' ? report.originKey : null;
+    const recorded = store.recordOverturn({
+      groupId: appeal.groupId,
+      at: now,
+      subject: person,
+      aliases: subjects.aliasesOf(person),
+      source: group.source,
+      termId,
+      filterKey,
+      reportId: appeal.reportId,
+      strikes: automatic ? { from: group.startsAt - this.d.strikeWindowMs, to: group.startsAt } : null,
+    });
+    return recorded ? { termId, filterKey } : null;
   }
 
   /** The sanction is gone: close the appeal as moot (committed, unlike a refusal) and say so. Nothing is announced or marked. */
@@ -459,13 +747,42 @@ export class AppealService {
       return {
         ...this.summaryOf(r),
         statement: r.statement,
-        decided: r.decidedAt === null || r.decidedBy === null ? null : { by: r.decidedBy, at: r.decidedAt, reason: r.decisionReason ?? '', replacementGroupId: r.replacementGroupId },
+        decided:
+          r.decidedAt === null || r.decidedBy === null
+            ? null
+            : { by: r.decidedBy, at: r.decidedAt, reason: r.decisionReason ?? '', reasonCode: knownReasonCode(r), replacementGroupId: r.replacementGroupId },
         reportId: r.reportId,
+        cause: this.causeOf(r),
         shown: notice === undefined ? [] : notice.excerpt.map((l) => ({ text: l.text, day: l.day })),
       };
     } catch (err) {
       this.warn(err);
       return null;
+    }
+  }
+
+  /**
+   * Why the sanction behind an appeal was made. From the sanction's subject row (its source, term and report) and the report row. Never throws: rows that are gone
+   * (retention) and a store that fails both read as `other`, the failure logged by class.
+   */
+  private causeOf(r: AppealRow): AppealCause {
+    const { store } = this.d;
+    try {
+      const group = store.loadSanctionSubjectRow?.(r.groupId) ?? null;
+      if (group === null) return { source: 'other', via: 'api' };
+      if (group.source === 'auto_filter') return { source: 'term', termId: group.termId ?? null, strikes: this.d.strikesCount() };
+      const reportId = typeof group.reportId === 'string' && group.reportId !== '' ? group.reportId : null;
+      const report = reportId === null ? null : store.loadReport(reportId);
+      if (reportId !== null && report !== null) {
+        const decidedBy = group.source === 'ai' ? 'ai' : 'human';
+        return report.origin === 'filter' && typeof report.originKey === 'string'
+          ? { source: 'filter', reportId, filterKey: report.originKey, decidedBy }
+          : { source: 'report', reportId, decidedBy };
+      }
+      return { source: 'other', via: group.source === 'coop' ? 'coop' : 'api' };
+    } catch (err) {
+      this.warn(err);
+      return { source: 'other', via: 'api' };
     }
   }
 

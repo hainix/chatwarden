@@ -142,14 +142,20 @@ describe('migration 19: the covering index for reporter outcomes', () => {
     const db = memDb();
     const old = openAt18(db, 80);
     const before = dump(db, 'kit_reports', 'rowid');
-    const readsBefore = { tally: old.reporterTally(['s_rep3', 's_rep4']), list: old.listReports({ limit: 50 }) };
+    // The tally is read from the table raw: its statement reads a column migration 27 adds (`overturned_at`), which this version-18 schema does not have.
+    const tallyRaw = { open: 0, actioned: 0, dismissed: 0, badFaith: 0 };
+    for (const r of db.prepare("SELECT status, bad_faith, COUNT(*) AS n FROM kit_reports WHERE reporter_subject IN ('s_rep3', 's_rep4') GROUP BY status, bad_faith").all()) {
+      tallyRaw[String(r.status) as 'open' | 'actioned' | 'dismissed'] += Number(r.n);
+      if (Number(r.bad_faith) === 1) tallyRaw.badFaith += Number(r.n);
+    }
+    const readsBefore = { tally: tallyRaw, list: old.listReports({ limit: 50 }) };
     expect(before.length).toBeGreaterThan(200);
     old.close();
 
     const store = openStore({ db });
     expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     // Migration 26 adds columns (origin, the urgent-lane ones, scope and entity), all NULL or 0 on every old row: everything that was there is as it was.
-    const NEW_COLUMNS = ['origin', 'origin_key', 'urgent', 'handoff_at', 'handoff_by', 'escalated_to', 'escalated_by', 'escalated_at', 'evidence_ref', 'scope', 'entity_json'];
+    const NEW_COLUMNS = ['origin', 'origin_key', 'urgent', 'handoff_at', 'handoff_by', 'escalated_to', 'escalated_by', 'escalated_at', 'evidence_ref', 'scope', 'entity_json', 'overturned_at'];
     const withoutNew = (rows: unknown[]): unknown[] => rows.map((r) => Object.fromEntries(Object.entries(r as Record<string, unknown>).filter(([k]) => !NEW_COLUMNS.includes(k))));
     expect(withoutNew(dump(db, 'kit_reports', 'rowid'))).toEqual(before);
     const RECORD_FIELDS = ['urgent', 'evidenceRef', 'handoffAt', 'handoffBy', 'escalatedTo', 'escalatedBy', 'escalatedAt', 'scope', 'entity'];
@@ -215,7 +221,7 @@ describe('reporterOutcomes on SQLite', () => {
     expect(hits).toHaveLength(1);
     const plan = planOf(db, hits[0] as Seen);
     const line = plan.find((l) => l.includes('kit_reports'));
-    expect(line, plan.join(' | ')).toMatch(/^SEARCH kit_reports USING COVERING INDEX kit_reports_by_reporter_outcome/);
+    expect(line, plan.join(' | ')).toMatch(/^SEARCH kit_reports USING COVERING INDEX kit_reports_by_reporter_outcome_overturned \(/);
     expect(plan.join(' | ')).not.toMatch(/SCAN kit_reports/);
   });
 
@@ -246,10 +252,10 @@ describe('reporterOutcomes on SQLite', () => {
     const db = memDb();
     const store = openStore({ db });
     fileOn(store, 's_dup', 'dismissed', NOW);
-    expect(store.reporterOutcomes(['s_dup', 's_dup'], 0)).toEqual([{ reporter: 's_dup', actioned: 0, noAction: 1, badFaith: 0 }]);
+    expect(store.reporterOutcomes(['s_dup', 's_dup'], 0)).toEqual([{ reporter: 's_dup', actioned: 0, noAction: 1, badFaith: 0, overturned: 0 }]);
     // Even when the two copies land in different chunks of a long list.
     const filler = Array.from({ length: 600 }, (_, i) => `s_none${i}`);
-    expect(store.reporterOutcomes(['s_dup', ...filler, 's_dup'], 0)).toEqual([{ reporter: 's_dup', actioned: 0, noAction: 1, badFaith: 0 }]);
+    expect(store.reporterOutcomes(['s_dup', ...filler, 's_dup'], 0)).toEqual([{ reporter: 's_dup', actioned: 0, noAction: 1, badFaith: 0, overturned: 0 }]);
   });
 });
 

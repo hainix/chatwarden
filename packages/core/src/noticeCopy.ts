@@ -198,8 +198,24 @@ export interface NoticeView {
 }
 
 /** A template with its `{name}` values filled in; a name with no value stays as written. */
-function fill(template: string, values: Record<string, string>): string {
+export function fillWords(template: string, values: Record<string, string>): string {
   return template.replace(/\{([a-zA-Z]+)\}/g, (whole, name: string) => (Object.hasOwn(values, name) ? (values[name] as string) : whole));
+}
+const fill = fillWords;
+
+/**
+ * How long a restriction lasts, as the locale says it ("30 minutes", "24 hours", "7 days"): whole minutes (rounded up, at least one) under an hour, whole hours (rounded up) up to and
+ * including 72 hours, whole days (rounded up) beyond. An unusable locale reads English; an `ms` that is not a positive finite number reads as one minute. Never throws.
+ */
+export function durationText(ms: number, locale: string): string {
+  const span = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : MIN;
+  const [n, unit] = span < HOUR ? ([Math.max(1, Math.ceil(span / MIN)), 'minute'] as const) : span <= 72 * HOUR ? ([Math.ceil(span / HOUR), 'hour'] as const) : ([Math.ceil(span / DAY), 'day'] as const);
+  const format = (tag: string): string => new Intl.NumberFormat(tag, { style: 'unit', unit, unitDisplay: 'long' }).format(n);
+  try {
+    return format(safeLocale(typeof locale === 'string' ? locale : 'en'));
+  } catch {
+    return format('en');
+  }
 }
 
 /**

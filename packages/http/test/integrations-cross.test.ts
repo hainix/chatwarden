@@ -21,8 +21,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** The names `@chatwarden/http` exported at 0.1.11 (main 7447e69); K5 adds none. */
+/** The names `@chatwarden/http` exported at 0.1.11 (main 7447e69), plus the three additive 0.2.1 names (APPEAL_PAGE_CSP, appealLandingRoutes, createDeliveryWebhook); K5 adds none. */
 const ROOT_EXPORTS: string[] = [
+  'APPEAL_PAGE_CSP',
   'ATTEMPT_TIMEOUT_MS',
   'AiUnavailableError',
   'AuditFailedError',
@@ -56,11 +57,13 @@ const ROOT_EXPORTS: string[] = [
   'ValidationError',
   'adminRoutes',
   'aiRoutes',
+  'appealLandingRoutes',
   'appealRoutes',
   'auditRoutes',
   'blockedRoutes',
   'chatRoutes',
   'createAdminContext',
+  'createDeliveryWebhook',
   'createRoomBroadcaster',
   'createRouter',
   'encodeFrame',

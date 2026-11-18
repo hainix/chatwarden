@@ -41,6 +41,7 @@ export function compileSnippets(files: ReadonlyArray<{ file: string; code: strin
       '@chatwarden/hub-react/headless': src('hub-react/src/headless/index.ts'),
       '@chatwarden/player-react': src('player-react/src/index.ts'),
       '@chatwarden/player-react/chat': src('player-react/src/chat/index.ts'),
+      '@chatwarden/player-react/appeal': src('player-react/src/appeal/index.ts'),
       '@chatwarden/http/express': src('http/src/express.ts'),
       '@chatwarden/http/fetch': src('http/src/fetch.ts'),
       '@chatwarden/http/cli': src('http/src/cli/index.ts'),

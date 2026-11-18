@@ -140,6 +140,74 @@ describe('audit rows and modes: list, stats and detail required; decide best-eff
   });
 });
 
+describe('decide with a reason code (0.2.1): a fixed reason beside the private text', () => {
+  it('decide accepts reasonCode and the decided detail returns it', async () => {
+    const w = await appealsWorld();
+    const a = await w.appeal();
+    const res = await decide(w, a.appealId, { outcome: 'revoke', reason: REASON, reasonCode: 'not_a_violation' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: 'revoked' });
+    const detail = (await w.call('GET', `/appeals/${a.appealId}`)).body as { appeal: { decided: { by: string; reason: string; reasonCode: string | null } } };
+    expect(detail.appeal.decided).toMatchObject({ by: 'senior_bea', reason: REASON, reasonCode: 'not_a_violation' });
+  });
+
+  it('a reason of the wrong outcome is 400 invalid_reason, with the fixed message, and writes nothing', async () => {
+    const w = await appealsWorld();
+    const a = await w.appeal();
+    const before = w.routeAudit().filter((r) => r.action === 'appeal.decide').length;
+    const res = await decide(w, a.appealId, { outcome: 'uphold', reason: REASON, reasonCode: 'mistake' });
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toBe('invalid_reason');
+    expect(res.body).toEqual({ error: 'invalid_reason', message: 'That reason does not fit the decision.' });
+    expect(w.cw.appeals.get(a.appealId)).toMatchObject({ status: 'open', decided: null });
+    expect(w.routeAudit().filter((r) => r.action === 'appeal.decide')).toHaveLength(before);
+    expect(JSON.stringify(res.body)).not.toContain(REASON);
+    // the same appeal can then be decided with a code that fits
+    expect((await decide(w, a.appealId, { outcome: 'uphold', reason: REASON, reasonCode: 'rule_applies' })).status).toBe(200);
+  });
+
+  it('an unknown code is 400 invalid_reason too (a string the list does not have)', async () => {
+    const w = await appealsWorld();
+    const a = await w.appeal();
+    const res = await decide(w, a.appealId, { outcome: 'revoke', reason: REASON, reasonCode: 'toString' });
+    expect([res.status, errorOf(res)]).toEqual([400, 'invalid_reason']);
+  });
+
+  it.each([['a number', 7], ['null', null], ['an object', { code: 'mistake' }], ['an array', ['mistake']], ['true', true]])('a non-string reasonCode (%s) is 400 invalid_request, not invalid_reason', async (_n, reasonCode) => {
+    const w = await appealsWorld();
+    const a = await w.appeal();
+    const res = await decide(w, a.appealId, { outcome: 'revoke', reason: REASON, reasonCode });
+    expect([res.status, errorOf(res)]).toEqual([400, 'invalid_request']);
+    expect(w.cw.appeals.get(a.appealId)?.status).toBe('open');
+  });
+
+  it('no reasonCode still works (additive): the stored code is context_considered', async () => {
+    const w = await appealsWorld();
+    const a = await w.appeal();
+    expect((await decide(w, a.appealId, { outcome: 'uphold', reason: REASON })).status).toBe(200);
+    const detail = (await w.call('GET', `/appeals/${a.appealId}`)).body as { appeal: { decided: { reasonCode: string | null } } };
+    expect(detail.appeal.decided.reasonCode).toBe('context_considered');
+  });
+
+  it('the code is the only new key a decision body accepts: an unknown key is still ignored as before, and the actor is never from the body', async () => {
+    const w = await appealsWorld();
+    const a = await w.appeal();
+    const res = await decide(w, a.appealId, { outcome: 'uphold', reason: REASON, reasonCode: 'evidence_clear', actor: 'someone_else' });
+    expect(res.status).toBe(200);
+    expect(w.cw.appeals.get(a.appealId)?.decided).toMatchObject({ by: 'senior_bea', reasonCode: 'evidence_clear' });
+  });
+
+  it('a reduce takes its own codes: lighter_fits is 200, rule_applies is 400 invalid_reason', async () => {
+    const w = await appealsWorld();
+    const a = await w.appeal({ kind: 'ban', durationMs: null });
+    const to = { kind: 'chat', durationMs: 2 * HOUR };
+    expect(errorOf(await decide(w, a.appealId, { outcome: 'reduce', reason: REASON, to, reasonCode: 'rule_applies' }))).toBe('invalid_reason');
+    const ok = await decide(w, a.appealId, { outcome: 'reduce', reason: REASON, to, reasonCode: 'lighter_fits' });
+    expect(ok.status).toBe(200);
+    expect(w.cw.appeals.get(a.appealId)?.decided?.reasonCode).toBe('lighter_fits');
+  });
+});
+
 describe('400 invalid_query for a bad status, cursor, limit and days; /appeals/stats is not captured by /appeals/:id; 404 for an unknown id', () => {
   it('a bad status, cursor, limit or days is 400 invalid_query', async () => {
     const w = await appealsWorld();

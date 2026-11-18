@@ -162,7 +162,16 @@ describe('migration 20: AI reads and outcomes', () => {
   it('the older reads answer the same after the upgrade', () => {
     const db = memDb();
     const old = openAt(db, 19, 40);
-    const reads = (s: SqliteStore) => ({ list: s.listReports({ limit: 50 }), tally: s.reporterTally(['s_rep1', 's_rep2']), token: s.changeToken() });
+    // The tally is counted from the table raw: the store's own statement reads `overturned_at`, a column only migration 27 adds (these schemas stop at 19 and 20).
+    const tally = () => {
+      const t = { open: 0, actioned: 0, dismissed: 0, badFaith: 0 };
+      for (const r of db.prepare("SELECT status, bad_faith, COUNT(*) AS n FROM kit_reports WHERE reporter_subject IN ('s_rep1', 's_rep2') GROUP BY status, bad_faith").all()) {
+        t[String(r.status) as 'open' | 'actioned' | 'dismissed'] += Number(r.n);
+        if (Number(r.bad_faith) === 1) t.badFaith += Number(r.n);
+      }
+      return t;
+    };
+    const reads = (s: SqliteStore) => ({ list: s.listReports({ limit: 50 }), tally: tally(), token: s.changeToken() });
     const expected = reads(old);
     old.close();
     expect(reads(openStore({ db, migrations: UP_TO_20 }))).toEqual(expected);

@@ -1,11 +1,8 @@
-import { useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import type { NoticeKind, PlayerNotice } from '@chatwarden/core';
 import { bodyKey, isSanction, NOTICE_WORDS, noticeView, titleKey } from '@chatwarden/core/notice-copy';
 import type { NoticeView, NoticeWords, NoticeWordKey } from '@chatwarden/core/notice-copy';
 import type { PlayerError } from './client.js';
-import { createT, en } from './i18n.js';
 import type { PlayerT, PlayerText } from './i18n.js';
 import { safeHref } from './safeHref.js';
 
@@ -32,10 +29,8 @@ export interface Ui {
   timeZone: string | undefined;
 }
 
-export function useUi({ t, locale = 'en', now, timeZone }: PlayerUiProps): Ui {
-  const words = useMemo(() => t ?? createT(en, locale), [t, locale]);
-  return { t: words, locale, now: now ?? Date.now, timeZone };
-}
+// `useUi` is in its own file (it carries the English catalog as its default words), so an entry that draws only pieces of this file (the appeal page) does not bundle the catalog.
+export { useUi } from './useUi.js';
 
 /** What the two components that open a dialog take besides the common props. */
 export interface DialogHostProps {
@@ -52,10 +47,8 @@ export interface DialogHostProps {
   returnFocusTo?: () => HTMLElement | null;
 }
 
-/** Renders `children` where they are, or into `container` when one is given. */
-export function Portal({ container, children }: { container: HTMLElement | null | undefined; children: ReactNode }) {
-  return container === undefined || container === null ? <>{children}</> : createPortal(children, container);
-}
+// `Portal` is in its own file so an entry that draws no dialog (the appeal page) does not import React DOM.
+export { Portal } from './Portal.js';
 
 /** The root every component renders: the one class all the stylesheet's rules are scoped under. */
 export function Root({ theme, className, children }: { theme?: 'light' | 'dark'; className?: string; children: ReactNode }) {

@@ -103,7 +103,7 @@ describe('the form', () => {
     const body = puts(w)[0]!.body as { layer: Record<string, unknown>; reason: string };
     expect(body.layer).toEqual({ ai: { level: 1 }, appeals: { enabled: true, perPlayerPerWeek: 5, allowSelfReview: true } });
     expect(body.reason).toBe('Players asked for it');
-    expect((await w.client.policyProfile()).effective.appeals).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: true });
+    expect((await w.client.policyProfile()).effective.appeals).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: true, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
     await screen.findByText('Appeals settings saved.');
   });
 
@@ -147,7 +147,7 @@ describe('the form', () => {
     await save(user);
     await waitFor(() => expect(puts(w)).toHaveLength(1));
     expect((puts(w)[0]!.body as { layer: { appeals: unknown } }).layer.appeals).toEqual({ enabled: false, perPlayerPerWeek: 5, allowSelfReview: true });
-    expect((await w.client.policyProfile()).effective.appeals).toEqual({ enabled: false, perPlayerPerWeek: 5, allowSelfReview: true });
+    expect((await w.client.policyProfile()).effective.appeals).toEqual({ enabled: false, perPlayerPerWeek: 5, allowSelfReview: true, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
   });
 
   it('switching appeals back on brings the error back, and Save is held again', async () => {
@@ -406,5 +406,231 @@ describe('Simple mode', () => {
     cleanup();
     renderHub(w, { path: '/settings/advanced', mode: 'simple' });
     expect(await screen.findByRole('region', { name: 'Appeals' })).toBeInTheDocument();
+  });
+});
+
+// The three live settings added with the landing page (appeals landing, 5.1 and 10.8): how long a link works, the support contact and whether the person is
+// emailed the outcome. In the one existing form; only the keys that changed are named in the layer (plus what was already saved). The landing address, its
+// origins and the game's own words have no control here: they are set in code or in the profile.
+const DAY_MS = 86_400_000;
+const LINK = 'How long an appeal link works';
+const CONTACT = 'Support contact shown on the appeal page';
+const EMAILS = 'We email the person when it is decided';
+const linkSelect = (): HTMLSelectElement => within(panel()).getByLabelText(LINK) as HTMLSelectElement;
+const contactBox = (): HTMLInputElement => within(panel()).getByLabelText(CONTACT) as HTMLInputElement;
+const layerOf = (w: AppealsHub): Record<string, unknown> => (puts(w)[0]!.body as { layer: { appeals: Record<string, unknown> } }).layer.appeals;
+const optionTexts = (): string[] => within(linkSelect()).getAllByRole('option').map((o) => o.textContent ?? '');
+
+describe('link, contact and emails', () => {
+  it('shows the defaults: a link that works 30 days, no contact, no email; the days offered are 1, 7, 14, 30, 90, 180 and 365', async () => {
+    const w = await owner();
+    await open(w);
+    expect(linkSelect().value).toBe(String(30 * DAY_MS));
+    expect(optionTexts()).toEqual(['1 day', '7 days', '14 days', '30 days', '90 days', '180 days', '365 days']);
+    expect(contactBox().value).toBe('');
+    expect(contactBox().type).toBe('text');
+    expect(sw(EMAILS).checked).toBe(false);
+    expect(puts(w)).toHaveLength(0);
+  });
+
+  it('says the kit never sends the email, and that the page lives in code; there is no control for the landing address, origins or words', async () => {
+    const w = await owner();
+    await open(w);
+    expect(within(panel()).getByText(/never sends email/i)).toBeInTheDocument();
+    expect(within(panel()).getByText(/set in your game.s code, not here/i)).toBeInTheDocument();
+    expect(within(panel()).queryByLabelText(/landing|origin|words/i)).toBeNull();
+  });
+
+  it('shows what is in force, and the days of a stored value that is not in the list as a custom option, never losing it', async () => {
+    const w = await owner({ appeals: { linkTtlMs: 7 * DAY_MS, contact: 'help@game.example', emailsOutcome: true } });
+    await open(w);
+    expect([linkSelect().value, contactBox().value, sw(EMAILS).checked]).toEqual([String(7 * DAY_MS), 'help@game.example', true]);
+    cleanup();
+    const odd = await owner({ appeals: { linkTtlMs: 10 * DAY_MS } });
+    await open(odd);
+    expect(linkSelect().value).toBe(String(10 * DAY_MS));
+    expect(optionTexts()).toContain('10 days (custom)');
+    expect(optionTexts()).toHaveLength(8);
+  });
+
+  it('a custom stored value is kept when another field is saved: the layer does not name it', async () => {
+    const w = await owner({ appeals: { linkTtlMs: 10 * DAY_MS } });
+    const { user } = await open(w);
+    await user.type(contactBox(), 'help@game.example');
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect(layerOf(w)).toEqual({ enabled: true, perPlayerPerWeek: 20, allowSelfReview: false, contact: 'help@game.example' });
+    expect((await w.client.policyProfile()).effective.appeals?.linkTtlMs).toBe(10 * DAY_MS);
+  });
+
+  it('save sends only the keys that changed: the link length alone', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.selectOptions(linkSelect(), '90 days');
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect(layerOf(w)).toEqual({ enabled: false, perPlayerPerWeek: 3, allowSelfReview: false, linkTtlMs: 90 * DAY_MS });
+    expect((await w.client.policyProfile()).effective.appeals?.linkTtlMs).toBe(90 * DAY_MS);
+  });
+
+  it('the contact alone, with its surrounding spaces trimmed; and the email switch alone', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.type(contactBox(), '  help@game.example  ');
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect(layerOf(w)).toEqual({ enabled: false, perPlayerPerWeek: 3, allowSelfReview: false, contact: 'help@game.example' });
+    cleanup();
+    const e = await owner();
+    const second = await open(e);
+    await second.user.click(sw(EMAILS));
+    await save(second.user);
+    await waitFor(() => expect(puts(e)).toHaveLength(1));
+    expect(layerOf(e)).toEqual({ enabled: false, perPlayerPerWeek: 3, allowSelfReview: false, emailsOutcome: true });
+    expect((await e.client.policyProfile()).effective.appeals?.emailsOutcome).toBe(true);
+  });
+
+  it('what was saved before stays in the layer when another field is saved: a contact, a link length and the game\'s own words', async () => {
+    const w = await owner();
+    const state = await w.direct.policyProfile();
+    await w.direct.savePolicyProfile({ layer: { appeals: { contact: 'help@game.example', linkTtlMs: 14 * DAY_MS, words: { de: { 'player.appealPage.title': 'Einspruch' } } } as never }, version: state.version, reason: 'Set up' });
+    const { user } = await open(w);
+    expect(contactBox().value).toBe('help@game.example');
+    await user.click(sw(EMAILS));
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect(layerOf(w)).toEqual({
+      enabled: false,
+      perPlayerPerWeek: 3,
+      allowSelfReview: false,
+      linkTtlMs: 14 * DAY_MS,
+      contact: 'help@game.example',
+      emailsOutcome: true,
+      words: { de: { 'player.appealPage.title': 'Einspruch' } },
+    });
+  });
+
+  it.each([
+    ['exactly 200 characters', 'a'.repeat(200), true],
+    ['201 characters', 'a'.repeat(201), false],
+  ])('the contact is one line of up to 200 characters: %s', async (_name, value, ok) => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(contactBox());
+    await user.paste(value);
+    await user.click(within(panel()).getByRole('button', { name: 'Save changes' }));
+    if (ok) {
+      await screen.findByRole('textbox', { name: /Why are you changing this/ });
+      expect(within(panel()).queryByText('Use one line of up to 200 characters.')).toBeNull();
+    } else {
+      expect(await within(panel()).findByText('Use one line of up to 200 characters.')).toBeInTheDocument();
+      expect(contactBox()).toHaveAttribute('aria-invalid', 'true');
+      expect(puts(w)).toHaveLength(0);
+      expect(screen.queryByRole('textbox', { name: /Why are you changing this/ })).toBeNull();
+    }
+  });
+
+  it('a contact with a control character is refused, and nothing is sent', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(contactBox());
+    await user.paste(`help${String.fromCharCode(7)}me`);
+    await user.click(within(panel()).getByRole('button', { name: 'Save changes' }));
+    expect(await within(panel()).findByText('Use one line of up to 200 characters.')).toBeInTheDocument();
+    expect(puts(w)).toHaveLength(0);
+  });
+
+  it('a blank contact clears it: the layer says none, and the server reads it back as none', async () => {
+    const w = await owner({ appeals: { contact: 'help@game.example' } });
+    const { user } = await open(w);
+    await user.clear(contactBox());
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect(layerOf(w)).toEqual({ enabled: true, perPlayerPerWeek: 20, allowSelfReview: false, contact: null });
+    expect((await w.client.policyProfile()).effective.appeals?.contact).toBeNull();
+  });
+
+  it('a contact of spaces only is blank: it is not a change when none is set, and it clears one that is', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.type(contactBox(), '    ');
+    expect(within(panel()).getByRole('button', { name: 'Save changes' })).toHaveAttribute('aria-disabled', 'true');
+    cleanup();
+    const set = await owner({ appeals: { contact: 'help@game.example' } });
+    const again = await open(set);
+    await again.user.clear(contactBox());
+    await again.user.type(contactBox(), '   ');
+    await save(again.user);
+    await waitFor(() => expect(puts(set)).toHaveLength(1));
+    expect(layerOf(set)['contact']).toBeNull();
+  });
+
+  it('dirty: a change enables Save and putting it back disables it again', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    const saveButton = (): HTMLElement => within(panel()).getByRole('button', { name: 'Save changes' });
+    expect(saveButton()).toHaveAttribute('aria-disabled', 'true');
+    await user.selectOptions(linkSelect(), '7 days');
+    expect(saveButton()).not.toHaveAttribute('aria-disabled', 'true');
+    await user.selectOptions(linkSelect(), '30 days');
+    expect(saveButton()).toHaveAttribute('aria-disabled', 'true');
+    await user.type(contactBox(), 'x');
+    expect(saveButton()).not.toHaveAttribute('aria-disabled', 'true');
+    await user.clear(contactBox());
+    expect(saveButton()).toHaveAttribute('aria-disabled', 'true');
+    await user.click(sw(EMAILS));
+    expect(saveButton()).not.toHaveAttribute('aria-disabled', 'true');
+    await user.click(sw(EMAILS));
+    expect(saveButton()).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('Discard puts the three back to what is in force', async () => {
+    const w = await owner({ appeals: { contact: 'help@game.example' } });
+    const { user } = await open(w);
+    await user.selectOptions(linkSelect(), '1 day');
+    await user.clear(contactBox());
+    await user.click(sw(EMAILS));
+    await user.click(within(panel()).getByRole('button', { name: 'Discard changes' }));
+    expect([linkSelect().value, contactBox().value, sw(EMAILS).checked]).toEqual([String(30 * DAY_MS), 'help@game.example', false]);
+  });
+
+  it.each([
+    ['layer.appeals.contact', () => contactBox()],
+    ['layer.appeals.linkTtlMs', () => linkSelect()],
+    ['layer.appeals.emailsOutcome', () => sw(EMAILS)],
+  ])('a refusal of %s marks that field, in the same words, and keeps the draft', async (path, field) => {
+    const w = await owner();
+    const { user } = await open(w);
+    w.intercept.fn = (req) => (req.method === 'PUT' ? { status: 400, headers: {}, body: { error: 'invalid_profile', message: 'no', path } } : undefined);
+    await user.type(contactBox(), 'x@y.test');
+    await save(user);
+    await screen.findByText(/That setting isn't allowed/i);
+    expect(field()).toHaveAttribute('aria-invalid', 'true');
+    expect(contactBox().value).toBe('x@y.test');
+  });
+
+  it('seniors and moderators read the three, read only', async () => {
+    for (const role of ['moderator', 'senior'] as const) {
+      cleanup();
+      const w = await appealsHub({ role, actor: `${role}@example.test`, appeals: { contact: 'help@game.example', emailsOutcome: true } });
+      await open(w);
+      expect(linkSelect()).toBeDisabled();
+      expect(contactBox()).toBeDisabled();
+      expect(sw(EMAILS)).toBeDisabled();
+      expect(contactBox().value).toBe('help@game.example');
+    }
+  });
+
+  it('reset restores the base: the saved link length, contact and email go', async () => {
+    const w = await owner();
+    const state = await w.direct.policyProfile();
+    await w.direct.savePolicyProfile({ layer: { appeals: { contact: 'help@game.example', emailsOutcome: true, linkTtlMs: 7 * DAY_MS } }, version: state.version, reason: 'Set up' });
+    const { user } = await open(w);
+    expect(contactBox().value).toBe('help@game.example');
+    await user.click(screen.getByRole('button', { name: 'Reset appeals' }));
+    await user.type(screen.getByRole('textbox', { name: /Why are you resetting this/ }), 'Back to the code');
+    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(contactBox().value).toBe(''));
+    expect([linkSelect().value, sw(EMAILS).checked]).toEqual([String(30 * DAY_MS), false]);
   });
 });

@@ -1,4 +1,4 @@
-import type { AppealRow, SanctionRow, Store, SubjectId } from '@chatwarden/core';
+import type { AppealRow, OverturnInput, SanctionRow, Source, Store, SubjectId } from '@chatwarden/core';
 import { MemoryStore, compare } from './memoryStore.js';
 
 // The in-memory store's appeal methods (appeals inbox), kept apart from `MemoryStore` so a bundle that never calls `withMemoryAppeals` does
@@ -10,6 +10,7 @@ export type MemoryAppealMethods = Required<
     Store,
     | 'insertAppeal'
     | 'loadAppeal'
+    | 'loadAppealByGroup'
     | 'listAppeals'
     | 'countAppealsBy'
     | 'countOpenAppeals'
@@ -22,6 +23,11 @@ export type MemoryAppealMethods = Required<
     | 'purgeAppeals'
     | 'closeOrphanAppeals'
     | 'listAppealsBy'
+    | 'recordOverturn'
+    | 'latestAutoChatStart'
+    | 'overturnedTermCounts'
+    | 'overturnedFilterCounts'
+    | 'purgeOverturns'
   >
 >;
 
@@ -32,6 +38,19 @@ export type MemoryAppealStore = MemoryStore & MemoryAppealMethods;
 interface AppealState {
   rows: Map<string, AppealRow>;
   byGroup: Map<string, string>;
+  /** The overturn rows by sanction group (migration 27's `kit_overturns`): one per group, no text. */
+  overturns: Map<string, OverturnRecord>;
+}
+
+/** What an overturn keeps of its input: the person's subject id, the aliases are only for the strikes. */
+interface OverturnRecord {
+  groupId: string;
+  at: number;
+  subject: SubjectId;
+  source: Source;
+  termId: string | null;
+  filterKey: string | null;
+  reportId: string | null;
 }
 
 /** `'uncovered'` and a null rule are one rule: the one the kit could not place. */
@@ -50,7 +69,7 @@ class MemoryAppeals extends MemoryStore {
   // is journaled, so an undone transaction undoes it. Rows go in and come out as copies.
 
   private appealState(): AppealState {
-    return (this.ap ??= { rows: new Map(), byGroup: new Map() });
+    return (this.ap ??= { rows: new Map(), byGroup: new Map(), overturns: new Map() });
   }
 
   insertAppeal(row: AppealRow): boolean {
@@ -69,6 +88,13 @@ class MemoryAppeals extends MemoryStore {
 
   loadAppeal(id: string): AppealRow | null {
     const row = this.appealState().rows.get(id);
+    return row === undefined ? null : structuredClone(row);
+  }
+
+  loadAppealByGroup(groupId: string): AppealRow | null {
+    const s = this.appealState();
+    const id = s.byGroup.get(groupId);
+    const row = id === undefined ? undefined : s.rows.get(id);
     return row === undefined ? null : structuredClone(row);
   }
 
@@ -116,18 +142,25 @@ class MemoryAppeals extends MemoryStore {
 
   decideAppeal(
     id: string,
-    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean },
+    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean; reasonCode?: string },
   ): boolean {
     const row = this.appealState().rows.get(id);
     if (row === undefined || row.status !== 'open') return false;
     const before = { ...row };
+    // `before` has no reasonCode key when there was none: restoring must remove one the decision added.
+    const hadCode = Object.hasOwn(row, 'reasonCode');
     row.status = patch.status;
     row.decidedAt = patch.at;
     row.decidedBy = patch.by;
     row.decisionReason = patch.reason;
     row.replacementGroupId = patch.replacementGroupId;
+    // Left out, the row keeps no code (the key stays absent, as in a row decided before 0.2.1).
+    if (patch.reasonCode !== undefined) row.reasonCode = patch.reasonCode;
     if (patch.clearStatement === true) row.statement = null;
-    this.undoWith(() => Object.assign(row, before));
+    this.undoWith(() => {
+      Object.assign(row, before);
+      if (!hadCode) delete row.reasonCode;
+    });
     this.bump();
     return true;
   }
@@ -197,9 +230,98 @@ class MemoryAppeals extends MemoryStore {
   loadSanctionSubjectRow(groupId: string): SanctionRow | null {
     const row = this.sanctions.find((r) => r.groupId === groupId && r.targetType === 'subject');
     if (row === undefined) return null;
-    // The one read that carries the report id and the revocation time: only a row written with a report id, and only a revoked group, has the
-    // key, so every other load keeps the shape it had.
-    return { ...this.sanctionRow(row), ...(row.reportId == null ? {} : { reportId: row.reportId }), ...(row.revokedAt === null ? {} : { revokedAt: row.revokedAt }) };
+    // The one read that carries the report id, the term id, the revocation time and the overturn time: only a row written with a report id, only a revoked
+    // group and only an overturned one has the key (the term id reads null when there is none), so every other load keeps the shape it had.
+    return {
+      ...this.sanctionRow(row),
+      ...(row.reportId == null ? {} : { reportId: row.reportId }),
+      termId: row.termId ?? null,
+      ...(row.revokedAt === null ? {} : { revokedAt: row.revokedAt }),
+      ...(row.overturnedAt === null ? {} : { overturnedAt: row.overturnedAt }),
+    };
+  }
+
+  // Overturns (0.2.1). Synchronous; every write is journaled, so an undone transaction undoes it, and the change token moves with it.
+
+  recordOverturn(o: OverturnInput): boolean {
+    const s = this.appealState();
+    if (s.overturns.has(o.groupId)) return false;
+    s.overturns.set(o.groupId, { groupId: o.groupId, at: o.at, subject: o.subject, source: o.source, termId: o.termId, filterKey: o.filterKey, reportId: o.reportId });
+    this.undoWith(() => {
+      s.overturns.delete(o.groupId);
+    });
+    // Every row of the group (the address row too).
+    const marked = this.sanctions.filter((r) => r.groupId === o.groupId && r.overturnedAt === null);
+    for (const r of marked) r.overturnedAt = o.at;
+    if (marked.length > 0) {
+      this.undoWith(() => {
+        for (const r of marked) r.overturnedAt = null;
+      });
+    }
+    // The strikes of any alias inside the window (inclusive): set aside from the tally, still shown by the blocked-messages view.
+    if (o.strikes !== null) {
+      const { from, to } = o.strikes;
+      const aliases = new Set(o.aliases);
+      const flagged = this.strikes.filter((r) => aliases.has(r.subject) && r.at >= from && r.at <= to && !this.overturnedStrikes.has(r));
+      for (const r of flagged) this.overturnedStrikes.add(r);
+      if (flagged.length > 0) {
+        this.undoWith(() => {
+          for (const r of flagged) this.overturnedStrikes.delete(r);
+        });
+      }
+    }
+    if (o.reportId !== null && !this.overturnedReports.has(o.reportId) && this.reports.some((r) => r.id === o.reportId)) {
+      // The first overturn of a report keeps its time; nothing on the report record itself changes (a report read carries no overturn time, as on SQLite).
+      const id = o.reportId;
+      this.overturnedReports.set(id, o.at);
+      this.undoWith(() => {
+        this.overturnedReports.delete(id);
+      });
+    }
+    this.bump();
+    return true;
+  }
+
+  latestAutoChatStart(subjects: readonly SubjectId[]): number | null {
+    const wanted = new Set(subjects);
+    let latest: number | null = null;
+    for (const r of this.sanctions) {
+      if (r.kind !== 'chat' || r.source !== 'auto_filter' || r.targetType !== 'subject' || r.overturnedAt !== null || !wanted.has(r.value)) continue;
+      if (latest === null || r.startsAt > latest) latest = r.startsAt;
+    }
+    return latest;
+  }
+
+  overturnedTermCounts(since: number): Array<{ termId: string; overturned: number; lastAt: number }> {
+    const by = new Map<string, { termId: string; overturned: number; lastAt: number }>();
+    for (const r of this.appealState().overturns.values()) {
+      if (r.termId === null || r.at < since) continue;
+      const c = by.get(r.termId) ?? { termId: r.termId, overturned: 0, lastAt: r.at };
+      c.overturned += 1;
+      c.lastAt = Math.max(c.lastAt, r.at);
+      by.set(r.termId, c);
+    }
+    return [...by.values()].sort((a, b) => compare(a.termId, b.termId));
+  }
+
+  overturnedFilterCounts(since: number): Array<{ filterKey: string; overturned: number }> {
+    const by = new Map<string, number>();
+    for (const r of this.appealState().overturns.values()) {
+      if (r.filterKey === null || r.at < since) continue;
+      by.set(r.filterKey, (by.get(r.filterKey) ?? 0) + 1);
+    }
+    return [...by].sort((a, b) => compare(a[0], b[0])).map(([filterKey, overturned]) => ({ filterKey, overturned }));
+  }
+
+  purgeOverturns(before: number): number {
+    const s = this.appealState();
+    // A group decided from a report under an open legal hold keeps its overturn, as it keeps its appeal.
+    const heldGroups = this.heldGroupIds();
+    const gone = [...s.overturns.values()].filter((r) => r.at < before && !heldGroups.has(r.groupId));
+    if (gone.length === 0) return 0;
+    this.dropOverturns(s, gone);
+    this.bump();
+    return gone.length;
   }
 
   clearAppealStatements(before: number): number {
@@ -253,13 +375,47 @@ class MemoryAppeals extends MemoryStore {
     const keep = [...s.rows.values()].filter((r) => !set.has(r.subject) || keepGroups.has(r.groupId));
     const n = s.rows.size - keep.length;
     if (n === 0) return 0;
-    const next: AppealState = { rows: new Map(keep.map((r) => [r.id, r])), byGroup: new Map(keep.map((r) => [r.groupId, r.id])) };
+    const next: AppealState = { rows: new Map(keep.map((r) => [r.id, r])), byGroup: new Map(keep.map((r) => [r.groupId, r.id])), overturns: s.overturns };
     const before = this.ap;
     this.ap = next;
     this.undoWith(() => {
       this.ap = before;
     });
     return n;
+  }
+
+  /**
+   * Delete the overturn records of the set, except those of a sanction group in `keepGroups` (a hold protects it). They belong to the appeals counted above, so
+   * the count is not returned.
+   */
+  privacyEraseOverturns(set: ReadonlySet<string>, keepGroups: ReadonlySet<string>): void {
+    const s = this.ap;
+    if (s === undefined) return;
+    const gone = [...s.overturns.values()].filter((r) => set.has(r.subject) && !keepGroups.has(r.groupId));
+    if (gone.length === 0) return;
+    this.dropOverturns(s, gone);
+  }
+
+  /** Delete overturn records, journaled so an undo puts the whole map back in its first order (a deleted key re-added would go to the end). */
+  private dropOverturns(s: AppealState, gone: readonly OverturnRecord[]): void {
+    const before = [...s.overturns];
+    for (const r of gone) s.overturns.delete(r.groupId);
+    this.undoWith(() => {
+      s.overturns.clear();
+      for (const [k, v] of before) s.overturns.set(k, v);
+    });
+  }
+
+  /** An overturn record that cited a deleted report no longer does. */
+  privacyUnlinkOverturnReports(reportIds: ReadonlySet<string>): void {
+    for (const rec of this.ap?.overturns.values() ?? []) {
+      if (rec.reportId === null || !reportIds.has(rec.reportId)) continue;
+      const before = rec.reportId;
+      rec.reportId = null;
+      this.undoWith(() => {
+        rec.reportId = before;
+      });
+    }
   }
 
   /** An appeal that cited a deleted report no longer does. */
@@ -275,11 +431,11 @@ class MemoryAppeals extends MemoryStore {
   }
 
   /** The appeals of the set, newest first (time, then id, descending): the export's appeals. */
-  privacyExportAppeals(set: ReadonlySet<string>): AppealRow[] {
+  privacyExportAppeals(set: ReadonlySet<string>): Array<AppealRow & { overturnedAt: number | null }> {
     return [...(this.ap?.rows.values() ?? [])]
       .filter((r) => set.has(r.subject))
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
-      .map((r) => structuredClone(r));
+      .map((r) => ({ ...structuredClone(r), overturnedAt: this.ap?.overturns.get(r.groupId)?.at ?? null }));
   }
 }
 

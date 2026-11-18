@@ -14,15 +14,18 @@ export interface DoorAnswer {
   until: number | null;
   refCode: string;
   noticeId?: string;
+  /** A signed link to the appeal page for the sanction that refused them, when one can be made (0.2.1). A capability for that one notice: not to be logged. */
+  appealUrl?: string;
 }
 
 /** The documented fields of a door refusal, by name. Anything else on the core object is dropped. */
-export function doorRefusal(refusal: { kind: unknown; until: unknown; refCode: unknown; noticeId?: unknown }): DoorAnswer {
+export function doorRefusal(refusal: { kind: unknown; until: unknown; refCode: unknown; noticeId?: unknown; appealUrl?: unknown }): DoorAnswer {
   const out: DoorAnswer = {
     kind: refusal.kind === 'area' ? 'area' : 'ban',
     until: typeof refusal.until === 'number' && Number.isFinite(refusal.until) ? refusal.until : null,
     refCode: typeof refusal.refCode === 'string' ? refusal.refCode : '',
   };
   if (typeof refusal.noticeId === 'string' && refusal.noticeId.length > 0 && refusal.noticeId.length <= 64) out.noticeId = refusal.noticeId;
+  if (typeof refusal.appealUrl === 'string' && refusal.appealUrl.length > 0 && refusal.appealUrl.length <= 2100) out.appealUrl = refusal.appealUrl;
   return out;
 }

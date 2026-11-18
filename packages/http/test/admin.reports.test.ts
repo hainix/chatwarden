@@ -858,7 +858,7 @@ describe('GET /people/:ref/history', () => {
       sanctions: [],
       asReporter: {
         reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0,
-        accuracy: { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000 },
+        accuracy: { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000, overturned: 0 },
       },
       handle: null,
     });
@@ -1189,6 +1189,17 @@ describe('GET /reports: reporterAccuracy on the open rows', () => {
     const w = await world();
     const r = await withHistory(w, 'good-key', 1, 7);
     expect(((await items(w)).find((i) => i.id === r.id) as Item).reporterAccuracy).toEqual({ decided: 8, unfounded: 1, falseRate: 1 / 8, habitual: false });
+  });
+
+  it('a reporter whose upheld report was overturned on appeal carries overturned (the count, and left out of decided); one with none has no such key', async () => {
+    const w = await world();
+    const r = await withHistory(w, 'overturned-key', 2, 3);
+    expect(w.store.recordOverturn?.({ groupId: 'g-ov', at: w.clock.t - 1000, subject: 's_t', aliases: ['s_t'], source: 'moderator', termId: null, filterKey: null, reportId: 'hist-overturned-key-2', strikes: null })).toBe(true);
+    const row = (await items(w)).find((i) => i.id === r.id) as Item;
+    expect(row.reporterAccuracy).toMatchObject({ decided: 4, unfounded: 2, overturned: 1 });
+    expect(Object.keys(row.reporterAccuracy as object).sort()).toEqual(['decided', 'falseRate', 'habitual', 'overturned', 'unfounded']);
+    const clean = await withHistory(w, 'clean-key', 1, 1);
+    expect(Object.keys(((await items(w)).find((i) => i.id === clean.id) as Item).reporterAccuracy as object).sort()).toEqual(['decided', 'falseRate', 'habitual', 'unfounded']);
   });
 
   it('decided rows carry null', async () => {

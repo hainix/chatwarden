@@ -135,14 +135,18 @@ const noticeId = async (call: Call, who: RawWho) =>
 afterEach(() => vi.restoreAllMocks());
 
 describe('playerRoutes: the route table', () => {
-  it('has exactly the eight player routes', async () => {
+  it('has exactly the eight player routes and the four appeal landing routes', async () => {
     const { routes } = await setup();
     expect(Object.keys(routes).sort()).toEqual([
+      'GET /appeal',
+      'GET /appeal/case',
       'GET /appeals',
       'GET /code-of-conduct',
       'GET /notices',
       'GET /record',
       'GET /rules',
+      'OPTIONS /appeal/case',
+      'POST /appeal/case',
       'POST /appeals',
       'POST /names/check',
       'POST /notices/:id/ack',

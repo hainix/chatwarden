@@ -89,8 +89,8 @@ describe('migration 26, the entity block', () => {
     expect(() => openStore({ db })).not.toThrow();
   });
 
-  it('there is still exactly one migration after 25: the entity block is part of version 26', () => {
-    expect(MIGRATIONS.filter((m) => m.version > 25).map((m) => m.version)).toEqual([26]);
+  it('there is exactly one migration for each release after 25: the entity block is part of version 26, and 27 is release 0.2.1', () => {
+    expect(MIGRATIONS.filter((m) => m.version > 25).map((m) => m.version)).toEqual([26, 27]);
   });
 });
 

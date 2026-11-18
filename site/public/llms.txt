@@ -20,6 +20,7 @@ In your project folder, run `npm install @chatwarden/http @chatwarden/core`, the
 - [Recipe: Creator channels](https://github.com/hainix/chatwarden/blob/main/docs/recipes/creator-channels.md): staff scope, so a creator's moderators see only that creator's rooms.
 - [Recipe: Service mode](https://github.com/hainix/chatwarden/blob/main/docs/recipes/service-mode.md): the `/v1` service API for a game server in any language, with the Docker recipe.
 - [Recipe: Translations](https://github.com/hainix/chatwarden/blob/main/docs/recipes/translations.md): the Spanish and Portuguese catalogues, which are machine drafts, and how to add a language.
+- [Recipe: Appeal links and emails](https://github.com/hainix/chatwarden/blob/main/docs/recipes/appeal-emails.md): the signed appeal link, the page it opens, the `notices.deliver` hook that mails it, and the signed delivery webhook for service mode.
 
 ## What is in it
 
@@ -27,6 +28,7 @@ Everything below is optional. The names are settled at 0.2.0, except that the Di
 
 - Chat box: for a game with no chat, `<ChatBox>` from `@chatwarden/player-react/chat` is a moderated chat for one room, served by `createRoomBroadcaster` and `chatRoutes` in `@chatwarden/http`.
 - Pacing: slow mode, a burst limit and a repeat limit for each room and player, off until you set them. Signals are facts your game records about a player, shown where a profile rule says so; a signal never acts on its own.
+- Appeal links and the landing page (0.2.1): a sanction notice can carry a signed link to a page the kit serves (`GET /appeal` and `/appeal/case`, with `CHATWARDEN_PUBLIC_URL` in `chatwarden serve`), where the player reads what happened and files one appeal without signing in; `@chatwarden/player-react/appeal` has the same page as `AppealPage` for a page of your own, with its words from `@chatwarden/core/notice-locales`. The `notices.deliver` hook (or the signed delivery webhook in service mode) hands the notice and the appeal outcome to your own mail system; the kit never sends email. A moderator picks one of nine fixed reasons, and an overturned appeal sets the strikes aside and flags the term, filter and reporter numbers. Off until you set `landingUrl` and turn appeals on.
 - Appeals and names: a player can ask for a second look at a sanction (off until you turn it on), and a moderator decides. A name check can keep a blocked name as evidence and ask a player for a new name; the hub hides names the word list flags until shown.
 - AI help: off until you give it an adapter. It reads each report after the player has been told it arrived and shows what it found. At level 2 it pre-fills a mild suggestion that a moderator accepts or edits. It never writes a sanction, a strike, a mute or a notice: it never acts on its own yet.
 - AI gate dashboard and shadow mode: a read-only table in the hub shows the numbers that would decide whether the AI may act. Shadow mode lets it decide what it would have done and records that in a table of its own; nothing is written to a player.

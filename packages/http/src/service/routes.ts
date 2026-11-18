@@ -2,7 +2,7 @@
 // the table and `SERVICE_OPENAPI` are both built from those descriptions, so they cannot disagree. A route's handler is a thin adapter: validate, call the kit, copy the answer by name.
 // Browser-safe: nothing here imports `node:`.
 import { errorClass, safeWarn } from '@chatwarden/core';
-import type { Chatwarden, ChatResult, DoorKind, NameKind, RawWho, ReportEntity } from '@chatwarden/core';
+import type { Chatwarden, ChatResult, DoorKind, NameKind, PlayerAppeal, RawWho, ReportEntity } from '@chatwarden/core';
 import { HttpError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import type { KitResponse } from '../types.js';
@@ -93,9 +93,22 @@ export const SERVICE_SCHEMAS: Record<string, Schema> = {
       excerpt: { type: 'array', items: obj({ text: { type: 'string' }, day: { type: 'string' } }, ['text', 'day']) },
       createdAt: { type: 'number' },
       mustAcknowledge: { type: 'boolean' },
+      // A signed link to the appeal page for a sanction that can still be appealed (0.2.1); absent when none can be made.
+      appealUrl: str(1, 2100),
     },
     required: ['id', 'kind', 'excerpt', 'createdAt', 'mustAcknowledge'],
   },
+  // An appeal as the person sees it: no reason, no staff ref, no group or person id.
+  Appeal: obj(
+    {
+      id: str(1, 64),
+      noticeId: str(1, 64),
+      status: { enum: ['open', 'upheld', 'reduced', 'revoked'] },
+      createdAt: { type: 'number' },
+      decidedAt: nullable('number'),
+    },
+    ['id', 'noticeId', 'status', 'createdAt', 'decidedAt'],
+  ),
 };
 
 const ID: Schema = { type: 'string', pattern: '^[A-Za-z0-9_.:@~-]{1,128}$' };
@@ -103,7 +116,22 @@ const WHO = ref('Who');
 const IDENTITY = ref('Identity');
 const REFUSED_LINE = obj({ ok: { const: false }, refused: ref('Refusal') }, ['ok', 'refused']);
 const SEATED_WHO = { clientKey: 'raw-client-key-0001' };
-const NOTICE_EXAMPLE = { id: 'n1', kind: 'warning', rule: 2, ruleLabel: 'Be respectful', until: null, refCode: 'CW-0001', excerpt: [{ text: 'a line', day: '2026-11-17' }], createdAt: 1_800_000_000_000, mustAcknowledge: true };
+const APPEAL_URL_EXAMPLE = 'https://game.example/appeal?t=eyJ2IjoxLCJuIjoibjEiLCJlIjoxODAyNTkyMDAwMDAwfQ.signature';
+const NOTICE_EXAMPLE = {
+  id: 'n1',
+  kind: 'warning',
+  rule: 2,
+  ruleLabel: 'Be respectful',
+  until: null,
+  refCode: 'CW-0001',
+  excerpt: [{ text: 'a line', day: '2026-11-17' }],
+  createdAt: 1_800_000_000_000,
+  mustAcknowledge: true,
+  appealUrl: APPEAL_URL_EXAMPLE,
+};
+const APPEAL_EXAMPLE = { id: 'ap1', noticeId: 'n1', status: 'open', createdAt: 1_800_000_000_000, decidedAt: null };
+/** The statement the file route takes, in characters: far over the kit's own limit (1000), so the kit can refuse it with a reason instead of the route turning it away. */
+const APPEAL_STATEMENT_ROUTE_MAX = 20_000;
 
 export const ROUTE_SPECS: readonly RouteSpec[] = [
   {
@@ -308,10 +336,52 @@ export const ROUTE_SPECS: readonly RouteSpec[] = [
     answer: {
       oneOf: [
         obj({ ok: okTrue }, ['ok']),
-        obj({ ok: { const: false }, refusal: obj({ kind: { enum: ['ban', 'area'] }, until: nullable('number'), refCode: str(0, 64), noticeId: str(1, 64) }, ['kind', 'until', 'refCode']) }, ['ok', 'refusal']),
+        obj({ ok: { const: false }, refusal: obj({ kind: { enum: ['ban', 'area'] }, until: nullable('number'), refCode: str(0, 64), noticeId: str(1, 64), appealUrl: str(1, 2100) }, ['kind', 'until', 'refCode']) }, ['ok', 'refusal']),
       ],
     },
-    examples: [{ ok: true }, { ok: false, refusal: { kind: 'ban', until: 1_800_003_600_000, refCode: 'CW-0042' } }],
+    examples: [
+      { ok: true },
+      { ok: false, refusal: { kind: 'ban', until: 1_800_003_600_000, refCode: 'CW-0042' } },
+      { ok: false, refusal: { kind: 'ban', until: null, refCode: 'CW-0043', noticeId: 'n1', appealUrl: APPEAL_URL_EXAMPLE } },
+    ],
+  },
+  {
+    name: 'appeals_link',
+    method: 'POST',
+    path: '/appeals/link',
+    openapiPath: '/appeals/link',
+    summary: 'A signed link to the appeal page for one sanction notice, by its id, or null when none can be made (appeals off, no landing address set, a notice that is not a sanction or can no longer be appealed). The link is a capability for that one notice, not a login: do not log it.',
+    request: obj({ noticeId: str(1, 64) }, ['noticeId']),
+    requestExample: { noticeId: 'n1' },
+    answer: obj({ url: nullable('string') }, ['url']),
+    examples: [{ url: APPEAL_URL_EXAMPLE }, { url: null }],
+  },
+  {
+    name: 'appeals_file',
+    method: 'POST',
+    path: '/appeals',
+    openapiPath: '/appeals',
+    summary: 'File an appeal for a person, against one of their own sanction notices (the id the service gave them). The statement is at most 20000 characters here; the kit cleans it and refuses an empty or over-long one as statement_invalid. A refusal is a 200. Not idempotent: a second filing for the same notice is already_appealed.',
+    request: obj({ who: IDENTITY, noticeId: str(1, 64), statement: { type: 'string', maxLength: APPEAL_STATEMENT_ROUTE_MAX } }, ['who', 'noticeId', 'statement']),
+    requestExample: { who: SEATED_WHO, noticeId: 'n1', statement: 'That line was a quote from the game, not me.' },
+    answer: {
+      oneOf: [
+        obj({ ok: okTrue, appeal: ref('Appeal') }, ['ok', 'appeal']),
+        obj({ ok: { const: false }, refused: { enum: ['off', 'not_found', 'not_appealable', 'statement_invalid', 'already_appealed', 'rate'] }, retryAfterMs: { type: 'integer', minimum: 1 } }, ['ok', 'refused']),
+      ],
+    },
+    examples: [{ ok: true, appeal: APPEAL_EXAMPLE }, { ok: false, refused: 'already_appealed' }, { ok: false, refused: 'rate', retryAfterMs: 86_400_000 }],
+  },
+  {
+    name: 'appeals_mine',
+    method: 'POST',
+    path: '/appeals/mine',
+    openapiPath: '/appeals/mine',
+    summary: 'The appeals this person filed, newest first, as their status and times only: no reason, no staff ref, no group or person id. An unknown person has none.',
+    request: obj({ who: IDENTITY }, ['who']),
+    requestExample: { who: SEATED_WHO },
+    answer: obj({ appeals: { type: 'array', items: ref('Appeal') } }, ['appeals']),
+    examples: [{ appeals: [APPEAL_EXAMPLE] }, { appeals: [] }],
   },
 ];
 
@@ -325,6 +395,7 @@ const DOOR_KINDS: readonly string[] = ['join', 'create', 'public', 'matchmaking'
 const NAME_MAX = 64;
 const MAX_OTHERS = 50;
 const PHRASE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
+const NOTICE_ID_MAX = 64;
 
 /** The body as an object with only the allowed keys and all the required ones. No body is `{}` when nothing is required. Anything else is 400 `invalid_request`. */
 function bodyOf(body: unknown, allowed: readonly string[], required: readonly string[] = []): Record<string, unknown> {
@@ -417,6 +488,9 @@ class RoomTally {
 }
 
 const ok = (body: unknown): KitResponse => ({ status: 200, body });
+
+/** The documented fields of an appeal, copied by name: nothing else the kit holds can reach the wire. */
+const appealOf = (a: PlayerAppeal): PlayerAppeal => ({ id: a.id, noticeId: a.noticeId, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt });
 
 /** What `serviceRoutes` hands the table: the options a handler reads. */
 export interface RouteOptions {
@@ -631,6 +705,26 @@ export function buildServiceTable(cw: Chatwarden, svc: Svc, options: RouteOption
       if (!Array.isArray(b.others) || b.others.length < 1 || b.others.length > MAX_OTHERS) throw new ValidationError();
       const others = (b.others as unknown[]).map((o) => parseWho(o, { identity: true }));
       return ok({ blocked: cw.blocks.anyBetween(who as RawWho, others as RawWho[]) });
+    },
+
+    appeals_link: (c) => {
+      const b = bodyOf(c.body, ['noticeId'], ['noticeId']);
+      return ok({ url: cw.appeals.link(text(b.noticeId, 1, NOTICE_ID_MAX)) });
+    },
+
+    appeals_file: (c) => {
+      const b = bodyOf(c.body, ['who', 'noticeId', 'statement'], ['who', 'noticeId', 'statement']);
+      const who = parseWho(b.who, { identity: true });
+      const noticeId = text(b.noticeId, 1, NOTICE_ID_MAX);
+      const statement = text(b.statement, 0, APPEAL_STATEMENT_ROUTE_MAX);
+      const res = cw.appeals.file(who as RawWho, { noticeId, statement });
+      if (res.ok) return ok({ ok: true, appeal: appealOf(res.appeal) });
+      return ok({ ok: false, refused: res.refused, ...(res.refused === 'rate' && typeof res.retryAfterMs === 'number' ? { retryAfterMs: res.retryAfterMs } : {}) });
+    },
+
+    appeals_mine: (c) => {
+      const who = parseWho(bodyOf(c.body, ['who'], ['who']).who, { identity: true });
+      return ok({ appeals: cw.appeals.mine(who as RawWho).map(appealOf) });
     },
 
     doors_check: (c) => {

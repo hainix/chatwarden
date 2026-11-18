@@ -2,6 +2,17 @@
 
 Updated 2026-11-18. The full roadmap and the reasoning behind it: [design/2026-11-09-product-scope.md](design/2026-11-09-product-scope.md).
 
+## 0.2.1: built on branch `appeals-landing`, not yet published
+
+A patch release, additive: nothing in it breaks a 0.2.0 input. Appeal links, a landing page, delivery and feedback. Not tagged, not published; the owner's steps are in [RELEASING.md](../RELEASING.md).
+
+- **What 0.2.1 is.** A sanction notice can carry a signed appeal link; the kit serves a page for it (`GET /appeal`, `/appeal/case`; `@chatwarden/player-react/appeal` has the same page as `AppealPage`) where the player reads what happened and files one appeal, with no sign-in. A delivery hook (`notices.deliver`, or the signed delivery webhook of `chatwarden serve`) hands the notice and the outcome to the game's own mail system; the kit never sends email. A moderator picks one of nine fixed reasons, and an overturned appeal sets the strikes aside and flags the term, filter and reporter numbers. The recipe is [recipes/appeal-emails.md](recipes/appeal-emails.md) (`docs/recipes/appeal-emails.md`).
+- **Additive.** Every new setting is off or unset by default and every new `Store` method is optional. SQLite migration 27 (one-way: back up the database file) is the one migration of the release. The few new required members are on types the kit produces; the changelog names them.
+- **Peer floors.** Raised by hand, before `npm run version`, so it stayed a patch: `core` `^0.2.1` for `http`, `discord`, `hub-react` and `player-react`; `http` `^0.2.1` for `hub-react`; `hub-react` `^0.2.1` for `hub-element`. Every other peer stays `^0.2.0`. The table is in `scripts/manifests.test.ts`.
+- **Verified.** The packages build and pack (`npm run check:pack`), the consumer smoke installs the real tarballs, the size and budget tests, the README, recipe, manifest, changelog, privacy-docs and browser-bundle tests, the site build and its dist test pass by path, and a built `chatwarden serve` with appeals on answers the service conformance run and the invalid page for a bad token. Three reviews of the work found no critical issue. The full suite runs in CI, not here.
+- **Still the owner's.** A real-browser pass of the served page and `AppealPage` at desktop and 360 px, light and dark; a native-speaker read of the new Spanish and Portuguese words (machine drafts); the Moxgate wiring after publish (the delivery hook and the landing address); the production flip (turn appeals on, set the address, watch the first links); and the tag, the push and the publish.
+- **Parked.** A hub editor for `appeals.words`, strike forgiveness across processes, a delivery outbox and AI triage of appeals: see [plans/follow-ups.md](plans/follow-ups.md).
+
 ## 0.2.0: published (2026-11-18, all ten packages on npm, tag `v0.2.0`, PR #40)
 
 Published from tag `v0.2.0` through npm trusted publishing with provenance; chatwarden.dev is redeployed. Every `@chatwarden/*` peer is `^0.2.0`, and each package's `CHANGELOG.md` has a "Breaking changes for adopters" section: read it first. CI ran the full suite on Linux (Node 22.13 and 24), the Windows CLI job, the consumer-install smoke, the hub-element Chromium smoke, the site build and the C# sample against a live service.

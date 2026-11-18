@@ -5,11 +5,15 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { NOTICE_WORDS } from '@chatwarden/core/notice-copy';
+import { APPEAL_WORDS } from '@chatwarden/core/notice-locales';
 import { en as baseEn } from '../src/i18n.js';
 import { enChat } from '../src/chat/words.js';
 
 // The English words: the main catalog and the chat words (kept apart so the main entry does not carry them).
 const en = { ...baseEn, ...enChat };
+// The appeal page (`src/appeal/`, its own entry) reads its words from the kit's `@chatwarden/core/notice-locales`, which it shares with the served page and the delivered text. A
+// `t("player.appealPage...")` key written there is checked against those words, not against this package's own catalog.
+const appealKeys = new Set(Object.keys(APPEAL_WORDS));
 
 // Rules that bind every component of the package, checked on the source itself: no words outside the catalog, no inline
 // styles, no injected HTML, no import of another Chatwarden UI package, and a stylesheet whose tokens are a complete,
@@ -84,14 +88,14 @@ describe('no words outside the catalog', () => {
     const used: Array<[string, string]> = [];
     for (const f of appCode) for (const m of read(f).matchAll(/\bt\(\s*'(player\.[A-Za-z0-9_.]+)'/g)) used.push([rel(f), m[1] as string]);
     expect(used.length).toBeGreaterThan(15);
-    expect(used.filter(([, k]) => !keys.has(k))).toEqual([]);
+    expect(used.filter(([f, k]) => !keys.has(k) && !(f.startsWith('src/appeal/') && appealKeys.has(k)))).toEqual([]);
   });
 
   it('every key in a label table is in the catalog', () => {
     const keys = new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')));
     const used: Array<[string, string]> = [];
     for (const f of appCode) for (const m of read(f).matchAll(/'(player\.[A-Za-z0-9_.]+)'/g)) used.push([rel(f), m[1] as string]);
-    expect(used.filter(([, k]) => !keys.has(k))).toEqual([]);
+    expect(used.filter(([f, k]) => !keys.has(k) && !(f.startsWith('src/appeal/') && appealKeys.has(k)))).toEqual([]);
   });
 
   it('every catalog key is used by the source (no dead words)', () => {
@@ -163,13 +167,14 @@ describe('imports', () => {
     for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).not.toMatch(/hub-react|packages\/hub|\.\.\/\.\.\//);
   });
 
-  it('imports the kit as types only, except the one run-time subpath @chatwarden/core/notice-copy (pure words and functions, no engine)', () => {
+  it('imports the kit as types only, except the one run-time subpath @chatwarden/core/notice-copy (pure words and functions, no engine), and, in the appeal entry alone, @chatwarden/core/notice-locales (the words of the appeal page)', () => {
     for (const f of code)
-      for (const i of importsOf(f).filter((x) => x.spec.startsWith('@chatwarden/') && x.spec !== '@chatwarden/core/notice-copy')) expect(i.typeOnly, `${rel(f)} imports ${i.spec}`).toBe(true);
+      for (const i of importsOf(f).filter((x) => x.spec.startsWith('@chatwarden/') && x.spec !== '@chatwarden/core/notice-copy' && !(x.spec === '@chatwarden/core/notice-locales' && rel(f).startsWith('src/appeal/'))))
+        expect(i.typeOnly, `${rel(f)} imports ${i.spec}`).toBe(true);
   });
 
   it('imports nothing but React, the kit types and its own files', () => {
-    for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react-dom$|react\/jsx-runtime$|@chatwarden\/core(\/notice-copy)?$)/);
+    for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react-dom$|react\/jsx-runtime$|@chatwarden\/core(\/notice-copy|\/notice-locales)?$)/);
   });
 });
 
@@ -270,8 +275,10 @@ describe('the stylesheet is a complete token contract', () => {
   // 16 KB raw at 7i: raised for the configurable report dialog (grouped reasons, quote, follow-up panel); the gzip budget is unchanged.
   // 18 KB raw now: every read is `var(--cw-x, var(--cwd-x))` so a page can theme the components from any ancestor (the pattern hub-react
   // adopted at 7j), which repeats the token name once more on each of ~120 reads: +2.8 KB raw, about +160 bytes gzipped.
-  it('is small: under 18 KB raw (the size test holds it to 6 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(18 * 1024);
+  // 20 KB raw at 0.2.1: the appeal page (`AppealPage`) is a page, not a dialog, and has its own few rules (a column, a card, a form, Send as wide as a phone): +0.8 KB raw, about +120
+  // bytes gzipped. Raised, as the stylesheet's own rule asks, with the gzip budget (6 KB) unchanged.
+  it('is small: under 20 KB raw (the size test holds it to 6 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(20 * 1024);
   });
 });
 

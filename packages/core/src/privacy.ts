@@ -176,10 +176,10 @@ export const PRIVACY_REGISTRY: readonly PrivacyRule[] = [
   },
   {
     category: 'appeals',
-    tables: ['kit_appeals'],
-    export: 'The appeals the person filed: statement, status and times.',
-    eraseSafety: 'Deleted, except an appeal on a sanction group held for legal reasons.',
-    eraseNone: 'Deleted, except an appeal on a sanction group held for legal reasons.',
+    tables: ['kit_appeals', 'kit_overturns'],
+    export: 'The appeals the person filed: statement, status and times, and when a decision was overturned on appeal.',
+    eraseSafety: 'Deleted, except an appeal on a sanction group held for legal reasons; the overturn record of the person goes with them.',
+    eraseNone: 'Deleted, except an appeal on a sanction group held for legal reasons; the overturn record of the person goes with them.',
     retention: 'appealsMs',
     jsonColumns: [],
   },
@@ -392,7 +392,21 @@ export interface SubjectExport {
   }>;
   strikes: Array<{ at: number; roomId: string; line: string }>;
   blockedNames: Array<{ at: number; name: string; reason: string }>;
-  appeals: Array<{ createdAt: number; kind: string; rule: string | null; status: string; statement: string | null; decidedAt: number | null }>;
+  /**
+   * `overturnedAt` is when a granted appeal overturned the decision (null when none did); `reasonCode` the fixed reason the decision gave (null when it gave none or
+   * is not decided). Both are optional (0.2.1 added them to a published 0.2.0 contract): a store that omits a key means none, and the kit's own stores always emit both.
+   * The moderator's free text is never exported.
+   */
+  appeals: Array<{
+    createdAt: number;
+    kind: string;
+    rule: string | null;
+    status: string;
+    statement: string | null;
+    decidedAt: number | null;
+    overturnedAt?: number | null;
+    reasonCode?: string | null;
+  }>;
   signals: Array<{ at: number; kind: string }>;
   mutes: { placed: number; received: number };
   ai: { noAutomation: string | null; reads: number; outcomes: Array<{ verdict: string; agreement: string }> };

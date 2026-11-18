@@ -143,6 +143,7 @@ export function appealErrorText(t: HubT, error: HubError): string {
   if (error.code === 'same_decider') return t('hub.appeals.fail.sameDecider');
   if (error.code === 'already_decided') return t('hub.appeals.fail.alreadyDecided');
   if (error.code === 'gone') return t('hub.appeals.fail.gone');
+  if (error.code === 'invalid_reason') return t('hub.appeals.fail.reason');
   if (error.status === 400) return error.code === 'duration_not_offered' ? t('hub.error.durationNotOffered') : t('hub.appeals.fail.invalid');
   return errorText(t, error);
 }

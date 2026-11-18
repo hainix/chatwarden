@@ -285,6 +285,51 @@ export function appealsContract(name: string, make: () => Store): void {
       });
     });
 
+    // OPTIONAL beyond the rest (0.2.1): a store without it is read the old way (the newest few appeals of the person), so it skips.
+    const byGroup = make().loadAppealByGroup === undefined ? describe.skip : describe;
+    byGroup('loadAppealByGroup', () => {
+      const withGroup = (): Required<Pick<Store, 'loadAppealByGroup'>> & Appeals & Store => {
+        const s = store();
+        if (typeof s.loadAppealByGroup !== 'function') throw new Error('this store has no loadAppealByGroup');
+        return s as Required<Pick<Store, 'loadAppealByGroup'>> & Appeals & Store;
+      };
+
+      it('finds the appeal of a group whatever its status (open, decided and moot), and null for a group with none or an unknown one', () => {
+        const s = withGroup();
+        const open = appeal({ groupId: 'g-open' });
+        const decided = appeal({ groupId: 'g-decided' });
+        const moot = appeal({ groupId: 'g-moot' });
+        for (const r of [open, decided, moot]) s.insertAppeal(r);
+        s.decideAppeal(decided.id, decide({ status: 'revoked' }));
+        s.closeAppealsForGroup('g-moot', 'x', NOW);
+        expect(s.loadAppealByGroup('g-open')).toEqual(open);
+        expect(s.loadAppealByGroup('g-decided')).toMatchObject({ id: decided.id, status: 'revoked' });
+        expect(s.loadAppealByGroup('g-moot')).toMatchObject({ id: moot.id, status: 'moot' });
+        expect(s.loadAppealByGroup('g-none')).toBeNull();
+        expect(s.loadAppealByGroup('')).toBeNull();
+      });
+
+      it('is not limited by how many appeals the person has, answers exactly the group asked for, and returns a copy', () => {
+        const s = withGroup();
+        const first = appeal({ subject: 's_many', groupId: 'g-first', createdAt: NOW });
+        s.insertAppeal(first);
+        for (let i = 0; i < 60; i++) s.insertAppeal(appeal({ subject: 's_many', groupId: `g-more-${i}`, createdAt: NOW + 1000 + i }));
+        expect(s.listAppealsBy(['s_many'], 50).some((r) => r.id === first.id)).toBe(false);
+        const got = s.loadAppealByGroup('g-first');
+        expect(got?.id).toBe(first.id);
+        (got as AppealRow).statement = 'changed';
+        expect(s.loadAppealByGroup('g-first')?.statement).toBe(first.statement);
+        expect(s.loadAppealByGroup('g-more-59')?.groupId).toBe('g-more-59');
+      });
+
+      it('agrees with loadAppeal on the same row', () => {
+        const s = withGroup();
+        const row = appeal({ groupId: 'g-same' });
+        s.insertAppeal(row);
+        expect(s.loadAppealByGroup('g-same')).toEqual(s.loadAppeal(row.id));
+      });
+    });
+
     describe('countAppealsBy and countOpenAppeals', () => {
       it('countAppealsBy counts across a person\'s aliases in the window and returns the oldest time', () => {
         const s = store();
@@ -369,6 +414,54 @@ export function appealsContract(name: string, make: () => Store): void {
 
       it('an unknown id returns false', () => {
         expect(store().decideAppeal('nope', decide())).toBe(false);
+      });
+
+      it('stores reasonCode and every read returns it (0.2.1)', () => {
+        const s = store();
+        const a = appeal({ subject: 's_rc', groupId: 'g-rc-a' });
+        const b = appeal({ subject: 's_rc', groupId: 'g-rc-b' });
+        s.insertAppeal(a);
+        s.insertAppeal(b);
+        expect(s.decideAppeal(a.id, decide({ status: 'revoked', reasonCode: 'not_a_violation' }))).toBe(true);
+        expect(s.loadAppeal(a.id)?.reasonCode).toBe('not_a_violation');
+        expect(s.listAppeals({ status: 'decided', limit: 10 }).find((r) => r.id === a.id)?.reasonCode).toBe('not_a_violation');
+        expect(s.listAppealsBy(['s_rc'], 10).find((r) => r.id === a.id)?.reasonCode).toBe('not_a_violation');
+        // The other appeal of the same person is still open and has none.
+        expect(s.loadAppeal(b.id)?.reasonCode ?? null).toBeNull();
+        // The rest of the decision is exactly as before.
+        expect(s.loadAppeal(a.id)).toEqual({ ...a, status: 'revoked', decidedAt: NOW + DAY, decidedBy: 'senior_bea', decisionReason: 'the rule applied', reasonCode: 'not_a_violation' });
+      });
+
+      it('a row decided without a reasonCode reads null or absent, on every read', () => {
+        const s = store();
+        const a = appeal({ subject: 's_rc2', groupId: 'g-rc2' });
+        s.insertAppeal(a);
+        expect(s.decideAppeal(a.id, decide({ status: 'upheld' }))).toBe(true);
+        expect(s.loadAppeal(a.id)?.reasonCode ?? null).toBeNull();
+        expect(s.listAppeals({ status: 'decided', limit: 10 }).find((r) => r.id === a.id)?.reasonCode ?? null).toBeNull();
+        expect(s.listAppealsBy(['s_rc2'], 10).find((r) => r.id === a.id)?.reasonCode ?? null).toBeNull();
+        expect(s.loadAppeal(a.id)).toEqual({ ...a, status: 'upheld', decidedAt: NOW + DAY, decidedBy: 'senior_bea', decisionReason: 'the rule applied' });
+      });
+
+      it('a moot appeal has no reasonCode, and a second decision does not change the first one\'s', () => {
+        const s = store();
+        const a = appeal({ groupId: 'g-rc3' });
+        const m = appeal({ groupId: 'g-rc4' });
+        s.insertAppeal(a);
+        s.insertAppeal(m);
+        s.decideAppeal(a.id, decide({ status: 'upheld', reasonCode: 'rule_applies' }));
+        expect(s.decideAppeal(a.id, decide({ status: 'revoked', reasonCode: 'mistake' }))).toBe(false);
+        expect(s.loadAppeal(a.id)?.reasonCode).toBe('rule_applies');
+        s.closeAppealsForGroup('g-rc4', 'mod_ann', NOW + 5);
+        expect(s.loadAppeal(m.id)?.reasonCode ?? null).toBeNull();
+      });
+
+      it('any text a caller passes as the code is stored as given (the closed list lives in core, not in the store)', () => {
+        const s = store();
+        const a = appeal({ groupId: 'g-rc5' });
+        s.insertAppeal(a);
+        s.decideAppeal(a.id, decide({ status: 'upheld', reasonCode: 'a_future_code' }));
+        expect(s.loadAppeal(a.id)?.reasonCode).toBe('a_future_code');
       });
 
       it('clearStatement nulls the text; without it the text stays', () => {

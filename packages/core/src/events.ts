@@ -1,5 +1,5 @@
 import { safeWarn } from './log.js';
-import type { AppealOutcome } from './appeals.js';
+import type { AppealOutcome, AppealReasonCode } from './appeals.js';
 import type { HoldCode } from './legal.js';
 import type { RoomMode } from './roomSettings.js';
 import type { RuleRef } from './rules.js';
@@ -82,11 +82,18 @@ export type KitEvent =
    */
   | { type: 'appeal.created'; appealId: string; createdAt: number; target: StaffRef; kind: SanctionKind; rule: RuleRef | null }
   /**
-   * A moderator decided an appeal: `outcome` is uphold, reduce or revoke. Never the reason, the statement or a handle; an appeal made
-   * moot by someone else's revoke announces nothing.
+   * A moderator decided an appeal: `outcome` is uphold, reduce or revoke, and `reason` the fixed reason code of the decision (0.2.1: `context_considered` when
+   * the decision gave none). Never the moderator's free text, the statement or a handle; an appeal made moot by someone else's revoke announces nothing.
    * Carries subject ids: staff channels only, never send to a player.
    */
-  | { type: 'appeal.decided'; appealId: string; at: number; target: StaffRef; outcome: AppealOutcome; rule: RuleRef | null }
+  | { type: 'appeal.decided'; appealId: string; at: number; target: StaffRef; outcome: AppealOutcome; rule: RuleRef | null; reason: AppealReasonCode }
+  /**
+   * A granted appeal (a reduction or a revocation) overturned a sanction (0.2.1): `source` is where the sanction came from, `termId` the blocked term that
+   * tipped an automatic restriction and `filterKey` the counter key of the filter report a decision came from, each only when known. Emitted once, after the
+   * commit, for a granted appeal only (an upheld one, a refused one and a decision that lost a race announce nothing). It carries no subject and no text, so it
+   * can feed a count by term or by filter. Staff channels only.
+   */
+  | { type: 'sanction.overturned'; groupId: string; at: number; source: Source; termId?: string; filterKey?: string }
   /**
    * A moderator required a rename. It names no name and no reason: the game learns who to rename through `cw.people.accountIds(target)`
    * or a webhook that opted in to accounts. With `entity` the rename is of something the target owns (a clan, guild, team: `kind` and the game's opaque `ref`, never its label): the kit made no notice for it, and the game tells the owner in its own UI.
@@ -163,6 +170,7 @@ export const KIT_EVENT_TYPES: readonly KitEvent['type'][] = [
   'room.mode',
   'line.retracted',
   'insights.digest',
+  'sanction.overturned',
 ];
 
 /** The event of a type. */

@@ -19,13 +19,44 @@ export function authFiles(ctx: Ctx): FileSpec[] {
 
   const address = proxy
     ? `/**
- * The player's address. This adapter cannot see the socket, so behind your own reverse proxy (and only then) set CHATWARDEN_TRUST_PROXY=1
- * to take the first X-Forwarded-For entry. Anywhere else a client could put any address there.
+ * CHATWARDEN_TRUST_PROXY: the number of reverse proxies of your own in front of this server, from 1 to 10. Anything else (unset, 0, text) means
+ * none, so a client cannot switch it on. \`chatwarden serve\` reads the same variable the same way.
+ */
+function trustedProxies()${t(ctx, ': number')} {
+  const value = process.env.CHATWARDEN_TRUST_PROXY ?? '';
+  return /^[0-9]{1,2}$/.test(value) && Number(value) <= 10 ? Number(value) : 0;
+}
+
+/** The address in one X-Forwarded-For entry, with a port (and the brackets of an IPv6 address) dropped; undefined when it is not an address. */
+function addressIn(entry${t(ctx, ': string')})${t(ctx, ': string | undefined')} {
+  let address = entry;
+  if (address.startsWith('[')) {
+    const close = address.indexOf(']');
+    const rest = address.slice(close + 1);
+    if (close === -1 || !(rest === '' || /^:[0-9]{1,5}$/.test(rest))) return undefined;
+    address = address.slice(1, close);
+  } else if (address.split(':').length === 2) {
+    const [host = '', port = ''] = address.split(':'); // an IPv4 address with a port
+    if (!/^[0-9]{1,5}$/.test(port)) return undefined;
+    address = host;
+  }
+  const v4 = /^[0-9]{1,3}([.][0-9]{1,3}){3}$/.test(address) && address.split('.').every((octet) => octet === String(Number(octet)) && Number(octet) <= 255);
+  const v6 = (address.includes(':') && /^[0-9A-Fa-f:]{2,39}$/.test(address)) || /^::[Ff]{4}:[0-9]{1,3}([.][0-9]{1,3}){3}$/.test(address);
+  return v4 || v6 ? address : undefined;
+}
+
+/**
+ * The player's address. This adapter cannot see the socket, so behind your own reverse proxy (and only then) set CHATWARDEN_TRUST_PROXY to the
+ * number of proxies of your own in front of this server (1 for one). The address is then the X-Forwarded-For entry that many places from the right:
+ * each proxy appends the address it saw, so the entries to the left are whatever the client claimed and are never read. Anywhere else a client
+ * could put any address there. With it unset or 0 (or no usable entry), the address is the connection's.
  */
 function clientAddress(req${t(ctx, ': KitRequest')})${t(ctx, ': string | null')} {
-  if (process.env.CHATWARDEN_TRUST_PROXY === '1') {
-    const first = req.headers['x-forwarded-for']?.split(',')[0]?.trim();
-    if (first !== undefined && /^[0-9A-Fa-f:.]{2,45}$/.test(first)) return first;
+  const hops = trustedProxies();
+  if (hops > 0) {
+    const entries = req.headers['x-forwarded-for']?.split(',') ?? [];
+    const address = entries.length >= hops ? addressIn((entries[entries.length - hops] ?? '').trim()) : undefined;
+    if (address !== undefined) return address;
   }
   return req.remoteAddress ?? null;
 }

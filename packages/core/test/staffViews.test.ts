@@ -21,7 +21,7 @@ import { MemoryStore } from '@chatwarden/store-memory';
 const H = 3_600_000;
 const DAY = 24 * H;
 const NOW = 1_800_000_000_000;
-const NO_ACCURACY = { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000 };
+const NO_ACCURACY = { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000, overturned: 0 };
 
 async function setup() {
   const store = new MemoryStore();

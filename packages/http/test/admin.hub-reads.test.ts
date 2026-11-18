@@ -46,7 +46,7 @@ const SANCTION_VIEW_KEYS = [
   'revokedAt', 'revokedBy', 'revokeReason',
 ].sort();
 
-const NO_ACCURACY = { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000 };
+const NO_ACCURACY = { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000, overturned: 0 };
 const ZERO_REPORTER = { reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0, accuracy: NO_ACCURACY };
 
 describe('the permission table', () => {
@@ -655,7 +655,7 @@ describe('GET /terms: metadata and blocks30d', () => {
     const w = await world();
     const res = await w.call('GET', '/terms');
     const body = res.body as { terms: Array<Record<string, unknown>>; exceptions: Array<Record<string, unknown>>; blocks30d: Record<string, number> };
-    expect(Object.keys(body)).toEqual(['terms', 'exceptions', 'blocks30d']);
+    expect(Object.keys(body)).toEqual(['terms', 'exceptions', 'blocks30d', 'reviewFlags']);
     expect(Object.keys(body.terms[0]!)).toEqual(['id', 'term', 'language', 'active', 'note', 'addedBy', 'addedAt', 'updatedBy', 'updatedAt']);
     expect(Object.keys(body.exceptions[0]!)).toEqual(['id', 'phrase', 'language', 'active', 'note', 'addedBy', 'addedAt', 'updatedBy', 'updatedAt']);
     expect(body.terms[0]).toEqual({

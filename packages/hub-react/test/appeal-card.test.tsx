@@ -276,7 +276,7 @@ describe('Keep the decision, Remove it', () => {
     await user.click(keep());
     await user.click(send());
     await waitFor(() => expect(router.path).toBe('/appeals'));
-    expect(decides(w).map((r) => r.body)).toEqual([{ outcome: 'uphold', reason: 'The chat log is clear.' }]);
+    expect(decides(w).map((r) => r.body)).toEqual([{ outcome: 'uphold', reason: 'The chat log is clear.', reasonCode: 'rule_applies' }]);
     expect((await w.client.appeals({ status: 'decided' })).items.map((i) => i.status)).toEqual(['upheld']);
     // Sent at once: there is no hold, and nothing to undo.
     expect(screen.queryByRole('button', { name: /undo/i })).toBeNull();
@@ -291,7 +291,7 @@ describe('Keep the decision, Remove it', () => {
     await user.click(remove());
     await user.click(send());
     await waitFor(() => expect(router.path).toBe('/appeals'));
-    expect(decides(w).map((r) => r.body)).toEqual([{ outcome: 'revoke', reason: 'A mistake: it was not aimed at anyone.' }]);
+    expect(decides(w).map((r) => r.body)).toEqual([{ outcome: 'revoke', reason: 'A mistake: it was not aimed at anyone.', reasonCode: 'mistake' }]);
     const history = await w.client.personHistory(a.person);
     expect(history.sanctions.filter((s) => s.revokedAt !== null)).toHaveLength(1);
     expect(await screen.findByText('Appeal decided: the sanction was removed.')).toBeInTheDocument();
@@ -371,7 +371,7 @@ describe('Make it lighter', () => {
     await user.selectOptions(within(picker).getByLabelText('How long'), '1h');
     await user.click(send());
     await waitFor(() => expect(router.path).toBe('/appeals'));
-    expect(decides(w).map((r) => r.body)).toEqual([{ outcome: 'reduce', reason: 'Too long for a first offence.', to: { kind: 'chat', durationMs: HOUR } }]);
+    expect(decides(w).map((r) => r.body)).toEqual([{ outcome: 'reduce', reason: 'Too long for a first offence.', reasonCode: 'first_offence', to: { kind: 'chat', durationMs: HOUR } }]);
     const history = await w.client.personHistory(a.person);
     expect(history.sanctions.some((s) => s.kind === 'chat' && s.endsAt !== null && s.endsAt - s.startsAt === HOUR && s.revokedAt === null)).toBe(true);
     expect(await screen.findByText('Appeal decided: the sanction was made lighter.')).toBeInTheDocument();
@@ -387,7 +387,7 @@ describe('Make it lighter', () => {
     await user.selectOptions(within(picker).getByLabelText('What it becomes'), 'warning');
     await user.click(send());
     await waitFor(() => expect(decides(w)).toHaveLength(1));
-    expect(decides(w)[0]?.body).toEqual({ outcome: 'reduce', reason: 'A warning is enough.', to: { kind: 'warning', durationMs: null } });
+    expect(decides(w)[0]?.body).toEqual({ outcome: 'reduce', reason: 'A warning is enough.', reasonCode: 'first_offence', to: { kind: 'warning', durationMs: null } });
   });
 
   it('the picker needs the reason too, and goes when another choice is made', async () => {

@@ -66,7 +66,7 @@ describe('GET /filters/stats', () => {
   it('empty with no data; every body is no-store JSON', async () => {
     const w = await world();
     const res = await w.call('GET', '/filters/stats', { query: { days: '7' } });
-    expect(res.body).toEqual({ days: 7, keys: {} });
+    expect(res.body).toEqual({ days: 7, keys: {}, overturned: {} });
     expect(res.headers?.['cache-control']).toBe('no-store');
   });
 
@@ -89,6 +89,7 @@ describe('GET /filters/stats', () => {
         'personal_info.email': { count: 0, flag: 0, mask: 0, refuse: 1, flag_capped: 0 },
         'phrase.ads': { count: 1, flag: 0, mask: 0, refuse: 0, flag_capped: 0, label: 'Gold ads' },
       },
+      overturned: {},
     });
     // a phrase rule that is no longer in the settings keeps its counts and has no label
     const today = Math.floor(w.clock.t / 86_400_000);
@@ -274,5 +275,40 @@ describe('GET /me and GET /policy/profile', () => {
     const withHook = await world({ signals: { accountAgeDays: () => 10 } });
     const b = (await withHook.call('GET', '/policy/profile', rec())).body as { limits: { filters: { accountAge: boolean } } };
     expect(b.limits.filters).toEqual({ accountAge: true });
+  });
+});
+
+describe('GET /filters/stats: overturned (0.2.1)', () => {
+  const stats = async (w: Awaited<ReturnType<typeof world>>, days: '7' | '30' = '7') => (await w.call('GET', '/filters/stats', { query: { days } })).body as { days: number; keys: object; overturned: Record<string, number> };
+  const overturn = (w: Awaited<ReturnType<typeof world>>, groupId: string, filterKey: string, at: number): void => {
+    expect(w.store.recordOverturn?.({ groupId, at, subject: 's_x', aliases: ['s_x'], source: 'moderator', termId: null, filterKey, reportId: null, strikes: null })).toBe(true);
+  };
+
+  it('is a plain object of the overturned counts by filter key, over a fixed 90 days whatever `days` says', async () => {
+    const w = await world();
+    overturn(w, 'g1', 'link.unlisted', w.clock.t - 80 * 86_400_000);
+    overturn(w, 'g2', 'link.unlisted', w.clock.t - 1000);
+    overturn(w, 'g3', 'phrase.ads', w.clock.t - 1000);
+    overturn(w, 'g4', 'caps.shout', w.clock.t - 120 * 86_400_000);
+    for (const days of ['7', '30'] as const) {
+      const body = await stats(w, days);
+      expect(body.overturned).toEqual({ 'link.unlisted': 2, 'phrase.ads': 1 });
+      expect(Object.getPrototypeOf(body.overturned)).toBe(Object.prototype);
+      expect(body.days).toBe(Number(days));
+    }
+  });
+
+  it('a filter with no overturn is absent (no zero counts); nothing else of the body changes', async () => {
+    const w = await world();
+    const body = await stats(w);
+    expect(body).toEqual({ days: 7, keys: {}, overturned: {} });
+    expect(Object.keys(body).sort()).toEqual(['days', 'keys', 'overturned']);
+  });
+
+  it('the body carries no person, group, report or time of the overturns', async () => {
+    const w = await world();
+    overturn(w, 'g-secret-group', 'link.unlisted', w.clock.t - 1000);
+    const text = JSON.stringify(await stats(w));
+    for (const leak of ['g-secret-group', 's_x', 'moderator']) expect(text).not.toContain(leak);
   });
 });

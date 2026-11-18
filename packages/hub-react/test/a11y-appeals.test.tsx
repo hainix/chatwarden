@@ -75,6 +75,41 @@ describe.each(['light', 'dark'] as const)('axe on the appeals pages, %s theme', 
     expect(await violations(container)).toEqual([]);
   });
 
+  it('the decision bar with an outcome chosen: the fixed reasons group and the private reason', async () => {
+    const w = await world();
+    const a = await w.appeal({ target: 'Mallory', kind: 'chat', durationMs: 6 * HOUR });
+    const { container, user } = renderHub(w, { theme, path: `/appeals/${a.appealId}` });
+    await screen.findByRole('region', { name: 'What the player said' });
+    for (const outcome of ['Keep the decision', 'Make it lighter', 'Remove it']) {
+      await user.click(screen.getByRole('radio', { name: outcome }));
+      await screen.findByRole('group', { name: 'What the person is shown as the reason' });
+      expect(await violations(container)).toEqual([]);
+    }
+    await user.click(screen.getByRole('button', { name: 'Send decision' }));
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('"What caused this", closed and open, for each kind of cause', async () => {
+    for (const cause of [
+      { source: 'term', termId: 'syn:zorbak', strikes: 3 },
+      { source: 'filter', reportId: 'r1', filterKey: 'link.unlisted', decidedBy: 'human' },
+      { source: 'report', reportId: 'r2', decidedBy: 'ai' },
+      { source: 'other', via: 'coop' },
+    ]) {
+      const w = await world();
+      const a = await w.appeal({ target: 'Mallory' });
+      const real = await w.client.appeal(a.appealId);
+      w.intercept.fn = (req) => (req.method === 'GET' && req.path === `/appeals/${a.appealId}` ? { status: 200, body: { appeal: { ...real.appeal, cause } } } : undefined);
+      const { container, user, unmount } = renderHub(w, { theme, path: `/appeals/${a.appealId}` });
+      await screen.findByRole('region', { name: 'What the player said' });
+      expect(await violations(container)).toEqual([]);
+      await user.click(screen.getByText('What caused this'));
+      if (cause.source === 'term') await user.click(await screen.findByRole('button', { name: 'Show the word' }));
+      expect(await violations(container), cause.source).toEqual([]);
+      unmount();
+    }
+  });
+
   it('a decided appeal, read only, has no violations', async () => {
     const w = await world();
     const a = await w.appeal();
@@ -123,6 +158,13 @@ describe('at 360 px nothing scrolls sideways', () => {
     expect(rule('.cw-hub .cw-appeal')).toMatch(/min-width:\s*0/);
     expect(rule('.cw-hub .cw-appeal-pick')).toMatch(/min-width:\s*0/);
     expect(rule('.cw-hub .cw-appeal-controls')).toMatch(/flex-wrap:\s*wrap/);
+  });
+
+  it('the reasons group and "What caused this" can shrink and wrap, and use no colour of their own', () => {
+    expect(rule('.cw-hub .cw-appeal-reasoncode')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-appeal-cause')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-appeal-cause p')).toMatch(/overflow-wrap:\s*anywhere/);
+    for (const s of ['.cw-hub .cw-appeal-reasoncode', '.cw-hub .cw-appeal-cause']) expect(rule(s), s).not.toMatch(/var\(--cw-(accent|bad|warn|good)/);
   });
 
   it('uses no colour of its own: the referee card and plain tokens carry it', () => {

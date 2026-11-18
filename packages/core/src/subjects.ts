@@ -88,9 +88,9 @@ export class SubjectIndex {
   /** First/last seen of each stored identifier row, for the last_seen throttle. */
   private seen = new Map<string, Seen>();
   /**
-   * Exact last time each IP row was seen by `resolve` in this process. The
-   * stored `lastSeen` is throttled to once an hour; this is not, so `latestIp`
-   * can tell which of two addresses seen minutes apart is the newer.
+   * Exact last time each IP row and each account row was seen by `resolve` in this process. The
+   * stored `lastSeen` is throttled to once an hour; this is not, so `latestIp` and `latestAccount`
+   * can tell which of two values seen minutes apart is the newer.
    */
   private ipSeenAt = new Map<string, number>();
 
@@ -328,6 +328,7 @@ export class SubjectIndex {
     if (account !== null) {
       if (accountOwner === undefined) this.attach(root, 'account', account, now);
       else this.touch(accountOwner, 'account', account, now);
+      this.ipSeenAt.set(rowKey(accountOwner ?? root, 'account', account), now);
     }
     if (ip !== null) {
       if (this.owned.get(root)?.ips.has(ip) === true) this.touch(root, 'ip', ip, now);
@@ -423,6 +424,26 @@ export class SubjectIndex {
         const at = this.ipSeenAt.get(key) ?? this.seen.get(key)?.lastSeen ?? -Infinity;
         if (at > bestAt || (at === bestAt && best !== null && ip < best)) {
           best = ip;
+          bestAt = at;
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * The account id (as the game gave it, raw) most recently seen with the subject or any subject merged into it, or null when none was seen. On a tie the smaller
+   * value wins. A read: it creates nothing. For the delivery hook, which writes to the account a person was last seen with.
+   */
+  latestAccount(id: SubjectId): string | null {
+    let best: string | null = null;
+    let bestAt = -Infinity;
+    for (const member of this.members.get(this.canonical(id)) ?? []) {
+      for (const account of this.owned.get(member)?.accounts ?? []) {
+        const key = rowKey(member, 'account', account);
+        const at = this.ipSeenAt.get(key) ?? this.seen.get(key)?.lastSeen ?? -Infinity;
+        if (at > bestAt || (at === bestAt && (best === null || account < best))) {
+          best = account;
           bestAt = at;
         }
       }

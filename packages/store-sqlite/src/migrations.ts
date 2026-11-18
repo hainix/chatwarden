@@ -895,4 +895,47 @@ CREATE INDEX kit_pace_by_touched ON kit_pace (touched_at);
 CREATE INDEX kit_pace_by_who ON kit_pace (who);
 `,
   },
+  {
+    // Release 0.2.1. ONE migration for the whole release: each task appends a labelled block below and nobody adds a 28. Additive throughout: no row is touched
+    // (the new columns start NULL or 0, the one index that is replaced is rebuilt from the rows), and the runner wraps this in one savepoint with the version bump,
+    // so a failure leaves version 26.
+    //
+    // Block 1 (appeals landing, overturn storage): when an appeal is granted the decision is recorded as overturned. `kit_sanctions.term_id` is the term of the strike that tipped an
+    //   automatic restriction (null for every other sanction); `kit_sanctions.overturned_at` marks every row of the overturned group. `kit_strikes.overturned` is the flag that
+    //   takes a strike out of the in-memory tally on restart (`loadStrikes`), while the blocked-messages view still shows it. `kit_reports.overturned_at` marks the report the
+    //   sanction came from, so the reporter-accuracy read counts it as overturned and not as upheld. `kit_overturns` is one row per overturned group (the group id is the key, so a
+    //   second overturn is refused): the time, the person, where the sanction came from, the term, the filter key and the report, for counts by term and by filter and for the person's
+    //   export; it holds no text. Its indexes serve the counts by term and by filter (partial: a row with none is not indexed), the export and the erase (by person), and the
+    //   retention delete (by time). `kit_reports_by_reporter_outcome_overturned` replaces `kit_reports_by_reporter_outcome_reason` with `overturned_at` added, so the reporter read is
+    //   still answered from one covering index. The migration 19 index `kit_reports_by_reporter_outcome` STAYS: it is now a left prefix of the new one, but the open-reports-by-reporter
+    //   read names it (`INDEXED BY`), so dropping it would break that read (a test pins both).
+    // Block 2 (appeals landing, fixed reasons): `kit_appeals.reason_code`, the fixed reason a decision gave (a code from a closed list of seven, kept in core: no CHECK here, so a later
+    //   code needs no migration). NULL on every existing appeal and on one decided without a code; the free-text `decision_reason` is untouched and stays private.
+    version: 27,
+    sql: `
+-- Block 1 (appeals landing, overturn storage)
+ALTER TABLE kit_sanctions ADD COLUMN term_id TEXT;
+ALTER TABLE kit_sanctions ADD COLUMN overturned_at INTEGER;
+ALTER TABLE kit_strikes ADD COLUMN overturned INTEGER NOT NULL DEFAULT 0 CHECK (overturned IN (0, 1));
+ALTER TABLE kit_reports ADD COLUMN overturned_at INTEGER;
+CREATE TABLE kit_overturns (
+  group_id   TEXT PRIMARY KEY,
+  at         INTEGER NOT NULL,
+  subject_id TEXT NOT NULL,
+  source     TEXT NOT NULL,
+  term_id    TEXT,
+  filter_key TEXT,
+  report_id  TEXT
+) WITHOUT ROWID;
+CREATE INDEX kit_overturns_by_term    ON kit_overturns (term_id, at)    WHERE term_id IS NOT NULL;
+CREATE INDEX kit_overturns_by_filter  ON kit_overturns (filter_key, at) WHERE filter_key IS NOT NULL;
+CREATE INDEX kit_overturns_by_subject ON kit_overturns (subject_id);
+CREATE INDEX kit_overturns_by_at      ON kit_overturns (at);
+DROP INDEX kit_reports_by_reporter_outcome_reason;
+CREATE INDEX kit_reports_by_reporter_outcome_overturned ON kit_reports (reporter_subject, created_at, status, bad_faith, reported_reason, overturned_at);
+
+-- Block 2 (appeals landing, fixed reasons)
+ALTER TABLE kit_appeals ADD COLUMN reason_code TEXT;
+`,
+  },
 ];

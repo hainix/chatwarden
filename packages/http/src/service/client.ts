@@ -66,7 +66,24 @@ export interface Notice {
   excerpt: Array<{ text: string; day: string }>;
   createdAt: number;
   mustAcknowledge: boolean;
+  /** A signed link to the appeal page for a sanction notice that can still be appealed (0.2.1). A capability for that one notice: do not log it. */
+  appealUrl?: string;
 }
+
+/** An appeal as the person sees it: its status and times, no reason, no staff ref, no group or person id. */
+export interface Appeal {
+  id: string;
+  noticeId: string;
+  status: 'open' | 'upheld' | 'reduced' | 'revoked';
+  createdAt: number;
+  decidedAt: number | null;
+}
+
+const KNOWN_APPEAL_REFUSALS = ['off', 'not_found', 'not_appealable', 'statement_invalid', 'already_appealed', 'rate', 'unknown'] as const;
+export type AppealRefusal = (typeof KNOWN_APPEAL_REFUSALS)[number];
+
+/** The answer to a filing: the appeal, or why not (a refusal the client does not know is `unknown`, the original in `rawRefused`; `rate` carries how long to wait). */
+export type AppealFileAnswer = { ok: true; appeal: Appeal } | { ok: false; refused: AppealRefusal; rawRefused?: string; retryAfterMs?: number };
 
 export interface Handshake {
   api: number;
@@ -131,6 +148,15 @@ function reportAnswer(raw: unknown): ReportAnswer {
   return { ...rest, ok: false, refused: 'unknown', rawRefused: typeof refused === 'string' ? refused : '' } as ReportAnswer;
 }
 
+function appealAnswer(raw: unknown): AppealFileAnswer {
+  const a = raw as Record<string, unknown>;
+  if (a.ok === true) return a as unknown as AppealFileAnswer;
+  const known = same(KNOWN_APPEAL_REFUSALS, a.refused);
+  if (known !== null) return a as unknown as AppealFileAnswer;
+  const { refused, ...rest } = a;
+  return { ...rest, ok: false, refused: 'unknown', rawRefused: typeof refused === 'string' ? refused : '' } as AppealFileAnswer;
+}
+
 export interface ServiceClient {
   handshake(): Promise<Handshake>;
   seat(room: string, seat: string, input: { who: ServiceWho; handle: string; tags?: Record<string, string> }): Promise<{ ok: true; restriction: Restriction | null }>;
@@ -147,12 +173,21 @@ export interface ServiceClient {
   record(who: ServiceWho): Promise<{ record: Notice[] }>;
   restriction(who: ServiceWho, where?: { roomId?: string; seatId?: string }): Promise<{ restricted: boolean; until: number | null; kind: string | null }>;
   checkName(name: string, options?: { kind?: 'player' | 'entity'; who?: ServiceWho }): Promise<{ ok: true } | { ok: false; reason: string; rule: number }>;
-  checkDoor(kind: DoorKind, who: ServiceWho): Promise<{ ok: true } | { ok: false; refusal: { kind: 'ban' | 'area'; until: number | null; refCode: string; noticeId?: string } }>;
+  checkDoor(kind: DoorKind, who: ServiceWho): Promise<{ ok: true } | { ok: false; refusal: { kind: 'ban' | 'area'; until: number | null; refCode: string; noticeId?: string; appealUrl?: string } }>;
   blocksBetween(who: ServiceWho, others: ServiceWho[]): Promise<{ blocked: boolean[] }>;
+  /**
+   * A signed link to the appeal page for one sanction notice, or `{ url: null }` when none can be made. (Optional on the interface so a `ServiceClient` written against 0.2.0 still compiles;
+   * the client `createServiceClient` returns always has it.)
+   */
+  appealLink?(noticeId: string): Promise<{ url: string | null }>;
+  /** File an appeal for a person against one of their own sanction notices. A refusal is returned, not thrown. Optional on the interface, always on the client `createServiceClient` returns. */
+  fileAppeal?(who: ServiceWho, noticeId: string, statement: string): Promise<AppealFileAnswer>;
+  /** The appeals a person filed, newest first. Optional on the interface, always on the client `createServiceClient` returns. */
+  appeals?(who: ServiceWho): Promise<{ appeals: Appeal[] }>;
 }
 
 /** A typed client of `/v1`. See the file's header for what it does for you; everything else (the answer shapes, the refusals) is in the API description (`SERVICE_OPENAPI`). */
-export function createServiceClient(options: ServiceClientOptions): ServiceClient {
+export function createServiceClient(options: ServiceClientOptions): ServiceClient & Required<Pick<ServiceClient, 'appealLink' | 'fileAppeal' | 'appeals'>> {
   if (typeof options !== 'object' || options === null) throw new TypeError('createServiceClient: options must be an object');
   if (typeof options.baseUrl !== 'string' || options.baseUrl === '') throw new TypeError('createServiceClient: baseUrl is required');
   if (typeof options.key !== 'string' || !KEY_RE.test(options.key)) throw new TypeError('createServiceClient: key is required and must be a service key (no spaces)');
@@ -216,5 +251,8 @@ export function createServiceClient(options: ServiceClientOptions): ServiceClien
     checkName: (name, o) => call('POST', '/v1/names/check', { name, ...(o?.kind === undefined ? {} : { kind: o.kind }), ...(o?.who === undefined ? {} : { who: o.who }) }),
     checkDoor: (kind, who) => call('POST', '/v1/doors/check', { kind, who }),
     blocksBetween: (who, others) => call('POST', '/v1/blocks/between', { who, others }),
+    appealLink: (noticeId) => call('POST', '/v1/appeals/link', { noticeId }),
+    fileAppeal: async (who, noticeId, statement) => appealAnswer(await call('POST', '/v1/appeals', { who, noticeId, statement })),
+    appeals: (who) => call('POST', '/v1/appeals/mine', { who }),
   };
 }

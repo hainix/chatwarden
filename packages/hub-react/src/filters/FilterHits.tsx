@@ -30,7 +30,17 @@ export function FilterHits({ labelOf }: { labelOf: (key: string) => string | und
     };
   }, [open, days, client]);
 
-  const rows = data === null ? [] : Object.entries(data.keys).map(([key, c]) => ({ key, label: filterKeyLabel(t, key, c.label ?? labelOf(key)), counts: c }));
+  // Filter reports overturned on appeal (90 days, fixed) sit in their rule's own row; a rule with a count and no hits in the window still has a row, of zeros.
+  const overturned = data?.overturned ?? {};
+  const turned = (key: string): number => (Object.hasOwn(overturned, key) && typeof overturned[key] === 'number' ? (overturned[key] as number) : 0);
+  const keys = data === null ? [] : [...Object.keys(data.keys), ...Object.keys(overturned).filter((k) => turned(k) > 0 && !Object.hasOwn(data.keys, k))];
+  const rows =
+    data === null
+      ? []
+      : keys.map((key) => {
+          const c = Object.hasOwn(data.keys, key) ? (data.keys[key] as FilterStatsView['keys'][string]) : { count: 0, flag: 0, mask: 0, refuse: 0, flag_capped: 0 };
+          return { key, label: filterKeyLabel(t, key, c.label ?? labelOf(key)), counts: c, overturned: turned(key) };
+        });
   return (
     <details
       className="cw-fhits"
@@ -73,7 +83,10 @@ export function FilterHits({ labelOf }: { labelOf: (key: string) => string | und
             <tbody>
               {rows.map((r) => (
                 <tr key={r.key}>
-                  <td>{r.label}</td>
+                  <td>
+                    {r.label}
+                    {r.overturned > 0 && <span className="cw-hint cw-fhits-overturned">{t('hub.settings.filters.hits.overturned', { count: r.overturned })}</span>}
+                  </td>
                   <td>{r.counts.count}</td>
                   <td>{r.counts.flag}</td>
                   <td>{r.counts.mask}</td>

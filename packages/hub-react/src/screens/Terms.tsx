@@ -160,6 +160,9 @@ export function Terms() {
     return row === undefined ? null : { word: shown ? row.term : null, language: languageLabel(row.language, locale) };
   };
 
+  // Terms the server marks for a second look (overturned on appeal often enough, over 90 days): a quiet line in the row, never a reorder, a hide or an edit.
+  const flagOf = new Map((data.reviewFlags ?? []).map((f) => [f.termId, f.overturned] as const));
+
   const counts: TermsList['blocks30d'] = fetched === null ? data.blocks30d : { [fetched.id]: fetched.blocks30d, ...data.blocks30d };
 
   const name = (kind: TermKind, row: Row, n: number): string => (shown ? row.word : t(kind === 'term' ? 'hub.terms.rowName.term' : 'hub.terms.rowName.exception', { n }));
@@ -222,7 +225,22 @@ export function Terms() {
                     </>
                   )}
                 </td>
-                {kind === 'term' && <td className="cw-term-count">{counts[row.id] ?? 0}</td>}
+                {kind === 'term' && (
+                  <td className="cw-term-count">
+                    {counts[row.id] ?? 0}
+                    {flagOf.has(row.id) && (
+                      <span className="cw-term-flag">
+                        <Tag>{t('hub.terms.flag', { count: flagOf.get(row.id) ?? 0 })}</Tag>
+                        {/* The row's own edit action (it checks a word before saving) is the review: there is no second tester. Without terms.write there is none to reach. */}
+                        {canWrite && (
+                          <button type="button" className="cw-linkbtn" aria-label={t('hub.terms.flag.review.label', { name: rowName })} onClick={() => editButtons.current.get(row.id)?.focus()}>
+                            {t('hub.terms.flag.review')}
+                          </button>
+                        )}
+                      </span>
+                    )}
+                  </td>
+                )}
                 <td>
                   <input
                     type="checkbox"

@@ -227,11 +227,12 @@ export function queryAppealDays(raw: string | undefined): 30 | 90 | 365 | undefi
 }
 
 /** The ruling a staff body carries: the outcome, the private reason and, for `reduce` only, the lighter outcome. */
-export type AppealDecisionBody = Pick<AppealDecision, 'outcome' | 'reason' | 'to'>;
+export type AppealDecisionBody = Pick<AppealDecision, 'outcome' | 'reason' | 'to' | 'reasonCode'>;
 
 /**
- * The body of `POST /appeals/:id/decide`: `{ outcome, reason, to? }`. `outcome` is `uphold`, `reduce` or `revoke`; `reason` is text that is not
- * blank (the core keeps it to 500 characters); `to` is `{ kind, durationMs }` and is required for `reduce` and refused for the others.
+ * The body of `POST /appeals/:id/decide`: `{ outcome, reason, reasonCode?, to? }`. `outcome` is `uphold`, `reduce` or `revoke`; `reason` is text that is not
+ * blank (the core keeps it to 500 characters); `reasonCode` (0.2.1) is a string, passed through for the core to check against the outcome (anything that is not a
+ * string is 400 `invalid_request`); `to` is `{ kind, durationMs }` and is required for `reduce` and refused for the others.
  * Anything else is 400. The actor is never from the body. Whether `to` is lighter than the sanction is the core's to say.
  */
 export function bodyAppealDecision(body: Record<string, unknown>): AppealDecisionBody {
@@ -239,9 +240,12 @@ export function bodyAppealDecision(body: Record<string, unknown>): AppealDecisio
   if (typeof outcome !== 'string' || !(APPEAL_OUTCOMES as readonly string[]).includes(outcome)) throw new ValidationError();
   const reason = bodyText(body.reason);
   if (reason.trim() === '') throw new ValidationError();
+  // A key that is there must be a string (null, a number and the rest are a malformed body); whether it fits the outcome is the core's to say.
+  if (has(body, 'reasonCode') && typeof body.reasonCode !== 'string') throw new ValidationError();
+  const code: Pick<AppealDecisionBody, 'reasonCode'> = has(body, 'reasonCode') ? { reasonCode: body.reasonCode as AppealDecisionBody['reasonCode'] } : {};
   if (outcome !== 'reduce') {
     if (has(body, 'to')) throw new ValidationError();
-    return { outcome: outcome as AppealOutcome, reason };
+    return { outcome: outcome as AppealOutcome, reason, ...code };
   }
   const to = asObject(body.to);
   if (to === undefined) throw new ValidationError();
@@ -250,7 +254,7 @@ export function bodyAppealDecision(body: Record<string, unknown>): AppealDecisio
   if (durationMs !== null && !(typeof durationMs === 'number' && Number.isSafeInteger(durationMs) && durationMs > 0 && durationMs <= MAX_SANCTION_DURATION_MS)) {
     throw new ValidationError();
   }
-  return { outcome: 'reduce', reason, to: { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs } };
+  return { outcome: 'reduce', reason, ...code, to: { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs } };
 }
 
 /** What `POST /people/:ref/rename` takes, checked for shape. */

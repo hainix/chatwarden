@@ -54,6 +54,8 @@ const APPEAL_INDEXES = ['kit_appeals_by_group', 'kit_appeals_by_replacement', 'k
 const APPEAL_COLUMNS = [
   'id', 'subject_id', 'group_id', 'notice_id', 'report_id', 'rule', 'kind', 'statement', 'status', 'created_at', 'decided_at', 'decided_by',
   'decision_reason', 'replacement_group_id',
+  // migration 27, block 2 (release 0.2.1): the fixed reason of the decision
+  'reason_code',
 ];
 
 const notice = (i: number, kind: NoticeKind, over: Partial<NoticeRow> = {}): NoticeRow => ({
@@ -171,7 +173,7 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
     expect(indexSql(db, 'kit_notices')).toEqual(noticeIdx);
     expect(names(db, 'index').filter((i) => i.startsWith('kit_notices'))).toEqual(NOTICE_INDEXES);
     // (kit_links, kit_ai_noauto, kit_ai_acting, kit_ai_actions and kit_filter_hits, kit_erasures and kit_legal_holds come from later migrations)
-    expect(names(db, 'table').filter((x) => !tables.includes(x) && !['kit_links', 'kit_ai_noauto', 'kit_ai_acting', 'kit_ai_actions', 'kit_filter_hits', 'kit_erasures', 'kit_legal_holds', 'kit_report_comments', 'kit_chat_days', 'kit_pace'].includes(x))).toEqual(['kit_appeals', 'kit_blocked_names']);
+    expect(names(db, 'table').filter((x) => !tables.includes(x) && !['kit_links', 'kit_ai_noauto', 'kit_ai_acting', 'kit_ai_actions', 'kit_filter_hits', 'kit_erasures', 'kit_legal_holds', 'kit_report_comments', 'kit_chat_days', 'kit_pace', 'kit_overturns'].includes(x))).toEqual(['kit_appeals', 'kit_blocked_names']);
     // the same rows through the store, in the same order
     expect(store.loadNotices(['s_0', 's_1', 's_2', 's_3']).map((r) => r.id)).toEqual(
       (before as { notices: Array<{ id: string; created_at: number }> }).notices

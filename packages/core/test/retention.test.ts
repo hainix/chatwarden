@@ -844,6 +844,29 @@ describe('appeals and blocked-name retention', () => {
     expect(store.listBlockedNames(0, 10).map((r) => r.id)).toEqual(['b-new']);
   });
 
+  it('overturn rows go on the appeals clock and are counted with appeals (0.2.1)', async () => {
+    const { store } = appealsSetup();
+    const overturn = (groupId: string, at: number) =>
+      store.recordOverturn({ groupId, at, subject: 's_x', aliases: ['s_x'], source: 'auto_filter', termId: 't1', filterKey: null, reportId: null, strikes: null });
+    overturn('o-edge', NOW - 365 * DAY);
+    overturn('o-older', NOW - 365 * DAY - 1);
+    overturn('o-new', NOW - 10 * DAY);
+    store.insertAppeal(appeal('a-old', 'g-old'));
+    decide(store, 'a-old', NOW - 400 * DAY);
+    const res = await purge(store, NOW);
+    // one appeal row and one overturn row: the two counts add up
+    expect(res.appeals).toBe(2);
+    expect(store.overturnedTermCounts(0)).toEqual([{ termId: 't1', overturned: 2, lastAt: NOW - 10 * DAY }]);
+  });
+
+  it('a store without the overturn methods counts appeals as before', async () => {
+    const { store } = appealsSetup();
+    const bare = new Proxy(store, { get: (t, p, r) => (p === 'purgeOverturns' ? undefined : Reflect.get(t, p, r)) }) as typeof store;
+    store.insertAppeal(appeal('a-old', 'g-old'));
+    decide(store, 'a-old', NOW - 400 * DAY);
+    expect((await purge(bare, NOW)).appeals).toBe(1);
+  });
+
   it('the result of a purge always has the three fields, 0 when nothing is due', async () => {
     const { store } = appealsSetup();
     expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });

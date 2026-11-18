@@ -10,6 +10,7 @@ import * as profanity from '@chatwarden/profanity';
 import * as storeMemory from '@chatwarden/store-memory';
 import * as storeSqlite from '@chatwarden/store-sqlite';
 import { describe, expect, it } from 'vitest';
+import { clientAddressOf } from '../src/clientAddress.js';
 import { renderAll } from '../src/cli/templates/index.js';
 import type { Answers } from '../src/cli/types.js';
 import { VERSIONS, answersOf } from './cli-stubs.js';
@@ -365,7 +366,7 @@ describe('identify (players)', () => {
     expect(Object.keys(identify(request(FORWARDED, { remoteAddress: '198.51.100.7' })))).not.toContain('accountId');
   });
 
-  it('identify never reads x-forwarded-for unless CHATWARDEN_TRUST_PROXY=1', () => {
+  it('identify never reads x-forwarded-for unless CHATWARDEN_TRUST_PROXY is a number of proxies from 1 to 10', () => {
     for (const framework of ['express', 'fastify'] as const) {
       // Not even with the switch on: these adapters see the socket.
       for (const env of [{}, { CHATWARDEN_TRUST_PROXY: '1' }]) {
@@ -377,23 +378,77 @@ describe('identify (players)', () => {
       }
     }
     for (const framework of ['next', 'fetch'] as const) {
-      for (const env of [{}, { CHATWARDEN_TRUST_PROXY: '' }, { CHATWARDEN_TRUST_PROXY: '0' }, { CHATWARDEN_TRUST_PROXY: 'true' }, { CHATWARDEN_TRUST_PROXY: ' 1' }, { CHATWARDEN_TRUST_PROXY: 'yes' }]) {
+      for (const env of [{}, { CHATWARDEN_TRUST_PROXY: '' }, { CHATWARDEN_TRUST_PROXY: '0' }, { CHATWARDEN_TRUST_PROXY: 'true' }, { CHATWARDEN_TRUST_PROXY: ' 1' }, { CHATWARDEN_TRUST_PROXY: 'yes' }, { CHATWARDEN_TRUST_PROXY: '11' }, { CHATWARDEN_TRUST_PROXY: '-1' }, { CHATWARDEN_TRUST_PROXY: '1.5' }, { CHATWARDEN_TRUST_PROXY: '1,2' }, { CHATWARDEN_TRUST_PROXY: '999' }]) {
         const spy = spyHeaders(FORWARDED);
         const who = withToken({ framework, hub: 'react' }, env).auth.identify(request(spy.headers, { remoteAddress: '198.51.100.7' }));
         expect(who.ip, `${framework} ${JSON.stringify(env)}`).toBe('198.51.100.7');
         expect(spy.touched, `${framework} ${JSON.stringify(env)}`).not.toContain('x-forwarded-for');
       }
       const trusted = withToken({ framework, hub: 'react' }, { CHATWARDEN_TRUST_PROXY: '1' }).auth;
-      expect(trusted.identify(request(FORWARDED, { remoteAddress: '198.51.100.7' })).ip, framework).toBe('203.0.113.9');
+      // One proxy of your own: it appended the address it saw, so the player is the right-most entry. The left is whatever the client claimed.
+      expect(trusted.identify(request(FORWARDED, { remoteAddress: '198.51.100.7' })).ip, framework).toBe('10.1.1.1');
+      expect(trusted.identify(request({ 'x-forwarded-for': '6.6.6.6, 203.0.113.9' }, { remoteAddress: '198.51.100.7' })).ip, framework).toBe('203.0.113.9');
       expect(trusted.identify(request({ 'x-forwarded-for': '203.0.113.9' })).ip).toBe('203.0.113.9');
-      expect(trusted.identify(request({ 'x-forwarded-for': '2001:db8::1, 10.1.1.1' })).ip).toBe('2001:db8::1');
+      expect(trusted.identify(request({ 'x-forwarded-for': '10.1.1.1, 2001:db8::1' })).ip).toBe('2001:db8::1');
       // With the switch on but nothing usable in the header, it falls back to the socket (or to nobody).
-      for (const junk of ['', ' ', ',', 'not an address', '<script>', 'a'.repeat(200), '203.0.113.9; drop']) {
+      for (const junk of ['', ' ', ',', 'not an address', '<script>', 'a'.repeat(200), '203.0.113.9; drop', '203.0.113.9, ', '203.0.113.9:', '[2001:db8::1']) {
         expect(trusted.identify(request({ 'x-forwarded-for': junk }, { remoteAddress: '198.51.100.7' })).ip, JSON.stringify(junk)).toBe('198.51.100.7');
       }
       expect(trusted.identify(request({ 'x-forwarded-for': '' })).ip).toBeNull();
       // The key is still the key.
       expect(trusted.identify(request(FORWARDED)).clientKey).toBe('player-key-1');
+    }
+  });
+
+  it('CHATWARDEN_TRUST_PROXY means what it means in chatwarden serve: N proxies, the client is the N-th entry from the right (R2 ruling)', () => {
+    for (const framework of ['next', 'fetch'] as const) {
+      const auth = (n: string) => withToken({ framework, hub: 'react' }, { CHATWARDEN_TRUST_PROXY: n }).auth;
+      const ip = (n: string, forwarded: string, remoteAddress = '198.51.100.7') => auth(n).identify(request({ 'x-forwarded-for': forwarded }, { remoteAddress })).ip;
+      // Two proxies of your own: the second from the right. The first entry is the client's own claim and buys nothing.
+      expect(ip('2', '203.0.113.9, 10.1.1.1'), framework).toBe('203.0.113.9');
+      expect(ip('2', '6.6.6.6, 203.0.113.9, 10.1.1.1'), framework).toBe('203.0.113.9');
+      expect(ip('2', '6.6.6.6, 7.7.7.7, 203.0.113.9, 10.1.1.1'), framework).toBe('203.0.113.9');
+      expect(ip('1', '6.6.6.6, 7.7.7.7, 203.0.113.9'), framework).toBe('203.0.113.9');
+      expect(ip('3', '9.9.9.9, 8.8.8.8, 203.0.113.9, 10.1.1.2, 10.1.1.1'), framework).toBe('203.0.113.9');
+      expect(ip('10', Array.from({ length: 12 }, (_, i) => `198.51.100.${i + 1}`).join(', ')), framework).toBe('198.51.100.3');
+      // Fewer entries than proxies: not the client, not an entry the client could have written alone: the socket.
+      expect(ip('2', '203.0.113.9'), framework).toBe('198.51.100.7');
+      expect(ip('3', '203.0.113.9, 10.1.1.1'), framework).toBe('198.51.100.7');
+      // The entry the setting names must itself be an address.
+      expect(ip('2', '203.0.113.9, not-an-address, 10.1.1.1'), framework).toBe('198.51.100.7');
+      expect(ip('1', '6.6.6.6, <script>'), framework).toBe('198.51.100.7');
+      // A port after the address is dropped, brackets with it.
+      expect(ip('1', '6.6.6.6, 203.0.113.9:51234'), framework).toBe('203.0.113.9');
+      expect(ip('1', '[2001:db8::7]:443'), framework).toBe('2001:db8::7');
+      expect(ip('1', '[2001:db8::7]'), framework).toBe('2001:db8::7');
+      expect(ip('1', '2001:db8::7'), framework).toBe('2001:db8::7');
+    }
+  });
+
+  it('a long or padded X-Forwarded-For is read from the right, with no length cutoff (R3 I1)', () => {
+    for (const framework of ['next', 'fetch'] as const) {
+      const one = withToken({ framework, hub: 'react' }, { CHATWARDEN_TRUST_PROXY: '1' }).auth;
+      const two = withToken({ framework, hub: 'react' }, { CHATWARDEN_TRUST_PROXY: '2' }).auth;
+      const ipOf = (auth: any, forwarded: string) => auth.identify(request({ 'x-forwarded-for': forwarded }, { remoteAddress: '198.51.100.7' })).ip;
+      expect(ipOf(one, '9.9.9.9, '.repeat(50) + '203.0.113.9'), framework).toBe('203.0.113.9');
+      expect(ipOf(one, 'x'.repeat(2000) + ', 203.0.113.9'), framework).toBe('203.0.113.9');
+      expect(ipOf(one, ','.repeat(100) + '203.0.113.9'), framework).toBe('203.0.113.9');
+      expect(ipOf(two, '9.9.9.9,'.repeat(2000) + '203.0.113.9, 10.1.1.1'), framework).toBe('203.0.113.9');
+      // and a header that is one long junk entry is still no address
+      expect(ipOf(one, 'a'.repeat(5000)), framework).toBe('198.51.100.7');
+    }
+  });
+
+  it('the generated address rule gives the same answer as the one chatwarden serve uses', () => {
+    const table: Array<[number, string]> = [
+      [1, '203.0.113.9'], [1, '6.6.6.6, 203.0.113.9'], [2, '6.6.6.6, 203.0.113.9, 10.1.1.1'], [2, '203.0.113.9'], [3, '1.1.1.1, 2.2.2.2'], [1, '203.0.113.9:80'], [1, '[2001:db8::7]:1'],
+      [1, '2001:db8::7'], [1, '::ffff:203.0.113.9'], [1, '9.9.9.9, '.repeat(60) + '203.0.113.9'], [2, ',' + '203.0.113.9, 10.0.0.1'], [1, '203.0.113.9,'], [1, '<b>'], [1, ''],
+    ];
+    const peer = '198.51.100.7';
+    for (const [n, header] of table) {
+      const generated = withToken({ framework: 'fetch', hub: 'react' }, { CHATWARDEN_TRUST_PROXY: String(n) }).auth.identify(request({ 'x-forwarded-for': header }, { remoteAddress: peer })).ip;
+      const served = clientAddressOf({ method: 'GET', path: '/', query: {}, headers: { 'x-forwarded-for': header }, body: undefined, remoteAddress: peer }, n);
+      expect(generated, `${n} ${JSON.stringify(header).slice(0, 40)}`).toBe(served ?? peer);
     }
   });
 });

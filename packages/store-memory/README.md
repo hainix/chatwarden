@@ -115,6 +115,8 @@ purges and a few more). Blocked names kept as evidence (`names.keepBlocked`) nee
 already has is kept, and calling one twice changes nothing. The SQLite store has them built in. `withdrawNotice`, which lets a game release a required
 rename, is already on `MemoryStore`.
 
+New in 0.2.1, `withMemoryAppeals` carries six more optional methods, which the appeal link and the feedback from a granted appeal read: `recordOverturn` (one overturn row for a sanction group, with its strikes and report), `loadAppealByGroup` (the appeal of one sanction group, so a link finds it directly), `latestAutoChatStart` (the person's latest automatic restriction that was not overturned), `overturnedTermCounts` and `overturnedFilterCounts` (the counts behind the hub's term flag and filter counts) and `purgeOverturns` (the retention). They are all optional on `Store`: a store you wrote without them still works, and the kit falls back (a link finds an appeal among the person's newest 50, and the hub counts read as none).
+
 ```ts
 import { createChatwarden, type Platform } from '@chatwarden/core';
 import { createMemoryStore, withMemoryAppeals, withMemoryNames } from '@chatwarden/store-memory';

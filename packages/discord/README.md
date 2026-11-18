@@ -16,7 +16,7 @@ Status: pre-release, as-is, no support promise.
 npm install @chatwarden/discord @chatwarden/core
 ```
 
-Node 22.13 or newer. No other dependencies; it uses the global `fetch`. The peer range on `@chatwarden/core` is `^0.2.0`, like every `@chatwarden/*` peer in 0.2.0: the feed listens for the appeal events and posts the urgent and digest posts, which an older core does not have.
+Node 22.13 or newer. No other dependencies; it uses the global `fetch`. The peer range on `@chatwarden/core` is `^0.2.1`: the feed listens for the appeal events and posts the urgent and digest posts, and since 0.2.1 the `sanction.overturned` event, which a 0.2.0 core does not have.
 
 ## Set up
 
@@ -81,6 +81,8 @@ against a 24-hour chat restriction, Rule 2.` when a player files, and `Appeal de
 or `revoked`), each with an "Open in the hub" link on the person. The length comes from the appeal's sanction (`cw.appeals.get`, read for the two times only); without it
 the post names the kind and no length. An appeal made moot by someone else's revoke posts nothing, and neither does `rename.required`, which is for your game. With
 `severeOnly`, only appeals under a severe rule post. A post never carries the statement, the moderator's reason or a handle.
+
+**Overturned on appeal (0.2.1).** When a granted appeal overturns a decision, `sanction.overturned` posts one line to the shared "Unattributed reports" thread (the event names no person), pings no one and has no link: `Overturned on appeal: an automatic restriction from the slur list.` for a term or an automatic filter decision, `Overturned on appeal: a decision that came from the links filter.` for a chat filter (also "the personal information filter", "the caps and repeats filter" and "a phrase rule": the family of the filter key and nothing more; "a chat filter" for a family it does not know), `Overturned on appeal: a decision made by the AI.` and `Overturned on appeal: a moderator decision.` The post never carries the term, the term id, the filter key beyond its family, the group id or any person. `severeOnly` does not hold it back, because the event carries no rule.
 
 **What a post says.** Plain staff text: the kind of event, the category, the Community Rule (number and title), the conduct level
 when the report carries one, the reference code, the length of a sanction, and the links. Examples: `**New report**`,

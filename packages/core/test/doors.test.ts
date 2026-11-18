@@ -681,3 +681,101 @@ describe('DoorService R19: a bystander on a shared IP gets no notice id', () => 
     });
   });
 });
+
+describe('DoorService: the appeal link on a refusal', () => {
+  function linked(appealUrl?: (noticeId: string) => string | null) {
+    const t = setup();
+    const notices = new NoticeService({ store: t.store, subjects: t.subjects, rules: new CommunityRules(STARTER_RULES), clock: t.clock, logger: { warn() {} } });
+    const calls: string[] = [];
+    const doors = new DoorService({
+      hasher: t.hasher,
+      subjects: t.subjects,
+      sanctions: t.sanctions,
+      clock: t.clock,
+      logger: t.logger,
+      notices,
+      ...(appealUrl === undefined
+        ? {}
+        : {
+            appealUrl: (id: string) => {
+              calls.push(id);
+              return appealUrl(id);
+            },
+          }),
+    });
+    return { ...t, doors, notices, calls };
+  }
+  const offender: RawWho = { clientKey: 'tok-off', ip: IP };
+  const bystander: RawWho = { clientKey: 'tok-by', ip: IP };
+  async function offend(t: ReturnType<typeof linked>, kind: 'ban' | 'area' = 'ban') {
+    const s = t.seat(offender);
+    t.seat(bystander);
+    const g = await t.ban(s, kind, { includeIp: true });
+    const id = t.notices.createForSanction({ groupId: g.groupId, refCode: g.refCode, kind, until: NOW + H, rule: 1, subject: s }, [], { notify: false });
+    return { s, g, id };
+  }
+
+  it('a refusal carries appealUrl when the notice has one; the function is given the notice id and nothing else', async () => {
+    const t = linked((id) => `https://game.example/appeal?t=${id}`);
+    const { g, id } = await offend(t);
+    expect(t.doors.check('join', offender)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode, noticeId: id, appealUrl: `https://game.example/appeal?t=${id}` });
+    expect(t.calls).toEqual([id]);
+  });
+
+  it('an area refusal carries it too', async () => {
+    const t = linked(() => 'https://game.example/appeal?t=x');
+    const { id } = await offend(t, 'area');
+    expect(t.doors.check('public', offender)).toMatchObject({ kind: 'area', noticeId: id, appealUrl: 'https://game.example/appeal?t=x' });
+  });
+
+  it('a new link is asked for on every refusal (nothing is cached)', async () => {
+    let n = 0;
+    const t = linked(() => `https://game.example/appeal?t=${(n += 1)}`);
+    await offend(t);
+    expect(t.doors.check('join', offender)).toMatchObject({ appealUrl: 'https://game.example/appeal?t=1' });
+    expect(t.doors.check('join', offender)).toMatchObject({ appealUrl: 'https://game.example/appeal?t=2' });
+    expect(t.calls).toHaveLength(2);
+  });
+
+  it('none when the function says null, or when there is no function (the refusal is exactly as before)', async () => {
+    const nullish = linked(() => null);
+    const a = await offend(nullish);
+    expect(nullish.doors.check('join', offender)).toEqual({ kind: 'ban', until: NOW + H, refCode: a.g.refCode, noticeId: a.id });
+    const none = linked();
+    const b = await offend(none);
+    expect(none.doors.check('join', offender)).toEqual({ kind: 'ban', until: NOW + H, refCode: b.g.refCode, noticeId: b.id });
+  });
+
+  it("none for a bystander refused through someone else's shared-IP row, and the function is never asked", async () => {
+    const t = linked(() => 'https://game.example/appeal?t=x');
+    const { g } = await offend(t);
+    expect(t.doors.check('join', bystander)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode });
+    expect(t.doors.check('join', { ip: IP })).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode });
+    expect(t.calls).toEqual([]);
+  });
+
+  it('none when there is no notice for the refusal, and the function is never asked', async () => {
+    const t = linked(() => 'https://game.example/appeal?t=x');
+    const s = t.seat(offender);
+    const g = await t.ban(s, 'ban', { includeIp: true });
+    expect(t.doors.check('join', offender)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode });
+    expect(t.calls).toEqual([]);
+  });
+
+  it('none when the function throws: the refusal is still returned, and the class alone is logged', async () => {
+    const t = linked(() => {
+      throw new RangeError('secret-detail key tok-off');
+    });
+    const { g, id } = await offend(t);
+    expect(t.doors.check('join', offender)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode, noticeId: id });
+    expect(t.logged).toEqual([['doors.appeal_link_failed', { error: 'RangeError' }]]);
+  });
+
+  it('a function that returns something that is not a string leaves the field out', async () => {
+    for (const bad of [undefined, 5, {}, '', null]) {
+      const t = linked(() => bad as never);
+      const { g, id } = await offend(t);
+      expect(t.doors.check('join', offender)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode, noticeId: id });
+    }
+  });
+});

@@ -15,7 +15,7 @@ import { OWNER, world } from './reportingWorld.js';
 
 // The `appeals` and `names` sections in the layer (the owner's edits), through cw.policy and cw.profile.
 
-const APPEALS_OFF = { enabled: false, perPlayerPerWeek: 3, allowSelfReview: false };
+const APPEALS_OFF = { enabled: false, perPlayerPerWeek: 3, allowSelfReview: false, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} };
 const NAMES_OFF = { profanity: false, keepBlocked: false, renames: false, maskInHub: true, reserved: [], reservedAllow: [], reservedRule: 2 };
 const base = (): ModerationProfile => PRESETS.standard;
 
@@ -37,9 +37,9 @@ describe('appeals and names in the layer', () => {
 
   it('a layer beats the code profile, which beats the defaults', () => {
     const coded = resolveProfile('standard', { appeals: { enabled: true, perPlayerPerWeek: 5 }, names: { profanity: true } });
-    expect(coded.appeals).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: false });
+    expect(coded.appeals).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: false, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
     const p = applyPolicyLayer(coded, { appeals: { perPlayerPerWeek: 2, allowSelfReview: true }, names: { profanity: false, maskInHub: false } });
-    expect(p.appeals).toEqual({ enabled: true, perPlayerPerWeek: 2, allowSelfReview: true });
+    expect(p.appeals).toEqual({ enabled: true, perPlayerPerWeek: 2, allowSelfReview: true, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
     expect(p.names).toEqual({ ...NAMES_OFF, maskInHub: false });
     // the defaults, with no code profile value and no layer
     expect(applyPolicyLayer(base(), {}).appeals).toEqual(APPEALS_OFF);
@@ -108,7 +108,7 @@ describe('cw.policy and the appeals and names sections', () => {
     const { cw } = await world({ overrides: { appeals: { perPlayerPerWeek: 4 }, names: { profanity: true } } }, withMemoryAppeals(new MemoryStore()));
     const res = cw.policy.save({ appeals: { enabled: true }, names: { keepBlocked: true } }, { version: 0, ...OWNER });
     expect(res).toEqual({ ok: true, version: 1, changed: ['appeals', 'names'] });
-    expect(cw.profile.appeals).toEqual({ enabled: true, perPlayerPerWeek: 4, allowSelfReview: false });
+    expect(cw.profile.appeals).toEqual({ enabled: true, perPlayerPerWeek: 4, allowSelfReview: false, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
     expect(cw.profile.names).toEqual({ ...NAMES_OFF, profanity: true, keepBlocked: true });
     expect(cw.policy.get().base.appeals.enabled).toBe(false);
     expect(cw.policy.get().layer.appeals).toEqual({ enabled: true });
@@ -199,7 +199,7 @@ describe('appeals over a store without the appeal methods', () => {
     const store = new MemoryStore();
     store.savePolicyLayer({ appeals: { enabled: true, perPlayerPerWeek: 7 }, names: { keepBlocked: true } }, 0);
     const { cw } = await world({}, store);
-    expect(cw.profile.appeals).toEqual({ enabled: false, perPlayerPerWeek: 7, allowSelfReview: false });
+    expect(cw.profile.appeals).toEqual({ enabled: false, perPlayerPerWeek: 7, allowSelfReview: false, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
     expect(cw.profile.names.keepBlocked).toBe(true);
   });
 

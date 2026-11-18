@@ -384,3 +384,52 @@ describe('term text stays in GET /terms and POST /terms/check only', () => {
     for (const k of keysDeep(res.body)) expect(forbidden.test(k), k).toBe(false);
   });
 });
+
+describe('GET /terms: reviewFlags (0.2.1)', () => {
+  type Flags = Array<{ termId: string; overturned: number; lastAt: number }>;
+  type W = Awaited<ReturnType<typeof world>>;
+  /** One overturned automatic restriction that named a term (the kit's own record of it). */
+  const overturn = (w: W, groupId: string, termId: string, at: number): void => {
+    expect(
+      w.store.recordOverturn?.({ groupId, at, subject: 's_flagged', aliases: ['s_flagged'], source: 'auto_filter', termId, filterKey: null, reportId: null, strikes: null }),
+    ).toBe(true);
+  };
+
+  it('is always there: an empty list when nothing was overturned, and no audit row', async () => {
+    const { call, audit } = await world();
+    const body = (await call('GET', '/terms')).body as { reviewFlags: Flags };
+    expect(body.reviewFlags).toEqual([]);
+    expect(audit().filter((r) => r.role !== null)).toEqual([]);
+  });
+
+  it('lists a listed term overturned at least twice, with the count and the last time; a term overturned once is below the minimum', async () => {
+    const w = await world();
+    const rows = (await w.call('GET', '/terms')).body as Rows;
+    const zorbak = rows.terms.find((t) => t.term === 'zorbak')?.id as string;
+    const vlemmo = rows.terms.find((t) => t.term === 'vlemmo')?.id as string;
+    overturn(w, 'g1', zorbak, w.clock.t - 2000);
+    overturn(w, 'g2', zorbak, w.clock.t - 1000);
+    overturn(w, 'g3', vlemmo, w.clock.t - 500);
+    const body = (await w.call('GET', '/terms')).body as { reviewFlags: Flags };
+    expect(body.reviewFlags).toEqual([{ termId: zorbak, overturned: 2, lastAt: w.clock.t - 1000 }]);
+    // only these three keys on an entry: no person, group or line
+    expect(Object.keys(body.reviewFlags[0] as object).sort()).toEqual(['lastAt', 'overturned', 'termId']);
+    // the existing keys are unchanged
+    expect(Object.keys(body).sort()).toEqual(['blocks30d', 'exceptions', 'reviewFlags', 'terms']);
+  });
+
+  it('a flagged term id that is not in the listed rows is left out: no count of a row the response does not list', async () => {
+    const w = await world();
+    overturn(w, 'g1', 'term-that-is-not-listed', w.clock.t - 2000);
+    overturn(w, 'g2', 'term-that-is-not-listed', w.clock.t - 1000);
+    const text = JSON.stringify((await w.call('GET', '/terms')).body);
+    expect(text).not.toContain('term-that-is-not-listed');
+    expect(((await w.call('GET', '/terms')).body as { reviewFlags: Flags }).reviewFlags).toEqual([]);
+  });
+
+  it('terms.read still decides who may read it, and the flags are in the same answer', async () => {
+    const w = await world({ permissions: { 'terms.read': 'owner' } });
+    expect((await w.call('GET', '/terms', { role: 'moderator' })).status).toBe(403);
+    expect(((await w.call('GET', '/terms', { role: 'owner' })).body as { reviewFlags: Flags }).reviewFlags).toEqual([]);
+  });
+});

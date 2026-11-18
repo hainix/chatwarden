@@ -115,6 +115,45 @@ export class StrikeService {
   }
 
   /**
+   * An automatic restriction was overturned on appeal (called after the commit that recorded the overturn): the strikes that earned it and its start stop counting.
+   * Drops from the person's tally every strike inside `[startsAt - windowMs, startsAt]` (the ones that made the restriction; a strike after `startsAt` stays), then
+   * puts the person's latest automatic start back to the latest one that is not overturned and still inside the look-back (`store.latestAutoChatStart`), or removes it.
+   * A store without that method removes the start only when it is the one given. Folds the ids merged into the person first. SYNCHRONOUS and never throws: an unknown
+   * person, an old start or a failing store changes nothing more than it can, and a failure is logged by class (`strikes.forgive_failed`).
+   *
+   * Multi-process note: like the tally itself, this is in-process state. The overturn is stored, so a second process serving chat over the same database catches up when it
+   * restarts (`loadStrikes` and `loadAutoChatStarts` leave overturned rows out); until then its own tally and last automatic start still count the strikes, and its next
+   * restriction for that person can be the longer repeat length. Route one person's chat to one process, as pacing already advises.
+   */
+  forgive(subject: SubjectId, startsAt: number): void {
+    let person: SubjectId;
+    try {
+      person = this.subjects.canonical(subject);
+      const times = this.foldTally(person);
+      const kept = times.filter((t) => !(t >= startsAt - this.limits.windowMs && t <= startsAt));
+      if (kept.length === 0) this.tally.delete(person);
+      else if (kept.length !== times.length) this.tally.set(person, kept);
+    } catch (err) {
+      this.warn('strikes.forgive_failed', { error: err instanceof Error ? err.name : typeof err });
+      return;
+    }
+    try {
+      this.foldLastAutoStart(person);
+      const latest = this.store.latestAutoChatStart?.(this.subjects.aliasesOf(person));
+      if (latest === undefined) {
+        // A store that cannot say: the start it knows is the only one this can undo.
+        if (this.lastAutoStart.get(person) === startsAt) this.lastAutoStart.delete(person);
+      } else if (latest !== null && latest >= this.clock.now() - this.limits.repeatLookbackMs) {
+        this.lastAutoStart.set(person, latest);
+      } else {
+        this.lastAutoStart.delete(person);
+      }
+    } catch (err) {
+      this.warn('strikes.forgive_failed', { error: err instanceof Error ? err.name : typeof err });
+    }
+  }
+
+  /**
    * Record one strike and return the automatic restriction it triggers, if any. SYNCHRONOUS and never throws.
    *
    * With a subject, the strike row is written inside `store.transaction`, then the in-memory tally of the

@@ -82,6 +82,8 @@ export interface StoredSanction extends SanctionRow {
   revokedBy: string | null;
   revokedAt: number | null;
   revokeReason: string | null;
+  /** When an appeal that overturned the group was granted (every row of the group), or null. Set by `recordOverturn` (the appeals wrapper). */
+  overturnedAt: number | null;
 }
 
 /**
@@ -101,6 +103,13 @@ export class MemoryStore implements Store {
   protected mutes = new Map<string, { row: MuteRow; seq: number }>();
   private muteSeq = 0;
   protected strikes: StrikeRow[] = [];
+  /** The strike rows `recordOverturn` set aside (their restriction was overturned on appeal): `loadStrikes` leaves them out, the other reads show them. Keyed by the stored row. */
+  protected overturnedStrikes = new WeakSet<StrikeRow>();
+  /**
+   * When an appeal overturned the decision a report led to, by report id: read only by `reporterOutcomes` and `reporterTally` (SQLite keeps the same fact in a column no report read returns, so a
+   * report read carries no overturn time in either store). An id of a deleted report stays here, inert: nothing reads a report that is not stored.
+   */
+  protected overturnedReports = new Map<string, number>();
   /** Reports in insertion order; `insertReport` enforces UNIQUE (reporter, target, room). */
   protected reports: StoredReportRow[] = [];
   /** The chat-filter hit counters by (day, key, action). */
@@ -249,7 +258,7 @@ export class MemoryStore implements Store {
     const addedCode = owner === undefined;
     this.refOwners.set(first.refCode, first.groupId);
     for (const row of rows) {
-      this.sanctions.push({ ...row, gapRef: null, gapClosedBy: null, gapClosedAt: null, revokedBy: null, revokedAt: null, revokeReason: null });
+      this.sanctions.push({ ...row, gapRef: null, gapClosedBy: null, gapClosedAt: null, revokedBy: null, revokedAt: null, revokeReason: null, overturnedAt: null });
     }
     this.undoWith(() => {
       this.sanctions.length -= rows.length;
@@ -661,7 +670,7 @@ export class MemoryStore implements Store {
   loadStrikes(since: number): StrikeRow[] {
     // Oldest first; the sort is stable, so strikes at the same instant keep their write order.
     return this.strikes
-      .filter((r) => r.at >= since)
+      .filter((r) => r.at >= since && !this.overturnedStrikes.has(r))
       .sort((a, b) => a.at - b.at)
       .map((r) => ({ ...r }));
   }
@@ -684,7 +693,7 @@ export class MemoryStore implements Store {
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }> {
     const latest = new Map<SubjectId, number>();
     for (const r of this.sanctions) {
-      if (r.kind !== 'chat' || r.source !== 'auto_filter' || r.targetType !== 'subject') continue;
+      if (r.kind !== 'chat' || r.source !== 'auto_filter' || r.targetType !== 'subject' || r.overturnedAt !== null) continue;
       latest.set(r.value, Math.max(latest.get(r.value) ?? r.startsAt, r.startsAt));
     }
     return [...latest].map(([subject, startsAt]) => ({ subject, startsAt }));
@@ -829,7 +838,9 @@ export class MemoryStore implements Store {
     const wanted = new Set(reporters);
     for (const r of this.reports) {
       if (r.origin !== null || !wanted.has(r.reporterSubject)) continue;
-      tally[r.status] += 1;
+      // An actioned report whose sanction was overturned on appeal is not counted as actioned: it has its own count, left off while it is none (the 0.2.0 shape).
+      if (r.status === 'actioned' && this.overturnedReports.has(r.id)) tally.overturned = (tally.overturned ?? 0) + 1;
+      else tally[r.status] += 1;
       if (r.badFaith) tally.badFaith += 1;
     }
     return tally;
@@ -842,8 +853,12 @@ export class MemoryStore implements Store {
       if (r.origin !== null || !wanted.has(r.reporterSubject) || r.status === 'open' || r.createdAt < since) continue;
       // A report about someone who may be at risk is never a reporter's false report: it is left out of the numbers.
       if (r.reportedReason === 'welfare') continue;
-      const row = by.get(r.reporterSubject) ?? { reporter: r.reporterSubject, actioned: 0, noAction: 0, badFaith: 0 };
-      if (r.status === 'actioned') row.actioned += 1;
+      const row = by.get(r.reporterSubject) ?? { reporter: r.reporterSubject, actioned: 0, noAction: 0, badFaith: 0, overturned: 0 };
+      // An actioned report whose sanction was overturned on appeal is neither upheld nor dismissed: it has its own count.
+      if (r.status === 'actioned') {
+        if (!this.overturnedReports.has(r.id)) row.actioned += 1;
+        else row.overturned = (row.overturned ?? 0) + 1;
+      }
       else if (r.badFaith) row.badFaith += 1;
       else row.noAction += 1;
       by.set(r.reporterSubject, row);
@@ -1265,6 +1280,11 @@ export class MemoryStore implements Store {
       .map(({ n }) => structuredClone(n));
   }
 
+  loadNotice(id: string): NoticeRow | null {
+    const n = this.notices.find((x) => x.id === id);
+    return n === undefined ? null : structuredClone(n);
+  }
+
   ackNotice(id: string, at: number): boolean {
     const n = this.notices.find((x) => x.id === id);
     if (n === undefined || n.ackedAt !== null || n.withdrawnAt !== null) return false;
@@ -1440,6 +1460,7 @@ export class MemoryStore implements Store {
         });
       }
       hooks.privacyUnlinkAppealReports?.(about);
+      hooks.privacyUnlinkOverturnReports?.(about);
       // The staff thread of a deleted report goes with it (staff workflow rows).
       const comments = this.comments;
       const keptComments = comments.filter((c) => !about.has(c.reportId));
@@ -1554,6 +1575,8 @@ export class MemoryStore implements Store {
 
     add('blocked_names', hooks.privacyEraseBlockedNames?.(set) ?? 0);
     add('appeals', hooks.privacyEraseAppeals?.(set, heldGroups) ?? 0);
+    // The overturn record of the person goes with them; it belongs to an appeal that is counted above, so it adds nothing to the counts.
+    hooks.privacyEraseOverturns?.(set, heldGroups);
     add('signals', hooks.privacyEraseSignals?.(set) ?? 0);
     add('ai', hooks.privacyEraseNoAutomation?.(set) ?? 0);
 
@@ -1840,7 +1863,7 @@ export class MemoryStore implements Store {
       blockedNames: cap('blockedNames', (hooks.privacyExportBlockedNames?.(set) ?? []).map((r) => ({ at: r.at, name: r.name, reason: r.reason }))),
       appeals: cap(
         'appeals',
-        (hooks.privacyExportAppeals?.(set) ?? []).map((r) => ({ createdAt: r.createdAt, kind: r.kind, rule: r.rule, status: r.status, statement: r.statement, decidedAt: r.decidedAt })),
+        (hooks.privacyExportAppeals?.(set) ?? []).map((r) => ({ createdAt: r.createdAt, kind: r.kind, rule: r.rule, status: r.status, statement: r.statement, decidedAt: r.decidedAt, overturnedAt: r.overturnedAt ?? null, reasonCode: r.reasonCode ?? null })),
       ),
       signals: cap('signals', hooks.privacyExportSignals?.(set) ?? []),
       // `received` leaves blocks out: a person is never told they were blocked.
@@ -1912,7 +1935,9 @@ interface PrivacyHooks {
   privacyExportSignals(set: ReadonlySet<string>): Array<{ at: number; kind: string }>;
   privacyEraseAppeals(set: ReadonlySet<string>, keepGroups: ReadonlySet<string>): number;
   privacyUnlinkAppealReports(reportIds: ReadonlySet<string>): void;
-  privacyExportAppeals(set: ReadonlySet<string>): AppealRow[];
+  privacyEraseOverturns(set: ReadonlySet<string>, keepGroups: ReadonlySet<string>): void;
+  privacyUnlinkOverturnReports(reportIds: ReadonlySet<string>): void;
+  privacyExportAppeals(set: ReadonlySet<string>): Array<AppealRow & { overturnedAt?: number | null }>;
   privacyEraseBlockedNames(set: ReadonlySet<string>): number;
   privacyExportBlockedNames(set: ReadonlySet<string>): BlockedNameRow[];
   privacyEraseLinks(reportIds: ReadonlySet<string>, goneGroups: ReadonlySet<string>): number;

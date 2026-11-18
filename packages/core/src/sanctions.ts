@@ -139,13 +139,20 @@ export interface SanctionInput {
    */
   reportId?: string;
   /**
+   * The term of the strike that tipped an automatic restriction into force (a blocked-term id, never its text): a non-empty string, kept on the subject row so
+   * an appeal that overturns the restriction can say which term caused it. Absent stores nothing. For the kit's own chat path only, like `reportId`: it is accepted
+   * only with `startsAtToken`, and any other caller passing it gets the same `RangeError`.
+   * @internal
+   */
+  termId?: string;
+  /**
    * The start time to write instead of "now", epoch ms, never after "now". For the appeals service only, so a reduced sanction keeps the
    * original start (the ladder reads sanctions by start). The end is `startsAt + durationMs`. Honoured only with `startsAtToken`; any other
    * caller passing it gets a `RangeError`.
    * @internal
    */
   startsAt?: number;
-  /** @internal The key to `startsAt` and `reportId`: {@link APPEALS_START_TOKEN}. */
+  /** @internal The key to `startsAt`, `reportId` and `termId`: {@link APPEALS_START_TOKEN}. */
   startsAtToken?: symbol;
   /** @internal The key to the internal source `ai`: {@link AI_SOURCE_TOKEN}. Anyone else passing `source: 'ai'` is refused. */
   sourceToken?: symbol;
@@ -182,7 +189,7 @@ export function refCode(): string {
 
 /**
  * What `validate` settles: the rule as stored text, the trimmed gap note (null when there is none), and the two internal values it read
- * ONCE (`start` and `reportId`, undefined when not given). The writer uses these, never a second read of the input, so what was checked
+ * ONCE (`start`, `reportId` and `termId`, undefined when not given). The writer uses these, never a second read of the input, so what was checked
  * is what is stored even for an object with getters or an inherited property.
  */
 interface Checked {
@@ -192,6 +199,7 @@ interface Checked {
   gapNote: string | null;
   start: number | undefined;
   reportId: string | undefined;
+  termId: string | undefined;
 }
 
 /**
@@ -209,19 +217,21 @@ function validate(input: SanctionInput, now?: number): Checked {
   // smuggle one past the guard), and the writer uses this read.
   const start: unknown = input.startsAt;
   const report: unknown = input.reportId;
+  const term: unknown = input.termId;
   const token: unknown = input.startsAtToken;
   // The source is read ONCE too, and the internal one (`ai`) is for the kit's own AI actor only (design 6.1): any other caller is refused here, in the
   // one place every writer shares, whatever the entry point. The writer stores this read.
   const source: unknown = input.source;
   if (isInternalSource(source) && input.sourceToken !== AI_SOURCE_TOKEN) throw new SanctionError('applySanction: invalid source');
-  if ((start !== undefined || report !== undefined) && token !== APPEALS_START_TOKEN) {
-    throw new RangeError('applySanction: startsAt and reportId are not accepted');
+  if ((start !== undefined || report !== undefined || term !== undefined) && token !== APPEALS_START_TOKEN) {
+    throw new RangeError('applySanction: startsAt, reportId and termId are not accepted');
   }
   if (start !== undefined) {
     if (typeof start !== 'number' || !Number.isSafeInteger(start) || start < 0) throw new SanctionError('applySanction: invalid start');
     if (now !== undefined && start > now) throw new SanctionError('applySanction: a start cannot be in the future');
   }
   if (report !== undefined && (typeof report !== 'string' || report === '')) throw new SanctionError('applySanction: invalid report id');
+  if (term !== undefined && (typeof term !== 'string' || term === '')) throw new SanctionError('applySanction: invalid term id');
   const d = input.durationMs;
   if (isRecordKind(input.kind)) {
     // A warning or a note has no end and no IP: it is a record, not a restriction.
@@ -252,14 +262,14 @@ function validate(input: SanctionInput, now?: number): Checked {
     // The kit's own writers (the decision, the appeals service: `token`) may leave the note out: a replacement under no rule has its gap
     // recorded on the sanction it replaces, so it does not open a second one.
     if (trimmed === '' && token === APPEALS_START_TOKEN && note === undefined) {
-      return { source: source as Source, rule: 'uncovered', gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
+      return { source: source as Source, rule: 'uncovered', gapNote: null, start: start as number | undefined, reportId: report as string | undefined, termId: term as string | undefined };
     }
     if (trimmed === '') throw new SanctionError('applySanction: a rule-gap note is required when no rule is cited');
     if (trimmed.length > GAP_NOTE_MAX) throw new SanctionError('applySanction: the rule-gap note is too long');
-    return { source: source as Source, rule: 'uncovered', gapNote: trimmed, start: start as number | undefined, reportId: report as string | undefined };
+    return { source: source as Source, rule: 'uncovered', gapNote: trimmed, start: start as number | undefined, reportId: report as string | undefined, termId: term as string | undefined };
   }
   if (note !== undefined) throw new SanctionError('applySanction: a rule-gap note is only for an uncovered moderator sanction');
-  return { source: source as Source, rule: String(ref), gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
+  return { source: source as Source, rule: String(ref), gapNote: null, start: start as number | undefined, reportId: report as string | undefined, termId: term as string | undefined };
 }
 
 /** What {@link writeSanction} wrote: the group's handle and the rows, for the caller to hand to the index. */
@@ -278,7 +288,7 @@ function applyNow(
   now: number,
   pending: boolean,
 ): WrittenSanction {
-  const { source, rule, gapNote, start: given, reportId } = validate(input, now);
+  const { source, rule, gapNote, start: given, reportId, termId } = validate(input, now);
   const subject = subjects.canonical(input.subject);
   // The start is "now" unless the appeals service gave the original one (validate has refused anyone else).
   const start = given ?? now;
@@ -313,6 +323,8 @@ function applyNow(
       gapStatus: gapNote === null ? null : 'open',
       // Only a sanction a report decision made carries one; the key is absent otherwise, so every other row keeps its shape.
       ...(reportId === undefined ? {} : { reportId }),
+      // Only an automatic restriction the chat path wrote carries the term that tipped it.
+      ...(termId === undefined ? {} : { termId }),
     };
     const rows: SanctionRow[] = [subjectRow];
     if (ip !== null) {

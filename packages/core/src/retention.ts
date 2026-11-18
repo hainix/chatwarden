@@ -341,7 +341,8 @@ export async function purge(
       appealsClosed: store.closeOrphanAppeals?.('retention', now, p.appealStatementsMs === 0) ?? 0,
       // Statements first: a statement is player text and goes on its own, shorter clock even when its row stays (or goes in the next call).
       appealStatements: store.clearAppealStatements?.(now - p.appealStatementsMs) ?? 0,
-      appeals: store.purgeAppeals?.(now - p.appealsMs) ?? 0,
+      // The overturn rows (0.2.1) are the record of a granted appeal: they go on the same clock and count with the appeals.
+      appeals: (store.purgeAppeals?.(now - p.appealsMs) ?? 0) + (store.purgeOverturns?.(now - p.appealsMs) ?? 0),
       blockedNames: store.purgeBlockedNames?.(now - p.blockedNamesMs) ?? 0,
       // Counter rows are keyed by UTC day: a day goes once it ended before the cutoff (strictly older than the day the cutoff falls in).
       filterHits: store.purgeFilterHits(Math.floor((now - p.filterHitsMs) / DAY_MS)),

@@ -18,8 +18,9 @@ import { bodyAppealDecision, bodyObject, queryAppealDays, queryAppealStatus, que
  *   `invalid_query`. Audits `appeal.view` with no target (required).
  * - `GET /appeals/:id` (`appeals.read`): `{ appeal }`, the `AppealDetail`: the statement (null once purged), the decision and its private reason
  *   once made, and the lines the player was shown. 404 for an unknown id. Audits `appeal.view` with the appeal as target (required).
- * - `POST /appeals/:id/decide { outcome, reason, to? }` (`appeals.decide`): `outcome` is `uphold`, `reduce` or `revoke`; `reason` is private (1 to
- *   500 characters, never echoed); `to` is `{ kind, durationMs }` and is required for `reduce` only (the lighter outcome; with `customDuration` off the length
+ * - `POST /appeals/:id/decide { outcome, reason, reasonCode?, to? }` (`appeals.decide`): `outcome` is `uphold`, `reduce` or `revoke`; `reason` is private (1 to
+ *   500 characters, never echoed); `reasonCode` (0.2.1) is the fixed reason, one the outcome offers (`APPEAL_REASONS`; `context_considered` when left out; a
+ *   string that does not fit is 400 `invalid_reason`, anything that is not a string 400 `invalid_request`); `to` is `{ kind, durationMs }` and is required for `reduce` only (the lighter outcome; with `customDuration` off the length
  *   must be one the profile offers, else 400 `duration_not_offered`). 200 `{ status, replacementGroupId? }`. 409 `already_decided`, 409
  *   `same_decider` (the moderator who made the original decision may not decide its appeal unless `appeals.allowSelfReview` is on), 409 `gone`
  *   (the sanction is gone; the appeal is closed as moot), 400 for a body or a `to` the core refuses, 404 for an unknown id. The actor is the
@@ -92,7 +93,7 @@ export function appealRoutes(ctx: AdminContext): RouteTable {
       if (!res.ok) {
         if (res.error === 'not_found') throw new NotFoundError();
         if (res.error === 'invalid') throw new ValidationError();
-        // already_decided, same_decider and gone have their own codes.
+        // invalid_reason, already_decided, same_decider and gone have their own codes.
         throw new HttpError(res.error);
       }
       // The decision is written: an audit failure is logged, never turned into an error.

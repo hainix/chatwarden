@@ -29,13 +29,29 @@ const VERSION = readJson<Manifest>('packages', 'core', 'package.json').version a
 // bump in 0.x is outside every `^0.1.x` range, so every @chatwarden/* peer, required or optional, is `^0.2.0`. The floor is raised by hand
 // (RELEASING.md, "When a peer floor must rise"); after this release it stays where it is through a compatible release.
 const PEER_FLOOR = '^0.2.0';
+// 0.2.1 raises six floors by hand and leaves every other peer at ^0.2.0 (RELEASING.md, "When a peer floor must rise"; the release is a patch because every range is set before
+// `npm run version`, so changesets never sees one out of range). Each exception names the API that forced it; the stores, matcher, profanity, hub-element's other peers and
+// the optional peers of http stay at the 0.2.0 floor because a 0.2.1 build of them uses nothing that is new in core (the new Store methods are optional).
+const RAISED_FLOOR = '^0.2.1';
+const RAISED: Record<string, Record<string, string>> = {
+  // http: `cw.appeals.caseByLink`, `fileByLink` and `landingOrigins`, `appealUrl` on a notice and a door refusal, `resolveLandingOptions` (the appeal landing routes and the delivery webhook).
+  '@chatwarden/http': { '@chatwarden/core': RAISED_FLOOR },
+  // discord: the `sanction.overturned` event type, which it posts to the feed.
+  '@chatwarden/discord': { '@chatwarden/core': RAISED_FLOOR },
+  // hub-react: `AppealDetail.cause` and `reasonCode`, the new admin fields (`reviewFlags`, the overturned counts, the three appeal settings) from core, and from http the routes that carry them.
+  '@chatwarden/hub-react': { '@chatwarden/core': RAISED_FLOOR, '@chatwarden/http': RAISED_FLOOR },
+  // player-react: `@chatwarden/core/notice-locales`, the words of the new AppealPage.
+  '@chatwarden/player-react': { '@chatwarden/core': RAISED_FLOOR },
+  // hub-element: bundles the new hub, so its optional types-only peer on hub-react rises with it.
+  '@chatwarden/hub-element': { '@chatwarden/hub-react': RAISED_FLOOR },
+};
 const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
 const UI_PACKAGES = new Set(['@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/hub-element']);
 // hub-element bundles React, hub-react and the little of core it needs into its own script, so it peers on none of them (hub-react is an
 // optional peer for the types only).
 const BUNDLED = new Set(['@chatwarden/hub-element']);
 /** The range every @chatwarden peer must declare. */
-const peerRangeOf = (): string => PEER_FLOOR;
+const peerRangeOf = (pkg: string, peer: string): string => RAISED[pkg]?.[peer] ?? PEER_FLOOR;
 
 describe('published package set', () => {
   it('is the ten expected packages, none private', () => {
@@ -97,9 +113,9 @@ describe('core is a peer, never a dependency', () => {
     expect(Object.keys(core.devDependencies ?? {}).filter(ownScope)).toEqual(['@chatwarden/store-memory']);
   });
   it.each(dependents.map((p) => [p.pkg.name, p.pkg] as const))(
-    '%s peers on core at ^0.2.0 and dev-depends on core at the group version',
+    '%s peers on core at its floor (^0.2.0, or ^0.2.1 where 0.2.1 needs new core API) and dev-depends on core at the group version',
     (_n, pkg) => {
-      expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(peerRangeOf());
+      expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(peerRangeOf(pkg.name, '@chatwarden/core'));
       expect(pkg.devDependencies?.['@chatwarden/core']).toBe(VERSION);
       expect(pkg.peerDependenciesMeta?.['@chatwarden/core']).toBeUndefined();
     },
@@ -115,7 +131,7 @@ describe('core is a peer, never a dependency', () => {
 describe('every @chatwarden peer is linked locally at the exact version', () => {
   it.each(published.map((p) => [p.pkg.name, p.pkg] as const))('%s', (_n, pkg) => {
     for (const peer of Object.keys(pkg.peerDependencies ?? {}).filter(ownScope)) {
-      expect(pkg.peerDependencies![peer]).toBe(peerRangeOf());
+      expect(pkg.peerDependencies![peer]).toBe(peerRangeOf(pkg.name, peer));
       // http peers (optionally) on hub-element but does not dev-depend on it: hub-element's tests dev-depend on http, and the workspace links the package at the
       // root anyway, so a dev dependency would only close a cycle (publish order and a clean install). The serve tests find the linked copy.
       if (pkg.name === '@chatwarden/http' && peer === '@chatwarden/hub-element') {
@@ -144,11 +160,11 @@ describe('store-memory', () => {
 
 describe('peer floors', () => {
   const byName = (n: string): Manifest => published.find((p) => p.pkg.name === n)!.pkg;
-  it('every @chatwarden/* peer of every package is ^0.2.0, optional ones included', () => {
+  it('every @chatwarden/* peer of every package is ^0.2.0, optional ones included, except the six raised to ^0.2.1 in RAISED', () => {
     const seen: string[] = [];
     for (const { pkg } of published) {
       for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {}).filter(([n]) => ownScope(n))) {
-        expect(range, `${pkg.name} peer ${peer}`).toBe(PEER_FLOOR);
+        expect(range, `${pkg.name} peer ${peer}`).toBe(peerRangeOf(pkg.name, peer));
         seen.push(`${pkg.name} -> ${peer}`);
       }
     }
@@ -173,6 +189,31 @@ describe('peer floors', () => {
         '@chatwarden/store-sqlite -> @chatwarden/matcher',
       ].sort(),
     );
+  });
+  it('the raised floors are exactly these six, each ^0.2.1, and every other peer is ^0.2.0 (0.2.1 raised only what uses new API)', () => {
+    const raised: string[] = [];
+    for (const { pkg } of published) {
+      for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {}).filter(([n]) => ownScope(n))) {
+        if (range !== PEER_FLOOR) raised.push(`${pkg.name} -> ${peer} ${range}`);
+      }
+    }
+    expect(raised.sort()).toEqual(
+      [
+        '@chatwarden/discord -> @chatwarden/core ^0.2.1',
+        '@chatwarden/http -> @chatwarden/core ^0.2.1',
+        '@chatwarden/hub-element -> @chatwarden/hub-react ^0.2.1',
+        '@chatwarden/hub-react -> @chatwarden/core ^0.2.1',
+        '@chatwarden/hub-react -> @chatwarden/http ^0.2.1',
+        '@chatwarden/player-react -> @chatwarden/core ^0.2.1',
+      ].sort(),
+    );
+    // the stores, matcher and profanity use nothing new in core, and http's optional peers stay where they were
+    for (const name of ['@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/matcher', '@chatwarden/profanity']) {
+      for (const range of Object.values(byName(name).peerDependencies ?? {})) expect(range, name).toBe(PEER_FLOOR);
+    }
+    for (const peer of ['@chatwarden/hub-element', '@chatwarden/matcher', '@chatwarden/profanity', '@chatwarden/store-sqlite']) {
+      expect(byName('@chatwarden/http').peerDependencies?.[peer], peer).toBe(PEER_FLOOR);
+    }
   });
   it('the four optional peers of http stay optional (a consumer without them installs), and the required ones stay required', () => {
     const http = byName('@chatwarden/http');
@@ -291,7 +332,7 @@ describe('hub-react', () => {
     expect(Object.keys(hub().peerDependencies ?? {}).sort()).toEqual(['@chatwarden/core', '@chatwarden/http', 'react', 'react-dom']);
     expect(hub().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
     expect(hub().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
-    expect(hub().peerDependencies?.['@chatwarden/http']).toBe(PEER_FLOOR);
+    expect(hub().peerDependencies?.['@chatwarden/http']).toBe('^0.2.1');
     expect(hub().dependencies).toBeUndefined();
   });
   it('ships the stylesheet as ./styles.css and the optional font as ./font.css, and lists only those under sideEffects', () => {
@@ -342,7 +383,7 @@ describe('player-react', () => {
     expect(Object.keys(player().peerDependencies ?? {}).sort()).toEqual(['@chatwarden/core', 'react', 'react-dom']);
     expect(player().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
     expect(player().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
-    expect(player().peerDependencies?.['@chatwarden/core']).toBe(PEER_FLOOR);
+    expect(player().peerDependencies?.['@chatwarden/core']).toBe('^0.2.1');
     expect(player().dependencies).toBeUndefined();
   });
   it('ships the stylesheets as ./styles.css and ./chat.css and lists only those two under sideEffects', () => {
@@ -358,6 +399,14 @@ describe('player-react', () => {
     expect(pkg.typesVersions?.['*'].chat?.[0]).toBe(chat?.types?.replace(/^\.\//, ''));
     expect(JSON.stringify(pkg.exports?.['.'])).not.toContain('chat');
   });
+  it('has the lazy ./appeal subpath (the appeal page), with types for both resolution modes, and the main entry does not point at it', () => {
+    const pkg = player() as Manifest & { exports?: Record<string, { types?: string; default?: string } | string>; typesVersions?: { '*': Record<string, string[]> } };
+    const appeal = pkg.exports?.['./appeal'] as { types?: string; default?: string } | undefined;
+    expect(appeal?.default).toBe('./dist/src/appeal/index.js');
+    expect(appeal?.types).toBe('./dist/src/appeal/index.d.ts');
+    expect(pkg.typesVersions?.['*'].appeal?.[0]).toBe(appeal?.types?.replace(/^\.\//, ''));
+    expect(JSON.stringify(pkg.exports?.['.'])).not.toContain('appeal');
+  });
   it('dev-depends on the kit the tests run on, on hub-react for the transport type check, and on the test tools, not as peers', () => {
     for (const d of ['@chatwarden/http', '@chatwarden/store-memory', '@chatwarden/hub-react', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {
       expect(player().devDependencies?.[d], d).toBeDefined();
@@ -370,7 +419,7 @@ describe('hub-element', () => {
     published.find((p) => p.pkg.name === '@chatwarden/hub-element')!.pkg as Manifest & { sideEffects?: unknown; exports?: Record<string, unknown>; files?: string[] };
   it('bundles React, react-dom, hub-react and the part of core it needs: no react peer, no dependency, hub-react only as an optional peer for the types', () => {
     expect(Object.keys(element().peerDependencies ?? {})).toEqual(['@chatwarden/hub-react']);
-    expect(element().peerDependencies?.['@chatwarden/hub-react']).toBe(PEER_FLOOR);
+    expect(element().peerDependencies?.['@chatwarden/hub-react']).toBe('^0.2.1');
     expect(element().peerDependenciesMeta?.['@chatwarden/hub-react']).toEqual({ optional: true });
     expect(element().dependencies).toBeUndefined();
   });

@@ -1,3 +1,5 @@
+import { APPEAL_REASONS } from '@chatwarden/core';
+import type { AppealCause, AppealReasonCode } from '@chatwarden/core';
 import { useContext, useId, useMemo, useRef, useState } from 'react';
 import { actorName } from '../claims.js';
 import { useHub } from '../context.js';
@@ -5,6 +7,7 @@ import { REASON_MAX } from '../decision.js';
 import type { Problem } from '../decision.js';
 import { appealErrorText, groupName, kindLabel, lengthPhrase, ruleLabel, sanctionWhat } from '../labels.js';
 import { useHubAction, useHubData } from '../hooks.js';
+import type { HubText } from '../i18n.js';
 import { LazyPlayerPreview } from '../lazyParts.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import { useMode } from '../mode.js';
@@ -19,6 +22,7 @@ import type { NoticeOp } from '@chatwarden/core/notice-copy';
 import type { AppealDecisionInput, AppealDetail, PersonHistory, PolicyDocs, Reason } from '../types.js';
 import { Card, Fetched, Link, Masked, Notice, PersonChip, Tag, Time } from '../ui.js';
 import { Field } from './ActionEditor.js';
+import { CauseDisclosure } from './AppealCause.js';
 import { ReasonChips } from './DecisionBar.js';
 import { HiddenExcerpt } from './HiddenExcerpt.js';
 
@@ -62,6 +66,8 @@ function Body({ appeal }: { appeal: AppealDetail }) {
   const open = appeal.status === 'open';
   const mayDecide = can('appeals.decide');
   const what = sanctionWhat(t, locale, sanction);
+  // An older server sends no cause: then there is no disclosure, and nothing is asked for.
+  const cause = (appeal as { cause?: AppealCause }).cause;
 
   // Their record: in Simple one read of their history gives the one line (and the name to show). Detailed reads nothing for the header: the appeal carries no name,
   // and a name is not worth an audited `history.view` row, so it has the tag and the link to the record. Without `history.read` it is the tag alone.
@@ -119,6 +125,8 @@ function Body({ appeal }: { appeal: AppealDetail }) {
           </ul>
         )}
       </section>
+
+      {!simple && cause !== undefined && <CauseDisclosure cause={cause} />}
 
       {simple ? (
         wantsHistory && (
@@ -231,6 +239,8 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
   const [reason, setReason] = useState('');
   const [attempted, setAttempted] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  // The fixed reason shown to the person: null until one is picked, which reads as the first of the outcome's three (the group opens on it).
+  const [code, setCode] = useState<AppealReasonCode | null>(null);
   const [kind, setKind] = useState<LighterKind | null>(null);
   const [length, setLength] = useState<string | null>(null);
   // The appeal is closed (someone else decided it, or the sanction is gone): nothing is left to send, so the controls go and the words stay with a way back.
@@ -249,6 +259,8 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
   const chosenKind: LighterKind | null = kind !== null && kinds.includes(kind) ? kind : (kinds[kinds.length - 1] ?? null);
   const lengths = chosenKind === null ? [] : lighterLengths(chosenKind, given, offered);
   const chosenLength = lengths.some((ms) => lengthValue(ms) === length) ? length : lengths.length === 0 ? null : lengthValue(lengths[lengths.length - 1] ?? null);
+  const codes = outcome === null ? [] : APPEAL_REASONS[outcome];
+  const chosenCode: AppealReasonCode | null = code !== null && codes.includes(code) ? code : (codes[0] ?? null);
   const problem = attempted ? reasonProblem(reason) : undefined;
   const choiceProblem = attempted && outcome === null;
 
@@ -273,7 +285,7 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
     const lighter = outcome === 'reduce' ? lighterTo() : null;
     if (outcome === 'reduce' && lighter === null) return;
     sending.current = true;
-    const input: AppealDecisionInput = { outcome, ...(lighter === null ? {} : { to: lighter }), reason: reason.trim() };
+    const input: AppealDecisionInput = { outcome, ...(lighter === null ? {} : { to: lighter }), reason: reason.trim(), ...(chosenCode === null ? {} : { reasonCode: chosenCode }) };
     const result = await action.run(input).finally(() => {
       sending.current = false;
     });
@@ -321,7 +333,10 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
                   checked={outcome === o}
                   disabled={unavailable}
                   aria-describedby={unavailable ? `${base}-warning` : undefined}
-                  onChange={() => setOutcome(o)}
+                  onChange={() => {
+                    setOutcome(o);
+                    setCode(null);
+                  }}
                 />
                 <label htmlFor={`${base}-${o}`}>{t(label)}</label>
               </div>
@@ -360,6 +375,17 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
               )}
             </fieldset>
           )}
+        </fieldset>
+      )}
+      {!settled && outcome !== null && (
+        <fieldset className="cw-appeal-reasoncode">
+          <legend>{t('hub.appeals.reasonCode.legend')}</legend>
+          {codes.map((c) => (
+            <div key={c} className="cw-radio">
+              <input type="radio" id={`${base}-code-${c}`} name={`${base}-code`} value={c} checked={chosenCode === c} onChange={() => setCode(c)} />
+              <label htmlFor={`${base}-code-${c}`}>{t(`hub.appeals.reasonCode.${outcome}.${c}` as HubText)}</label>
+            </div>
+          ))}
         </fieldset>
       )}
       {!settled && <ReasonChips reasons={reasons} onPick={(r) => setReason((v) => (v.trim() === '' ? r.text : `${v.trimEnd()} ${r.text}`))} />}

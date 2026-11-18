@@ -63,6 +63,7 @@ export type {
   SubjectIdRecord,
   StoredReport,
   StrikeRow,
+  OverturnInput,
   SubjectRecord,
   FilterHitRow,
   ReportOrigin,
@@ -249,6 +250,8 @@ export type {
   AuditTargetType,
   Role,
 } from './audit.js';
+export { resolveLandingOptions } from './appealLink.js';
+export type { LandingOptions } from './appealLink.js';
 export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
 export { CaseWorkflow } from './caseWorkflow.js';
@@ -334,6 +337,7 @@ export type {
   PlayerNotice,
   SanctionNoticeInput,
 } from './notices.js';
+export type { NoticeDelivery, NoticeDeliveryOptions } from './delivery.js';
 export { KIT_EVENT_TYPES } from './events.js';
 export type { InsightsDigest, KitEvent, KitEventOf, KitListener, StaffRef, Subscribe } from './events.js';
 export { createChatwarden } from './chatwarden.js';
@@ -450,8 +454,8 @@ export type { FilterCheckResult, FilterCheckRule, FilterHit, FilterHitKind, Filt
 export type { FilterKeyCounts, FilterStats } from './filters/counters.js';
 export type { FilterSpan } from './filters/fold.js';
 // Appeals and names settings: off until set (names masking in the hub is the one default-on setting).
-export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_STATEMENT_MAX, APPEAL_STATS_MIN_SANCTIONS, normalizeStatement, resolveAppeals, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
-export type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';
+export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_REASON_CODES, APPEAL_REASON_DEFAULT, APPEAL_REASONS, APPEAL_STATEMENT_MAX, APPEAL_STATS_MIN_SANCTIONS, normalizeStatement, resolveAppeals, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
+export type { AppealCase, AppealCaseResult, AppealCause, AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealReasonCode, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';
 export { LINK_SYSTEMS } from './links.js';
 export type { LinkRow, LinkSystem } from './links.js';
 export { checkNameRules, DEFAULT_RESERVED_RULE, MAX_RESERVED_ENTRIES, NAME_ALLOW_MAX, NAME_ENTRY_MAX, NAME_ENTRY_MIN, resolveNames } from './names.js';

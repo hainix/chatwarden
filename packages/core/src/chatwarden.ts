@@ -57,7 +57,11 @@ import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
 import { checkNameRules } from './names.js';
 import type { NameCheckResult, NameKind } from './names.js';
-import type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, AppealSummary, PlayerAppeal } from './appeals.js';
+import { resolveLandingOptions } from './appealLink.js';
+import { checkDeliveryOptions, DeliveryService } from './delivery.js';
+import type { NoticeDeliveryOptions } from './delivery.js';
+import type { AppealCaseResult, AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, AppealSummary, PlayerAppeal } from './appeals.js';
+import { isSanction } from './noticeCopy.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
 import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
@@ -88,6 +92,8 @@ import type { RevokeWithin, SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
 import {
   blockedCountsByTerm,
+  filterOverturnedCounts,
+  termReviewFlags,
   blockedItems,
   blockedNameItems,
   listSanctionGroups,
@@ -196,6 +202,21 @@ export interface ChatwardenOptions {
    * room with every check off touches the store not at all. `cw.rooms.setPace` overrides stay per process. Default false: the in-memory pacer, exactly as before.
    */
   sharedPacing?: boolean;
+  /**
+   * Where the appeal page lives (0.2.1). Code or environment only, never the profile: `landingUrl` is the page's address (an http or https URL of at most 2000 characters, no credentials,
+   * no fragment, no query string; the kit adds `?t=<token>`), and `landingOrigins` the origins a script may read `GET /appeal/case` from (at most 20, each exactly an origin such as
+   * `https://game.example`: no path, no trailing slash, never `*`). Without `landingUrl` no sanction notice or door refusal carries an `appealUrl`. Checked once at creation: a bad value is a
+   * `RangeError` naming the option and never echoing it.
+   */
+  appeals?: { landingUrl?: string; landingOrigins?: readonly string[] };
+  /**
+   * Tell the game what a person was told (0.2.1), so it can send it by email or any other channel: `deliver(d)` is called after the commit, fenced and never awaited, once per notice, when a sanction
+   * is given (a moderator's decision, the automatic restriction) and when an appeal is decided, and only when an account id is known (`d.to.accountId`, never an address hash); otherwise
+   * `chatwarden.delivery_skipped_no_account` is counted (logged at most once a minute with a count). A throw or a rejection is logged by class (`chatwarden.delivery_failed`) and never fails
+   * the sanction. `d.noticeId` is the stable key for dedupe and retry; the kit has no email address and sends nothing itself. `localeOf({ accountId })` picks the language (`es-MX`; nothing is
+   * English). Code only: a function is not settings. A `deliver` or `localeOf` that is not a function is a `TypeError` at creation.
+   */
+  notices?: NoticeDeliveryOptions;
   /** Defaults to the system clock. */
   clock?: Clock;
   /** The kill switch, read per call. Drives both sanction enforcement and report intake. Defaults to always on. */
@@ -398,6 +419,24 @@ export interface Chatwarden {
      * with their ranges, and how many lines it would refuse or mask. Writes nothing and counts nothing. At most 5 000 lines are read. Staff only.
      */
     check(candidate: FilterSettings, lines: readonly string[]): FilterCheckResult;
+    /**
+     * How many granted appeals overturned a decision that came from each filter key's reports, over the last 7, 30 or 90 UTC days (default 90; any other value is a
+     * `RangeError`): `{ [filterKey]: count }`, an object with no prototype, a key with none absent. Counts groups, from the overturn rows. `{}` for a store that keeps
+     * none. A number beside `stats`, never a person or a line. Staff only.
+     */
+    overturned(q?: { days?: 7 | 30 | 90 }): Record<string, number>;
+  };
+  /**
+   * The blocked terms, read for review. Staff only.
+   */
+  terms: {
+    /**
+     * Terms whose automatic restrictions were overturned on appeal often enough to look at (0.2.1): `{ termId, overturned, lastAt }`, `overturned` counting groups in
+     * the last `days` (an integer 1 to 365, default 90), kept when it is at least `min` (an integer 1 to 1000, default 2), ordered by `overturned` descending, then
+     * `lastAt` descending, then `termId`. Read from the overturn rows, so a purge of the strikes does not change it. `[]` for a store that keeps none; `RangeError`
+     * for a bad `days` or `min`. A term id, never the term text. Staff only.
+     */
+    reviewFlags(q?: { days?: number; min?: number }): Array<{ termId: string; overturned: number; lastAt: number }>;
   };
   chat: {
     accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[]; staff?: boolean }): ChatResult;
@@ -970,7 +1009,9 @@ export interface Chatwarden {
      * Decide an open appeal: `uphold` (the sanction stands), `reduce` (to a lighter kind, or the same kind and shorter, keeping the original
      * start so the ladder does not restart, never ending later than the original) or `revoke`. A moderator may not decide an appeal of
      * their own decision unless `appeals.allowSelfReview` is on (`same_decider`); an automatic sanction has no such decider. `reason` is
-     * private (1 to 500 characters). One transaction; the player is told through a notice; `appeal.decided` is emitted after the commit.
+     * private (1 to 500 characters). `reasonCode` (0.2.1) is the fixed reason: one of `APPEAL_REASONS[outcome]`, `context_considered` when left out, and
+     * `{ ok: false, error: 'invalid_reason' }` for a code that is not a string, not in the list or not offered for the outcome (answered before the store is read,
+     * so nothing is written). One transaction; the player is told through a notice; `appeal.decided` is emitted after the commit with the code.
      * Staff-side: the permission and the audit row belong to the route. A store failure rejects and writes nothing.
      */
     decide(input: AppealDecision): Promise<AppealDecideResult>;
@@ -995,6 +1036,28 @@ export interface Chatwarden {
      * appeals or a person the kit does not hold. Carries a staff ref and never the statement: staff channels only.
      */
     forPerson(subject: SubjectId): AppealSummary[];
+    /**
+     * A signed link to the appeal page for one of the person's sanction notices (by its id), or null: appeals off, no `appeals.landingUrl`, an unknown id, a notice that is not a
+     * sanction, one that has ended, or one withdrawn with no decided appeal (a withdrawn notice whose sanction has a decided appeal still gets one, to read the outcome). The link is
+     * `landingUrl?t=<token>`, a capability for that one sanction, not a login: it works until `min(now + appeals.linkTtlMs, the end of the appealable window)`. `opts.ttlMs` replaces the
+     * setting (whole ms from one hour to 365 days, else `RangeError`). Never throws for a bad id. Never log the link: it is the key.
+     */
+    link(noticeId: string, opts?: { ttlMs?: number }): string | null;
+    /** Open a token: its signature and expiry only, nothing read from the store. `{ ok: false, reason: 'invalid' }` for any token that does not open. Never throws. Never log the token. */
+    openLink(token: string): { ok: true; noticeId: string; expiresAt: number } | { ok: false; reason: 'invalid' };
+    /**
+     * What the appeal page shows for a link (see `AppealCase`): the sanction as the player was shown it, whether an appeal can still be filed, the appeal if there is one and the sanction as it
+     * stands now. One answer, `{ ok: false, reason: 'invalid' }`, for every link that does not open: forged, expired, signed for another purpose, off, a notice that is gone, withdrawn (unless
+     * its sanction has a decided appeal) or moot. Read only; the link is a capability for one sanction, not a login.
+     */
+    caseByLink(token: string): AppealCaseResult;
+    /**
+     * File an appeal from a link, for the person on its notice: the same checks in the same order as `file` (an invalid link is `not_found`; a notice no longer on the record, a decided view,
+     * is `not_appealable`), and the same weekly cap per person. Never throws; a store failure is logged (`chatwarden.appeal_failed`) and answers `not_found`.
+     */
+    fileByLink(token: string, input: { statement: string }): AppealFileResult;
+    /** The origins the appeal page may be read from by a script (`appeals.landingOrigins`), frozen. The one list the HTTP layer reads, so the two cannot disagree. */
+    landingOrigins(): readonly string[];
   };
   /**
    * Decide a report: close it, write each sanction and its notice, and tell the people involved, in one
@@ -1186,6 +1249,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const limits = resolveLimits(opts.limits);
   if (opts.sharedPacing !== undefined && typeof opts.sharedPacing !== 'boolean') throw new TypeError('createChatwarden: sharedPacing must be true or false');
   if (opts.sharedPacing === true) assertPaceStore(store);
+  const landing = resolveLandingOptions(opts.appeals);
+  const deliveryOptions = checkDeliveryOptions(opts.notices);
   // The phrase books: the grammar and sizes first, then every context's `chat.phrases` must name one. Each phrase is also run through the matcher and every profanity filter in force, once those exist (further down).
   const phraseBooks = checkPhraseBooks(opts.phrases);
   checkContextBooks(baseProfile.contexts, phraseBooks);
@@ -1319,6 +1384,22 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     notify: typeof platformNotify === 'function' ? (who, event) => platformNotify.call(platform, who, event) : undefined,
   });
 
+  // The delivery hook (only when the game gave one). The link and the game's own words are read late: the appeal service and the profile in force come later.
+  const delivery: DeliveryService | undefined =
+    deliveryOptions === undefined
+      ? undefined
+      : new DeliveryService({
+          store,
+          subjects,
+          notices,
+          rules,
+          clock,
+          logger,
+          options: deliveryOptions,
+          link: (noticeId) => appealService.link(noticeId),
+          words: () => policy.profileNow().appeals.words,
+        });
+
   /** The signal service, set once `personOf` exists (the chat path above it only calls it later, never during creation). */
   const signalRef: { service?: SignalRuntime } = {};
 
@@ -1422,6 +1503,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     logger,
     notices,
+    delivery,
     autoRestrictRule,
     limits: { maxLength: limits.chatMaxLength, rate: limits.chatRate },
     filters: {
@@ -1486,7 +1568,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     // A report a filter filed is announced like any other: `report.created` with its origin.
     onSystemReport: (reportId) => announceReport(reportId),
   });
-  const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices });
+  // The signed appeal link on a refusal: the appeal service is built later, and only asked when a refusal happens.
+  const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices, appealUrl: (noticeId) => appealService.link(noticeId) });
   // The AI service is built after the audit trail it writes to; a decision reaches it through this late binding.
   const aiRef: { service?: AiService } = {};
   // The "do not automate" mark (design 6.4): kept under the canonical person; `cw.people.automation` is this same facade.
@@ -1541,6 +1624,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     index: sanctions,
     logger,
     reporterFeedback: limits.reporterFeedback,
+    delivery,
     aiOutcome: (args) => aiRef.service?.outcomeOf(args) ?? null,
   });
 
@@ -1567,6 +1651,20 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     ...(opts.signals?.accountAgeDays === undefined ? {} : { accountAgeDays: opts.signals.accountAgeDays }),
   });
   const signals = signalRef.service;
+  /** The sanction notices of a player's list with their signed appeal link, when one can be made. Fresh objects; any other notice is passed through untouched. */
+  const withAppealUrls = (list: PlayerNotice[]): PlayerNotice[] => {
+    // One link per notice id for this call only (a list that names a notice twice reads the store once for it); nothing is kept for the next call.
+    const links = new Map<string, string | null>();
+    return list.map((n) => {
+      if (!isSanction(n.kind)) return n;
+      let url = links.get(n.id);
+      if (url === undefined) {
+        url = appealService.link(n.id);
+        links.set(n.id, url);
+      }
+      return url === null ? n : { ...n, appealUrl: url };
+    });
+  };
   /** A player-facing read: a store failure is logged (class only) and reads as `fallback`. */
   const forPlayer = <T>(who: RawWho, fallback: T, read: (subject: SubjectId) => T): T => {
     try {
@@ -1814,7 +1912,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         });
   aiRef.service = aiService;
   const ai: AiFacade = aiService ?? createInertAi();
-  const appealService = new AppealService({
+  const appealService: AppealService = new AppealService({
     store,
     subjects,
     notices,
@@ -1829,6 +1927,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     // A granted appeal marks the original decision reversed in the casebook; with no AI this is the inert facade and does nothing.
     // A REVOKE teaches the opposite sign and counts as a false positive; a REDUCE only keeps the decision from teaching (the rule applied).
     onGranted: (appeal, outcome) => void (outcome === 'revoke' ? ai.markReversed(appeal.reportId as string, { corrective: true }) : ai.markReversed(appeal.reportId as string)),
+    // A granted appeal on an automatic restriction sets its strikes aside in the store; the live tally forgets them through the strike service.
+    strikeWindowMs: limits.strikes.windowMs,
+    strikesCount: () => limits.strikes.count,
+    forgive: (subject, startsAt) => strikes.forgive(subject, startsAt),
+    secret: opts.secret,
+    landingUrl: landing.landingUrl,
+    landingOrigins: landing.landingOrigins,
+    delivery,
   });
 
   // Names. The profanity filter for a name is the kit's own when the profile has one; otherwise (a profile that allows swearing in chat) it is
@@ -1984,6 +2090,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         if (q === null || typeof q !== 'object' || (q.days !== 7 && q.days !== 30)) return Promise.reject(new RangeError('filters.stats: days must be 7 or 30'));
         return filterHits.stats(q.days);
       },
+      overturned: (q) => filterOverturnedCounts(store, q, clock.now()),
       test: (text, candidate) => {
         if (typeof text !== 'string') throw new TypeError('filters.test: text must be a string');
         const settings = candidate === undefined ? policy.profileNow().filters : resolveFilters(candidate, 'candidate');
@@ -2077,6 +2184,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
       reporterAccuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
       dismissMany: (input) => dismissMany({ store, subjects, holders: (people) => desk.holders(people), decide: decideAnnounced }, input),
+    },
+    terms: {
+      reviewFlags: (q) => termReviewFlags(store, q, clock.now()),
     },
     blocked: {
       list: (q) => blockedItems(store, subjects, q?.days, clock.now()),
@@ -2265,9 +2375,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       rules,
     }),
     notices: {
-      pending: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.pending(s)),
+      pending: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => withAppealUrls(notices.pending(s))),
       ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),
-      record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
+      record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => withAppealUrls(notices.record(s))),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
       lineText: (line) => notices.lineText(line),
     },
@@ -2281,6 +2391,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       openCount: () => appealService.openCount(),
       stats: (q) => appealService.stats(q),
       forPerson: (subject) => appealService.forPerson(subject),
+      link: (noticeId, o) => appealService.link(noticeId, o),
+      openLink: (token) => appealService.openLink(token),
+      caseByLink: (token) => appealService.caseByLink(token),
+      fileByLink: (token, input) => appealService.fileByLink(token, input),
+      landingOrigins: () => landing.landingOrigins,
     },
     decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),

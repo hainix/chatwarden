@@ -276,6 +276,22 @@ describe('.env.example', () => {
     expect(env).toContain("randomBytes(32).toString('hex')");
   });
 
+  it('CHATWARDEN_TRUST_PROXY is described as a number of proxies read from the right, in the .env.example and in the generated auth file (R2 ruling)', () => {
+    for (const framework of ['next', 'fetch'] as const) {
+      const files = renderAll(answersOf({ framework, hub: 'react' }), VERSIONS);
+      const env = files.find((f) => f.path.endsWith('.env.example'))!.content;
+      const auth = files.find((f) => /\/auth\.[tj]s$/.test(f.path))!.content;
+      for (const [name, text] of [['.env.example', env], ['auth', auth]] as const) {
+        expect(text, name).toMatch(/number of (reverse )?proxies/i);
+        expect(text, name).toMatch(/from the right/i);
+        expect(text, name).not.toMatch(/first X-Forwarded-For/i);
+        expect(text, name).not.toMatch(/=1 to take/);
+      }
+      expect(env).toMatch(/only behind your own/i);
+      expect(env).toMatch(/CHATWARDEN_TRUST_PROXY=\n/);
+    }
+  });
+
   it('the library-only one has no staff token', () => {
     const env = renderAll(answersOf({ framework: 'none', hub: 'none' }), VERSIONS).find((f) => f.path.endsWith('.env.example'))!.content;
     expect(env).not.toContain('CHATWARDEN_ADMIN_TOKEN');

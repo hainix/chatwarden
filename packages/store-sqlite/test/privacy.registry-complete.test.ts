@@ -45,6 +45,13 @@ describe('completeness (sqlite): every kit_ table in sqlite_master is in the reg
     for (const t of claimed()) expect(real.has(t), t).toBe(true);
   });
 
+  it('claims kit_overturns (0.2.1) through the appeals category, not the "holds no person" list', () => {
+    const db = new DatabaseSync(':memory:');
+    openStore({ db });
+    expect(PRIVACY_REGISTRY.find((r) => r.category === 'appeals')?.tables).toContain('kit_overturns');
+    expect(Object.keys(NO_PERSON_TABLES)).not.toContain('kit_overturns');
+  });
+
   it('names the tables and columns this release added: kit_filter_hits, kit_erasures, kit_reports.origin and origin_key and their indexes', () => {
     const db = new DatabaseSync(':memory:');
     openStore({ db });

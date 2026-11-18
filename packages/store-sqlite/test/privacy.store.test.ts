@@ -78,6 +78,8 @@ describe('one prepared statement per category, with the indexes the lookups need
       // The export's count of comments on reports that name the person reads the people list inside each report (json): the same scan, once per export.
       'EXPORT_COMMENTS_SQL',
       'APPEALS_UNLINK_SQL',
+      // The same link on the overturn record (granted appeals only; a table the size of the appeals' granted subset).
+      'OVERTURNS_UNLINK_SQL',
       'ERASURES_PURGE_SQL',
       'ERASURE_INSERT_SQL',
       'EPOCH_BUMP_SQL',

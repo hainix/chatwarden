@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "description": "Chat moderation engine for games: reports, warnings, timeouts and bans, a moderator queue and player notices. No sockets, HTTP or disk.",
   "license": "Apache-2.0",
@@ -34,12 +34,19 @@
     "./notice-copy": {
       "types": "./dist/src/noticeCopy.d.ts",
       "default": "./dist/src/noticeCopy.js"
+    },
+    "./notice-locales": {
+      "types": "./dist/src/noticeLocales.d.ts",
+      "default": "./dist/src/noticeLocales.js"
     }
   },
   "typesVersions": {
     "*": {
       "notice-copy": [
         "dist/src/noticeCopy.d.ts"
+      ],
+      "notice-locales": [
+        "dist/src/noticeLocales.d.ts"
       ]
     }
   },
@@ -54,7 +61,7 @@
     "prepack": "tsc -b"
   },
   "devDependencies": {
-    "@chatwarden/store-memory": "0.2.0"
+    "@chatwarden/store-memory": "0.2.1"
   },
   "publishConfig": {
     "access": "public"
