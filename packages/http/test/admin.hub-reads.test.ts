@@ -655,7 +655,7 @@ describe('GET /terms: metadata and blocks30d', () => {
     const w = await world();
     const res = await w.call('GET', '/terms');
     const body = res.body as { terms: Array<Record<string, unknown>>; exceptions: Array<Record<string, unknown>>; blocks30d: Record<string, number> };
-    expect(Object.keys(body)).toEqual(['terms', 'exceptions', 'blocks30d']);
+    expect(Object.keys(body)).toEqual(['terms', 'exceptions', 'blocks30d', 'reviewFlags']);
     expect(Object.keys(body.terms[0]!)).toEqual(['id', 'term', 'language', 'active', 'note', 'addedBy', 'addedAt', 'updatedBy', 'updatedAt']);
     expect(Object.keys(body.exceptions[0]!)).toEqual(['id', 'phrase', 'language', 'active', 'note', 'addedBy', 'addedAt', 'updatedBy', 'updatedAt']);
     expect(body.terms[0]).toEqual({

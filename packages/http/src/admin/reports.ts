@@ -116,6 +116,8 @@ export interface ReporterAccuracySummary {
   unfounded: number;
   falseRate: number | null;
   habitual: boolean;
+  /** How many of their upheld reports had the sanction overturned on appeal in the window (0.2.1). Left off while none, so a row with none is as it was. */
+  overturned?: number;
 }
 
 /** What a bulk dismissal answers: counts only. Never a report id, a subject id or a reporter ref. */
@@ -180,7 +182,15 @@ const summarize = (
   claim: claimView(claim),
   viewing: viewing === undefined ? [] : [...viewing],
   reporterAccuracy:
-    accuracy === undefined ? null : { decided: accuracy.decided, unfounded: accuracy.unfounded, falseRate: accuracy.falseRate, habitual: accuracy.habitual },
+    accuracy === undefined
+      ? null
+      : {
+          decided: accuracy.decided,
+          unfounded: accuracy.unfounded,
+          falseRate: accuracy.falseRate,
+          habitual: accuracy.habitual,
+          ...(typeof accuracy.overturned === 'number' && accuracy.overturned > 0 ? { overturned: accuracy.overturned } : {}),
+        },
   ai: ai === undefined ? null : { ...ai },
   ...(boosted ? { boosted: true as const } : {}),
   ...originOf(r),

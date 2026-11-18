@@ -37,7 +37,19 @@ describe('GET /terms with the shared list wired', () => {
     expect(body.exceptions.map((e) => e.phrase)).not.toContain('glarn lake');
     expect(body.community).toEqual({ hidden: 4 });
     expect(text(body.blocks30d)).not.toContain('CWT-2026');
-    expect(Object.keys(body).sort()).toEqual(['blocks30d', 'community', 'exceptions', 'terms']);
+    expect(Object.keys(body).sort()).toEqual(['blocks30d', 'community', 'exceptions', 'reviewFlags', 'terms']);
+  });
+
+  it('reviewFlags leaves out a community row the response hides, and lists one the adopter owns', async () => {
+    const w = await communityWorld();
+    const hidden = idOf(w, 'tarvox');
+    const own = idOf(w, 'zorbak');
+    for (const [i, termId] of [hidden, hidden, own, own].entries()) {
+      w.store.recordOverturn?.({ groupId: `g-${i}`, at: w.clock.t - 1000 + i, subject: 's_x', aliases: ['s_x'], source: 'auto_filter', termId, filterKey: null, reportId: null, strikes: null });
+    }
+    const body = (await w.call('GET', '/terms')).body as List & { reviewFlags: Array<{ termId: string; overturned: number }> };
+    expect(body.reviewFlags.map((f) => f.termId)).toEqual([own]);
+    expect(JSON.stringify(body)).not.toContain(hidden);
   });
 
   it('a community row a person touched is the adopter\'s: it is listed, and no longer counted as hidden', async () => {
@@ -99,7 +111,7 @@ describe('routes are absent when community is not passed, and the term routes ar
     expect(Object.keys(w.routes).filter((k) => /lookup|share|community/.test(k))).toEqual([]);
     expect(Object.keys(w.routes).filter((k) => /^GET \/terms\/:id/.test(k))).toEqual([]);
     const body = (await w.call('GET', '/terms')).body as List;
-    expect(Object.keys(body).sort()).toEqual(['blocks30d', 'exceptions', 'terms']);
+    expect(Object.keys(body).sort()).toEqual(['blocks30d', 'exceptions', 'reviewFlags', 'terms']);
   });
 
   it('the same world with and without community answers the existing term routes the same way (byte for byte, apart from the community field)', async () => {

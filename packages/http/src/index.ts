@@ -64,6 +64,8 @@ export type {
 export { CODE_OF_CONDUCT_CSP, playerRoutes } from './player.js';
 export { appealLandingRoutes } from './appealLanding.js';
 export type { AppealLandingOptions } from './appealLanding.js';
+export { createDeliveryWebhook } from './service/deliveryWebhook.js';
+export type { DeliveryWebhook, DeliveryWebhookOptions } from './service/deliveryWebhook.js';
 export { APPEAL_PAGE_CSP } from './appealPage.js';
 export type { NamesRateLimit, PlayerOptions } from './player.js';
 export { healthRoutes } from './health.js';

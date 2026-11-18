@@ -30,10 +30,11 @@ function checked<T>(run: () => T): T {
  * report or leaves an audit entry (the settings themselves are edited through `PUT /policy/profile`, the owner's `policy.write`). Every body
  * is `no-store`.
  *
- * - `GET /filters/stats?days=7|30`: `{ days, keys }`, what the filters did over the last 7 or 30 UTC days (today included): per counter key
+ * - `GET /filters/stats?days=7|30`: `{ days, keys, overturned }`, what the filters did over the last 7 or 30 UTC days (today included): per counter key
  *   (`link.unlisted`, `personal_info.phone`, `phrase.<id>`, `ratio.caps` ...) the counts by the action applied, `{ count, flag, mask, refuse,
  *   flag_capped }` (`flag_capped`: the daily cap turned a flag into a count). A phrase key also has `label`, the rule's label as it is now (absent
- *   when the rule is no longer in the settings). No person, room or text. Any other `days` is 400 `invalid_query`. No audit row.
+ *   when the rule is no longer in the settings). `overturned` (0.2.1) is a plain object of how many decisions a filter's report led to were overturned on appeal, by filter key, over the last 90 days
+ *   whatever `days` says (a fixed window; key order is not promised; a filter with none is absent). No person, room or text. Any other `days` is 400 `invalid_query`. No audit row.
  * - `POST /filters/test { text, candidate? }`: the verdict for one line, `{ verdict, delivered }`: every hit with its kind, detail, action, Community
  *   Rule and matched ranges (`spans`, offsets in `text`), the refusal if one, and the line as it would be delivered (`null` when it would be
  *   refused). Under the settings in force, or under `candidate` (not saved). `text` is 1 to 2 000 characters. Nothing is stored, counted, audited
@@ -60,7 +61,7 @@ export function filterRoutes(ctx: AdminContext, recentLines: () => readonly stri
         const label = labels.get(key);
         keys[key] = { ...counts, ...(label === undefined ? {} : { label }) };
       }
-      return { status: 200, body: { days: stats.days, keys } };
+      return { status: 200, body: { days: stats.days, keys, overturned: { ...cw.filters.overturned({ days: 90 }) } } };
     }),
 
     'POST /filters/test': ctx.secure('filters.read', (c) => {

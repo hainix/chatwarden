@@ -12,9 +12,12 @@ import type { ServeFlags } from '../cli/args.js';
 import type { RunningService, ServeDeps, ServeIo, SignalSource } from './launch.js';
 import { SERVE_OPTIONS } from '../cli/args.js';
 import { adminRoutes } from '../admin/index.js';
+import { appealLandingRoutes } from '../appealLanding.js';
 import { toFetch } from '../fetch.js';
 import { healthRoutes } from '../health.js';
 import { parseKeys } from './auth.js';
+import { createDeliveryWebhook } from './deliveryWebhook.js';
+import type { DeliveryWebhook } from './deliveryWebhook.js';
 import { nodeHandler, peerAddress } from './node.js';
 import { projectImporter } from './serveResolve.js';
 import { SERVICE_OPENAPI } from './openapi.js';
@@ -45,6 +48,13 @@ export interface ServeConfig {
   serviceKeys?: string;
   adminToken?: string;
   authModule?: string;
+  /** `CHATWARDEN_PUBLIC_URL`: where this service is reached from outside, such as `https://chat.example.com`. The appeal page is `<it>/appeal`. */
+  publicUrl?: string;
+  /** `CHATWARDEN_LANDING_ORIGINS`: the origins (comma separated) of the pages that may read the appeal page's json from a browser. */
+  landingOrigins?: string;
+  /** `CHATWARDEN_DELIVERY_URL` and `CHATWARDEN_DELIVERY_SECRET`: where a sanction notice and an appeal outcome are delivered, signed. Both or neither. */
+  deliveryUrl?: string;
+  deliverySecret?: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -112,7 +122,52 @@ export function resolveServeConfig(flags: ServeFlags, env: Env): ServeConfig {
     ...optional('serviceKeys', present(env.CHATWARDEN_SERVICE_KEYS)),
     ...optional('adminToken', present(env.CHATWARDEN_ADMIN_TOKEN)),
     ...optional('authModule', present(env.CHATWARDEN_AUTH_MODULE)),
+    ...optional('publicUrl', present(env.CHATWARDEN_PUBLIC_URL)),
+    ...optional('landingOrigins', present(env.CHATWARDEN_LANDING_ORIGINS)),
+    ...optional('deliveryUrl', present(env.CHATWARDEN_DELIVERY_URL)),
+    ...optional('deliverySecret', present(env.CHATWARDEN_DELIVERY_SECRET)),
   };
+}
+
+const PUBLIC_URL_MAX = 1900;
+const LANDING_ORIGINS_MAX = 20;
+
+/** The address of the appeal page from `CHATWARDEN_PUBLIC_URL`: an http(s) address with no credentials, query or fragment, at most 1900 characters; the page is that address (trailing slashes dropped) plus `/appeal`. */
+function landingUrlFrom(value: string): string {
+  const fail = (): never => {
+    throw new ServeError('CHATWARDEN_PUBLIC_URL must be an http or https address of at most 1900 characters with no credentials, no query string and no fragment.');
+  };
+  if (value.length > PUBLIC_URL_MAX || value.includes('?') || value.includes('#')) fail();
+  let url: URL | null = null;
+  try {
+    url = new URL(value);
+  } catch {
+    fail();
+  }
+  if (url === null || (url.protocol !== 'http:' && url.protocol !== 'https:') || url.username !== '' || url.password !== '' || url.hostname === '') fail();
+  return `${value.replace(/\/+$/, '')}/appeal`;
+}
+
+/** The origins from `CHATWARDEN_LANDING_ORIGINS`: a comma separated list of at most 20, each exactly an origin (`https://game.example`: no path, no trailing slash, no wildcard). Empty entries are skipped. */
+function landingOriginsFrom(value: string): string[] {
+  const fail = (): never => {
+    throw new ServeError('CHATWARDEN_LANDING_ORIGINS must be a comma separated list of at most 20 origins such as https://your-game.test (no path, no trailing slash).');
+  };
+  const items = value
+    .split(',')
+    .map((v) => v.trim())
+    .filter((v) => v !== '');
+  if (items.length > LANDING_ORIGINS_MAX) fail();
+  for (const item of items) {
+    let url: URL | null = null;
+    try {
+      url = new URL(item);
+    } catch {
+      fail();
+    }
+    if (url === null || (url.protocol !== 'http:' && url.protocol !== 'https:') || url.origin !== item) fail();
+  }
+  return items;
 }
 
 const MAKE_ONE = 'openssl rand -base64 32';
@@ -199,6 +254,21 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
     if (config.adminToken.length < MIN_TOKEN_LENGTH) throw new ServeError(`CHATWARDEN_ADMIN_TOKEN must be at least ${MIN_TOKEN_LENGTH} characters.`);
   }
 
+  // 2b. the appeal page and the delivery webhook
+  const landingUrl = config.publicUrl === undefined ? undefined : landingUrlFrom(config.publicUrl);
+  const landingOrigins = config.landingOrigins === undefined ? undefined : landingOriginsFrom(config.landingOrigins);
+  if ((config.deliveryUrl === undefined) !== (config.deliverySecret === undefined)) throw new ServeError('CHATWARDEN_DELIVERY_URL and CHATWARDEN_DELIVERY_SECRET must be set together.');
+  let webhook: DeliveryWebhook | undefined;
+  if (config.deliveryUrl !== undefined && config.deliverySecret !== undefined) {
+    const own = config.deliverySecret;
+    if (own.length < 32 || own === secret || keys.includes(own) || own === config.adminToken) throw new ServeError('CHATWARDEN_DELIVERY_SECRET must be its own secret of at least 32 characters.');
+    try {
+      webhook = createDeliveryWebhook({ url: config.deliveryUrl, secret: own, logger });
+    } catch {
+      throw new ServeError('CHATWARDEN_DELIVERY_URL must be an https address (http only for localhost and 127.0.0.1) with no credentials.');
+    }
+  }
+
   // 3. the files
   let profile = { preset: 'standard' as (typeof PRESETS)[number], overrides: {} as Record<string, unknown>, phrases: undefined as Record<string, unknown> | undefined };
   if (config.profileFile !== undefined) profile = splitProfile(await readJson(read, config.profileFile, 'profile'));
@@ -241,6 +311,10 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
         sharedPacing: config.sharedPacing,
         platform: { identify: () => ({}) },
         logger,
+        ...(landingUrl === undefined && landingOrigins === undefined
+          ? {}
+          : { appeals: { ...(landingUrl === undefined ? {} : { landingUrl }), ...(landingOrigins === undefined ? {} : { landingOrigins }) } }),
+        ...(webhook === undefined ? {} : { notices: { deliver: webhook.deliver } }),
       });
     } catch (err) {
       const where = (err as { path?: unknown }).path;
@@ -258,7 +332,7 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
       {
         '/v1': serviceRoutes(cw, { keys, logger, warnings, processes: config.processes > 1 ? 'multiple' : 'single', capabilities: { sharedPacing: config.sharedPacing } }),
         '/admin': adminRoutes(cw, { authorize, terms: live, logger }),
-        '': healthRoutes(cw, { logger }),
+        '': { ...healthRoutes(cw, { logger }), ...appealLandingRoutes(cw, { logger }) },
       },
       { unmatched: 'pass', remoteAddress: peerAddress, logger },
     );
@@ -271,6 +345,7 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
     });
     const address = server.address();
     const port = typeof address === 'object' && address !== null ? address.port : config.port;
+    if (landingUrl === undefined) log(JSON.stringify({ event: 'chatwarden.serve_no_public_url' }));
     log(JSON.stringify({ event: 'chatwarden.serve_started', port }));
     const kit = cw;
     let closing: Promise<void> | undefined;
@@ -278,6 +353,7 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
       port,
       close: () =>
         (closing ??= (async () => {
+          webhook?.dispose();
           const stopped = new Promise<void>((resolveClose) => server.close(() => resolveClose()));
           server.closeIdleConnections();
           const timer = setTimeout(() => server.closeAllConnections(), CLOSE_GRACE_MS);
@@ -288,6 +364,7 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
         })()),
     };
   } catch (err) {
+    webhook?.dispose();
     try {
       await cw?.close();
     } catch {
