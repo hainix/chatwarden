@@ -57,7 +57,9 @@ import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
 import { checkNameRules } from './names.js';
 import type { NameCheckResult, NameKind } from './names.js';
-import type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, AppealSummary, PlayerAppeal } from './appeals.js';
+import { resolveLandingOptions } from './appealLink.js';
+import type { AppealCaseResult, AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, AppealSummary, PlayerAppeal } from './appeals.js';
+import { isSanction } from './noticeCopy.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
 import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
@@ -198,6 +200,13 @@ export interface ChatwardenOptions {
    * room with every check off touches the store not at all. `cw.rooms.setPace` overrides stay per process. Default false: the in-memory pacer, exactly as before.
    */
   sharedPacing?: boolean;
+  /**
+   * Where the appeal page lives (0.2.1). Code or environment only, never the profile: `landingUrl` is the page's address (an http or https URL of at most 2000 characters, no credentials,
+   * no fragment, no query string; the kit adds `?t=<token>`), and `landingOrigins` the origins a script may read `GET /appeal/case` from (at most 20, each exactly an origin such as
+   * `https://game.example`: no path, no trailing slash, never `*`). Without `landingUrl` no sanction notice or door refusal carries an `appealUrl`. Checked once at creation: a bad value is a
+   * `RangeError` naming the option and never echoing it.
+   */
+  appeals?: { landingUrl?: string; landingOrigins?: readonly string[] };
   /** Defaults to the system clock. */
   clock?: Clock;
   /** The kill switch, read per call. Drives both sanction enforcement and report intake. Defaults to always on. */
@@ -1017,6 +1026,28 @@ export interface Chatwarden {
      * appeals or a person the kit does not hold. Carries a staff ref and never the statement: staff channels only.
      */
     forPerson(subject: SubjectId): AppealSummary[];
+    /**
+     * A signed link to the appeal page for one of the person's sanction notices (by its id), or null: appeals off, no `appeals.landingUrl`, an unknown id, a notice that is not a
+     * sanction, one that has ended, or one withdrawn with no decided appeal (a withdrawn notice whose sanction has a decided appeal still gets one, to read the outcome). The link is
+     * `landingUrl?t=<token>`, a capability for that one sanction, not a login: it works until `min(now + appeals.linkTtlMs, the end of the appealable window)`. `opts.ttlMs` replaces the
+     * setting (whole ms from one hour to 365 days, else `RangeError`). Never throws for a bad id. Never log the link: it is the key.
+     */
+    link(noticeId: string, opts?: { ttlMs?: number }): string | null;
+    /** Open a token: its signature and expiry only, nothing read from the store. `{ ok: false, reason: 'invalid' }` for any token that does not open. Never throws. Never log the token. */
+    openLink(token: string): { ok: true; noticeId: string; expiresAt: number } | { ok: false; reason: 'invalid' };
+    /**
+     * What the appeal page shows for a link (see `AppealCase`): the sanction as the player was shown it, whether an appeal can still be filed, the appeal if there is one and the sanction as it
+     * stands now. One answer, `{ ok: false, reason: 'invalid' }`, for every link that does not open: forged, expired, signed for another purpose, off, a notice that is gone, withdrawn (unless
+     * its sanction has a decided appeal) or moot. Read only; the link is a capability for one sanction, not a login.
+     */
+    caseByLink(token: string): AppealCaseResult;
+    /**
+     * File an appeal from a link, for the person on its notice: the same checks in the same order as `file` (an invalid link is `not_found`; a notice no longer on the record, a decided view,
+     * is `not_appealable`), and the same weekly cap per person. Never throws; a store failure is logged (`chatwarden.appeal_failed`) and answers `not_found`.
+     */
+    fileByLink(token: string, input: { statement: string }): AppealFileResult;
+    /** The origins the appeal page may be read from by a script (`appeals.landingOrigins`), frozen. The one list the HTTP layer reads, so the two cannot disagree. */
+    landingOrigins(): readonly string[];
   };
   /**
    * Decide a report: close it, write each sanction and its notice, and tell the people involved, in one
@@ -1208,6 +1239,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const limits = resolveLimits(opts.limits);
   if (opts.sharedPacing !== undefined && typeof opts.sharedPacing !== 'boolean') throw new TypeError('createChatwarden: sharedPacing must be true or false');
   if (opts.sharedPacing === true) assertPaceStore(store);
+  const landing = resolveLandingOptions(opts.appeals);
   // The phrase books: the grammar and sizes first, then every context's `chat.phrases` must name one. Each phrase is also run through the matcher and every profanity filter in force, once those exist (further down).
   const phraseBooks = checkPhraseBooks(opts.phrases);
   checkContextBooks(baseProfile.contexts, phraseBooks);
@@ -1508,7 +1540,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     // A report a filter filed is announced like any other: `report.created` with its origin.
     onSystemReport: (reportId) => announceReport(reportId),
   });
-  const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices });
+  // The signed appeal link on a refusal: the appeal service is built later, and only asked when a refusal happens.
+  const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices, appealUrl: (noticeId) => appealService.link(noticeId) });
   // The AI service is built after the audit trail it writes to; a decision reaches it through this late binding.
   const aiRef: { service?: AiService } = {};
   // The "do not automate" mark (design 6.4): kept under the canonical person; `cw.people.automation` is this same facade.
@@ -1589,6 +1622,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     ...(opts.signals?.accountAgeDays === undefined ? {} : { accountAgeDays: opts.signals.accountAgeDays }),
   });
   const signals = signalRef.service;
+  /** The sanction notices of a player's list with their signed appeal link, when one can be made. Fresh objects; any other notice is passed through untouched. */
+  const withAppealUrls = (list: PlayerNotice[]): PlayerNotice[] =>
+    list.map((n) => {
+      if (!isSanction(n.kind)) return n;
+      const url = appealService.link(n.id);
+      return url === null ? n : { ...n, appealUrl: url };
+    });
   /** A player-facing read: a store failure is logged (class only) and reads as `fallback`. */
   const forPlayer = <T>(who: RawWho, fallback: T, read: (subject: SubjectId) => T): T => {
     try {
@@ -1855,6 +1895,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     strikeWindowMs: limits.strikes.windowMs,
     strikesCount: () => limits.strikes.count,
     forgive: (subject, startsAt) => strikes.forgive(subject, startsAt),
+    secret: opts.secret,
+    landingUrl: landing.landingUrl,
+    landingOrigins: landing.landingOrigins,
   });
 
   // Names. The profanity filter for a name is the kit's own when the profile has one; otherwise (a profile that allows swearing in chat) it is
@@ -2295,9 +2338,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       rules,
     }),
     notices: {
-      pending: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.pending(s)),
+      pending: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => withAppealUrls(notices.pending(s))),
       ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),
-      record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
+      record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => withAppealUrls(notices.record(s))),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
       lineText: (line) => notices.lineText(line),
     },
@@ -2311,6 +2354,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       openCount: () => appealService.openCount(),
       stats: (q) => appealService.stats(q),
       forPerson: (subject) => appealService.forPerson(subject),
+      link: (noticeId, o) => appealService.link(noticeId, o),
+      openLink: (token) => appealService.openLink(token),
+      caseByLink: (token) => appealService.caseByLink(token),
+      fileByLink: (token, input) => appealService.fileByLink(token, input),
+      landingOrigins: () => landing.landingOrigins,
     },
     decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),

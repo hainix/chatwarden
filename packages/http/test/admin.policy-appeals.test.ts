@@ -5,7 +5,7 @@ import { errorOf, world } from './world.js';
 // effective, base and layer; PUT accepts layer.appeals and layer.names; a bad value is 400 invalid_profile with the layer path;
 // DELETE ?section= resets one.
 
-const APPEALS_OFF = { enabled: false, perPlayerPerWeek: 3, allowSelfReview: false };
+const APPEALS_OFF = { enabled: false, perPlayerPerWeek: 3, allowSelfReview: false, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} };
 const NAMES_OFF = { profanity: false, keepBlocked: false, renames: false, maskInHub: true, reserved: [], reservedAllow: [], reservedRule: 2 };
 const PUT = (body: unknown, role: 'owner' | 'senior' | 'moderator' = 'owner', actor = 'owner_ann') => ({ role, actor, body });
 
@@ -39,7 +39,7 @@ describe('appeals and names over /policy/profile', () => {
       ok: true,
       version: 1,
       changed: ['appeals', 'names'],
-      effective: { appeals: { enabled: true, perPlayerPerWeek: 6, allowSelfReview: false }, names: { ...NAMES_OFF, renames: true } },
+      effective: { appeals: { enabled: true, perPlayerPerWeek: 6, allowSelfReview: false, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} }, names: { ...NAMES_OFF, renames: true } },
       layer: { appeals: { enabled: true }, names: { renames: true } },
     });
     expect((res.body as ProfileBody).base.appeals).toEqual({ ...APPEALS_OFF, perPlayerPerWeek: 6 });

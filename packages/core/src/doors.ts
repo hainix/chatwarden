@@ -18,6 +18,11 @@ export interface DoorRefusal {
   until: number | null;
   refCode: string;
   noticeId?: string;
+  /**
+   * A signed link to the appeal page for the sanction behind the refusal, when the notice has one (appeals on, `appeals.landingUrl` set). A new link is made on every refusal.
+   * It is a capability for that one sanction, not a login: do not log it.
+   */
+  appealUrl?: string;
 }
 
 export interface DoorServiceDeps {
@@ -31,6 +36,11 @@ export interface DoorServiceDeps {
    * failed lookup is logged and the extra field is left out; the door still refuses.
    */
   notices?: NoticeService;
+  /**
+   * The signed appeal link for a notice, or null when there is none. Optional: without it a refusal never carries an `appealUrl`. A throw is logged
+   * (`doors.appeal_link_failed`, the class only) and the field is left out; the door still refuses.
+   */
+  appealUrl?: (noticeId: string) => string | null;
 }
 
 /** Joining or creating a private room: only a full ban closes these. Public rooms and matchmaking add area bans. */
@@ -76,6 +86,7 @@ export class DoorService {
   private readonly clock: Clock;
   private readonly logger: Logger | undefined;
   private readonly notices: NoticeService | undefined;
+  private readonly appealUrl: ((noticeId: string) => string | null) | undefined;
 
   constructor(deps: DoorServiceDeps) {
     this.hasher = deps.hasher;
@@ -84,6 +95,7 @@ export class DoorService {
     this.clock = deps.clock;
     this.logger = deps.logger;
     this.notices = deps.notices;
+    this.appealUrl = deps.appealUrl;
   }
 
   /**
@@ -119,7 +131,11 @@ export class DoorService {
       if (hit === null) return null;
       const refusal: DoorRefusal = { kind: hit.kind, until: hit.active.until, refCode: hit.active.refCode };
       const noticeId = this.noticeId(hit.active.groupId, hit.subject);
-      if (noticeId !== null) refusal.noticeId = noticeId;
+      if (noticeId !== null) {
+        refusal.noticeId = noticeId;
+        const url = this.linkFor(noticeId);
+        if (url !== null) refusal.appealUrl = url;
+      }
       return refusal;
     } catch (err) {
       this.logFailure(err);
@@ -134,6 +150,18 @@ export class DoorService {
       return this.notices.noticeIdForGroup(groupId, subject);
     } catch (err) {
       safeWarn(this.logger, 'doors.notice_lookup_failed', { error: err instanceof Error ? err.name : typeof err });
+      return null;
+    }
+  }
+
+  /** The appeal link for the notice, or null. Never throws: a broken link only drops the extra field. */
+  private linkFor(noticeId: string): string | null {
+    if (this.appealUrl === undefined) return null;
+    try {
+      const url: unknown = this.appealUrl(noticeId);
+      return typeof url === 'string' && url !== '' ? url : null;
+    } catch (err) {
+      safeWarn(this.logger, 'doors.appeal_link_failed', { error: err instanceof Error ? err.name : typeof err });
       return null;
     }
   }

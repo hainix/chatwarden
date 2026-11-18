@@ -103,7 +103,7 @@ describe('the form', () => {
     const body = puts(w)[0]!.body as { layer: Record<string, unknown>; reason: string };
     expect(body.layer).toEqual({ ai: { level: 1 }, appeals: { enabled: true, perPlayerPerWeek: 5, allowSelfReview: true } });
     expect(body.reason).toBe('Players asked for it');
-    expect((await w.client.policyProfile()).effective.appeals).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: true });
+    expect((await w.client.policyProfile()).effective.appeals).toEqual({ enabled: true, perPlayerPerWeek: 5, allowSelfReview: true, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
     await screen.findByText('Appeals settings saved.');
   });
 
@@ -147,7 +147,7 @@ describe('the form', () => {
     await save(user);
     await waitFor(() => expect(puts(w)).toHaveLength(1));
     expect((puts(w)[0]!.body as { layer: { appeals: unknown } }).layer.appeals).toEqual({ enabled: false, perPlayerPerWeek: 5, allowSelfReview: true });
-    expect((await w.client.policyProfile()).effective.appeals).toEqual({ enabled: false, perPlayerPerWeek: 5, allowSelfReview: true });
+    expect((await w.client.policyProfile()).effective.appeals).toEqual({ enabled: false, perPlayerPerWeek: 5, allowSelfReview: true, linkTtlMs: 2_592_000_000, contact: null, emailsOutcome: false, words: {} });
   });
 
   it('switching appeals back on brings the error back, and Save is held again', async () => {

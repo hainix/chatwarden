@@ -43,6 +43,15 @@ export function appliesInRecord(r: Pick<NoticeRow, 'withdrawnAt' | 'kind' | 'cre
   );
 }
 
+/**
+ * Until when a sanction notice can still be appealed (epoch ms), or null when it has no end (a permanent sanction). A warning stays appealable for the 90 days it is on the
+ * record; any other kind until the later of its end and those 90 days. The same rule {@link appliesInRecord} applies at one instant, as a time.
+ */
+export function appealableUntil(r: Pick<NoticeRow, 'kind' | 'createdAt' | 'until'>): number | null {
+  if (r.kind === 'warning') return r.createdAt + NOTICE_RECORD_WINDOW_MS;
+  return r.until === null ? null : Math.max(r.createdAt + NOTICE_RECORD_WINDOW_MS, r.until);
+}
+
 const KNOWN_KINDS: readonly string[] = [...SANCTION_NOTICE_KINDS, 'report_outcome', ...MESSAGE_NOTICE_KINDS];
 const isMessageKind = (kind: unknown): kind is MessageNoticeKind => (MESSAGE_NOTICE_KINDS as readonly unknown[]).includes(kind);
 
@@ -69,6 +78,11 @@ export interface PlayerNotice {
   createdAt: number;
   /** True for a warning: the client must show it and get an `ack` before the player starts the next game. */
   mustAcknowledge: boolean;
+  /**
+   * A signed link to the appeal page for this sanction, when one can be made (appeals on, `appeals.landingUrl` set, the notice a sanction that can still be appealed). Set by
+   * `cw.notices.pending` and `cw.notices.record`; absent otherwise. The link is a capability for this one sanction, not a login: do not log it or put it in a shared place.
+   */
+  appealUrl?: string;
 }
 
 export type ExcerptErrorCode = 'foreign_line' | 'too_many' | 'invalid_line';
@@ -486,6 +500,11 @@ export class NoticeService {
     return this.store
       .loadNotices(this.subjects.aliasesOf(person))
       .filter((r) => KNOWN_KINDS.includes(r.kind) && this.subjects.canonical(r.subject) === person);
+  }
+
+  /** A stored notice as the player reads it: the very words and masking of `pending` and `record`. For the appeal page, which shows the notice a link is for. */
+  viewOf(row: NoticeRow): PlayerNotice {
+    return this.toPlayer(row);
   }
 
   private toPlayer(r: NoticeRow): PlayerNotice {

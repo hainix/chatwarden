@@ -14,7 +14,20 @@ const PER_WEEK_MIN = 1;
 const PER_WEEK_MAX = 20;
 const PER_WEEK_DEFAULT = 3;
 
-const KEYS = ['enabled', 'perPlayerPerWeek', 'allowSelfReview'] as const;
+/** The allowed range of `linkTtlMs` (one hour to 365 days) and its default (30 days). */
+export const LINK_TTL_MIN_MS = 3_600_000;
+export const LINK_TTL_MAX_MS = 31_536_000_000;
+const LINK_TTL_DEFAULT_MS = 2_592_000_000;
+const CONTACT_MAX = 200;
+const WORDS_MAX_LANGUAGES = 16;
+const WORDS_MAX_ENTRIES = 80;
+const WORD_MAX = 600;
+const LANGUAGE_KEY = /^[a-z]{2,3}$/;
+const WORD_KEY = /^[a-z][A-Za-z0-9_.]{0,63}$/;
+/** True when the text holds a C0 or C1 control character (a newline and a tab included). */
+const hasControl = (text: string): boolean => [...text].some((ch) => ch.charCodeAt(0) < 32 || (ch.charCodeAt(0) >= 127 && ch.charCodeAt(0) <= 159));
+
+const KEYS = ['enabled', 'perPlayerPerWeek', 'allowSelfReview', 'linkTtlMs', 'contact', 'emailsOutcome', 'words'] as const;
 
 /** What a moderator may rule on an appeal: the sanction stands, is made lighter, or is lifted. */
 export const APPEAL_OUTCOMES = ['uphold', 'reduce', 'revoke'] as const;
@@ -61,6 +74,18 @@ export interface AppealSettings {
   perPlayerPerWeek?: number;
   /** May the moderator who made the original decision decide the appeal? Default false. For a team of one. */
   allowSelfReview?: boolean;
+  /** How long a signed appeal link works, in ms: 3,600,000 (one hour) to 31,536,000,000 (365 days). Default 30 days. Never longer than the sanction stays appealable. */
+  linkTtlMs?: number;
+  /** Where a player can write to a person: one line of 1 to 200 characters (no control, bidirectional or zero-width character). Shown on the appeal page. Null or left out: none. */
+  contact?: string | null;
+  /** Does the delivery tell the person by email (through the game) when an appeal is decided? Default false: the page and the notice still show the outcome. */
+  emailsOutcome?: boolean;
+  /**
+   * The game's own words for the appeal page and the delivery text, by language: `{ de: { 'player.appealPage.title': '...' } }`. At most 16 languages (two or three
+   * lower-case letters), 80 entries each; a key is a word key (`^[a-z][A-Za-z0-9_.]{0,63}$`), a value 1 to 600 characters with no control character. Only the
+   * structure is checked here: a key the kit does not use is ignored when the words are read. Default none.
+   */
+  words?: Readonly<Record<string, Readonly<Record<string, string>>>>;
 }
 
 /**
@@ -70,7 +95,15 @@ export interface ResolvedAppeals {
   enabled: boolean;
   perPlayerPerWeek: number;
   allowSelfReview: boolean;
+  linkTtlMs: number;
+  contact: string | null;
+  emailsOutcome: boolean;
+  /** The game's own words by language, deep-frozen. */
+  words: Readonly<Record<string, Readonly<Record<string, string>>>>;
 }
+
+/** The default `words`: nothing, shared and frozen. */
+const NO_WORDS: ResolvedAppeals['words'] = Object.freeze({});
 
 function isPlain(v: unknown): v is Record<string, unknown> {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
@@ -89,22 +122,76 @@ function given(o: Record<string, unknown>, key: string): unknown {
  * `input` once.
  */
 export function resolveAppeals(input: AppealSettings | undefined, path = 'appeals'): ResolvedAppeals {
-  if (input === undefined) return { enabled: false, perPlayerPerWeek: PER_WEEK_DEFAULT, allowSelfReview: false };
+  if (input === undefined) {
+    return { enabled: false, perPlayerPerWeek: PER_WEEK_DEFAULT, allowSelfReview: false, linkTtlMs: LINK_TTL_DEFAULT_MS, contact: null, emailsOutcome: false, words: NO_WORDS };
+  }
   if (!isPlain(input)) throw new ProfileError(path, 'must be an object');
   for (const k of Object.keys(input)) if (!(KEYS as readonly string[]).includes(k)) throw new ProfileError(`${path}.${k}`, 'is not a known setting');
   const enabled = given(input, 'enabled');
   const perWeek = given(input, 'perPlayerPerWeek');
   const self = given(input, 'allowSelfReview');
+  const ttl = given(input, 'linkTtlMs');
+  const contact = given(input, 'contact');
+  const emails = given(input, 'emailsOutcome');
+  const words = given(input, 'words');
   if (enabled !== undefined && typeof enabled !== 'boolean') throw new ProfileError(`${path}.enabled`, 'must be true or false');
   if (perWeek !== undefined && (typeof perWeek !== 'number' || !Number.isSafeInteger(perWeek) || perWeek < PER_WEEK_MIN || perWeek > PER_WEEK_MAX)) {
     throw new ProfileError(`${path}.perPlayerPerWeek`, `must be a whole number from ${PER_WEEK_MIN} to ${PER_WEEK_MAX}`);
   }
   if (self !== undefined && typeof self !== 'boolean') throw new ProfileError(`${path}.allowSelfReview`, 'must be true or false');
+  if (ttl !== undefined && (typeof ttl !== 'number' || !Number.isSafeInteger(ttl) || ttl < LINK_TTL_MIN_MS || ttl > LINK_TTL_MAX_MS)) {
+    throw new ProfileError(`${path}.linkTtlMs`, `must be a whole number of milliseconds from ${LINK_TTL_MIN_MS} (one hour) to ${LINK_TTL_MAX_MS} (365 days)`);
+  }
+  if (emails !== undefined && typeof emails !== 'boolean') throw new ProfileError(`${path}.emailsOutcome`, 'must be true or false');
   return {
     enabled: enabled ?? false,
     perPlayerPerWeek: (perWeek as number | undefined) ?? PER_WEEK_DEFAULT,
     allowSelfReview: self ?? false,
+    linkTtlMs: (ttl as number | undefined) ?? LINK_TTL_DEFAULT_MS,
+    contact: resolveContact(contact, `${path}.contact`),
+    emailsOutcome: emails ?? false,
+    words: resolveWords(words, `${path}.words`),
   };
+}
+
+/** One line for the appeal page, trimmed: 1 to 200 characters, nothing the cleaner would strip and no line break. Null and absent are none. */
+function resolveContact(v: unknown, path: string): string | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'string') throw new ProfileError(path, 'must be a line of text or null');
+  const text = v.trim();
+  const length = statementLength(text);
+  if (length < 1 || length > CONTACT_MAX || hasControl(text) || normalizeStatement(text) !== text) {
+    throw new ProfileError(path, `must be one line of 1 to ${CONTACT_MAX} characters with no control, bidirectional or zero-width character`);
+  }
+  return text;
+}
+
+/** The game's own words: structure only. A deep-frozen copy; nothing of the input is kept by reference. Messages never echo a key or a value. */
+function resolveWords(v: unknown, path: string): ResolvedAppeals['words'] {
+  if (v === undefined) return NO_WORDS;
+  const shape = `must be an object of at most ${WORDS_MAX_LANGUAGES} languages, each an object of at most ${WORDS_MAX_ENTRIES} words`;
+  if (!isPlain(v)) throw new ProfileError(path, shape);
+  const languages = Object.keys(v);
+  if (languages.length > WORDS_MAX_LANGUAGES) throw new ProfileError(path, shape);
+  const out: Record<string, Readonly<Record<string, string>>> = {};
+  for (const language of languages) {
+    if (!LANGUAGE_KEY.test(language)) throw new ProfileError(path, 'a language must be two or three lower-case letters');
+    const table: unknown = v[language];
+    if (!isPlain(table)) throw new ProfileError(path, shape);
+    const keys = Object.keys(table);
+    if (keys.length > WORDS_MAX_ENTRIES) throw new ProfileError(path, shape);
+    const copy: Record<string, string> = {};
+    for (const key of keys) {
+      const value: unknown = table[key];
+      if (!WORD_KEY.test(key)) throw new ProfileError(path, 'a word key must start with a lower-case letter and use letters, digits, dot and underscore (64 at most)');
+      if (typeof value !== 'string' || value.length < 1 || value.length > WORD_MAX || hasControl(value)) {
+        throw new ProfileError(path, `a word must be text of 1 to ${WORD_MAX} characters with no control character`);
+      }
+      copy[key] = value;
+    }
+    out[language] = Object.freeze(copy);
+  }
+  return Object.freeze(out);
 }
 
 /** What a player sees of an appeal. No staff field, no reason, no id of a sanction or a person. */
@@ -256,6 +343,41 @@ export interface AppealDetail extends AppealSummary {
   /** What the player was shown with the sanction: their own lines, as the notice kept them (already masked where blocked). */
   shown: Array<{ text: string; day: string }>;
 }
+
+/**
+ * What the appeal page shows for one signed link (0.2.1): the sanction as the player was shown it, whether an appeal can still be filed, the appeal if there is one, and the
+ * sanction as it stands now. An allow-list: no notice id, group id, person, key, account, address, staff ref, private reason or statement. The link is the capability; this is
+ * all it opens.
+ */
+export interface AppealCase {
+  /** The notice as the player's own notice shows it (the same words and masking), without its id. */
+  notice: {
+    kind: 'warning' | 'chat' | 'area' | 'ban';
+    rule: RuleRef | null;
+    ruleLabel: string | null;
+    until: number | null;
+    refCode: string | null;
+    createdAt: number;
+    excerpt: Array<{ text: string; day: string }>;
+  };
+  /** True while an appeal can be filed from this link: the sanction is live and still standing, and has had no appeal. */
+  canAppeal: boolean;
+  /** The appeal filed for this sanction, if any. `reason` is the fixed reason code of a decision (null while open, and for a decision that kept none). */
+  appeal: { status: 'open' | 'upheld' | 'reduced' | 'revoked'; createdAt: number; decidedAt: number | null; reason: AppealReasonCode | null } | null;
+  /** The sanction as it stands after the appeal: the original (upheld), the replacement (reduced), or null (open, revoked). */
+  standing: { kind: 'warning' | 'chat' | 'area' | 'ban'; until: number | null } | null;
+  /** When the link stops working (epoch ms). */
+  expiresAt: number;
+  /** Whether the person is also told of the outcome by email (the setting; the game sends it). */
+  emailsOutcome: boolean;
+  /** The line the game gave for help, or null. */
+  contact: string | null;
+  /** The longest statement (the same as `APPEAL_STATEMENT_MAX`). */
+  statementMax: number;
+}
+
+/** The answer to `cw.appeals.caseByLink`: the case, or one answer for every link that does not open (forged, expired, off, gone, withdrawn, moot). */
+export type AppealCaseResult = { ok: true; case: AppealCase } | { ok: false; reason: 'invalid' };
 
 export interface AppealPage {
   items: AppealSummary[];

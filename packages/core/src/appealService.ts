@@ -7,11 +7,16 @@ import {
   APPEAL_REASONS,
   APPEAL_STATEMENT_MAX,
   APPEAL_STATS_MIN_SANCTIONS,
+  LINK_TTL_MAX_MS,
+  LINK_TTL_MIN_MS,
   normalizeStatement,
   SANCTION_KIND_ORDER,
   statementLength,
 } from './appeals.js';
+import { mintAppealToken, verifyAppealToken } from './appealLink.js';
 import type {
+  AppealCase,
+  AppealCaseResult,
   AppealCause,
   AppealDecideResult,
   AppealDecision,
@@ -31,7 +36,7 @@ import { randomId } from './crypto.js';
 import type { KitEvent } from './events.js';
 import { safeWarn } from './log.js';
 import { appealReduction } from './noticePlan.js';
-import { appliesInRecord } from './notices.js';
+import { appealableUntil, appliesInRecord, NOTICE_RECORD_WINDOW_MS } from './notices.js';
 import type { NoticeService } from './notices.js';
 import { parseRuleRef } from './rules.js';
 import type { RuleRef } from './rules.js';
@@ -39,7 +44,7 @@ import { APPEALS_START_TOKEN, MAX_SANCTION_DURATION_MS, writeSanction } from './
 import type { SanctionIndex } from './sanctions.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
 import type { SubjectIndex } from './subjects.js';
-import type { AppealRow, Clock, Logger, Matcher, RawWho, SanctionRow, Store, SubjectId } from './types.js';
+import type { AppealRow, Clock, Logger, Matcher, NoticeRow, RawWho, SanctionRow, Store, SubjectId } from './types.js';
 
 // The appeals service: filing (the player side) here; deciding and the staff reads are added to the same class. It holds no state of its own:
 // every fact is in the store, so two processes on one database agree.
@@ -101,6 +106,12 @@ export interface AppealServiceDeps {
    * strikes that earned it (`StrikeService.forgive`). A throw is logged by class and never fails the decision.
    */
   forgive?: (subject: SubjectId, startsAt: number) => void;
+  /** The kit's secret: keys the signed appeal link. */
+  secret: string;
+  /** The appeal page's address (`ChatwardenOptions.appeals.landingUrl`), or null: without it no link is made. */
+  landingUrl: string | null;
+  /** The origins the appeal page may be read from by a script (`ChatwardenOptions.appeals.landingOrigins`). Frozen. */
+  landingOrigins: readonly string[];
 }
 
 /** A decision step that must roll the transaction back and answer something other than success. */
@@ -233,17 +244,25 @@ export class AppealService {
     if (subject === null || typeof noticeId !== 'string' || noticeId === '') return NOT_FOUND;
     const notice = this.d.notices.ownRow(subject, noticeId);
     if (notice === null) return NOT_FOUND;
+    return this.fileFor(this.d.subjects.canonical(subject), notice, input.statement);
+  }
+
+  /**
+   * The filing itself, once the notice is known to be the person's (found by their own details in {@link file}, or read from a signed link in {@link fileByLink}): the one body
+   * both entrances run, so the order of the checks and the weekly cap are one code path. `person` is canonical. Checks: not_appealable, statement_invalid, the sanction still
+   * standing, then in one transaction already_appealed and rate.
+   */
+  private fileFor(person: SubjectId, notice: NoticeRow, rawStatement: unknown): AppealFileResult {
     const now = this.d.clock.now();
     if (notice.groupId === null || !appliesInRecord(notice, now)) return { ok: false, refused: 'not_appealable' };
 
-    const statement = normalizeStatement(input.statement);
+    const statement = normalizeStatement(rawStatement);
     if (statement === '' || statementLength(statement) > APPEAL_STATEMENT_MAX) return { ok: false, refused: 'statement_invalid' };
 
     const group = this.d.store.loadSanctionSubjectRow?.(notice.groupId) ?? null;
     // The notice outlived its sanction rows (retention): there is nothing left to appeal.
     if (group === null || group.revokedAt !== undefined) return { ok: false, refused: 'not_appealable' };
 
-    const person = this.d.subjects.canonical(subject);
     const aliases = this.d.subjects.aliasesOf(person);
     const cap = this.d.settings().perPlayerPerWeek;
     const row: AppealRow = {
@@ -289,6 +308,151 @@ export class AppealService {
       safeWarn(this.d.logger, 'chatwarden.event_failed', { error: errName(err) });
     }
     return { ok: true, appeal: toPlayerAppeal(row) };
+  }
+
+  // --- the signed link -------------------------------------------------------------------------------------------------------
+
+  /** Is this notice one a link can be about: it has a sanction group and is one of the four sanction kinds. */
+  private static isSanctionNotice(row: NoticeRow): row is NoticeRow & { groupId: string; kind: 'warning' | 'chat' | 'area' | 'ban' } {
+    return row.groupId !== null && (row.kind === 'warning' || row.kind === 'chat' || row.kind === 'area' || row.kind === 'ban');
+  }
+
+  /** The appeal filed for the notice's sanction, found among the person's newest appeals; null when there is none. */
+  private appealOf(row: NoticeRow): AppealRow | null {
+    const aliases = this.d.subjects.aliasesOf(this.d.subjects.canonical(row.subject));
+    return (this.d.store.listAppealsBy?.(aliases, MINE_MAX) ?? []).find((r) => r.groupId === row.groupId) ?? null;
+  }
+
+  /**
+   * The one rule behind every use of a link, read from the store now. A notice is LIVE when it is on the person's record, or a DECIDED VIEW when it was withdrawn and its sanction
+   * has a decided appeal (so the person can still read the outcome). Anything else (a notice that is gone, not a sanction, ended, withdrawn with no decided appeal, or whose appeal
+   * is moot) is null.
+   */
+  private linkState(row: NoticeRow | null, now: number): { row: NoticeRow & { groupId: string; kind: 'warning' | 'chat' | 'area' | 'ban' }; live: boolean; appeal: AppealRow | null } | null {
+    if (row === null || !AppealService.isSanctionNotice(row)) return null;
+    const appeal = this.appealOf(row);
+    if (appeal !== null && appeal.status === 'moot') return null;
+    const live = appliesInRecord(row, now);
+    const decided = row.withdrawnAt !== null && appeal !== null && appeal.status !== 'open';
+    return live || decided ? { row, live, appeal } : null;
+  }
+
+  /**
+   * A signed link to the appeal page for one sanction notice, or null: appeals off, no `appeals.landingUrl`, a notice that does not exist, is not a sanction, has ended, or was withdrawn
+   * with no decided appeal. The link is a capability for that one sanction, not a login: it works until `min(now + linkTtlMs, the end of the appealable window)`. A withdrawn notice whose
+   * sanction has a decided appeal still gets a link, to read the outcome. `opts.ttlMs` replaces the setting (a whole number of ms from one hour to 365 days, else `RangeError`). Never
+   * throws for a bad `noticeId`; a store failure is logged by class and answers null.
+   */
+  link(noticeId: unknown, opts?: { ttlMs?: number }): string | null {
+    const given: unknown = typeof opts === 'object' && opts !== null ? opts.ttlMs : undefined;
+    if (given !== undefined && (typeof given !== 'number' || !Number.isSafeInteger(given) || given < LINK_TTL_MIN_MS || given > LINK_TTL_MAX_MS)) {
+      throw new RangeError(`appeals.link: ttlMs must be a whole number from ${LINK_TTL_MIN_MS} to ${LINK_TTL_MAX_MS}`);
+    }
+    const landing = this.d.landingUrl;
+    if (landing === null || !this.enabled() || typeof noticeId !== 'string' || noticeId === '' || noticeId.length > 64) return null;
+    try {
+      const now = this.d.clock.now();
+      const state = this.linkState(this.d.store.loadNotice?.(noticeId) ?? null, now);
+      if (state === null) return null;
+      const end = state.live ? appealableUntil(state.row) : now + NOTICE_RECORD_WINDOW_MS;
+      const ttl = (given as number | undefined) ?? this.d.settings().linkTtlMs;
+      const expiresAt = Math.min(now + ttl, end ?? Infinity);
+      if (!(expiresAt > now)) return null;
+      const url = new URL(landing);
+      url.searchParams.set('t', mintAppealToken(this.d.secret, state.row.id, expiresAt));
+      return url.toString();
+    } catch (err) {
+      this.warn(err);
+      return null;
+    }
+  }
+
+  /** Open a token: its signature and expiry only (nothing is read from the store). Never throws. */
+  openLink(token: unknown): { ok: true; noticeId: string; expiresAt: number } | { ok: false; reason: 'invalid' } {
+    const opened = verifyAppealToken(this.d.secret, token, this.d.clock.now());
+    return opened.ok ? opened : { ok: false, reason: 'invalid' };
+  }
+
+  /**
+   * The one validity rule shared by {@link caseByLink} and {@link fileByLink}: appeals off, a forged or expired token, a notice that is gone, one that is neither live nor a decided
+   * view, and a moot appeal all give null, so the caller cannot tell them apart. May throw when the store does (the callers catch it).
+   */
+  private resolveLink(token: unknown): { row: NoticeRow & { groupId: string; kind: 'warning' | 'chat' | 'area' | 'ban' }; expiresAt: number; live: boolean; appeal: AppealRow | null } | null {
+    if (!this.enabled()) return null;
+    const now = this.d.clock.now();
+    const opened = verifyAppealToken(this.d.secret, token, now);
+    if (!opened.ok) return null;
+    const state = this.linkState(this.d.store.loadNotice?.(opened.noticeId) ?? null, now);
+    return state === null ? null : { ...state, expiresAt: opened.expiresAt };
+  }
+
+  /**
+   * What the appeal page shows for a signed link, or `{ ok: false, reason: 'invalid' }`: one answer for a forged, expired, erased, purged, withdrawn or moot link and for appeals being off.
+   * Read only. A store failure is logged by class and answers invalid.
+   */
+  caseByLink(token: unknown): AppealCaseResult {
+    try {
+      const link = this.resolveLink(token);
+      if (link === null) return { ok: false, reason: 'invalid' };
+      const { row, live, appeal } = link;
+      const view = this.d.notices.viewOf(row);
+      const group = this.d.store.loadSanctionSubjectRow?.(row.groupId) ?? null;
+      const standing = (kind: 'warning' | 'chat' | 'area' | 'ban', until: number | null) => ({ kind, until: kind === 'warning' ? null : until });
+      let stands: AppealCase['standing'] = null;
+      if (appeal !== null && appeal.status === 'upheld') {
+        // The original, while it still stands (a moderator may have revoked it since).
+        stands = group !== null && group.revokedAt === undefined ? standing(row.kind, row.until) : null;
+      } else if (appeal !== null && appeal.status === 'reduced' && appeal.replacementGroupId !== null) {
+        const replacement = this.d.store.loadSanctionSubjectRow?.(appeal.replacementGroupId) ?? null;
+        const kind = replacement?.kind;
+        stands = replacement !== null && replacement.revokedAt === undefined && (kind === 'warning' || kind === 'chat' || kind === 'area' || kind === 'ban') ? standing(kind, replacement.endsAt) : null;
+      }
+      const settings = this.d.settings();
+      return {
+        ok: true,
+        case: {
+          notice: {
+            kind: row.kind,
+            rule: view.rule,
+            ruleLabel: view.ruleLabel,
+            until: view.until,
+            refCode: view.refCode,
+            createdAt: view.createdAt,
+            excerpt: view.excerpt.map((l) => ({ text: l.text, day: l.day })),
+          },
+          canAppeal: live && group !== null && group.revokedAt === undefined && appeal === null,
+          appeal:
+            appeal === null
+              ? null
+              : { status: appeal.status as 'open' | 'upheld' | 'reduced' | 'revoked', createdAt: appeal.createdAt, decidedAt: appeal.decidedAt, reason: knownReasonCode(appeal) },
+          standing: stands,
+          expiresAt: link.expiresAt,
+          emailsOutcome: settings.emailsOutcome,
+          contact: settings.contact,
+          statementMax: APPEAL_STATEMENT_MAX,
+        },
+      };
+    } catch (err) {
+      this.warn(err);
+      return { ok: false, reason: 'invalid' };
+    }
+  }
+
+  /**
+   * File an appeal from a signed link: for the person on the notice (never one a caller names), with the same checks in the same order as {@link file} (one code path), so an invalid
+   * link is `not_found`, a notice no longer on the record (a decided view) `not_appealable`, then the statement, `already_appealed` and the weekly `rate` per person. Never throws; a store
+   * failure is logged by class and answers `not_found`.
+   */
+  fileByLink(token: unknown, input: { statement: string }): AppealFileResult {
+    if (!this.enabled()) return { ok: false, refused: 'off' };
+    try {
+      const link = this.resolveLink(token);
+      if (link === null || typeof input !== 'object' || input === null) return NOT_FOUND;
+      return this.fileFor(this.d.subjects.canonical(link.row.subject), link.row, input.statement);
+    } catch (err) {
+      this.warn(err);
+      return NOT_FOUND;
+    }
   }
 
   /**
