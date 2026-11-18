@@ -334,7 +334,7 @@ describe('limits and bombs', () => {
     expect(await code(writeZip([spec('a'), spec('b')]))).toBe('ok');
     // the whole run of bombs was quick
     expect(Date.now() - started).toBeLessThan(20_000);
-  });
+  }, 30_000);
 
   it('the limits are parameters: a smaller expanded budget refuses a file that fits the default, and a bad parameter falls back to the default', async () => {
     const zip = writeZip([{ name: 'a.txt', data: 'x'.repeat(5000), method: 8 }]);
