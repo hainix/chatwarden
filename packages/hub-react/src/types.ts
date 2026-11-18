@@ -43,6 +43,7 @@ import type {
   Suggestion,
 } from '@chatwarden/core';
 import type { ErasePreview, ErasureReceipt, FilterCheckResult, FilterKeyCounts, FilterTestResult, HoldCode, PrivacyExport, PrivacyStatement, PromptExcluded, TeamNote } from '@chatwarden/core';
+import type { GameKind, PresetName } from '@chatwarden/core';
 import type { AiReadAgainBody, ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
 export type { PolicyLayer, PolicySection, PromptExcluded, TeamNote };
@@ -713,6 +714,24 @@ export type PolicySamples = Extract<PolicyPreview, { ok: true }>['samples'];
 export type PolicySaved = { ok: true; version: number; changed: PolicySection[] } & Partial<PolicyState>;
 
 export type PolicyFormat = 'markdown' | 'html' | 'text';
+
+export type { GameKind };
+
+/** What one kind of game would set up: the preset it comes from and the layer `POST /setup/apply` would save. */
+export interface SetupOption {
+  game: GameKind;
+  preset: PresetName;
+  layer: PolicyLayer;
+}
+
+/** `GET /setup` (owner): whether to offer the first-run panel, when it was dismissed, whether the dismissal is kept across restarts, the version to apply against, and the four options (empty once `show` is false). */
+export interface SetupState {
+  show: boolean;
+  dismissedAt: number | null;
+  persists: boolean;
+  version: number;
+  options: SetupOption[];
+}
 
 /**
  * `GET /policy`: the profile and rules in force and the generated documents.

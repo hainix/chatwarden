@@ -9,6 +9,7 @@ import type { LiveQueue } from '../liveQueue.js';
 import { queueStats } from '../queue.js';
 import { useFeatures } from '../features.js';
 import { Avatar, Empty, Fetched, Link, Panel, Skeleton } from '../ui.js';
+import { LazyFirstRun } from '../lazyParts.js';
 import { ActionRow } from './ActionRow.js';
 
 /** Sanctions shown under "Recent actions". */
@@ -24,12 +25,15 @@ export function Overview() {
   const { t, can, me } = useHub();
   const queue = useOptionalQueue();
   const features = useFeatures();
+  // The first-run panel is the owner's, and only an owner who may change the settings is offered it (its own code is not fetched for anyone else).
+  const offerSetup = me.role === 'owner' && can('policy.write');
   const showRecent = can('history.read');
   // The cases someone asked a second look of this role (or a lower one): only with the workflow on, and only a number worth a line. Nothing else on the page changes.
   const asked = features.workflow && queue !== null ? queue.groups.filter((g) => g.asked !== undefined && (g.asked === 'senior' ? me.role !== 'moderator' : me.role === 'owner')).length : 0;
   return (
     <div className="cw-screen">
       <h2 className="cw-screen-title" tabIndex={-1}>{t('hub.overview.title')}</h2>
+      {offerSetup && <LazyFirstRun />}
       {(asked > 0 || features.insights) && (
         <p className="cw-hint cw-overview-desk">
           {asked > 0 && <span>{t('hub.desk.overview.asked', { count: asked })}</span>}

@@ -1,4 +1,5 @@
 import { useHub } from '../context.js';
+import { LazyFirstRun } from '../lazyParts.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import { Skeleton } from '../ui.js';
 import { Overview } from './Overview.js';
@@ -9,7 +10,7 @@ import { Overview } from './Overview.js';
  * overview as it is.
  */
 export function SimpleHome() {
-  const { t, can } = useHub();
+  const { t, can, me } = useHub();
   const queue = useOptionalQueue();
   if (queue === null) return <Overview />;
   const ready = queue.status === 'ready';
@@ -19,6 +20,7 @@ export function SimpleHome() {
       <h2 className="cw-screen-title" tabIndex={-1}>
         {t('hub.simple.home.title')}
       </h2>
+      {me.role === 'owner' && can('policy.write') && <LazyFirstRun />}
       {queue.status === 'loading' && (
         <div>
           <p role="status" className="cw-sr">
