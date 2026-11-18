@@ -93,7 +93,7 @@ export function verifyDelivery(secret: string, body: string, header: string): bo
   again: `POST /v1/appeals/link` with the `noticeId` answers a fresh link, and `appealUrl` is on the notices in `POST /v1/notices/pending` and `POST /v1/record`.
 
 Behind a TLS proxy (the normal way to serve `chatwarden serve`), set `CHATWARDEN_TRUST_PROXY` to the number of proxies of your own in front of it (`1` for one), so that the page's rate limits tell players apart by the address the proxy reports in
-`X-Forwarded-For`. Without it every player behind the proxy looks like one address, and the kit logs `chatwarden.landing_shared_address` once. Set it only behind a proxy you run.
+`X-Forwarded-For`. Without it the page has no per-address limit for players behind the proxy (a proxy on a private or loopback address is not counted as a person, so each appeal link is limited by its own token only), and the kit logs `chatwarden.landing_shared_address` once. Set it only behind a proxy you run.
 
 ## What an appeal does for you
 

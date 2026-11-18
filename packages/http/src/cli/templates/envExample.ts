@@ -20,7 +20,7 @@ const WHAT: Record<string, string[]> = {
   DISCORD_MENTION_ROLE_ID: ['A Discord role to ping on a severe report or sanction. Optional.'],
   CHATWARDEN_PUBLIC_URL: ['The public address of this server, for the links in Discord posts. When empty it is http://localhost:3000.'],
   CHATWARDEN_TRUST_PROXY: [
-    'Set to 1 only behind your own reverse proxy: the first X-Forwarded-For entry is then taken as the player address.',
+    'Set to the number of reverse proxies of your own in front of this server (1 for one), and only behind your own: the player address is then the X-Forwarded-For entry that many places from the right.',
     'Left empty, the address comes from the connection and a client cannot choose it.',
   ],
 };
