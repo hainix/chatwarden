@@ -39,6 +39,12 @@ export interface NoticeDeliveryOptions {
   deliver?: (d: NoticeDelivery) => void | Promise<void>;
   /** The language to write in for an account: a tag such as `es-MX`, or nothing for English. A throw reads as English. Given `{ accountId }` and nothing else. */
   localeOf?: (to: { accountId: string }) => string | undefined;
+  /**
+   * Whether a sanction the kit gave on its own (an automatic chat restriction: `sanction.automated` is true) is told to `deliver` too. Default `true` (0.2.3). With `false` the hook is not called
+   * for such a notice; the notice itself, the restriction and "My record" are unchanged. A moderator's sanction and every appeal outcome are always delivered, even for an automatic sanction: a
+   * person filed that appeal and waits for the answer.
+   */
+  deliverAutomatic?: boolean;
 }
 
 export interface DeliveryServiceDeps {
@@ -99,6 +105,7 @@ export class DeliveryService {
       if (row === null || row.groupId === null || !(row.kind === 'warning' || row.kind === 'chat' || row.kind === 'area' || row.kind === 'ban')) return;
       const group = this.d.store.loadSanctionSubjectRow?.(row.groupId) ?? null;
       if (group === null) return;
+      if (group.automated && this.d.options.deliverAutomatic === false) return;
       const person = this.d.subjects.canonical(row.subject);
       const to = this.recipient(person);
       if (to === null) return;
@@ -221,15 +228,20 @@ export class DeliveryService {
 }
 
 /**
- * Check `ChatwardenOptions.notices` once, at creation: an object, whose `deliver` and `localeOf`, when given, are functions (`TypeError` naming `notices.deliver` or `notices.localeOf`, never the
- * value). Returns a copy to deliver with, or undefined when the game gave no `deliver` (then the kit delivers nothing and reads nothing for it).
+ * Check `ChatwardenOptions.notices` once, at creation: an object, whose `deliver` and `localeOf`, when given, are functions and whose `deliverAutomatic`, when given, is a boolean (`TypeError` naming `notices.deliver`, `notices.localeOf` or
+ * `notices.deliverAutomatic`, never the value). Returns a copy to deliver with, or undefined when the game gave no `deliver` (then the kit delivers nothing and reads nothing for it).
  */
 export function checkDeliveryOptions(input: unknown): NoticeDeliveryOptions | undefined {
   if (input === undefined) return undefined;
   if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new TypeError('createChatwarden: notices must be an object');
-  const { deliver, localeOf } = input as Record<string, unknown>;
+  const { deliver, localeOf, deliverAutomatic } = input as Record<string, unknown>;
   if (deliver !== undefined && typeof deliver !== 'function') throw new TypeError('createChatwarden: notices.deliver must be a function');
   if (localeOf !== undefined && typeof localeOf !== 'function') throw new TypeError('createChatwarden: notices.localeOf must be a function');
+  if (deliverAutomatic !== undefined && typeof deliverAutomatic !== 'boolean') throw new TypeError('createChatwarden: notices.deliverAutomatic must be a boolean');
   if (typeof deliver !== 'function') return undefined;
-  return { deliver: deliver as NoticeDeliveryOptions['deliver'] & object, ...(typeof localeOf === 'function' ? { localeOf: localeOf as NoticeDeliveryOptions['localeOf'] & object } : {}) };
+  return {
+    deliver: deliver as NoticeDeliveryOptions['deliver'] & object,
+    ...(typeof localeOf === 'function' ? { localeOf: localeOf as NoticeDeliveryOptions['localeOf'] & object } : {}),
+    ...(typeof deliverAutomatic === 'boolean' ? { deliverAutomatic } : {}),
+  };
 }

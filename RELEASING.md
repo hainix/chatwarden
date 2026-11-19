@@ -100,6 +100,8 @@ The `@chatwarden/http` package also ships a command, `chatwarden` (the `bin` in 
 
    0.2.2 was that case a third time, and again a patch: `http`, `hub-react` and `store-sqlite` peer on `@chatwarden/core` `^0.2.2` (`http` uses `recommendFor`, `cw.policy.setup` and the whole-form layer; `hub-react` the whole-form layer, `PolicyState.promptExcluded` and the evidence kind; `store-sqlite` imports `registrySubjectColumns` at run time), `hub-react` peers on `@chatwarden/http` `^0.2.2` (the `/setup` routes) and `hub-element` on `@chatwarden/hub-react` `^0.2.2`. `discord` and `player-react` stay at `^0.2.1`, and the memory store, `matcher`, `profanity` and the optional peers of `http` stay at `^0.2.0`. They were set by hand before `npm run version`, and `scripts/manifests.test.ts` holds the table.
 
+   0.2.3 was that case a fourth time, and again a patch: `http` peers on `@chatwarden/core` `^0.2.3` alone, because `chatwarden serve` passes `notices.deliverAutomatic` (`CHATWARDEN_DELIVER_AUTOMATIC`), which an older core ignores. Every other peer stayed where it was. It was set by hand before `npm run version`.
+
    This deliberately overrides `onlyUpdatePeerDependentsWhenOutOfRange`, by hand, for correctness. For a 0.x minor, set every range to the new minor
    before `npm run version` (as 0.2.0 did), so that changesets never sees one out of range and turns the fixed group into a major. When a release makes a package use a
    new API: before `npm run version`, set that package's peer range by hand to the version this release will have (the new group version satisfies it, so changesets

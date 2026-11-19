@@ -12,7 +12,7 @@
     "eval:ai": "node --experimental-strip-types --no-warnings eval/run.ts"
   },
   "devDependencies": {
-    "@chatwarden/core": "0.2.2"
+    "@chatwarden/core": "0.2.3"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.8.0"

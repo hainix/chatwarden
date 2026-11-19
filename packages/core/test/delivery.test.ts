@@ -350,6 +350,22 @@ describe('notices options are checked at creation', () => {
     expect(await world({ notices: { deliver: async () => undefined } } as never)).toBeDefined();
   });
 
+  it('a deliverAutomatic that is not a boolean is a TypeError naming notices.deliverAutomatic, with or without a deliver', async () => {
+    for (const deliverAutomatic of [0, 1, 'false', 'true', '', {}, [], null, () => true]) {
+      expect(await message({ deliver: () => undefined, deliverAutomatic }), String(deliverAutomatic)).toContain('notices.deliverAutomatic');
+      expect(await message({ deliverAutomatic }), String(deliverAutomatic)).toContain('notices.deliverAutomatic');
+    }
+  });
+
+  it('a boolean deliverAutomatic, or none, is accepted', async () => {
+    for (const deliverAutomatic of [true, false, undefined]) expect(await world({ notices: { deliver: () => undefined, deliverAutomatic } } as never), String(deliverAutomatic)).toBeDefined();
+    expect(await world({ notices: { deliverAutomatic: false } } as never)).toBeDefined();
+  });
+
+  it('the deliverAutomatic message never echoes a value', async () => {
+    expect(await message({ deliver: () => undefined, deliverAutomatic: 'zorbak-secret-value' })).not.toContain('zorbak-secret-value');
+  });
+
   it('the message never echoes a value', async () => {
     expect(await message({ deliver: 'zorbak-secret-value' })).not.toContain('zorbak-secret-value');
   });

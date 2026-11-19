@@ -259,6 +259,48 @@ describe('a started service', () => {
   });
 });
 
+describe('CHATWARDEN_DELIVER_AUTOMATIC (0.2.3)', () => {
+  it('reads 1, true, 0 and false into deliverAutomatic; unset or empty leaves it out (the kit default is on)', () => {
+    for (const [value, expected] of [['1', true], ['true', true], ['0', false], ['false', false], ['TRUE', true], ['False', false]] as const) {
+      expect(resolveServeConfig(FLAGS, { CHATWARDEN_DELIVER_AUTOMATIC: value }).deliverAutomatic, value).toBe(expected);
+    }
+    for (const env of [{}, { CHATWARDEN_DELIVER_AUTOMATIC: '' }]) expect(Object.hasOwn(resolveServeConfig(FLAGS, env), 'deliverAutomatic'), JSON.stringify(env)).toBe(false);
+  });
+
+  it('anything else is a ServeError that names the variable and never repeats the value', () => {
+    for (const value of ['yes', 'no', 'on', 'off', '2', '-1', '01', 'tru', ' 1', 'SEEDED-VALUE', 'null']) {
+      let message = '';
+      try {
+        resolveServeConfig(FLAGS, { CHATWARDEN_DELIVER_AUTOMATIC: value });
+      } catch (err) {
+        expect(err).toBeInstanceOf(ServeError);
+        message = (err as Error).message;
+      }
+      expect(message, value).toBe('CHATWARDEN_DELIVER_AUTOMATIC must be 1, 0, true or false.');
+    }
+  });
+
+  it('there is no flag for it, and --help lists it', () => {
+    const text = serveHelpText();
+    expect(text).not.toContain('--deliver-automatic');
+    const line = text.split('\n').find((l) => l.includes('CHATWARDEN_DELIVER_AUTOMATIC'));
+    expect(line).toBeDefined();
+    expect((line as string).length).toBeGreaterThan('CHATWARDEN_DELIVER_AUTOMATIC'.length + 20);
+  });
+
+  it('a bad value stops startup with that message, before anything is opened', async () => {
+    let message = '';
+    try {
+      const config = resolveServeConfig(FLAGS, { ...BASE_ENV, CHATWARDEN_DELIVER_AUTOMATIC: 'maybe' });
+      await (await startService(config, { log: () => undefined })).close();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ServeError);
+      message = (err as Error).message;
+    }
+    expect(message).toBe('CHATWARDEN_DELIVER_AUTOMATIC must be 1, 0, true or false.');
+  });
+});
+
 describe('CHATWARDEN_TRUST_PROXY', () => {
   it('is read as given, an empty one is not set, and it has no flag', () => {
     expect(resolveServeConfig(FLAGS, { CHATWARDEN_TRUST_PROXY: '1' })).toMatchObject({ trustProxy: '1' });
@@ -338,6 +380,39 @@ describe('the delivery webhook', () => {
     const body = JSON.parse(hit.body) as Record<string, unknown>;
     expect(body).toMatchObject({ noticeId, kind: 'sanction', to: { accountId: 'acct-serve-0001' } });
     expect(String(body.text)).toContain('https://game.example/appeal?t=');
+  });
+
+  /** Three lines with a blocked synthetic term from one seat: the kit's own chat restriction for that person (automated, source auto_filter). */
+  async function automaticTimeout(cw: Chatwarden, account: string): Promise<void> {
+    const n = Math.random().toString(36).slice(2, 10);
+    const room = `room-${n}`;
+    cw.rooms.seat(room, 'a', { clientKey: `serve-auto-${n}-0001`, accountId: account }, 'Target');
+    for (let i = 0; i < 3; i += 1) cw.chat.accept(room, 'a', 'you zorbak');
+  }
+
+  it('an automatic timeout is delivered by default, and with CHATWARDEN_DELIVER_AUTOMATIC=1', async () => {
+    for (const extra of [{}, { CHATWARDEN_DELIVER_AUTOMATIC: '1' }]) {
+      const r = await receiver();
+      const s = await start({ ...extra, CHATWARDEN_DELIVERY_URL: r.url, CHATWARDEN_DELIVERY_SECRET: DELIVERY_SECRET });
+      await automaticTimeout(s.cw(), 'acct-serve-0010');
+      await waitFor(() => r.got.length > 0);
+      expect(r.got, JSON.stringify(extra)).toHaveLength(1);
+      expect(JSON.parse((r.got[0] as { body: string }).body)).toMatchObject({ kind: 'sanction', sanction: { automated: true, source: 'auto_filter' } });
+    }
+  });
+
+  it('CHATWARDEN_DELIVER_AUTOMATIC=0 (or false): the automatic timeout is not delivered, a moderator sanction still is', async () => {
+    for (const off of ['0', 'false']) {
+      const r = await receiver();
+      const s = await start({ CHATWARDEN_DELIVER_AUTOMATIC: off, CHATWARDEN_DELIVERY_URL: r.url, CHATWARDEN_DELIVERY_SECRET: DELIVERY_SECRET });
+      await automaticTimeout(s.cw(), 'acct-serve-0011');
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+      expect(r.got, off).toEqual([]);
+      const noticeId = await sanctionedNotice(s.cw(), { account: 'acct-serve-0012' });
+      await waitFor(() => r.got.length > 0);
+      expect(r.got, off).toHaveLength(1);
+      expect(JSON.parse((r.got[0] as { body: string }).body)).toMatchObject({ noticeId, kind: 'sanction', sanction: { automated: false, source: 'moderator' } });
+    }
   });
 
   it('a person with no account is delivered nothing; a start without the two variables sets no hook', async () => {
