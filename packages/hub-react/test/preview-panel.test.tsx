@@ -227,7 +227,7 @@ describe('live', () => {
 
 describe('who is told, in what order', () => {
   const decide = (over: Record<string, unknown> = {}): NoticeOp =>
-    ({ op: 'decide', verdict: 'upheld', target: 'P-bob', reporter: 'P-rep', actions: [{ person: 'P-bob', kind: 'chat', durationMs: DAY, rule: 2, lines: [{ text: 'you are a *****', day: '2027-01-15' }] }], rename: null, ...over }) as NoticeOp;
+    ({ op: 'decide', verdict: 'upheld', target: 'P-bob', reporter: 'P-rep', actions: [{ person: 'P-bob', kind: 'chat', durationMs: DAY, rule: 2, lines: [{ text: 'you are a *****', day: '2027-01-15' }] }], rename: null, evidenceKind: 'chat', ...over }) as NoticeOp;
   const names = (to: string): string => ({ 'P-bob': 'Bob', 'P-rep': 'Rae' })[to] ?? to;
 
   it('two people each under their own name; the reporter reads "who reported, sees"', async () => {

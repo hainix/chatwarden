@@ -58,6 +58,7 @@ describe('migration 8: kit_notices', () => {
     const cols = db.prepare('PRAGMA table_info(kit_notices)').all().map((c) => String(c.name));
     expect(cols).toEqual([
       'id', 'subject_id', 'group_id', 'kind', 'rule', 'until', 'ref_code', 'excerpt_json', 'created_at', 'acked_at', 'withdrawn_at',
+      'evidence', // migration 28 (0.2.2)
     ]);
     const idx = db.prepare('PRAGMA index_list(kit_notices)').all().map((i) => String(i.name));
     expect(idx).toContain('kit_notices_by_subject');
@@ -282,7 +283,7 @@ describe('SqliteStore purgeNotices', () => {
     store.purgeStrayRows = () => 0;
     store.insertNotice(notice('old', { kind: 'warning', until: null, createdAt: NOW - 200 * DAY, ackedAt: NOW - 199 * DAY }));
     store.insertNotice(notice('keep', { createdAt: NOW - DAY }));
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 1, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, erasuresFinished: 0, strayRows: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 1, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, aiActions: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0, filterHits: 0, welfareReports: 0, chatCounts: 0, pace: 0, idleSubjects: 0, erasuresFinished: 0, strayRows: 0 });
     expect(ids(db)).toEqual(['keep']);
   });
 

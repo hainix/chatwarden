@@ -198,7 +198,7 @@ describe('the panel in the decision bar', () => {
     const { user, bar, panel } = await open(w, f.id);
     await user.click(within(bar).getByRole('radio', { name: 'Fair' }));
     await user.click(within(bar).getByRole('checkbox', { name: 'Ask for a new name' }));
-    await waitFor(() => expect(within(panel).getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual(['Your chat is turned off', 'Please choose a new name', 'Thanks for your report']));
+    await waitFor(() => expect(within(panel).getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual(['You have a warning', 'Please choose a new name', 'Thanks for your report'])); // a name report: the suggestion is a warning, not a chat restriction
     expect(panel).toHaveTextContent('Notice 1 of 2');
     expect(panel).toHaveTextContent('Notice 2 of 2');
     expect(panel).toHaveTextContent('The player sees them one at a time.');

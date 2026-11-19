@@ -142,6 +142,14 @@ class MemorySignals extends MemoryStore {
     return n;
   }
 
+  /** Add the ids of `wanted` that a signal row names, as the person it is about or the one who caused it (the identity age-out). */
+  privacyNamedBySignals(wanted: ReadonlySet<string>, into: Set<string>): void {
+    for (const row of this.sig?.rows.values() ?? []) {
+      if (wanted.has(row.subject)) into.add(row.subject);
+      if (row.bySubject !== null && wanted.has(row.bySubject)) into.add(row.bySubject);
+    }
+  }
+
   /** The rows ABOUT the set, newest first (time, then id, descending): the export's signals. */
   privacyExportSignals(set: ReadonlySet<string>): Array<{ at: number; kind: string }> {
     return [...(this.sig?.rows.values() ?? [])]

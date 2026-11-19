@@ -38,8 +38,8 @@ const FORMAT = [
   'hub.settings.filters.problem',
 ];
 const ALLOW: Record<'es' | 'pt', ReadonlySet<string>> = {
-  es: new Set([...SHARED, ...FORMAT, 'hub.mode.simple', 'hub.case.entity.clan']),
-  pt: new Set([...SHARED, ...FORMAT, 'hub.shell.offline', 'hub.case.entity.item', 'hub.community.share.status', 'hub.settings.filters.links.title', 'hub.report.origin.links', 'hub.settings.ai.status.label', 'hub.settings.ai.gates.col.status', 'hub.settings.ai.gates.gate.volume']),
+  es: new Set([...SHARED, ...FORMAT, 'hub.mode.simple', 'hub.case.entity.clan', 'hub.settings.reporting.evidence.chat']),
+  pt: new Set([...SHARED, ...FORMAT, 'hub.shell.offline', 'hub.case.entity.item', 'hub.community.share.status', 'hub.settings.filters.links.title', 'hub.report.origin.links', 'hub.settings.ai.status.label', 'hub.settings.ai.gates.col.status', 'hub.settings.ai.gates.gate.volume', 'hub.settings.reporting.evidence.chat']),
 };
 
 describe.each(Object.entries(GROUPS))('hub catalogue: %s words', (_name, group) => {

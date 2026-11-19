@@ -135,17 +135,17 @@ const STANDARD_RULES: readonly CommunityRule[] = [
   {
     number: 2,
     title: 'No insulting, threatening or targeting another player',
-    text: 'Do not insult, threaten or target another player as a person in chat. Talk about the game itself, like destroying or killing an opposing unit or character in play, is fine.',
+    text: 'Do not insult, threaten or target another player as a person, whether in chat, in how you play or in your name. Talk about the game itself, like destroying or killing an opposing unit or character in play, is fine.',
   },
   {
     number: 3,
-    title: 'No sexual messages',
-    text: 'Do not send sexual messages or comments, and do not pressure anyone for them.',
+    title: 'No sexual content',
+    text: 'Do not use sexual messages, names or comments, and do not pressure anyone for them.',
   },
   {
     number: 4,
     title: 'No spam, flooding or advertising',
-    text: 'Do not repeat the same message, flood the chat or advertise. Stick to talking about the game and the people in it.',
+    text: 'Do not repeat the same message, flood chat, invites or pings, or advertise. Stick to talking about the game and the people in it.',
   },
   {
     number: 5,
@@ -177,7 +177,7 @@ const RELAXED_CR2: Pick<CommunityRule, 'title' | 'text'> = {
 
 /** CR 2 where swearing is not allowed: it also covers swearing aimed at a player. */
 const STRICT_CR2_TEXT =
-  'Do not insult, swear at, threaten or target another player in chat. Talking about the game itself is fine; aiming it at a person is not.';
+  'Do not insult, swear at, threaten or target another player, whether in chat, in how you play or in your name. Talking about the game itself is fine; aiming it at a person is not.';
 
 /**
  * The starter Community Rules for a profile flavour: a fresh copy each call, so editing one list changes no other.

@@ -65,12 +65,13 @@ describe('migration 26 blocks 4 and 5 from an earlier database', () => {
     expect(names(b, 'index')).toEqual(names(a, 'index'));
   });
 
-  it('migration 26 is the only migration of its release: the versions are 1..N, 27 is release 0.2.1 and there is no 28', () => {
+  it('migration 26 is the only migration of its release: the versions are 1..N, 27 is release 0.2.1, 28 is release 0.2.2 and there is no 29', () => {
     const versions = MIGRATIONS.map((m) => m.version);
     expect(versions).toEqual(versions.map((_, i) => i + 1));
     expect(versions).toContain(26);
     expect(versions).toContain(27);
-    expect(versions).not.toContain(28);
+    expect(versions).toContain(28);
+    expect(versions).not.toContain(29);
   });
 
   it('kit_erasures takes the two modes only and the pending index is partial', () => {

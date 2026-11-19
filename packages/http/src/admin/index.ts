@@ -19,6 +19,7 @@ import { personRoutes } from './people.js';
 import { privacyRoutes } from './privacy.js';
 import { policyRoutes } from './policy.js';
 import { policyProfileRoutes } from './policyProfile.js';
+import { setupRoutes } from './setup.js';
 import type { PolicyOptions } from './policy.js';
 import { reportRoutes } from './reports.js';
 import { roomRoutes } from './rooms.js';
@@ -122,6 +123,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
       ...(options.contactUrl === undefined ? {} : { contactUrl: options.contactUrl }),
     }),
     ...policyProfileRoutes(ctx),
+    ...setupRoutes(ctx),
     ...contextRoutes(ctx),
     ...filterRoutes(ctx, options.recentLines ?? (() => [])),
     ...aiRoutes(ctx),

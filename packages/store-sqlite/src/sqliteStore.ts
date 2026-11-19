@@ -50,6 +50,7 @@ import type {
   OpenReportQuery,
   PolicyLayer,
   ReasonRow,
+  SetupState,
   ReportActivity,
   ReportCategory,
   ReportEntity,
@@ -106,6 +107,7 @@ import {
   finishErasure as finishErasureSql,
   insertErasure as insertErasureSql,
   loadPendingErasures as loadPendingErasuresSql,
+  purgeIdleSubjects as purgeIdleSubjectsSql,
   purgeStrayRows as purgeStrayRowsSql,
 } from './privacy.js';
 
@@ -348,7 +350,29 @@ function toSanctionRow(r: Record<string, unknown>): SanctionRow {
   };
 }
 
-const NOTICE_COLUMNS = 'id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at';
+/** The `kit_meta` key of the first-run setup flag (0.2.2): one row, JSON `{ "dismissedAt": number | null }`. No table, no migration. */
+export const SETUP_STATE_KEY = 'setup_state';
+/** The setup flag's row by key. Binds: the key. */
+export const SETUP_LOAD_SQL = 'SELECT value FROM kit_meta WHERE key = ?';
+/** Replace the setup flag's row. Binds: the key, the JSON. */
+export const SETUP_SAVE_SQL = 'INSERT OR REPLACE INTO kit_meta (key, value) VALUES (?, ?)';
+
+/** The setup flag from its stored text; anything that is not `{ dismissedAt: finite number | null }` reads as never saved. Never throws. */
+function parseSetupState(value: unknown): SetupState | null {
+  if (typeof value !== 'string') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const at = (parsed as { dismissedAt?: unknown }).dismissedAt;
+  if (at === null || (typeof at === 'number' && Number.isFinite(at))) return { dismissedAt: at };
+  return null;
+}
+
+const NOTICE_COLUMNS = 'id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at, evidence';
 /** One notice by id, whatever its owner or state. Binds: the id. */
 export const NOTICE_BY_ID_SQL = `SELECT ${NOTICE_COLUMNS} FROM kit_notices WHERE id = ?`;
 
@@ -365,6 +389,7 @@ function toNoticeRow(r: Record<string, unknown>): NoticeRow {
     createdAt: Number(r.created_at),
     ackedAt: r.acked_at === null ? null : Number(r.acked_at),
     withdrawnAt: r.withdrawn_at === null ? null : Number(r.withdrawn_at),
+    ...(r.evidence === 'chat' || r.evidence === 'play' || r.evidence === 'name' ? { evidence: r.evidence } : {}),
   };
 }
 
@@ -2111,6 +2136,22 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  // The first-run setup flag (0.2.2). SYNCHRONOUS on purpose. One `kit_meta` row; no row is "never saved".
+
+  getSetupState(): SetupState | null {
+    return this.transaction(() => {
+      const r = this.db.prepare(SETUP_LOAD_SQL).get(SETUP_STATE_KEY);
+      return r === undefined ? null : parseSetupState(r.value);
+    });
+  }
+
+  saveSetupState(state: SetupState): void {
+    const json = JSON.stringify({ dismissedAt: state.dismissedAt });
+    this.transaction(() => {
+      this.db.prepare(SETUP_SAVE_SQL).run(SETUP_STATE_KEY, json);
+    });
+  }
+
   // Staff audit trail. SYNCHRONOUS on purpose. The json columns (before_json / after_json) are never selected: the
   // rows the term editor wrote may hold term text there.
 
@@ -2196,6 +2237,10 @@ export class SqliteStore implements Store, TermStore {
 
   purgeStrayRows(before: number, only?: readonly SubjectId[]): number {
     return purgeStrayRowsSql(this.db, (fn) => this.transaction(fn), before, only);
+  }
+
+  purgeIdleSubjects(before: number): number {
+    return purgeIdleSubjectsSql(this.db, (fn) => this.transaction(fn), before);
   }
 
   insertErasure(row: ErasureRow): void {
@@ -3128,8 +3173,8 @@ export class SqliteStore implements Store, TermStore {
     this.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO kit_notices (id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO kit_notices (id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at, evidence)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           row.id,
@@ -3143,6 +3188,7 @@ export class SqliteStore implements Store, TermStore {
           row.createdAt,
           row.ackedAt,
           row.withdrawnAt,
+          row.evidence ?? null,
         );
     });
   }

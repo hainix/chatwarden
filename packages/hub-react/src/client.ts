@@ -57,6 +57,8 @@ import type {
   PolicyLayer,
   PolicySamples,
   PolicySaved,
+  GameKind,
+  SetupState,
   PolicySection,
   PolicyState,
   ReportDetail,
@@ -406,6 +408,14 @@ export interface HubClient {
   previewPolicyProfile(input: { layer: PolicyLayer; rule?: number }): Promise<{ samples: PolicySamples }>;
   /** `DELETE /policy/profile` (owner): reset one section, or everything. Always give a `reason`. */
   resetPolicyProfile(input: { section?: PolicySection; reason: string; version?: number }): Promise<PolicySaved>;
+
+  // The first-run setup (0.2.2), owner only
+  /** `GET /setup` (owner): whether to offer the first-run panel, the version to apply against, and what each kind of game would set up (empty once `show` is false). */
+  setup(): Promise<SetupState>;
+  /** `POST /setup/dismiss` (owner): "Keep the current ones". The panel is not offered again; no setting changes. */
+  dismissSetup(): Promise<{ ok: true; show: false; dismissedAt: number; persists: boolean }>;
+  /** `POST /setup/apply` (owner): save the recommendation for a kind of game. Answers like `savePolicyProfile`; a stale `version` is a 409 `conflict`. */
+  applySetup(input: { game: GameKind; version: number }): Promise<PolicySaved>;
 }
 
 
@@ -521,6 +531,9 @@ export function createHubClient(transport: Transport): HubClient {
     savePolicyProfile: (input) => call<PolicySaved>({ method: 'PUT', path: '/policy/profile', body: input }),
     previewPolicyProfile: (input) => post<{ samples: PolicySamples }>('/policy/profile/preview', input),
     resetPolicyProfile: ({ section, ...body }) => call<PolicySaved>({ method: 'DELETE', path: '/policy/profile', ...(section === undefined ? {} : { query: { section } }), body }),
+    setup: () => call<SetupState>({ method: 'GET', path: '/setup' }),
+    dismissSetup: () => call<{ ok: true; show: false; dismissedAt: number; persists: boolean }>({ method: 'POST', path: '/setup/dismiss', body: {} }),
+    applySetup: (input) => call<PolicySaved>({ method: 'POST', path: '/setup/apply', body: input }),
     listAudit: (query = {}) => get<Page<AuditItem>>('/audit', q({ cursor: query.cursor, limit: query.limit, actor: query.actor, action: query.action })),
   };
 }

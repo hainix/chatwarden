@@ -15,6 +15,7 @@ import type {
   NoticeRow,
   OpenReportQuery,
   PolicyLayer,
+  SetupState,
   ReasonRow,
   ReportActivity,
   ReportListQuery,
@@ -138,6 +139,8 @@ export class MemoryStore implements Store {
   protected reasons: ReasonRow[] = [];
   /** The stored policy layer and its version, or null when none was ever saved. */
   protected policy: { layer: PolicyLayer; version: number } | null = null;
+  /** The first-run setup flag, or null when none was ever saved. */
+  protected setup: SetupState | null = null;
   /** AI reads in insertion order (one row per report and input hash). */
   protected aiReads: AiReadRow[] = [];
   /** The AI spend ledger: one entry per attempt (a call started), booked at the time it was reserved. */
@@ -495,6 +498,20 @@ export class MemoryStore implements Store {
       this.policy = prior;
     });
     return current + 1;
+  }
+
+  // The first-run setup flag (synchronous, see the Store interface). Not a queue change: it does not move the token.
+
+  getSetupState(): SetupState | null {
+    return this.setup === null ? null : { dismissedAt: this.setup.dismissedAt };
+  }
+
+  saveSetupState(state: SetupState): void {
+    const prior = this.setup;
+    this.setup = { dismissedAt: state.dismissedAt };
+    this.undoWith(() => {
+      this.setup = prior;
+    });
   }
 
   // Staff audit trail (synchronous, see the Store interface).
@@ -1632,6 +1649,89 @@ export class MemoryStore implements Store {
     this.undoWith(() => {
       this.epoch -= 1;
     });
+  }
+
+  /**
+   * The identity age-out (see `Store.purgeIdleSubjects`). A person is a subject and everything merged into it; it is idle when the newest `lastSeen` over its identifier rows
+   * (its `createdAt` when it has none) is before the cutoff for every subject of it. Whoever has an id in any table the privacy registry lists keeps their rows: the tables of
+   * this class are read here, the wrappers' own (signals, appeals and overturns, kept names, "do not automate" marks) through their `privacyNamedBy*` hooks.
+   */
+  purgeIdleSubjects(before: number): number {
+    const seen = new Map<SubjectId, number>();
+    for (const r of this.subjectIds.values()) seen.set(r.subjectId, Math.max(seen.get(r.subjectId) ?? Number.NEGATIVE_INFINITY, r.lastSeen));
+    const idle = new Set<SubjectId>();
+    for (const [id, rec] of this.subjects) if ((seen.get(id) ?? rec.createdAt) < before) idle.add(id);
+    if (idle.size === 0) return 0;
+    const rootOf = (id: SubjectId): SubjectId => {
+      const walked = new Set<SubjectId>();
+      let at = id;
+      for (;;) {
+        walked.add(at);
+        const up = this.subjects.get(at)?.mergedInto ?? null;
+        if (up === null || walked.has(up) || !this.subjects.has(up)) return at;
+        at = up;
+      }
+    };
+    const people = new Map<SubjectId, SubjectId[]>();
+    for (const id of this.subjects.keys()) {
+      const root = rootOf(id);
+      const mine = people.get(root);
+      if (mine === undefined) people.set(root, [id]);
+      else mine.push(id);
+    }
+    const candidates = [...people.values()].filter((members) => members.every((m) => idle.has(m)));
+    if (candidates.length === 0) return 0;
+    const wanted = new Set(candidates.flat());
+    const named = new Set<SubjectId>();
+    this.namedSubjects(wanted, named);
+    const doomed = new Set(candidates.filter((members) => !members.some((m) => named.has(m))).flat());
+    if (doomed.size === 0) return 0;
+    const before_ = this.subjects.size;
+    this.dropSubjects(doomed);
+    this.bumpEpoch();
+    return before_ - this.subjects.size;
+  }
+
+  /** Every id of `wanted` that a row of this store (or of a wrapper) names: the tables the privacy registry lists. */
+  private namedSubjects(wanted: ReadonlySet<SubjectId>, into: Set<SubjectId>): void {
+    const add = (id: string | null | undefined): void => {
+      if (id !== null && id !== undefined && wanted.has(id)) into.add(id);
+    };
+    const addJson = (text: string): void => {
+      try {
+        const walk = (v: unknown): void => {
+          if (typeof v === 'string') add(v);
+          else if (Array.isArray(v)) v.forEach(walk);
+          else if (typeof v === 'object' && v !== null) Object.values(v).forEach(walk);
+        };
+        walk(JSON.parse(text));
+      } catch {
+        // A value that cannot be read names nobody for certain: any id that appears in the text counts as named.
+        for (const id of wanted) if (text.includes(id)) into.add(id);
+      }
+    };
+    for (const r of this.sanctions) if (r.targetType === 'subject') add(r.value);
+    for (const n of this.notices) add(n.subject);
+    for (const r of this.reports) {
+      add(r.reporterSubject);
+      add(r.targetSubject);
+      for (const p of r.people) add(p);
+    }
+    for (const d of this.decisions.values()) addJson(d.resultJson);
+    for (const r of this.strikes) add(r.subject);
+    for (const m of this.mutes.values()) {
+      add(m.row.viewer);
+      add(m.row.target);
+    }
+    for (const person of this.claims.keys()) add(person);
+    for (const subject of this.discordThreads.keys()) add(subject);
+    for (const a of this.auditRows) if (a.target !== null) add(a.target.ref);
+    for (const r of this.pace.values()) add(r.who);
+    const hooks = this as unknown as Partial<Record<'privacyNamedBySignals' | 'privacyNamedByAppeals' | 'privacyNamedByNames' | 'privacyNamedByNoAutomation', (wanted: ReadonlySet<string>, into: Set<string>) => void>>;
+    hooks.privacyNamedBySignals?.(wanted, into);
+    hooks.privacyNamedByAppeals?.(wanted, into);
+    hooks.privacyNamedByNames?.(wanted, into);
+    hooks.privacyNamedByNoAutomation?.(wanted, into);
   }
 
   purgeStrayRows(before: number, only?: readonly SubjectId[]): number {

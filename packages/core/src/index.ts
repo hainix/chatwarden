@@ -57,6 +57,7 @@ export type {
   BlockedNameRow,
   ConductLevel,
   Source,
+  SetupState,
   Store,
   SubjectId,
   SubjectIdKind,
@@ -158,7 +159,12 @@ export {
   DEFAULT_REPORT_REASONS,
   DEFAULT_REPORT_THANKS,
   defaultReporting,
+  EVIDENCE_KINDS,
+  evidenceKindOf,
+  evidenceOfReason,
+  evidenceOfRule,
   findReason,
+  isEvidenceKind,
   isReasonId,
   legacyCategoryOf,
   LEGACY_REASON_ALIASES,
@@ -173,6 +179,7 @@ export {
   suggestedRule,
 } from './reporting.js';
 export type {
+  EvidenceKind,
   PlayerReporting,
   ReportFlow,
   ReportingSettings,
@@ -298,11 +305,13 @@ export {
   EXPORT_SECTION_MAX,
   NO_PERSON_JSON_COLUMNS,
   NO_PERSON_TABLES,
+  NO_SUBJECT_COLUMNS,
   PRIVACY_CATEGORIES,
   PRIVACY_REGISTRY,
   erasedReporter,
   isNonPersonReporter,
   isRestrictingKind,
+  registrySubjectColumns,
 } from './privacy.js';
 export type {
   EraseMode,
@@ -404,8 +413,13 @@ export {
   layerSections,
   MAX_DURATION_MS,
   MAX_DURATIONS,
+  MAX_AI_CONTEXT,
   MAX_GUIDELINE_OUTCOME,
   MAX_RULE_LIST,
+  MAX_TIER_DESCRIPTION,
+  MAX_TIER_EXAMPLE,
+  MAX_TIER_EXAMPLES,
+  MAX_TIER_TITLE,
   MAX_WINDOW_DAYS,
   AI_DAILY_CALLS_DEFAULT,
   AI_DAILY_CALLS_MAX,
@@ -415,6 +429,15 @@ export {
   resolveProfile,
   validateProfile,
 } from './profile.js';
+// The moderation principles block of the AI prompt (tiers and team notes, screened and capped) and what it leaves out.
+export { PRINCIPLES_BLOCK_MAX, PRINCIPLES_LINE_MAX, promptPrinciples } from './principles.js';
+export type { PromptExcluded, PromptPrinciples } from './principles.js';
+// The recommended setup: what kind of game this is, and the starting layer for it.
+export { CREATOR_TEAM_NOTE, GAME_KINDS, GAME_PRESET, isGameKind, recommendFor } from './recommend.js';
+export type { GameKind, Recommendation } from './recommend.js';
+// Team notes: staff-only working guidance, each optionally tied to a Community Rule.
+export { TEAM_NOTE_MAX, TEAM_NOTES_MAX } from './teamNotes.js';
+export type { TeamNote } from './teamNotes.js';
 // Pace settings: slow mode, burst limit and repeat refusal, all off until set.
 export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
 export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
@@ -497,6 +520,7 @@ export type {
   PolicyPreview,
   PolicySaveContext,
   PolicySaveResult,
+  PolicySetup,
   PolicyState,
   PreviewOutcome,
   PreviewSample,
@@ -512,6 +536,7 @@ export type {
   Outcome,
   PolicyCell,
   PolicyLadderRow,
+  PolicyGuidelinesWhole,
   PolicyLayer,
   PolicySection,
   PresetName,

@@ -1,3 +1,4 @@
+import { useHub } from '../context.js';
 import { LazyAiStrip } from '../lazyParts.js';
 import type { AiReadView } from '../types.js';
 import { useOptionalCase } from './CaseContext.js';
@@ -10,12 +11,14 @@ import { HiddenExcerpt } from './HiddenExcerpt.js';
  * loaded only when there is a read to show or one is expected, so the first load pays for none of it.
  */
 export function AiReadSlot({ read }: { read: AiReadView | null | undefined }) {
+  const { t } = useHub();
   const c = useOptionalCase();
   // A case that is closed is history: no strip on it, and no wait for a read nobody will act on.
   const status = c?.detail.data?.report.status;
   if (status !== undefined && status !== 'open') return null;
   const expected = c?.detail.data?.aiExpected === true;
-  if (read == null && !expected) return null;
+  // The AI reads chat only: a report about play or a name has no read, and one line says why.
+  if (read == null && !expected) return c?.detail.data?.report.aiSkipped === 'chat_only' ? <p className="cw-hint cw-ai-chatonly">{t('hub.ai.chatOnly')}</p> : null;
   const strip = <LazyAiStrip read={read ?? null} expected={expected} />;
   // The careful view hides the AI's summary until the case is opened; a read still on its way has no text to hide.
   return read == null ? strip : <HiddenExcerpt what="ai">{strip}</HiddenExcerpt>;

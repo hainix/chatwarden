@@ -61,6 +61,8 @@ export const ACTION_LABEL: Record<AuditAction, HubText> = {
 // screen: only the reporting section, only steps and ladder sections, or the general words (both, none named, or a section this hub does not know).
 
 const LADDER = new Set<string>(SECTION_ORDER);
+// The sections of the principles: the written guidelines, the team notes and the AI's standard. A row of these that touches the notes or the standard reads as principles.
+const PRINCIPLES = new Set<string>(['guidelines', 'teamNotes', 'aiContext']);
 
 /** The catalog key for a `policy.update` or `policy.reset` row, by the sections its detail names; null for any other action. */
 export function policyAuditKey(action: string, detail: unknown): HubText | null {
@@ -70,6 +72,7 @@ export function policyAuditKey(action: string, detail: unknown): HubText | null 
   if (!Array.isArray(sections) || sections.length === 0 || !sections.every((s) => typeof s === 'string')) return general;
   const names = sections as string[];
   if (names.every((s) => s === 'reporting')) return action === 'policy.update' ? 'hub.audit.label.policy.update.reporting' : 'hub.audit.label.policy.reset.reporting';
+  if (names.every((s) => PRINCIPLES.has(s)) && names.some((s) => s === 'teamNotes' || s === 'aiContext')) return action === 'policy.update' ? 'hub.audit.label.policy.update.principles' : 'hub.audit.label.policy.reset.principles';
   if (names.every((s) => LADDER.has(s))) return action === 'policy.update' ? 'hub.audit.label.policy.update.ladder' : 'hub.audit.label.policy.reset.ladder';
   return general;
 }

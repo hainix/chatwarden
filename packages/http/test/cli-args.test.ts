@@ -189,10 +189,11 @@ describe('OPTIONS', () => {
     }
   });
 
-  it('the seven questions carry their text, in the design order, and nothing else does', () => {
+  it('the eight questions carry their text, in the table order (the run puts the game first), and nothing else does', () => {
     const asked = OPTIONS.filter((o) => o.question !== undefined).map((o) => o.name);
-    expect(asked).toEqual(['framework', 'store', 'chat', 'chat-transport', 'hub', 'discord', 'profile']);
-    for (const option of OPTIONS) if (option.question) expect(option.question).toMatch(/\?$/);
+    expect(asked).toEqual(['framework', 'store', 'chat', 'chat-transport', 'hub', 'discord', 'game', 'profile']);
+    // a question ends with a question mark; the game's carries what each kind means in a closing parenthesis
+    for (const option of OPTIONS) if (option.question) expect(option.question).toMatch(option.name === 'game' ? /^[^()]*\? \([^()]*\)$/ : /\?$/);
   });
 });
 
@@ -242,5 +243,43 @@ describe('helpText', () => {
 
   it('is the same text every time', () => {
     expect(helpText()).toBe(text);
+  });
+});
+
+describe('--game', () => {
+  it("--game creator parses to game 'creator', for each of the four kinds, and the inline form is the same", () => {
+    for (const game of ['competitive', 'social', 'kids', 'creator'] as const) {
+      expect(ok(['init', '--game', game]).game, game).toBe(game);
+      expect(ok(['init', `--game=${game}`]).game, game).toBe(game);
+    }
+  });
+
+  it('no --game leaves the field absent', () => {
+    expect(Object.hasOwn(ok(['init', '--yes']), 'game')).toBe(false);
+  });
+
+  it('--game nope is the error "--game must be one of competitive, social, kids, creator (got nope)."', () => {
+    expect(err(['init', '--game', 'nope'])).toBe('--game must be one of competitive, social, kids, creator (got nope).');
+    expect(err(['init', '--game', 'Kids'])).toContain('--game must be one of');
+  });
+
+  it('--game given twice is refused, and one without a value needs one', () => {
+    expect(err(['init', '--game', 'kids', '--game', 'social'])).toBe('--game was given more than once.');
+    expect(err(['init', '--game'])).toBe('--game needs a value.');
+  });
+
+  it('--help lists --game with its four values, before --profile', () => {
+    const text = helpText();
+    const lines = text.split('\n');
+    const at = lines.findIndex((l) => /^\s+--game\b/.test(l));
+    expect(at).toBeGreaterThan(-1);
+    expect(lines[at]).toContain('Kind of game');
+    expect(lines[at + 1]).toContain('one of: competitive, social, kids, creator');
+    expect(at).toBeLessThan(lines.findIndex((l) => /^\s+--profile\b/.test(l)));
+  });
+
+  it('--game works with --service (it is a flag of init, not refused by the parser)', () => {
+    const parsed = ok(['init', '--service', '--game', 'creator']);
+    expect(parsed).toMatchObject({ service: true, game: 'creator' });
   });
 });

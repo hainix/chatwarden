@@ -7,7 +7,7 @@ import type { NoticeKind } from '../src/types.js';
 import { NOTICE_RECORD_WINDOW_MS } from '../src/notices.js';
 
 // The words of a player notice, kept in one place. The snapshot below is the player-react `en` catalog of 0.1.14 for these keys, taken before
-// the move: moving the code must not change a word.
+// the move: moving the code must not change a word. 0.2.2 changed the neutral warning body and the lines label on purpose and added the evidence variants.
 
 /** Every kind a notice can have. Typed over the union: a kind added to `NoticeKind` fails to compile here until it is listed. */
 const KINDS: Record<NoticeKind, true> = {
@@ -33,7 +33,11 @@ const SNAPSHOT_0_1_14: Record<string, string> = {
   'player.notice.title.appeal_reduced': 'We looked again and changed the decision',
   'player.notice.title.appeal_revoked': 'We looked again and removed the decision',
   'player.notice.title.fallback': 'A message from the moderators',
-  'player.notice.body.warning': 'A moderator gave you a warning for something you wrote. You can keep playing.',
+  // 0.2.2: the warning body is neutral, and the chat, play and name variants are new (evidence-copy.test.ts pins them).
+  'player.notice.body.warning': 'A moderator gave you a warning for breaking a community rule. You can keep playing.',
+  'player.notice.body.warning.chat': 'A moderator gave you a warning for something you wrote. You can keep playing.',
+  'player.notice.body.warning.play': 'A moderator gave you a warning for how you played. You can keep playing.',
+  'player.notice.body.warning.name': 'A moderator gave you a warning about your name. You can keep playing.',
   'player.notice.body.chat': 'A moderator turned off your chat. You can still play.',
   'player.notice.body.area': 'A moderator stopped you joining public rooms and matchmaking. You can still play in private rooms.',
   'player.notice.body.ban': 'A moderator banned you from playing.',
@@ -52,7 +56,8 @@ const SNAPSHOT_0_1_14: Record<string, string> = {
   'player.notice.untilLeft': '{when} ({left})',
   'player.notice.ref': 'Reference',
   'player.notice.refHint': 'Quote this code if you contact us.',
-  'player.notice.lines': 'Your messages that led to this',
+  'player.notice.lines': 'What led to this',
+  'player.notice.lines.chat': 'Your messages that led to this',
   'player.notice.todo.warning': 'Press Acknowledge to confirm you saw this.',
   'player.notice.acknowledge': 'Acknowledge',
   'player.notice.gotIt': 'Got it',
@@ -76,7 +81,7 @@ describe('NOTICE_WORDS', () => {
     expect(bodyKey(kind)).toBe(`player.notice.body.${kind}`);
   });
 
-  it('NOTICE_WORDS equals the 0.1.14 strings', () => {
+  it('NOTICE_WORDS equals the 0.1.14 strings plus the 0.2.2 evidence words', () => {
     expect({ ...NOTICE_WORDS }).toEqual(SNAPSHOT_0_1_14);
   });
 

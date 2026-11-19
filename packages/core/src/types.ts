@@ -11,6 +11,7 @@ import type { LinkRow, LinkSystem } from './links.js';
 import type { NameReason } from './names.js';
 import type { ErasePlan, ErasureCounts, ErasureRow, SubjectExport } from './privacy.js';
 import type { PolicyLayer } from './profile.js';
+import type { EvidenceKind } from './evidenceKind.js';
 import type { RuleRef } from './rules.js';
 
 // ---------------------------------------------------------------------------
@@ -1121,6 +1122,11 @@ export interface NoticeRow {
   createdAt: number;
   ackedAt: number | null;
   withdrawnAt: number | null;
+  /**
+   * What the sanction was about, so the notice is worded for it: `chat`, `play` or `name` (0.2.2). Absent for a notice made before then, for a report outcome and a message,
+   * and when the decision had no kind (neutral). A store keeps it as given; an unknown stored value reads as absent.
+   */
+  evidence?: EvidenceKind;
 }
 
 // ---------------------------------------------------------------------------
@@ -1137,6 +1143,14 @@ export interface NoticeRow {
  * in-memory indexes instead. Add each new group of methods under the marker
  * below and keep the lifecycle methods above it.
  */
+/**
+ * The first-run setup flag a store may keep (see `Store.getSetupState`): when the owner dismissed the setup panel, or null while it has not been
+ * dismissed. Never holds a person.
+ */
+export interface SetupState {
+  dismissedAt: number | null;
+}
+
 export interface Store {
   /** Latest applied kit schema version (0 when no migration has run). */
   schemaVersion(): number;
@@ -1489,6 +1503,20 @@ export interface Store {
    * inside `transaction`, so an undone transaction undoes it. It does not move the change token.
    */
   savePolicyLayer?(layer: PolicyLayer, expectedVersion: number): number | null;
+
+  // The first-run setup flag (0.2.2): whether the owner dismissed the "set up your moderation" panel. OPTIONAL, like the policy pair: a store without
+  // both methods still works, and the dismissal is then kept for this process only (`cw.policy.setup().persists` is false). SYNCHRONOUS on purpose.
+
+  /**
+   * The stored setup state, or null when none was ever saved or it cannot be read (a damaged value reads as never saved; it never throws).
+   * Returns a copy.
+   */
+  getSetupState?(): SetupState | null;
+
+  /**
+   * Replace the stored setup state. Runs inside `transaction`, so an undone transaction undoes it. It does not move the change token.
+   */
+  saveSetupState?(state: SetupState): void;
 
   // AI reads and the casebook (AI levels 1 and 2, design section 5). OPTIONAL: a store without them works as before, and
   // `createChatwarden({ ai })` leaves the AI inert with one (and logs it once). SYNCHRONOUS on purpose (like claims); they run inside `transaction`.
@@ -2066,7 +2094,18 @@ export interface Store {
    */
   purgeStrayRows(before: number, only?: readonly SubjectId[]): number;
 
-  /** A counter that moves on every erase (and the finish of one) and on nothing else; persists with the store and is shared by every process on the database. Starts at 0. */
+  /**
+   * OPTIONAL (0.2.2, the identity age-out: `retention.subjectsMs`). Delete the subject and identifier rows (account id, key hash, address hash) of every person who was last
+   * seen before `before` and has no record anywhere. A person is a subject and every subject merged into it; "last seen" is the newest `lastSeen` over their identifier rows
+   * (a subject with none counts from its `createdAt`); the cutoff is strict, so a person last seen exactly at `before` stays. "No record" means that no id of the person
+   * appears in any column `registrySubjectColumns()` lists (a sanction row of any age, a notice, a report as reporter, target or line writer, a decision, a strike, a mute
+   * or block either way, a kept name, an appeal, an overturn, a signal either way, a "do not automate" mark, a claim, a Discord thread, an audit row, pacer state): derive the
+   * check from that list so a table added to the registry is covered, and a report a legal hold keeps keeps the people it names. Returns how many SUBJECT rows went. One
+   * transaction. When it deleted anything it moves the erasure epoch, so another process forgets those people. A store without it never ages identities out.
+   */
+  purgeIdleSubjects?(before: number): number;
+
+  /** A counter that moves on every erase (and the finish of one, and an identity age-out that deleted someone) and on nothing else; persists with the store and is shared by every process on the database. Starts at 0. */
   erasureEpoch(): number;
 
   // Legal hold (0.2.0). REQUIRED. `cw.legal` is the only caller. A hold protects one report and what hangs on it (see {@link HeldSet}): while it is open, EVERY purge

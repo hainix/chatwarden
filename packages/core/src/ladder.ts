@@ -1,3 +1,5 @@
+import { evidenceOfRule, isEvidenceKind } from './evidenceKind.js';
+import type { EvidenceKind } from './evidenceKind.js';
 import type { ModerationProfile, Outcome } from './profile.js';
 import type { RuleRef } from './rules.js';
 import { CONDUCT_LEVELS } from './types.js';
@@ -179,6 +181,12 @@ export interface SuggestContext {
    */
   hideSignalText?: boolean;
   /**
+   * What the report is about (0.2.2): `chat`, `play` or `name`, from the report's reason. Absent (or anything else) falls back to the rule (CR 5 and 6 are `play`, CR 7 is `name`), else it
+   * is chat as before. For `play` and `name` the words say gameplay conduct or an offensive name, a null level is not read as hostile, a chat restriction is never the step (a ban from public rooms
+   * instead), and a name with renames on is told to ask for a new name first (in the sentence, not a field).
+   */
+  evidence?: EvidenceKind | null;
+  /**
    * Read only what happened in these staff scopes: the person's record is the actions made from reports filed in a room of one of them, and no signal rule is read (a count of what other
    * players did would reach past the scope). Set by a staff route for a scoped moderator; `cw.suggest` applies it. An empty list reads an empty record.
    */
@@ -291,6 +299,12 @@ const LEVEL_NOUN: Record<ConductLevel, string> = {
   severe: 'severe conduct',
 };
 
+/** The same four levels worded for what a report is about, so a play or name report is never called an "aggressive message" or "hostile conduct". */
+const KIND_NOUN: Record<'play' | 'name', Record<ConductLevel, string>> = {
+  play: { banter: 'minor gameplay conduct', rude: 'gameplay conduct', hostile: 'deliberate gameplay conduct', severe: 'severe gameplay conduct' },
+  name: { banter: 'borderline name', rude: 'offensive name', hostile: 'offensive name', severe: 'severe offensive name' },
+};
+
 function lowerFirst(s: string): string {
   return `${s.charAt(0).toLowerCase()}${s.slice(1)}`;
 }
@@ -334,8 +348,9 @@ function repeatMet(profile: ModerationProfile, live: readonly ActionRecord[], no
  *   step and `hostile` reads the high column, each never below the first-offense outcome for the level. Notes no
  *   longer matter.
  * - A chat restriction becomes a ban from public rooms and matchmaking (`area`) at the same length under the
- *   profile's `areaRules` (default CR 5 and 6). A warning or a full ban is left alone.
- * - A null level reads as `hostile`.
+ *   profile's `areaRules` (default CR 5 and 6), and whenever the report's evidence kind is `play` or `name`. A warning or a full ban is left alone.
+ * - A null level reads as `hostile`, except for `play` and `name` evidence (`context.evidence`, else the rule: CR 5 and 6, CR 7), where it reads as `rude`: a first offence. For those a chat
+ *   restriction is also a ban from public rooms, and a name with a clean record gets at least a warning, with a rename suggested first when `names.renames` is on.
  *
  * Returns a fresh object each call. Throws `RangeError` for a level that is not a {@link ConductLevel} (for example a
  * K2 `'high'`).
@@ -351,13 +366,16 @@ export function suggest(
   if (level !== null && !CONDUCT_LEVELS.includes(level)) {
     throw new RangeError('suggest: level must be banter, rude, hostile, severe or null');
   }
-  const read: ConductLevel = level ?? 'hostile';
+  const kind: EvidenceKind | undefined = isEvidenceKind(context.evidence) ? context.evidence : evidenceOfRule(rule);
+  const offKind = kind === 'play' || kind === 'name' ? kind : undefined;
+  const nouns: Record<ConductLevel, string> = offKind === undefined ? LEVEL_NOUN : KIND_NOUN[offKind];
+  const read: ConductLevel = level ?? (offKind === undefined ? 'hostile' : 'rude');
   const name = profile.name;
   if (read === 'banter') {
     return {
       outcome: 'none',
       label: outcomeLabel('none'),
-      why: `${name} profile: banter is not moderated, so no action is suggested.`,
+      why: offKind === undefined ? `${name} profile: banter is not moderated, so no action is suggested.` : `${name} profile: this is minor and not moderated, so no action is suggested.`,
     };
   }
 
@@ -369,7 +387,9 @@ export function suggest(
   const step = recordStep(records);
   const row = profile.ladder[step];
   if (row === undefined) throw new RangeError('suggest: the profile ladder has no row for this record');
-  const first = plainPick(profile.firstOffense[effective]);
+  let first = plainPick(profile.firstOffense[effective]);
+  // A name that breaks the rules is at least a warning (with a rename asked first when the profile allows it), whatever the level's first-offense outcome says.
+  if (offKind === 'name' && !severe) first = stronger(first, plainPick('warning'));
 
   let pick: Pick;
   let reason: string;
@@ -390,8 +410,9 @@ export function suggest(
       pick = first;
       const verb = verbPhrase(pick.outcome, outcomeLabel(pick.outcome));
       reason = live.some((r) => r.kind === 'note')
-        ? `the earlier notes do not yet add up to a repeat, so the ${LEVEL_NOUN[effective]} ${verb}`
-        : `first ${LEVEL_NOUN[effective]} with a clean record ${verb}`;
+        ? `the earlier notes do not yet add up to a repeat, so the ${nouns[effective]} ${verb}`
+        : `first ${nouns[effective]} with a clean record ${verb}`;
+      if (offKind === 'name' && !severe && profile.names?.renames === true) reason += '; ask for a new name first';
     }
   }
 
@@ -416,10 +437,16 @@ export function suggest(
   let outcome = copyOutcome(pick.outcome);
   let label = pick.label ?? outcomeLabel(outcome);
   let areaNote = '';
-  if (typeof outcome !== 'string' && outcome.kind === 'chat' && typeof rule === 'number' && areaRules.includes(rule)) {
-    outcome = { kind: 'area', durationMs: outcome.durationMs };
-    label = outcomeLabel(outcome);
-    areaNote = ' (this rule bans from public rooms instead of restricting chat)';
+  if (typeof outcome !== 'string' && outcome.kind === 'chat') {
+    const byRule = typeof rule === 'number' && areaRules.includes(rule);
+    // The kind the report SAYS (`context.evidence`) always swaps. A kind only read off the rule swaps for a name (no profile lists CR 7 by default); for CR 5 and 6 `areaRules` is the say, so a profile
+    // that lists other rules (or none) keeps them as it wrote.
+    const said = isEvidenceKind(context.evidence) && context.evidence !== 'chat';
+    if (byRule || said || offKind === 'name') {
+      outcome = { kind: 'area', durationMs: outcome.durationMs };
+      label = outcomeLabel(outcome);
+      areaNote = byRule ? ' (this rule bans from public rooms instead of restricting chat)' : ' (this is not about chat, so it bans from public rooms instead of restricting chat)';
+    }
   }
   const why = `${name} profile: ${reason}${areaNote}.${sentences.map((s) => ` ${s}`).join('')}`;
   return hits.length === 0 || context.hideSignalText === true ? { outcome, label, why } : { outcome, label, why, signals: { raised, ids: hits.map((h) => h.id) } };

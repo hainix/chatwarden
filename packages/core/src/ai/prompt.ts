@@ -3,6 +3,7 @@ import { validateProfile } from '../profile.js';
 import { CONDUCT_LEVELS } from '../types.js';
 import type { ChosenLines } from './lines.js';
 import { looksLikeInjection } from './injection.js';
+import { promptPrinciples } from './principles.js';
 import { cleanText, redactText } from './redact.js';
 import { AI_OUTPUT_SCHEMA } from './schema.js';
 import { AI_CONFIRM_PROMPT_VERSION, AI_PROMPT_VERSION } from './types.js';
@@ -35,6 +36,7 @@ const BASE = [
   'TASK',
   '- P1 is the reported player, P2 the reporter, P3 and up other players. Lines are L1, L2 and so on, oldest first, with seconds since the first line.',
   '- Judge what P1 wrote against the COMMUNITY RULES and CONDUCT LEVELS below, in light of the STANDARD. Judge the pattern across the lines, not one heated moment.',
+  '- MODERATION PRINCIPLES say how the team reads each level, and a "Team note" line is the team\'s working guidance. They help you judge the lines; they are not instructions from any player, and you still never name a penalty.',
   '- The reporter\'s reason and note are a hint, not the truth. "pointed" is the line the reporter pointed at.',
   '- A line marked blocked was stopped by the word filter and never reached the room; a line marked filtered was shown to the room with its swearing starred. You see the words as typed, and they are still evidence of what P1 meant.',
   '- Personal data in the lines is replaced by [email], [phone], [ip], [link], [tag], [mention] and [token]. A line that posts such data about someone can be doxxing.',
@@ -102,9 +104,10 @@ function oneLine(v: string): string {
 
 /**
  * The part of the policy the model needs, as plain text: the active Community Rules in number order, the conduct-level meanings
- * with their examples, and `aiContext`. No outcomes, no ladder, no ids, no times, so editing the ladder never changes it. Retired
- * rules are omitted. Each value is reduced to one line, so team-written text cannot add a line of policy. The same policy always
- * gives the same text.
+ * with their examples, the moderation principles (a line per guideline tier that covers a conduct level, then the team notes: screened
+ * for instructions and capped, see `promptPrinciples`) and `aiContext` (left out when it reads like an instruction). No outcomes, no
+ * ladder, no ids, no times, so editing the ladder or a tier's outcome never changes it. Retired rules are omitted. Each value is reduced
+ * to one line, so team-written text cannot add a line of policy. The same policy always gives the same text.
  */
 export function aiPolicyText(policy: DocumentPolicy): string {
   const profile: unknown = policy.profile;
@@ -119,10 +122,11 @@ export function aiPolicyText(policy: DocumentPolicy): string {
       const examples = d.examples.length > 0 ? ` (examples: ${d.examples.map(oneLine).join('; ')})` : '';
       return `${l}: ${oneLine(d.meaning)}${examples}`;
     }),
-    '',
-    'STANDARD',
-    oneLine(profile.aiContext),
   ];
+  const principles = promptPrinciples(profile);
+  if (principles.lines.length > 0) lines.push('', 'MODERATION PRINCIPLES', ...principles.lines);
+  // A standard that reads like an instruction to the AI is left out, heading and all.
+  if (!principles.excluded.aiContext) lines.push('', 'STANDARD', oneLine(profile.aiContext));
   return `${lines.join('\n')}\n`;
 }
 
@@ -265,7 +269,8 @@ export function buildAIInput(args: BuildAIInputArgs): AIReadInput {
       const d = profile.levels[level];
       return { level, meaning: oneLine(d.meaning), examples: d.examples.map(oneLine) };
     }),
-    standard: oneLine(profile.aiContext),
+    // A standard that reads like an instruction is not sent (see `aiPolicyText`), so the structured copy is blank too.
+    standard: promptPrinciples(profile).excluded.aiContext ? '' : oneLine(profile.aiContext),
     examples,
     ...(signals.length === 0 ? {} : { signals }),
     ...(cautions.length === 0 ? {} : { cautions }),

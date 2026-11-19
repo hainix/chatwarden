@@ -1,3 +1,4 @@
+import { stripInvisible } from './appeals.js';
 import { DEFAULT_AREA_RULES, DEFAULT_SEVERE_RULES, lengthLabel, outcomeLabel } from './ladder.js';
 import type { LadderCell } from './ladder.js';
 import { validateProfile, withDurationDefaults } from './profile.js';
@@ -53,7 +54,7 @@ export interface ModeratorGuideOptions {
 export interface PolicyJson {
   version: 1;
   /** With `durations` and `customDuration` filled in, so a profile written for 0.1.1 reads back with the two new keys. */
-  profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms'>;
+  profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms' | 'teamNotes'>;
   /** Every rule, retired ones included, in number order. */
   rules: CommunityRule[];
 }
@@ -79,9 +80,18 @@ type Block =
 
 const FORMATS: readonly string[] = ['markdown', 'html', 'text'];
 
-/** Collapse every run of whitespace and control characters (line breaks included) to one space. */
+/**
+ * Collapse every run of whitespace and control characters (line breaks included) to one space. Bidi, zero-width and other invisible characters are removed first (the
+ * same set as for a team note), so a team-edited tier title or example cannot reorder or hide text in a document.
+ */
 function flat(v: string): string {
-  return v.replace(/[\p{Cc}\s]+/gu, ' ');
+  return stripInvisible(v).replace(/[\p{Cc}\s]+/gu, ' ');
+}
+
+/** ` (CR 3)` for a note that cites a rule, ` (CR 3, retired)` when that rule is retired, nothing for a note with no rule. */
+function noteSuffix(rule: number | undefined, rules: CommunityRules): string {
+  if (rule === undefined) return '';
+  return rules.get(rule)?.retired === true ? ` (CR ${rule}, retired)` : ` (CR ${rule})`;
 }
 
 /** A value from outside this file (team text, a name, a rule): one trimmed line. */
@@ -440,6 +450,26 @@ function swearingForPlayer(profile: ModerationProfile): string {
 }
 
 /**
+ * What the code of conduct says comes first, and next, for the rules about play and names: read from the profile, not fixed. The first step is what the profile does for a first
+ * offence that is not about chat (the `rude` outcome); a name that breaks the rules is at least a warning, so that is said when the first step is gentler. The next steps are the
+ * area ban only when one of these rules is an area rule of the profile.
+ */
+function playedSteps(profile: DocumentPolicy['profile'], numbers: readonly number[]): string {
+  const first = profile.firstOffense.rude;
+  let sentence: string;
+  if (first === 'warning') sentence = 'Usually a warning comes first.';
+  else if (first === 'note') sentence = 'Usually the first time is only noted for the moderators, and you are not sent a warning.';
+  else if (first === 'none') sentence = 'Usually the first time is not acted on.';
+  else sentence = 'Usually a restriction comes first.';
+  if (first !== 'warning' && numbers.includes(7)) sentence += ' A name that breaks the rules gets a warning.';
+  const area = profile.areaRules ?? DEFAULT_AREA_RULES;
+  const next = numbers.some((n) => area.includes(n))
+    ? 'If you carry on, the next steps are a ban from public rooms and matchmaking, then longer bans.'
+    : 'If you carry on, the steps get stricter.';
+  return `${sentence} ${next}`;
+}
+
+/**
  * The player-facing code of conduct, for a website or a rules page: the summary, the numbered Community Rules, what
  * happens in plain words, how to report, what a notice means and what to do about a mistake. It is written to
  * "you" and uses none of the moderators' internal terms; records are only ever "a private record".
@@ -465,9 +495,23 @@ export function codeOfConduct(policy: DocumentPolicy, options: CodeOfConductOpti
     { k: 'h', level: 2, text: 'The rules' },
     { k: 'ul', items: ruleItems(rules) },
     { k: 'h', level: 2, text: 'What happens if you break a rule' },
-    { k: 'p', text: 'What happens depends on what you did and on whether it has happened before. Reported messages are reviewed before a decision is made.' },
+    { k: 'p', text: 'What happens depends on what you did and on whether it has happened before. Reports are reviewed by a moderator before a decision is made. Depending on the report that can be chat, how the game was played, or a player name.' },
   ];
   for (const tier of profile.guidelines) blocks.push(...playerTierBlocks(profile, tier));
+
+  // The tiers above are about what is written; cheating, throwing, leaving and names are judged on what happened, so the page says so for the rules that cover them.
+  const played = rules.active().filter((r) => r.number === 5 || r.number === 6 || r.number === 7);
+  if (played.length > 0) {
+    const names = played.map((r) => `CR ${r.number} (${clean(r.title)})`);
+    const list = names.length === 1 ? (names[0] as string) : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] as string}`;
+    blocks.push(
+      { k: 'h', level: 3, text: 'Playing and names' },
+      {
+        k: 'p',
+        text: `${list} are about how you play and the name you choose, not about what you write in chat. They are judged on what happened. ${playedSteps(profile, played.map((r) => r.number))}`,
+      },
+    );
+  }
 
   const area = areaRuleList(snapshot);
   const severe = severeRuleList(snapshot);
@@ -487,7 +531,7 @@ export function codeOfConduct(policy: DocumentPolicy, options: CodeOfConductOpti
     { k: 'h', level: 2, text: 'How to report' },
     {
       k: 'p',
-      text: 'Use the report option in the game. Pick the reason that fits best and describe what happened. Recent chat from that game is reviewed before a decision is made.',
+      text: 'Use the report option in the game. Pick the reason that fits best and describe what happened.',
     },
     {
       k: 'p',
@@ -573,12 +617,19 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
       { k: 'p', text: `Outcome: ${clean(tier.outcome)}` },
     );
   }
+  if (profile.teamNotes.length > 0) {
+    blocks.push(
+      { k: 'h', level: 2, text: 'Team notes' },
+      { k: 'p', text: 'Working notes for the moderation team. Players never see them.' },
+      { k: 'ul', items: profile.teamNotes.map((n) => `${clean(n.text)}${noteSuffix(n.rule, rules)}`) },
+    );
+  }
 
   blocks.push(
     { k: 'h', level: 2, text: 'First offense' },
     { k: 'p', text: 'What a person with a clean record gets for each level.' },
     { k: 'table', head: ['Level', 'Outcome'], rows: CONDUCT_LEVELS.map((l) => [l, outcomeLabel(profile.firstOffense[l])]) },
-    { k: 'p', text: 'Banter is never acted on, whatever the record.' },
+    { k: 'p', text: 'The lowest level, banter, is never acted on, whatever the record. In chat that is salt and trash talk; in play, a minor slip.' },
     { k: 'h', level: 2, text: 'Repeated behaviour' },
     { k: 'p', text: `${capitalise(repeatRule(profile))}.` },
     {
@@ -595,7 +646,7 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
       },
       {
         k: 'table',
-        head: ['Step', 'Low / medium (banter, rude)', 'High (hostile with a record, severe)'],
+        head: ['Step', 'Low / medium (minor or isolated)', 'High (serious or repeated, or severe)'],
         rows: profile.ladder.map((row) => [String(row.step), clean(row.lowMedium.label), clean(row.high.label)]),
       },
     );
@@ -620,7 +671,7 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
     { k: 'h', level: 2, text: 'Writing a reason' },
     {
       k: 'p',
-      text: 'Write the reason in your own words: what was said, and why it breaks the rule you cite. The reason is for the record. The player never sees it, only the rule number and a reference code.',
+      text: 'Write the reason in your own words: what happened, and why it breaks the rule you cite. The reason is for the record. The player never sees it, only the rule number and a reference code.',
     },
     { k: 'h', level: 2, text: 'Dismissing a report' },
     {
@@ -672,7 +723,7 @@ export function agentBrief(policy: DocumentPolicy): string {
     ...CONDUCT_LEVELS.map((l) => `- ${l}: ${outcomeLabel(profile.firstOffense[l])}`),
     `Repeated: ${repeatRule(profile)}. Applies only while the record holds no warning or restriction, and is never milder than the first offense.`,
     `Record steps: ${RECORD_STEPS}.`,
-    'Escalation after the first offense. Step = heaviest action on the record in the last 90 days. Low = banter and rude; high = hostile once the record has a warning or restriction, and severe:',
+    'Escalation after the first offense. Step = heaviest action on the record in the last 90 days. Low = banter and rude (minor or isolated conduct); high = hostile once the record has a warning or restriction (serious or repeated conduct), and severe:',
     ...profile.ladder.map((row) => `- step ${row.step}: low ${clean(row.lowMedium.label)} | high ${clean(row.high.label)}`),
   ];
   const area = areaRuleList(snapshot);
@@ -684,6 +735,7 @@ export function agentBrief(policy: DocumentPolicy): string {
   lines.push(
     'Guidelines:',
     ...profile.guidelines.map((t) => `- ${clean(t.title)} (covers: ${t.covers.map(coverName).join(', ')}): ${clean(t.outcome)}`),
+    ...(profile.teamNotes.length === 0 ? [] : ['Team notes:', ...profile.teamNotes.map((n) => `- ${clean(n.text)}${noteSuffix(n.rule, rules)}`)]),
     `Profanity: ${profile.profanity.mode}. The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.`,
     '',
     'AI AUTO-ACT',
@@ -705,8 +757,8 @@ export function agentBrief(policy: DocumentPolicy): string {
  */
 export function policyJson(policy: DocumentPolicy): PolicyJson {
   const snapshot = checkPolicy(policy);
-  // The AI, pace, signal, appeal, name, filter, desk, safety and room settings are runtime switches, not policy text (the safety contact line is for staff only): the document tools never carry them.
-  const profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms'> & {
+  // The AI, pace, signal, appeal, name, filter, desk, safety and room settings are runtime switches, not policy text (the safety contact line and the team notes are for staff only): the document tools never carry them.
+  const profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'desk' | 'safety' | 'rooms' | 'teamNotes'> & {
     ai?: unknown;
     pace?: unknown;
     signals?: unknown;
@@ -716,6 +768,7 @@ export function policyJson(policy: DocumentPolicy): PolicyJson {
     desk?: unknown;
     safety?: unknown;
     rooms?: unknown;
+    teamNotes?: unknown;
   } =
     structuredClone(snapshot.profile);
   delete profile.ai;
@@ -727,6 +780,7 @@ export function policyJson(policy: DocumentPolicy): PolicyJson {
   delete profile.desk;
   delete profile.safety;
   delete profile.rooms;
+  delete profile.teamNotes;
   return { version: 1, profile, rules: snapshot.rules.all() };
 }
 

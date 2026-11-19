@@ -11,6 +11,7 @@ import { auditContract } from './audit.contract.js';
 import { deskContract } from './desk.contract.js';
 import { discordThreadsContract } from './discordThreads.contract.js';
 import { filtersContract } from './filters.contract.js';
+import { idleContract } from './idle.contract.js';
 import { legalContract } from './legal.contract.js';
 import { linksContract } from './links.contract.js';
 import { mutesContract } from './mutes.contract.js';
@@ -25,6 +26,7 @@ import { reportsContract } from './reports.contract.js';
 import { retentionContract } from './retention.contract.js';
 import { sanctionsContract } from './sanctions.contract.js';
 import { scopeContract } from './scope.contract.js';
+import { setupContract } from './setup.contract.js';
 import { signalsContract } from './signals.contract.js';
 import { strikesContract } from './strikes.contract.js';
 import { teamContract } from './team.contract.js';
@@ -42,6 +44,7 @@ export {
   deskContract,
   discordThreadsContract,
   filtersContract,
+  idleContract,
   legalContract,
   linksContract,
   mutesContract,
@@ -56,6 +59,7 @@ export {
   retentionContract,
   sanctionsContract,
   scopeContract,
+  setupContract,
   signalsContract,
   strikesContract,
   subjectsContract,
@@ -81,6 +85,7 @@ export const CONTRACT_AREAS = [
   'staff views',
   'team',
   'policy',
+  'setup state',
   'report reasons',
   'ai',
   'ai act',
@@ -96,6 +101,7 @@ export const CONTRACT_AREAS = [
   'desk',
   'scope',
   'pace',
+  'identity age-out',
 ] as const;
 
 /**
@@ -117,6 +123,7 @@ export function storeContract(name: string, make: () => Store, dump?: (s: Store)
   viewsContract(name, make);
   teamContract(name, make);
   policyContract(name, make);
+  setupContract(name, make);
   reportReasonsContract(name, make);
   aiContract(name, make);
   aiActContract(name, make);
@@ -132,4 +139,5 @@ export function storeContract(name: string, make: () => Store, dump?: (s: Store)
   deskContract(name, make);
   scopeContract(name, make);
   paceContract(name, make);
+  idleContract(name, make);
 }

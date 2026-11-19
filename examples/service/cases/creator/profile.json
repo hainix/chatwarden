@@ -1,0 +1,12 @@
+{
+  "preset": "standard",
+  "teamNotes": [
+    {
+      "text": "Protect the creator and their guests from targeted abuse"
+    }
+  ],
+  "contexts": {},
+  "names": {
+    "reserved": []
+  }
+}

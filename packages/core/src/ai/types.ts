@@ -8,15 +8,16 @@ import type { AiGateName } from './gates.js';
 /**
  * The prompt version. Bumped when the prompt or the output schema changes; part of the input hash, so a bump makes every stored
  * read stale. 2 added the full-stop spacing line; 3 added the stable paragraph about signal counts; 4 added the stable paragraph about
- * appeal cautions and corrective examples; 5 added the confirming read's prompt (`purpose: 'confirm'`) beside it, so every stored read is stale once.
+ * appeal cautions and corrective examples; 5 added the confirming read's prompt (`purpose: 'confirm'`) beside it, so every stored read is stale once; 6 added the
+ * moderation principles and team notes to the stable text (and the line that explains them), so every stored read is stale once more.
  */
-export const AI_PROMPT_VERSION = 5;
+export const AI_PROMPT_VERSION = 6;
 
 /**
  * The version of the confirming read's own prompt (`purpose: 'confirm'`): a counter apart from {@link AI_PROMPT_VERSION}, so a confirming read is never mistaken for a read
- * of the same version. Bumped when the confirming prompt changes.
+ * of the same version. Bumped when the confirming prompt changes: 2 added the same principles block and explanatory line as the read's version 6.
  */
-export const AI_CONFIRM_PROMPT_VERSION = 1;
+export const AI_CONFIRM_PROMPT_VERSION = 2;
 
 /**
  * One signal count about the reported person (P1), as the model is shown it: the adopter's own short label, whether it counts for or

@@ -417,6 +417,13 @@ describe('notices', () => {
     return w;
   }
 
+  it('a pending notice carries what the sanction was about (0.2.2) and still fits the documented schema', async () => {
+    const w = await warned();
+    const pending = bodyOf(await w.call('POST', '/notices/pending', { body: { who: w.who('wumbo') } }));
+    expect(pending.notices[0].evidence).toBe('chat');
+    expect(schemaProblems(w)).toEqual([]);
+  });
+
   it('pending lists an unacknowledged notice for the named who; ack marks it; a second ack and another person\'s id both answer ok false in the same shape', async () => {
     const w = await warned();
     const pending = bodyOf(await w.call('POST', '/notices/pending', { body: { who: w.who('wumbo') } }));

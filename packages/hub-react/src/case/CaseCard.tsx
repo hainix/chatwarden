@@ -65,8 +65,9 @@ function reportedLine(
 }
 
 /** What the reported person said, and, on request, the whole chat around it. */
-function Said({ report, target, people }: { report: StaffReport; target: ReportPerson; people: ReportPerson[] }) {
+function Said({ report, target, people }: { report: StaffReport & { evidenceKind?: 'chat' | 'play' | 'name' }; target: ReportPerson; people: ReportPerson[] }) {
   const { t } = useHub();
+  const offKind = report.evidenceKind === 'play' || report.evidenceKind === 'name' ? report.evidenceKind : undefined;
   const id = useId();
   const [whole, setWhole] = useState(false);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -76,7 +77,7 @@ function Said({ report, target, people }: { report: StaffReport; target: ReportP
   const shown = whole ? all : mine;
   const body = (
     <>
-      {mine.length === 0 && <p className="cw-hint">{t('hub.report.excerpt.silent', { name: personName(target, people, t) })}</p>}
+      {mine.length === 0 && <p className="cw-hint">{offKind === undefined ? t('hub.report.excerpt.silent', { name: personName(target, people, t) }) : t(`hub.report.excerpt.context.${offKind}`)}</p>}
       {shown.length > 0 && (
         <div className="cw-transcript cw-scard-lines">
           <ol className="cw-lines" aria-label={t('hub.report.excerpt.label')}>
@@ -105,7 +106,7 @@ function Said({ report, target, people }: { report: StaffReport; target: ReportP
   );
   return (
     <section className="cw-scard-said" aria-labelledby={id}>
-      <h3 id={id}>{t('hub.simple.said.title')}</h3>
+      <h3 id={id}>{t(offKind === undefined ? 'hub.simple.said.title' : 'hub.simple.said.title.context')}</h3>
       {all.length === 0 ? (
         body
       ) : (
@@ -422,7 +423,7 @@ export function CaseCard() {
         {c.aiCase?.from != null && !aiOk && draft.status === 'ready' && <LazyAiParts part="why" />}
         {!aiOk && one !== null && (
           <>
-            <LazyPlayerPreview op={decideOp(one.form, { target: parts.target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order })} nameOf={parts.nameOf} reporter={parts.reporter} />
+            <LazyPlayerPreview op={decideOp(one.form, { target: parts.target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order, evidence: parts.evidence })} nameOf={parts.nameOf} reporter={parts.reporter} />
             <p className="cw-hint cw-scard-fine">{t('hub.simple.undo', { seconds: SECONDS })}</p>
           </>
         )}

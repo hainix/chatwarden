@@ -84,6 +84,10 @@ const SPECS: Spec[] = [
   // The urgent lane (0.2.0): mark a report urgent, mark it as passed to the safety team. Their own checks are in admin.urgent.test.ts.
   { name: 'POST /reports/:id/urgent', method: 'POST', path: (i) => `/reports/${i.report}/urgent`, body: { on: true }, lock: { 'reports.urgent': 'owner' }, min: 'moderator' },
   { name: 'POST /reports/:id/handoff', method: 'POST', path: (i) => `/reports/${i.report}/handoff`, body: {}, lock: { 'reports.handoff': 'owner' }, min: 'moderator' },
+  // The first-run setup (0.2.2): the owner's, fixed in code, not scope-aware. Their own checks are in admin.setup.test.ts.
+  { name: 'GET /setup', method: 'GET', path: () => '/setup', lock: {}, min: 'owner' },
+  { name: 'POST /setup/apply', method: 'POST', path: () => '/setup/apply', body: { game: 'social', version: 0 }, lock: {}, min: 'owner' },
+  { name: 'POST /setup/dismiss', method: 'POST', path: () => '/setup/dismiss', body: {}, lock: {}, min: 'owner' },
   { name: 'GET /audit', method: 'GET', path: () => '/audit', lock: { 'audit.read': 'owner' }, min: 'senior' },
 ];
 

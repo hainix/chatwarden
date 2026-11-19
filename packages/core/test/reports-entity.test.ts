@@ -248,9 +248,9 @@ describe('the rules are the same', () => {
 });
 
 describe('the impersonation reason', () => {
-  it('is present in the default reasons, disabled, in the Chat group, mapped to Community Rule 2', () => {
+  it('is present in the default reasons, disabled, in the Players group, mapped to Community Rule 2', () => {
     const r = DEFAULT_REPORT_REASONS.find((x) => x.id === 'impersonation');
-    expect(r).toMatchObject({ id: 'impersonation', label: 'Pretending to be staff or someone else', group: 'Chat', rules: [2], enabled: false, urgent: false, asksNote: false, showResources: false });
+    expect(r).toMatchObject({ id: 'impersonation', label: 'Pretending to be staff or someone else', group: 'Players', evidence: 'chat', rules: [2], enabled: false, urgent: false, asksNote: false, showResources: false });
     expect(r?.hint.length).toBeGreaterThan(0);
   });
 

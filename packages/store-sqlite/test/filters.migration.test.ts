@@ -60,11 +60,12 @@ const filterReport = (id: string, over: Partial<StoredReport> = {}): StoredRepor
 });
 
 describe('migration 26 (filters blocks)', () => {
-  it('migration 26 exists, versions run 1..N without a gap, 27 (release 0.2.1) exists and no version 28 was added', () => {
+  it('migration 26 exists, versions run 1..N without a gap, 27 (release 0.2.1) and 28 (release 0.2.2) exist and no version 29 was added', () => {
     expect(MIGRATIONS.find((m) => m.version === 26)).toBeDefined();
     expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: MIGRATIONS.length }, (_, i) => i + 1));
     expect(MIGRATIONS.find((m) => m.version === 27)).toBeDefined();
-    expect(MIGRATIONS.find((m) => m.version === 28)).toBeUndefined();
+    expect(MIGRATIONS.find((m) => m.version === 28)).toBeDefined();
+    expect(MIGRATIONS.find((m) => m.version === 29)).toBeUndefined();
   });
 
   it('from an empty database adds origin and origin_key to kit_reports, their two indexes, and kit_filter_hits', () => {

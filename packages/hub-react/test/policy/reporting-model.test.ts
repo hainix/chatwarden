@@ -129,7 +129,7 @@ describe('reportingLayer', () => {
     expect(Object.keys(layer ?? {})).toEqual(['reasons']);
     expect(layer?.reasons).toHaveLength(13);
     expect(layer?.reasons?.find((r) => r.id === 'hate')?.label).toBe('Hate speech');
-    expect(layer?.reasons?.[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', rules: [2], asksNote: false, enabled: true, urgent: false, thanks: null, showResources: false });
+    expect(layer?.reasons?.[0]).toEqual({ id: 'harassment', label: 'Insults or harassment', hint: 'Insults, put-downs or picking on someone', group: 'Chat', rules: [2], asksNote: false, enabled: true, urgent: false, thanks: null, showResources: false, evidence: 'chat' });
   });
 
   it('carries urgent, thanks and showResources through a save untouched (threat stays urgent, welfare keeps its resources)', () => {
@@ -304,9 +304,9 @@ describe('the rows', () => {
   });
 
   it('lists the group names in use, once each, in order', () => {
-    expect(groupsOf(fresh())).toEqual(['Chat', 'Gameplay']);
+    expect(groupsOf(fresh())).toEqual(['Chat', 'Players', 'Gameplay']);
     const d = fresh();
-    expect(groupsOf(patchReason(d, row(d, 'hate').key, { group: '  Zed ' }))).toEqual(['Chat', 'Zed', 'Gameplay']);
+    expect(groupsOf(patchReason(d, row(d, 'hate').key, { group: '  Zed ' }))).toEqual(['Chat', 'Zed', 'Players', 'Gameplay']);
   });
 });
 
@@ -341,9 +341,10 @@ describe('playerGroups: what players see', () => {
     let d = fresh();
     d = patchReason(d, row(d, 'sexual').key, { enabled: false });
     const groups = playerGroups(d);
-    expect(groups.map((g) => g.name)).toEqual(['Chat', 'Gameplay', '']);
-    expect(groups[0]?.labels).toEqual(['Insults or harassment', 'Hate', 'Threats', 'Spam or ads', 'Sharing personal info', 'Inappropriate name']);
-    expect(groups[2]?.labels).toEqual(['Something else']);
+    expect(groups.map((g) => g.name)).toEqual(['Chat', 'Players', 'Gameplay', '']);
+    expect(groups[0]?.labels).toEqual(['Insults or harassment', 'Hate', 'Threats', 'Spam or ads', 'Sharing personal info']);
+    expect(groups[1]?.labels).toEqual(['Inappropriate name']);
+    expect(groups[3]?.labels).toEqual(['Something else']);
   });
 
   it('a row with no label yet is not shown', () => {

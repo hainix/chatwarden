@@ -16,8 +16,8 @@ const LOCALES = { es: es as Record<string, string>, pt: pt as Record<string, str
 
 /** Keys whose text is the same in English and in the language, on purpose. */
 const ALLOW: Record<string, ReadonlySet<string>> = {
-  es: new Set(['player.chat.label', 'player.notice.untilLeft', 'player.report.quote']),
-  pt: new Set(['player.chat.label', 'player.notice.untilLeft', 'player.report.quote']),
+  es: new Set(['player.chat.label', 'player.notice.untilLeft', 'player.report.quote', 'player.report.group.chat']),
+  pt: new Set(['player.chat.label', 'player.notice.untilLeft', 'player.report.quote', 'player.report.group.chat']),
 };
 
 describe.each(Object.entries(LOCALES))('player catalogue %s', (locale, catalog) => {

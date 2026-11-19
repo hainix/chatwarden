@@ -6,7 +6,7 @@ import type { PolicySection, PolicyState } from '../types.js';
 import { SECTION_ORDER } from './model.js';
 import type { Pending } from './useSaveFlow.js';
 
-export type ResetKey = 'lengths' | 'ladder' | 'first' | 'repeat' | 'rules' | 'guidelines' | 'reporting' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'safety' | 'desk' | 'all';
+export type ResetKey = 'lengths' | 'ladder' | 'first' | 'repeat' | 'rules' | 'guidelines' | 'notes' | 'standard' | 'reporting' | 'pace' | 'signals' | 'appeals' | 'names' | 'filters' | 'safety' | 'desk' | 'all';
 
 /** What each Reset covers: the kit's sections (a panel can hold two), and the words for its button and its toast. */
 export const RESETS: Record<ResetKey, { sections: readonly PolicySection[]; what: HubText; done: HubText }> = {
@@ -16,6 +16,8 @@ export const RESETS: Record<ResetKey, { sections: readonly PolicySection[]; what
   repeat: { sections: ['repeat'], what: 'hub.settings.repeat.what', done: 'hub.settings.repeat.done' },
   rules: { sections: ['areaRules', 'severeRules'], what: 'hub.settings.rules.what', done: 'hub.settings.rules.done' },
   guidelines: { sections: ['guidelines'], what: 'hub.settings.guidelines.what', done: 'hub.settings.guidelines.done' },
+  notes: { sections: ['teamNotes'], what: 'hub.settings.notes.what', done: 'hub.settings.notes.done' },
+  standard: { sections: ['aiContext'], what: 'hub.settings.standard.what', done: 'hub.settings.standard.done' },
   reporting: { sections: ['reporting'], what: 'hub.reporting.what', done: 'hub.reporting.done' },
   pace: { sections: ['pace'], what: 'hub.settings.pace.what', done: 'hub.settings.pace.done' },
   signals: { sections: ['signals'], what: 'hub.settings.signals.what', done: 'hub.settings.signals.done' },

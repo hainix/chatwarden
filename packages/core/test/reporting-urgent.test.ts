@@ -24,7 +24,7 @@ describe('default reasons', () => {
   it('threat is urgent; welfare exists, is disabled, urgent, showResources and has no rule; every other default is not urgent; the list still has other enabled', () => {
     expect(byId('threat')?.urgent).toBe(true);
     const welfare = byId('welfare');
-    expect(welfare).toMatchObject({ id: 'welfare', label: 'Someone may be in trouble', group: 'Chat', rules: [], enabled: false, urgent: true, showResources: true, asksNote: true });
+    expect(welfare).toMatchObject({ id: 'welfare', label: 'Someone may be in trouble', group: 'Players', rules: [], enabled: false, urgent: true, showResources: true, asksNote: true });
     expect(welfare?.hint).toBe('Someone who says they want to hurt themselves, or may be at risk');
     for (const r of DEFAULT_REPORT_REASONS) if (r.id !== 'threat' && r.id !== 'welfare') expect(r.urgent, r.id).toBe(false);
     expect(DEFAULT_REPORT_REASONS.filter((r) => r.showResources).map((r) => r.id)).toEqual(['welfare']);

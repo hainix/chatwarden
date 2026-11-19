@@ -69,6 +69,7 @@ export const partLoaders: {
   namePanel: () => Promise<ComponentType<PanelProps>>;
   filterPanel: () => Promise<ComponentType<PanelProps>>;
   safetyPanel: () => Promise<ComponentType<PanelProps>>;
+  standardPanel: () => Promise<ComponentType<PanelProps>>;
   privacyPanel: () => Promise<ComponentType<Record<string, never>>>;
   appealList: () => Promise<ComponentType<{ selected: string | null }>>;
   shareTerm: () => Promise<ComponentType<ShareTermProps>>;
@@ -82,6 +83,7 @@ export const partLoaders: {
   deskPanel: () => Promise<ComponentType<PanelProps>>;
   roomsPanel: () => Promise<ComponentType<Record<string, never>>>;
   contextsPanel: () => Promise<ComponentType<Record<string, never>>>;
+  firstRun: () => Promise<ComponentType<Record<string, never>>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
@@ -95,6 +97,7 @@ export const partLoaders: {
   namePanel: () => import('./screens/NameSettings.js').then((m) => m.NameSettings),
   filterPanel: () => import('./screens/FilterSettings.js').then((m) => m.FilterSettings),
   safetyPanel: () => import('./screens/SafetySettings.js').then((m) => m.SafetySettings),
+  standardPanel: () => import('./screens/StandardSettings.js').then((m) => m.StandardSettings),
   privacyPanel: () => import('./screens/PrivacySettings.js').then((m) => m.PrivacySettings),
   appealList: () => import('./appeals/AppealList.js').then((m) => m.AppealList),
   shareTerm: () => import('./terms/ShareTerm.js').then((m) => m.ShareTerm),
@@ -108,6 +111,7 @@ export const partLoaders: {
   deskPanel: () => import('./screens/DeskSettings.js').then((m) => m.DeskSettings),
   roomsPanel: () => import('./screens/RoomsSettings.js').then((m) => m.RoomsSettings),
   contextsPanel: () => import('./policy/RoomContexts.js').then((m) => m.RoomContexts),
+  firstRun: () => import('./setup/FirstRun.js').then((m) => m.FirstRun),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -172,6 +176,8 @@ const appealPanel = lazyPart(() => partLoaders.appealPanel());
 const namePanel = lazyPart(() => partLoaders.namePanel());
 const filterPanel = lazyPart(() => partLoaders.filterPanel());
 const safetyPanel = lazyPart(() => partLoaders.safetyPanel());
+const standardPanel = lazyPart(() => partLoaders.standardPanel());
+const firstRun = lazyPart(() => partLoaders.firstRun());
 const privacyPanel = lazyPart(() => partLoaders.privacyPanel());
 const appealList = lazyPart(() => partLoaders.appealList());
 const shareTerm = lazyPart(() => partLoaders.shareTerm(), true);
@@ -226,6 +232,12 @@ export const LazyFilterSettings = filterPanel.Part;
 /** The "Safety and urgent cases" panel of Settings > Advanced: loaded when that screen is opened. */
 export const LazySafetySettings = safetyPanel.Part;
 
+/** The "The AI's standard" panel of Settings > Advanced: loaded when that screen is opened. */
+export const LazyStandardSettings = standardPanel.Part;
+
+/** The first-run panel ("What kind of game is this?") at the top of the Overview and the Simple home: loaded when an owner who may change the settings opens one of them; it draws nothing until it knows there is something to offer. */
+export const LazyFirstRun = firstRun.Part as ComponentType<FailureAware>;
+
 /** The "Privacy requests" panel of Settings > Advanced (the owner's): loaded when that screen is opened. */
 export const LazyPrivacySettings = privacyPanel.Part as ComponentType<FailureAware>;
 
@@ -279,6 +291,8 @@ export function resetLazyParts(): void {
   namePanel.reset();
   filterPanel.reset();
   safetyPanel.reset();
+  standardPanel.reset();
+  firstRun.reset();
   privacyPanel.reset();
   appealList.reset();
   shareTerm.reset();

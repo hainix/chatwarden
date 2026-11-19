@@ -10,10 +10,12 @@ const EXPRESS = JSON.stringify({ name: 'zorbak-game', type: 'module', dependenci
 const project = (extra: WorldOptions = {}): World =>
   createWorld({ files: { 'package.json': EXPRESS, 'tsconfig.json': '{}', 'src/index.ts': 'export {};\n', ...extra.files }, ...extra });
 const run = (world: World, ...argv: string[]): Promise<number> => runCli(['init', ...argv], world.env);
+const GAME_Q = '1. What kind of game is this? (competitive: trash talk expected; social: casual, mixed ages; kids: kids or teens; creator: creator and streaming communities) [competitive/social/kids/creator] (social) > ';
+const CREATOR_LINE = "    overrides: { teamNotes: [{ text: 'Protect the creator and their guests from targeted abuse' }] },";
 
 describe('the interactive first run (design 5.8)', () => {
   it('prints exactly that transcript shape: the intro, the questions with their choices and defaults, then the report', async () => {
-    const world = project({ isTTY: true, stdin: '\nbox\n\n\n\n' });
+    const world = project({ isTTY: true, stdin: '\n\nbox\n\n\n' });
     expect(await run(world)).toBe(0);
     const out = world.out();
     const head = out.slice(0, out.indexOf('Created'));
@@ -21,7 +23,7 @@ describe('the interactive first run (design 5.8)', () => {
       [
         'Chatwarden init. This writes new files into ./src/chatwarden and touches nothing else.',
         '',
-        '1. Where should it keep moderation data? [sqlite/memory] (sqlite) > 2. Do you already have chat? [none/box] (none) > 3. How will moderators open the hub? [element/react/none] (element) > 4. Post reports to a Discord forum? [y/n] (n) > 5. Which standard? [relaxed/standard/strict] (standard) > ',
+        `${GAME_Q}2. Where should it keep moderation data? [sqlite/memory] (sqlite) > 3. Do you already have chat? [none/box] (none) > 4. How will moderators open the hub? [element/react/none] (element) > 5. Post reports to a Discord forum? [y/n] (n) > `,
         '',
       ].join('\n'),
     );
@@ -41,13 +43,15 @@ describe('the interactive first run (design 5.8)', () => {
     const world = project({ isTTY: true, stdin: '\n' });
     await run(world, '--store', 'memory', '--chat', 'box', '--hub', 'none', '--no-discord');
     const asked = world.out().match(/\d\. [^>]*> /g) ?? [];
-    expect(asked).toEqual(['1. Which standard? [relaxed/standard/strict] (standard) > ']);
+    // the kind of game is the one question left, and it stands in for "Which standard?"
+    expect(asked).toEqual([GAME_Q]);
+    expect(world.out()).not.toContain('Which standard?');
   });
 
   it('a second run asks the same questions and writes nothing new: every file unchanged, exit 0 (idempotent)', async () => {
-    const world = project({ isTTY: true, stdin: '\nbox\n\n\n\n' });
+    const world = project({ isTTY: true, stdin: '\n\nbox\n\n\n' });
     expect(await run(world)).toBe(0);
-    const again = createWorld({ files: Object.fromEntries(world.files().map((f) => [f, world.read(f)!])), isTTY: true, stdin: '\nbox\n\n\n\n' });
+    const again = createWorld({ files: Object.fromEntries(world.files().map((f) => [f, world.read(f)!])), isTTY: true, stdin: '\n\nbox\n\n\n' });
     expect(await run(again)).toBe(0);
     expect(again.out()).toContain('Unchanged\n  src/chatwarden/.env.example');
     expect(again.out()).not.toContain('Created');
@@ -55,7 +59,7 @@ describe('the interactive first run (design 5.8)', () => {
   });
 
   it('input that ends in the middle of the questions takes the defaults for the rest, and does not hang', async () => {
-    const world = project({ isTTY: true, stdin: 'memory\n' });
+    const world = project({ isTTY: true, stdin: '\nmemory\n' });
     expect(await run(world)).toBe(0);
     expect(world.err()).toContain('input ended: using the defaults for the rest');
     expect(world.has('src/chatwarden/kit.ts')).toBe(true);
@@ -354,7 +358,7 @@ describe('an unexpected failure', () => {
 
 describe.each(['posix', 'win32'] as const)('the whole flow on %s paths', (kind: PathKind) => {
   it('an interactive run, then a check, end to end', async () => {
-    const world = createWorld({ kind, files: { 'package.json': EXPRESS, 'tsconfig.json': '{}', 'src/index.ts': '' }, isTTY: true, stdin: 'memory\nnone\nelement\nn\nstrict\n' });
+    const world = createWorld({ kind, files: { 'package.json': EXPRESS, 'tsconfig.json': '{}', 'src/index.ts': '' }, isTTY: true, stdin: 'kids\nmemory\nnone\nelement\nn\n' });
     expect(await runCli(['init'], world.env)).toBe(0);
     expect(world.read('src/chatwarden/kit.ts')).toContain("profile: 'strict'");
     expect(world.read('src/chatwarden/kit.ts')).toContain('createMemoryStore');
@@ -382,5 +386,123 @@ describe('Next.js: the route goes where the project\'s app directory is', () => 
     const world = nextProject({ 'app/page.tsx': '', 'src/util.ts': 'export {};\n' });
     expect(await run(world, '--yes', '--dir', 'src/chatwarden', '--store', 'memory')).toBe(0);
     expect(routes(world)).toEqual(['app/chatwarden/[...path]/route.ts']);
+  });
+});
+
+describe('init --game (0.2.2)', () => {
+  const KIT = 'src/chatwarden/kit.ts';
+
+  it("--yes --json --game kids has answers.game 'kids' and profile 'strict'", async () => {
+    const world = project();
+    expect(await run(world, '--yes', '--json', '--game', 'kids')).toBe(0);
+    const doc = JSON.parse(world.out()) as { answers: Record<string, unknown> };
+    expect(doc.answers).toMatchObject({ game: 'kids', profile: 'strict' });
+    expect(world.read(KIT)).toContain("profile: 'strict'");
+  });
+
+  it('the JSON answers carry no game key when none was given', async () => {
+    const world = project();
+    expect(await run(world, '--yes', '--json')).toBe(0);
+    const doc = JSON.parse(world.out()) as { answers: Record<string, unknown> };
+    expect(Object.hasOwn(doc.answers, 'game')).toBe(false);
+    expect(doc.answers.profile).toBe('standard');
+  });
+
+  it('each game writes its standard into kit.ts', async () => {
+    for (const [game, profile] of [['competitive', 'relaxed'], ['social', 'standard'], ['kids', 'strict'], ['creator', 'standard']] as const) {
+      const world = project();
+      expect(await run(world, '--yes', '--game', game), game).toBe(0);
+      expect(world.read(KIT), game).toContain(`profile: '${profile}',`);
+    }
+  });
+
+  it('--game creator writes kit.ts with the team-note overrides line right after the profile line', async () => {
+    const world = project();
+    expect(await run(world, '--yes', '--game', 'creator')).toBe(0);
+    const kit = world.read(KIT) as string;
+    expect(kit).toContain(`    profile: 'standard',\n${CREATOR_LINE}\n`);
+    expect(kit.split('\n').filter((l) => l === CREATOR_LINE)).toHaveLength(1);
+  });
+
+  it('--game creator in a JavaScript project writes the same line', async () => {
+    const world = createWorld({ files: { 'package.json': EXPRESS } });
+    expect(await run(world, '--yes', '--game', 'creator', '--lang', 'js')).toBe(0);
+    const kit = world.files().find((f) => /kit\.m?js$/.test(f));
+    expect(kit).toBeDefined();
+    expect(world.read(kit as string)).toContain(CREATOR_LINE);
+  });
+
+  it('--game social, kids, competitive and no game write no overrides line, and social and no game give a byte-identical kit.ts (control)', async () => {
+    const none = project();
+    await run(none, '--yes');
+    const social = project();
+    await run(social, '--yes', '--game', 'social');
+    expect(social.read(KIT)).toBe(none.read(KIT));
+    for (const game of ['social', 'kids', 'competitive'] as const) {
+      const world = project();
+      await run(world, '--yes', '--game', game);
+      expect(world.read(KIT), game).not.toContain('overrides:');
+      expect(world.read(KIT), game).not.toContain('teamNotes');
+    }
+    expect(none.read(KIT)).not.toContain('overrides:');
+    // a game and the profile it maps to write the same file
+    const kids = project();
+    await run(kids, '--yes', '--game', 'kids');
+    const strict = project();
+    await run(strict, '--yes', '--profile', 'strict');
+    expect(kids.read(KIT)).toBe(strict.read(KIT));
+  });
+
+  it('the creator project is the standard one plus the note: only kit.ts differs', async () => {
+    const creator = project();
+    await run(creator, '--yes', '--game', 'creator');
+    const standard = project();
+    await run(standard, '--yes');
+    expect(creator.files()).toEqual(standard.files());
+    for (const f of creator.files()) {
+      if (f === KIT) expect(creator.read(f)).not.toBe(standard.read(f));
+      else expect(creator.read(f), f).toBe(standard.read(f));
+    }
+  });
+
+  it('the interactive flow asks "What kind of game is this?" first; Enter takes social and writes profile standard, and "Which standard?" is not asked', async () => {
+    const world = project({ isTTY: true, stdin: '\n\n\n\n\n' });
+    expect(await run(world)).toBe(0);
+    const asked = world.out().match(/\d\. [^>]*> /g) ?? [];
+    expect(asked[0]).toBe(GAME_Q);
+    expect(asked).toHaveLength(5);
+    expect(world.out()).not.toContain('Which standard?');
+    expect(world.read(KIT)).toContain("profile: 'standard',");
+    expect(world.read(KIT)).not.toContain('overrides:');
+  });
+
+  it('typing kids writes profile strict and "Which standard?" is not asked', async () => {
+    const world = project({ isTTY: true, stdin: 'kids\n\n\n\n\n' });
+    expect(await run(world)).toBe(0);
+    expect(world.out()).not.toContain('Which standard?');
+    expect(world.read(KIT)).toContain("profile: 'strict',");
+  });
+
+  it('typing creator writes the creator note; a game typed in any case is taken', async () => {
+    const world = project({ isTTY: true, stdin: ' Creator \n\n\n\n\n' });
+    expect(await run(world)).toBe(0);
+    expect(world.read(KIT)).toContain(CREATOR_LINE);
+  });
+
+  it('with --profile relaxed on the command line AND a creator reply the kit has profile relaxed and still has the creator note', async () => {
+    const world = project({ isTTY: true, stdin: 'creator\n\n\n\n\n' });
+    expect(await run(world, '--profile', 'relaxed')).toBe(0);
+    expect(world.read(KIT)).toContain("profile: 'relaxed',");
+    expect(world.read(KIT)).toContain(CREATOR_LINE);
+    expect(world.out()).not.toContain('Which standard?');
+  });
+
+  it('a game on the command line is not asked, and --game with --dry-run writes nothing', async () => {
+    const world = project({ isTTY: true, stdin: '\n\n\n\n\n' });
+    await run(world, '--game', 'kids');
+    expect(world.out()).not.toContain('What kind of game');
+    const dry = project();
+    expect(await run(dry, '--dry-run', '--game', 'creator')).toBe(0);
+    expect(dry.writes()).toEqual([]);
   });
 });

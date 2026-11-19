@@ -13,6 +13,19 @@ describe('policyAuditKey', () => {
     ['policy.update', ['ladder'], 'hub.audit.label.policy.update.ladder'],
     ['policy.update', ['durations', 'customDuration'], 'hub.audit.label.policy.update.ladder'],
     ['policy.reset', ['areaRules', 'severeRules', 'guidelines'], 'hub.audit.label.policy.reset.ladder'],
+    ['policy.update', ['teamNotes'], 'hub.audit.label.policy.update.principles'],
+    ['policy.update', ['aiContext'], 'hub.audit.label.policy.update.principles'],
+    ['policy.update', ['guidelines', 'teamNotes'], 'hub.audit.label.policy.update.principles'],
+    ['policy.update', ['guidelines', 'teamNotes', 'aiContext'], 'hub.audit.label.policy.update.principles'],
+    ['policy.reset', ['teamNotes'], 'hub.audit.label.policy.reset.principles'],
+    ['policy.reset', ['aiContext'], 'hub.audit.label.policy.reset.principles'],
+    ['policy.reset', ['guidelines', 'aiContext'], 'hub.audit.label.policy.reset.principles'],
+    // a principles-only row that names the guidelines alone keeps its steps-and-ladder label (the section is shared with the ladder screen)
+    ['policy.update', ['guidelines'], 'hub.audit.label.policy.update.ladder'],
+    // the team notes are edited on the steps and ladder screen, so a row of them with the ladder keeps that label; the AI's standard is not, so it falls back to the general words
+    ['policy.update', ['teamNotes', 'ladder'], 'hub.audit.label.policy.update.ladder'],
+    ['policy.update', ['aiContext', 'reporting'], 'hub.audit.label.policy.update'],
+    ['policy.update', ['ladder', 'firstOffense', 'repeat', 'guidelines', 'aiContext'], 'hub.audit.label.policy.update'],
     ['policy.update', ['ladder', 'reporting'], 'hub.audit.label.policy.update'],
     ['policy.reset', ['durations', 'reporting'], 'hub.audit.label.policy.reset'],
   ] as const)('%s of %j reads as %s', (action, sections, key) => {
@@ -38,6 +51,13 @@ describe('policyAuditKey', () => {
 
   it('is only for the two settings actions', () => {
     expect(policyAuditKey('report.view', { sections: ['reporting'] })).toBeNull();
+  });
+});
+
+describe('the principles labels', () => {
+  it('are in plain words', () => {
+    expect(en['hub.audit.label.policy.update.principles']).toBe('Changed the moderation principles');
+    expect(en['hub.audit.label.policy.reset.principles']).toBe('Reset the moderation principles');
   });
 });
 

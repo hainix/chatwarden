@@ -1,5 +1,5 @@
 import { MAX_REASON_RULES, MAX_REPORT_REASONS, OTHER_REASON_ID, defaultReporting } from '@chatwarden/core';
-import type { ReportFlow, ReportReasonInput, ReportingSettings, ResolvedReporting } from '@chatwarden/core';
+import type { EvidenceKind, ReportFlow, ReportReasonInput, ReportingSettings, ResolvedReporting } from '@chatwarden/core';
 import type { Problem } from '../decision.js';
 
 // The Reporting settings are edited as a local draft, like the ladder: the draft holds what was typed or picked, and the functions here
@@ -27,6 +27,8 @@ export interface ReasonDraft {
   urgent: boolean;
   thanks: string | null;
   showResources: boolean;
+  /** What a report under this reason is about: chat, play or a name; `''` is not set (neutral). Sent as `null` when not set, so a built-in reason can be switched back to neutral. */
+  evidence: EvidenceKind | '';
 }
 
 export interface ReportingDraft {
@@ -53,7 +55,7 @@ export function reportingDraftOf(reporting: ResolvedReporting | undefined): Repo
   return {
     flow: r.flow,
     thanks: r.thanks,
-    reasons: ordered.map((x, i) => ({ key: `r${i}`, id: x.id, label: x.label, hint: x.hint, group: x.group, rules: [...x.rules], asksNote: x.asksNote, enabled: x.enabled, urgent: x.urgent, thanks: x.thanks, showResources: x.showResources })),
+    reasons: ordered.map((x, i) => ({ key: `r${i}`, id: x.id, label: x.label, hint: x.hint, group: x.group, rules: [...x.rules], asksNote: x.asksNote, enabled: x.enabled, urgent: x.urgent, thanks: x.thanks, showResources: x.showResources, evidence: x.evidence ?? '' })),
   };
 }
 
@@ -62,7 +64,7 @@ function sameness(d: ReportingDraft, newIds: boolean): string {
   return JSON.stringify([
     d.flow,
     d.thanks.trim(),
-    d.reasons.map((r) => [newIds ? r.id : r.id === '' ? '+' : r.id, r.label.trim(), r.hint.trim(), r.group.trim(), r.rules, r.asksNote, r.enabled, r.urgent, thanksOf(r.thanks), r.showResources]),
+    d.reasons.map((r) => [newIds ? r.id : r.id === '' ? '+' : r.id, r.label.trim(), r.hint.trim(), r.group.trim(), r.rules, r.asksNote, r.enabled, r.urgent, thanksOf(r.thanks), r.showResources, r.evidence]),
   ]);
 }
 
@@ -99,7 +101,7 @@ function inputsOf(d: ReportingDraft): ReportReasonInput[] {
       id = slugOf(r.label, taken);
       taken.add(id);
     }
-    return { id, label: r.label.trim(), hint: r.hint.trim(), group: r.group.trim(), rules: [...r.rules], asksNote: r.asksNote, enabled: isLocked({ id }) ? true : r.enabled, urgent: r.urgent, thanks: thanksOf(r.thanks), showResources: r.showResources };
+    return { id, label: r.label.trim(), hint: r.hint.trim(), group: r.group.trim(), rules: [...r.rules], asksNote: r.asksNote, enabled: isLocked({ id }) ? true : r.enabled, urgent: r.urgent, thanks: thanksOf(r.thanks), showResources: r.showResources, evidence: r.evidence === '' ? null : r.evidence };
   });
 }
 
@@ -143,7 +145,7 @@ const freshKey = (): string => `n${(keys += 1)}`;
 export function addReason(d: ReportingDraft): { draft: ReportingDraft; key: string | null } {
   if (d.reasons.length >= MAX_REPORT_REASONS) return { draft: d, key: null };
   const key = freshKey();
-  const row: ReasonDraft = { key, id: '', label: '', hint: '', group: '', rules: [], asksNote: false, enabled: true, urgent: false, thanks: null, showResources: false };
+  const row: ReasonDraft = { key, id: '', label: '', hint: '', group: '', rules: [], asksNote: false, enabled: true, urgent: false, thanks: null, showResources: false, evidence: '' };
   // "Something else" stays last: a new row goes before it.
   const at = d.reasons.findIndex((r) => isLocked(r));
   const reasons = at === d.reasons.length - 1 ? [...d.reasons.slice(0, at), row, d.reasons[at] as ReasonDraft] : [...d.reasons, row];

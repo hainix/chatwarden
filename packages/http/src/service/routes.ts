@@ -95,6 +95,8 @@ export const SERVICE_SCHEMAS: Record<string, Schema> = {
       mustAcknowledge: { type: 'boolean' },
       // A signed link to the appeal page for a sanction that can still be appealed (0.2.1); absent when none can be made.
       appealUrl: str(1, 2100),
+      // What the sanction was about (0.2.2); absent when it is neutral.
+      evidence: { enum: ['chat', 'play', 'name'] },
     },
     required: ['id', 'kind', 'excerpt', 'createdAt', 'mustAcknowledge'],
   },

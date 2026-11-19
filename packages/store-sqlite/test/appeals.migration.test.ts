@@ -98,13 +98,21 @@ const outcome = (i: number): AiOutcomeInsert => ({
   aiRule: null, aiSeverity: null, aiConfidence: null, decidedBy: null, source: 'human',
 });
 
+/** A notice written the way the kit wrote it before migration 28 added `evidence` (the store's own insert now names that column). */
+function insertOldNotice(db: DatabaseSync, row: NoticeRow): void {
+  db.prepare(
+    `INSERT INTO kit_notices (id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(row.id, row.subject, row.groupId, row.kind, row.rule, row.until, row.refCode, JSON.stringify(row.excerpt), row.createdAt, row.ackedAt, row.withdrawnAt);
+}
+
 /** A database at version 21 with notices of every old kind, sanctions, decisions, AI outcomes and an audit row. */
 function openAt21(db: DatabaseSync): SqliteStore {
   const store = openStore({ db, migrations: UP_TO_21 });
   expect(store.schemaVersion()).toBe(21);
-  OLD_KINDS.forEach((kind, i) => store.insertNotice(notice(i + 1, kind)));
+  OLD_KINDS.forEach((kind, i) => insertOldNotice(db, notice(i + 1, kind)));
   // a few more, so the rowid order and a gap (a deleted row) show
-  for (let i = 6; i <= 20; i++) store.insertNotice(notice(i, OLD_KINDS[i % 5] as NoticeKind));
+  for (let i = 6; i <= 20; i++) insertOldNotice(db, notice(i, OLD_KINDS[i % 5] as NoticeKind));
   db.prepare("DELETE FROM kit_notices WHERE id = 'n003'").run();
   // The version-21 table has none of the later columns, so these rows go in the way the kit wrote them then.
   for (let i = 0; i < 3; i++) {
@@ -167,9 +175,11 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
     const store = openStore({ db });
     expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     // (migration 26 adds the erasure epoch row to kit_meta)
-    expect(snapshot(db)).toEqual({ ...(before as object), meta: [{ key: 'erasure_epoch', value: '0' }], outcomes: (before as { outcomes: Array<Record<string, unknown>> }).outcomes.map((r) => ({ ...r, corrective: 0, ai_rule: null, ai_severity: null, ai_confidence: null, decided_by: null, source: 'human' })) });
+    expect(snapshot(db)).toEqual({ ...(before as object), notices: (before as { notices: Array<Record<string, unknown>> }).notices.map((r) => ({ ...r, evidence: null })), meta: [{ key: 'erasure_epoch', value: '0' }], outcomes: (before as { outcomes: Array<Record<string, unknown>> }).outcomes.map((r) => ({ ...r, corrective: 0, ai_rule: null, ai_severity: null, ai_confidence: null, decided_by: null, source: 'human' })) });
     // the live schema survives the rebuild: the same columns (names, types, nullability, defaults, primary key) and the same three indexes, byte for byte
-    expect(columnInfo(db, 'kit_notices')).toEqual(noticeCols);
+    // (migration 28 appends the nullable evidence column to the notices; everything before it is unchanged)
+    expect(columnInfo(db, 'kit_notices').slice(0, noticeCols.length)).toEqual(noticeCols);
+    expect(columns(db, 'kit_notices').slice(noticeCols.length)).toEqual(['evidence']);
     expect(indexSql(db, 'kit_notices')).toEqual(noticeIdx);
     expect(names(db, 'index').filter((i) => i.startsWith('kit_notices'))).toEqual(NOTICE_INDEXES);
     // (kit_links, kit_ai_noauto, kit_ai_acting, kit_ai_actions and kit_filter_hits, kit_erasures and kit_legal_holds come from later migrations)
@@ -290,13 +300,14 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
   it('a version 18 database with rows upgrades through 22 without changing data', () => {
     const db = memDb();
     const s = openStore({ db, migrations: MIGRATIONS.slice(0, 18) });
-    s.insertNotice(notice(1, 'warning'));
-    s.insertNotice(notice(2, 'report_outcome'));
+    insertOldNotice(db, notice(1, 'warning'));
+    insertOldNotice(db, notice(2, 'report_outcome'));
     s.close();
     const before = dump(db, 'kit_notices', 'rowid');
     const store = openStore({ db });
     expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
-    expect(dump(db, 'kit_notices', 'rowid')).toEqual(before);
+    // (migration 28 adds the nullable evidence column: old rows read null, nothing else moves)
+    expect(dump(db, 'kit_notices', 'rowid')).toEqual((before as Array<Record<string, unknown>>).map((r) => ({ ...r, evidence: null })));
   });
 
   it('is idempotent on a file: reopening twice leaves the same schema and rows', () => {

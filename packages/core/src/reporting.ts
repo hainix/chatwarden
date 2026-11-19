@@ -1,6 +1,12 @@
 import { httpsUrl } from './settingsCheck.js';
+import { evidenceOfRule, isEvidenceKind } from './evidenceKind.js';
+import type { EvidenceKind } from './evidenceKind.js';
+import type { RuleRef } from './rules.js';
 import type { ReportCategory } from './types.js';
 import type { SafetyResource } from './safety.js';
+
+export { EVIDENCE_KINDS, evidenceOfRule, isEvidenceKind } from './evidenceKind.js';
+export type { EvidenceKind } from './evidenceKind.js';
 
 // The reporting settings: how a player reports (the flow), what they may say it is for (the reasons), and what they are
 // told afterwards (the thank-you). Pure data and lookups: no store, no IO. The validation lives with the rest of the profile
@@ -69,6 +75,11 @@ export interface ReportReasonInput {
   thanks?: string | null;
   /** Show `safety.resources` to the reporter after the thank-you for this reason. Default false (`welfare` shows them in the defaults). */
   showResources?: boolean;
+  /**
+   * What a report under this reason is evidence of: `chat`, `play` or `name` (see {@link EvidenceKind}). The eight chat reasons, `cheating`, `griefing`, `afk` and `name` have a default;
+   * `other` and a reason of your own have none, which reads as neutral. `null` says "none" on purpose, also for a built-in id. A staff-side field: a player never reads it.
+   */
+  evidence?: EvidenceKind | null;
 }
 
 /** One reason with every field filled in. */
@@ -86,6 +97,8 @@ export interface ReportReason {
   thanks: string | null;
   /** Show the owner's resource list after the thank-you. */
   showResources: boolean;
+  /** What a report under this reason is evidence of; absent or `null` is neutral (see {@link ReportReasonInput.evidence}). */
+  evidence?: EvidenceKind | null;
 }
 
 /** The reporting settings as you write them: every field is optional and defaulted. */
@@ -131,7 +144,7 @@ const reason = (
   group: string,
   rules: number[],
   asksNote = false,
-  extra: { urgent?: boolean; showResources?: boolean; enabled?: boolean } = {},
+  extra: { urgent?: boolean; showResources?: boolean; enabled?: boolean; evidence?: EvidenceKind } = {},
 ): ReportReason => ({
   id,
   label,
@@ -143,33 +156,39 @@ const reason = (
   urgent: extra.urgent ?? false,
   thanks: null,
   showResources: extra.showResources ?? false,
+  ...(extra.evidence === undefined ? {} : { evidence: extra.evidence }),
 });
 
 /**
  * The default reasons, deep-frozen: Chat (insults or harassment, hate, sexual content, threats, spam or ads, sharing personal
- * info, an inappropriate name, a disabled "Pretending to be staff or someone else" and a disabled "Someone may be in trouble"), Gameplay (cheating, throwing or griefing, leaving or AFK), then Something else. Each maps to the starter Community
+ * info), Players (an inappropriate name, a disabled "Pretending to be staff or someone else" and a disabled "Someone may be in trouble"), Gameplay (cheating, throwing or griefing, leaving or AFK), then Something else.
+ * Each says what it is evidence of (`evidence`): the chat reasons and `impersonation` and `welfare` are `chat`, `cheating`, `griefing` and `afk` are `play`, `name` is `name`, and `other` has none (neutral). Each maps to the starter Community
  * Rules it usually means: harassment, threats and personal info to CR 2, a name to CR 7, hate to CR 1, sexual content to CR 3, spam to CR 4,
  * cheating to CR 5, griefing and AFK to CR 6; `impersonation` to CR 2, switched off until the owner turns it on (it appears in Settings > Reporting and in no player's report dialog until then). `other` and `welfare` map to none. `threat` is urgent; `welfare` is urgent, shows the owner's
  * resources and is switched off until the owner turns it on.
  */
 export const DEFAULT_REPORT_REASONS: readonly Readonly<ReportReason>[] = Object.freeze(
   [
-    reason('harassment', 'Insults or harassment', 'Insults, put-downs or picking on someone', 'Chat', [2]),
-    reason('hate', 'Hate', 'Hate aimed at who someone is', 'Chat', [1]),
-    reason('sexual', 'Sexual content', 'Sexual messages or pressure', 'Chat', [3]),
-    reason('threat', 'Threats', 'Threatening someone', 'Chat', [2], false, { urgent: true }),
-    reason('spam', 'Spam or ads', 'Repeated messages, flooding or advertising', 'Chat', [4]),
-    reason('personal_info', 'Sharing personal info', "Posting someone's private details", 'Chat', [2]),
-    reason('name', 'Inappropriate name', 'An offensive or inappropriate player name', 'Chat', [7]),
-    reason('impersonation', 'Pretending to be staff or someone else', 'A name or message that pretends to be a moderator, the game or another player', 'Chat', [2], false, { enabled: false }),
-    reason('welfare', 'Someone may be in trouble', 'Someone who says they want to hurt themselves, or may be at risk', 'Chat', [], true, {
+    reason('harassment', 'Insults or harassment', 'Insults, put-downs or picking on someone', 'Chat', [2], false, { evidence: 'chat' }),
+    reason('hate', 'Hate', 'Hate aimed at who someone is', 'Chat', [1], false, { evidence: 'chat' }),
+    reason('sexual', 'Sexual content', 'Sexual messages or pressure', 'Chat', [3], false, { evidence: 'chat' }),
+    reason('threat', 'Threats', 'Threatening someone', 'Chat', [2], false, { urgent: true, evidence: 'chat' }),
+    reason('spam', 'Spam or ads', 'Repeated messages, invites or ads', 'Chat', [4], false, { evidence: 'chat' }),
+    reason('personal_info', 'Sharing personal info', "Posting someone's private details", 'Chat', [2], false, { evidence: 'chat' }),
+    reason('name', 'Inappropriate name', 'An offensive or inappropriate player name', 'Players', [7], false, { evidence: 'name' }),
+    reason('impersonation', 'Pretending to be staff or someone else', 'A name or message that pretends to be a moderator, the game or another player', 'Players', [2], false, {
+      enabled: false,
+      evidence: 'chat',
+    }),
+    reason('welfare', 'Someone may be in trouble', 'Someone who says they want to hurt themselves, or may be at risk', 'Players', [], true, {
       urgent: true,
       showResources: true,
       enabled: false,
+      evidence: 'chat',
     }),
-    reason('cheating', 'Cheating', 'Cheating or exploiting a bug', 'Gameplay', [5]),
-    reason('griefing', 'Throwing or griefing', 'Losing on purpose or ruining the game', 'Gameplay', [6]),
-    reason('afk', 'Leaving or AFK', 'Leaving the game or not playing', 'Gameplay', [6]),
+    reason('cheating', 'Cheating', 'Cheating or exploiting a bug', 'Gameplay', [5], false, { evidence: 'play' }),
+    reason('griefing', 'Throwing or griefing', 'Losing on purpose or ruining the game', 'Gameplay', [6], false, { evidence: 'play' }),
+    reason('afk', 'Leaving or AFK', 'Leaving the game or not playing', 'Gameplay', [6], false, { evidence: 'play' }),
     reason(OTHER_REASON_ID, 'Something else', 'Anything else you want us to look at', '', [], true),
   ].map((r) => Object.freeze({ ...r, rules: Object.freeze([...r.rules]) as unknown as number[] })),
 );
@@ -204,6 +223,21 @@ export function findReason(reasons: readonly ReportReason[], id: string): Report
 /** The id `id` stands for in `reasons` (`disruption` becomes `griefing` unless the list has its own), or `id` itself when it is in no list. */
 export function canonicalReasonId(reasons: readonly ReportReason[], id: string): string {
   return findReason(reasons, id)?.id ?? id;
+}
+
+/** The evidence kind a reason says (an old alias included), or undefined for none: an unknown reason, `other`, a reason of your own with none, an explicit `null`. */
+export function evidenceOfReason(reasons: readonly ReportReason[], id: string | null): EvidenceKind | undefined {
+  if (id === null) return undefined;
+  const kind = findReason(reasons, id)?.evidence;
+  return isEvidenceKind(kind) ? kind : undefined;
+}
+
+/**
+ * What a report is evidence of: the reason's kind when it has one, else the kind of the rule cited ({@link evidenceOfRule}), else none (neutral). A custom reason with no kind and no
+ * play or name rule is neutral: no chat line is attached on its own and the notice names no conduct.
+ */
+export function evidenceKindOf(reasons: readonly ReportReason[], reasonId: string | null, rule?: RuleRef | null): EvidenceKind | undefined {
+  return evidenceOfReason(reasons, reasonId) ?? evidenceOfRule(rule);
 }
 
 /** The player-facing label of a reason id (an old alias included), or null when there is no such reason. */
@@ -297,6 +331,11 @@ export function fillReporting(value: unknown): unknown {
       if (!Object.hasOwn(filled, 'urgent')) filled['urgent'] = false;
       if (!Object.hasOwn(filled, 'thanks')) filled['thanks'] = null;
       if (!Object.hasOwn(filled, 'showResources')) filled['showResources'] = false;
+      // A stored list that names a built-in reason without a kind (a 0.2.1 layer) gets the built-in's kind; an explicit `null` stays.
+      if (!Object.hasOwn(filled, 'evidence')) {
+        const known = typeof filled['id'] === 'string' ? DEFAULT_REPORT_REASONS.find((d) => d.id === filled['id']) : undefined;
+        if (known?.evidence !== undefined) filled['evidence'] = known.evidence;
+      }
       return filled;
     });
   }

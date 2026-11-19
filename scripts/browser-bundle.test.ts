@@ -353,6 +353,10 @@ describe('browser bundle: size', () => {
 const AI_MARKERS = ['buildAIInput', 'AI_OUTPUT_SCHEMA', 'createFakeModerationAI'];
 // And the in-memory store's AI methods, which are opt-in (`withMemoryAi`) so a bundle that never calls it does not carry them.
 const MEMORY_AI_MARKERS = ['withMemoryAi', 'reserveAiRead', 'aiTeachableCount', 'listAiRetries', 'withMemoryAppeals', 'withMemoryLinks', 'withMemoryNames', 'UNIQUE constraint failed: kit_blocked_names.id'];
+// Three small PURE text helpers of the folder are in the kit's own build, because the policy state screens what reaches the AI prompt (the moderation principles,
+// 0.2.2): the injection tripwire, the text cleaner and the principles block. None holds a marker, an adapter, the prompt builder or a store call. The service, the prompt builder,
+// the validator, the fake and the ranking are still left out.
+const PURE_AI_HELPERS = ['injection', 'redact', 'principles'];
 const inputsOf = (m: Metafile): string[] => Object.keys(m.inputs).map((p) => p.replaceAll('\\', '/'));
 
 describe('browser bundle: the server-only AI module', () => {
@@ -369,8 +373,8 @@ describe('browser bundle: the server-only AI module', () => {
     const inputs = inputsOf(metafile);
     // (The test kit under src/testing is in the entry too, and is not the AI's business: it is left out of this list.)
     expect(inputs.filter((p) => /packages\/store-memory\/dist\/src\/(?!testing\/)/.test(p)).sort()).toEqual(['packages/store-memory/dist/src/index.js', 'packages/store-memory/dist/src/memoryStore.js']);
-    // Only the inert facade (a few lines) is there: nothing of the service, the worker, the prompt, the validator, the fake or the ranking.
-    expect(inputs.filter((p) => /packages\/core\/dist\/src\/ai\//.test(p))).toEqual(['packages/core/dist/src/ai/inert.js']);
+    // Only the inert facade (a few lines) and the pure text helpers are there: nothing of the service, the worker, the prompt, the validator, the fake or the ranking.
+    expect(inputs.filter((p) => /packages\/core\/dist\/src\/ai\//.test(p)).sort()).toEqual(['inert', ...PURE_AI_HELPERS].sort().map((f) => `packages/core/dist/src/ai/${f}.js`));
     expect(inputs.filter((p) => /packages\/hub-react\/dist\/src\/ai\//.test(p))).toEqual([]);
     expect(Object.keys(metafile.outputs)).toHaveLength(1);
   });
@@ -381,7 +385,7 @@ describe('browser bundle: the server-only AI module', () => {
     expect(toService).toMatchObject([{ path: `${LEFT_OUT}:./ai/service.js`, kind: 'dynamic-import', original: './ai/service.js' }]);
     // And nothing else in the build imports the service or reaches into the folder, however it is loaded.
     const all = Object.entries(metafile.inputs).flatMap(([file, v]) => v.imports.map((i) => ({ file, ...i })));
-    expect(all.filter((i) => /\/ai\/(?!inert\.js)/.test(i.path) && i.kind !== 'dynamic-import')).toEqual([]);
+    expect(all.filter((i) => !new RegExp(`/ai/(?:inert|${PURE_AI_HELPERS.join('|')})\\.js$`).test(i.path) && /\/ai\//.test(i.path) && i.kind !== 'dynamic-import')).toEqual([]);
     expect(esm).not.toMatch(/\bfrom\s*["']\.\/ai\/service\.js["']/);
     // A page that never passes an adapter never reaches the import: the inert facade answers (the scenarios below).
   });

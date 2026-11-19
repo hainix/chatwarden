@@ -71,6 +71,8 @@ function noticeOf(raw: unknown): PlayerNotice | null {
     excerpt,
     createdAt: typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) ? raw.createdAt : 0,
     mustAcknowledge: raw.mustAcknowledge === true,
+    // What the notice is about (0.2.2): kept only when it is one of the three kinds, so a value this version does not know reads as neutral.
+    ...(raw.evidence === 'chat' || raw.evidence === 'play' || raw.evidence === 'name' ? { evidence: raw.evidence } : {}),
   };
 }
 

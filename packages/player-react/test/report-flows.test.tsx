@@ -214,7 +214,7 @@ describe('one_tap: the reason is part of the one step (real kit)', () => {
     expect(options).toHaveLength(12);
     expect(options[0]).toHaveTextContent('Choose a reason (optional)');
     expect(options.at(-1)).toHaveTextContent('Something else');
-    expect([...select().querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Chat', 'Gameplay']);
+    expect([...select().querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Chat', 'Players', 'Gameplay']);
     await user.click(btn('Report'));
     await findStatus();
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Close']);
@@ -336,7 +336,8 @@ describe('reason_first', () => {
     const d = screen.getByRole('dialog');
     expect(d).toHaveAccessibleName('Report Bob?');
     const group = (label: string) => [...select().querySelectorAll<HTMLOptGroupElement>('optgroup')].find((g) => g.label === label) as HTMLOptGroupElement;
-    expect([...group('Chat').querySelectorAll('option')].map((o) => o.value)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info', 'name']);
+    expect([...group('Chat').querySelectorAll('option')].map((o) => o.value)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info']);
+    expect([...group('Players').querySelectorAll('option')].map((o) => o.value)).toEqual(['name']);
     expect([...group('Gameplay').querySelectorAll('option')].map((o) => o.value)).toEqual(['cheating', 'griefing', 'afk']);
     expect(select().lastElementChild).toHaveTextContent('Something else');
     expect(within(d).queryAllByRole('radio')).toHaveLength(0);

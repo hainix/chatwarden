@@ -114,7 +114,7 @@ export function AiCase() {
       const rep = L.c.detail.data?.report;
       if (L.gate?.ok !== true || L.aiFrom === null || !L.usable || rep === undefined || !L.c.settled() || isRepeatClick(click)) return;
       rememberQuick(rep.id, 'primary');
-      const input = toInput(L.aiFrom.form);
+      const input = toInput(L.aiFrom.form, rep.evidenceKind);
       decisions.submit({ reportId: rep.id, person: rep.targetPerson, name: L.name, input: { ...input, ai: echo(true, L.aiFrom.form) as NonNullable<typeof input.ai> }, snapshot: L.aiFrom.form });
       void actions.continueFrom({ reportId: rep.id, person: rep.targetPerson }, { quick: true });
     };

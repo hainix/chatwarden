@@ -938,4 +938,18 @@ CREATE INDEX kit_reports_by_reporter_outcome_overturned ON kit_reports (reporter
 ALTER TABLE kit_appeals ADD COLUMN reason_code TEXT;
 `,
   },
+  {
+    // Release 0.2.2. ONE migration for the whole release: each task appends a labelled block below and nobody adds a 29. Additive throughout: no row is touched (the new column
+    // starts NULL) and no table is rebuilt, and the runner wraps this in one savepoint with the version bump, so a failure leaves version 27.
+    //
+    // Block 1 (evidence kind): `kit_notices.evidence` is what a sanction notice is about: 'chat', 'play' or 'name' (the kind of the report's reason, or the decision's own), so the words of
+    //   the notice, the appeal page and "My record" follow it. NULL on every existing notice, on a report outcome and a message, and when the decision had no kind (neutral). No CHECK:
+    //   the closed list lives in core, so a later kind needs no migration. It holds no text and no identifier of its own; the table is still claimed by the notices category of the
+    //   privacy registry.
+    version: 28,
+    sql: `
+-- Block 1 (evidence kind)
+ALTER TABLE kit_notices ADD COLUMN evidence TEXT;
+`,
+  },
 ];

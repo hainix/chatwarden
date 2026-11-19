@@ -251,7 +251,7 @@ describe('Simple: the rule behind a reason', () => {
       expect(decides(w)[0]?.body).toEqual({
         verdict: 'upheld',
         reason: w.cw.rules.get(2)?.title,
-        actions: [{ subject: f.person, kind: 'chat', durationMs: 24 * 3_600_000, rule: 2, lineIds: [f.lineIds[1], f.lineIds[3]] }],
+        actions: [{ subject: f.person, kind: 'chat', durationMs: 24 * 3_600_000, rule: 2, lineIds: [f.lineIds[1]] }], // a report with no reason is neutral: only the line pointed at is attached
       });
       expect(w.cw.reports.get(f.id)?.status).toBe('actioned');
     });

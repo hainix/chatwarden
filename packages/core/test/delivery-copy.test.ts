@@ -169,7 +169,7 @@ describe('an appeal outcome', () => {
 
   it('a code that does not belong to the outcome reads as the context sentence of that outcome', () => {
     const { text } = buildDeliveryContent(outcome('en', 'upheld', 'mistake', null));
-    expect(text).toContain('Reason: We looked at the whole conversation, and the decision stands.');
+    expect(text).toContain('Reason: We looked at the whole situation, and the decision stands.');
   });
 
   it('the title and body are the outcome notice words, and the link is the outcome hint', () => {

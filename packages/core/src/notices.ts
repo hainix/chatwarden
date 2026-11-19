@@ -1,6 +1,8 @@
 import { randomId } from './crypto.js';
 import { safeWarn } from './log.js';
 import { maskSpans } from './mask.js';
+import { isEvidenceKind } from './evidenceKind.js';
+import type { EvidenceKind } from './evidenceKind.js';
 import { parseRuleRef } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
 import type { SubjectIndex } from './subjects.js';
@@ -78,6 +80,11 @@ export interface PlayerNotice {
   createdAt: number;
   /** True for a warning: the client must show it and get an `ack` before the player starts the next game. */
   mustAcknowledge: boolean;
+  /**
+   * What the sanction was about, so a screen can word it: `chat`, `play` or `name` (0.2.2). Absent when the decision had no kind (neutral), for a notice made before 0.2.2, and for a
+   * report outcome and a message. {@link noticeView} reads it; an adopter rendering a notice itself can branch on it.
+   */
+  evidence?: EvidenceKind;
   /**
    * A signed link to the appeal page for this sanction, when one can be made (appeals on, `appeals.landingUrl` set, the notice a sanction that can still be appealed). Set by
    * `cw.notices.pending` and `cw.notices.record`; absent otherwise. The link is a capability for this one sanction, not a login: do not log it or put it in a shared place.
@@ -190,6 +197,8 @@ export interface SanctionNoticeInput {
   /** The cited rule, or null when the sanction predates rules. */
   rule: RuleRef | null;
   subject: SubjectId;
+  /** What the sanction was about (0.2.2); stored with the notice so every surface words it the same. Absent: neutral. */
+  evidence?: EvidenceKind;
 }
 
 export interface NoticeServiceDeps {
@@ -286,6 +295,7 @@ export class NoticeService {
         until: group.until,
         refCode: group.refCode,
         excerpt,
+        ...(isEvidenceKind(group.evidence) ? { evidence: group.evidence } : {}),
       },
       subject,
       opts.notify !== false,
@@ -530,6 +540,7 @@ export class NoticeService {
       excerpt: message ? [] : r.excerpt.map((l) => ({ text: l.text, day: l.day })),
       createdAt: r.createdAt,
       mustAcknowledge: r.kind === 'warning',
+      ...(!message && isEvidenceKind(r.evidence) ? { evidence: r.evidence } : {}),
     };
   }
 

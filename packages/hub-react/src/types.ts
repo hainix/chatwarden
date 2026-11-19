@@ -42,10 +42,11 @@ import type {
   StaffReport,
   Suggestion,
 } from '@chatwarden/core';
-import type { ErasePreview, ErasureReceipt, FilterCheckResult, FilterKeyCounts, FilterTestResult, HoldCode, PrivacyExport, PrivacyStatement } from '@chatwarden/core';
+import type { ErasePreview, ErasureReceipt, FilterCheckResult, FilterKeyCounts, FilterTestResult, HoldCode, PrivacyExport, PrivacyStatement, PromptExcluded, TeamNote } from '@chatwarden/core';
+import type { EvidenceKind, GameKind, PresetName } from '@chatwarden/core';
 import type { AiReadAgainBody, ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
-export type { PolicyLayer, PolicySection };
+export type { PolicyLayer, PolicySection, PromptExcluded, TeamNote };
 
 /**
  * What the filters did over a window: per counter key the counts by action, and for a phrase key the rule's name as it is now (absent when the rule is gone). No person,
@@ -246,6 +247,10 @@ export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
   /** With `desk.workflow` on: the second look asked of a senior or the owner, or null. Absent with it off. */
   escalation?: ReportEscalation | null;
   reportedReasonLabel?: string | null;
+  /** What the report is about, from its reason as it is now (0.2.2): `chat`, `play` or `name`. Absent when it is neutral, and from an older server. */
+  evidenceKind?: EvidenceKind;
+  /** `chat_only` when the AI is on and does not read this report because it is about play or a name (0.2.2). Absent otherwise, and from an older server. */
+  aiSkipped?: 'chat_only';
   targetHandleFlagged?: boolean;
   reporterHandleFlagged?: boolean;
   /** Present only while the report is held for legal reasons (`legal.hold`): the code and the time, never who. */
@@ -345,6 +350,11 @@ export interface DecideInput {
   reason?: string;
   actions: DecisionAction[];
   evidence?: string;
+  /**
+   * What the decision is about, the moderator's own word over the report's (0.2.2): `chat` says the lines shown are chat; `null` is neutral. Not the bad-faith `evidence` note above.
+   * A 0.2.1 server ignores the key (the notice then reads as the report's own kind), so a newer hub on an older server loses only this override.
+   */
+  evidenceKind?: EvidenceKind | null;
   /** A senior or owner moving another moderator's live claim to themselves (audited by the server). */
   takeOver?: boolean;
   /**
@@ -713,6 +723,24 @@ export type PolicySamples = Extract<PolicyPreview, { ok: true }>['samples'];
 export type PolicySaved = { ok: true; version: number; changed: PolicySection[] } & Partial<PolicyState>;
 
 export type PolicyFormat = 'markdown' | 'html' | 'text';
+
+export type { GameKind };
+
+/** What one kind of game would set up: the preset it comes from and the layer `POST /setup/apply` would save. */
+export interface SetupOption {
+  game: GameKind;
+  preset: PresetName;
+  layer: PolicyLayer;
+}
+
+/** `GET /setup` (owner): whether to offer the first-run panel, when it was dismissed, whether the dismissal is kept across restarts, the version to apply against, and the four options (empty once `show` is false). */
+export interface SetupState {
+  show: boolean;
+  dismissedAt: number | null;
+  persists: boolean;
+  version: number;
+  options: SetupOption[];
+}
 
 /**
  * `GET /policy`: the profile and rules in force and the generated documents.

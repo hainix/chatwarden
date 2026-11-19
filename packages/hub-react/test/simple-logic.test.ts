@@ -22,6 +22,7 @@ const ctx = (over: Partial<ValidationContext> = {}): ValidationContext => ({
   canApply: true,
   canPermanent: false,
   ownLineIds: { [TARGET]: ['2', '4'] },
+  evidence: 'chat',
   ...over,
 });
 const DAY = 86_400_000;

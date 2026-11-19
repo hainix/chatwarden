@@ -29,7 +29,7 @@ describe('types: the plan input and context carry no moderator-only field', () =
 
   it('the decide op has exactly the documented fields', () => {
     type Decide = Extract<NoticeOp, { op: 'decide' }>;
-    expectTypeOf<keyof Decide>().toEqualTypeOf<'op' | 'verdict' | 'target' | 'reporter' | 'actions' | 'rename'>();
+    expectTypeOf<keyof Decide>().toEqualTypeOf<'op' | 'verdict' | 'target' | 'reporter' | 'actions' | 'rename' | 'evidenceKind'>();
     expectTypeOf<Decide['rename']>().toEqualTypeOf<{ rule: number } | null>();
   });
 

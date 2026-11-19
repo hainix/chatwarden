@@ -146,6 +146,14 @@ Migration 27 is the one migration of the whole 0.2.1 release: every task's block
 - **Fixed reasons.** `kit_appeals.reason_code` is the fixed reason of a decided appeal (null for an appeal decided before 0.2.1).
 - **One index swapped.** `kit_reports_by_reporter_outcome_reason` (migration 26) is dropped and `kit_reports_by_reporter_outcome_overturned` replaces it: the same columns with `overturned_at` added, so the reporter-accuracy read stays covered. `kit_reports_by_reporter_outcome` (migration 19) stays, because the open-reports-by-reporter read names it.
 
+### Migration 28 (0.2.2, one-way)
+
+Migration 28 is the one migration of the whole 0.2.2 release. It only adds one nullable column and runs in one transaction with the version bump, so a failure leaves version 27. **It is one-way: a 0.2.1 or older build refuses a database at version 28, so back up the database file before you upgrade.**
+
+- **Evidence kind.** `kit_notices.evidence` is what a sanction notice is about: `chat`, `play` or `name` (the kind of the report's reason, or the decision's own), so the words of the notice, the appeal page and "My record" follow it. It is null on every notice that already exists, on a report outcome and a message, and when the decision had no kind. There is no `CHECK`: the closed list lives in core. It holds no text and no identifier of its own.
+
+There is no other 0.2.2 schema. The first-run setup flag is one row of `kit_meta` (key `setup_state`, a small JSON value with the time the owner dismissed the panel, never a person), so it needs no table. `purgeIdleSubjects` (the identity age-out, `retention.subjectsMs` in `@chatwarden/core`) deletes from the tables that already exist: it reads `kit_subject_ids.last_seen`, a column that has been written since the subject index was added, so there is nothing to backfill and no grace period; the columns it checks for a record come from the privacy registry (`registrySubjectColumns()` in core), so a table added to the registry is covered.
+
 ## Links
 
 - [Chatwarden on GitHub](https://github.com/hainix/chatwarden) and the [root README](https://github.com/hainix/chatwarden#readme)

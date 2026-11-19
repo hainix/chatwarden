@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { CATEGORY_TO_RULE, CONDUCT_LEVELS, DEFAULT_SEVERE_RULES, errorClass, safeWarn } from '@chatwarden/core';
+import { CATEGORY_TO_RULE, CONDUCT_LEVELS, DEFAULT_SEVERE_RULES, errorClass, reasonLabel, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, Clock, DiscordThreadRow, InsightsDigest, KitEvent, KitEventOf, Limits, Logger, ModerationProfile } from '@chatwarden/core';
 import { checkRows } from './components.js';
 import type { DiscordActionRow } from './components.js';
@@ -49,6 +49,8 @@ export interface FeedKit {
   profile: Pick<ModerationProfile, 'severeRules'> & {
     /** The chat filters in force: only the phrase rules' labels are read, to word a phrase report ("Filter: <label>"). Optional. */
     filters?: { phrases?: ReadonlyArray<{ id: string; label: string }> };
+    /** The reporting reasons in force: only their labels are read, to name the reason in a report's post ("Category: Leaving or AFK"). Optional. */
+    reporting?: { reasons: ReadonlyArray<{ id: string; label: string }> };
   };
   rules: { all(): ReadonlyArray<{ number: number; title: string }> };
   limits: { strikes: Pick<Limits['strikes'], 'firstMs' | 'repeatMs'> };
@@ -131,6 +133,7 @@ interface ReportView {
   origin?: unknown;
   originKey?: unknown;
   category?: unknown;
+  reportedReason?: unknown;
   targetPerson?: unknown;
   conductLevel?: unknown;
 }
@@ -453,6 +456,17 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
   const categoryText = (category: unknown): string | undefined =>
     labelOf(CATEGORY_LABELS, category) ?? (isString(category) ? safeText(category, 30) : undefined);
 
+  /** The label of the reason the reporter gave, as the kit lists it now ("Leaving or AFK"), or undefined: no reason, an unknown one, or a kit with no reporting settings. */
+  const reasonText = (id: unknown): string | undefined => {
+    if (!isString(id)) return undefined;
+    try {
+      const label = reasonLabel((cw.profile.reporting?.reasons ?? []) as Parameters<typeof reasonLabel>[0], id);
+      return label === null ? undefined : safeText(label, 60);
+    } catch {
+      return undefined;
+    }
+  };
+
   const readReport = (op: string, reportId: unknown): ReportView | null => {
     if (!isString(reportId)) return null;
     try {
@@ -557,7 +571,8 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     const person = report === null ? null : personOf(report.targetPerson);
     const rule = ruleOfCategory(e.category);
     const level = CONDUCT_LEVELS.find((l) => l === report?.conductLevel);
-    const category = categoryText(e.category);
+    // The reason the reporter picked reads better than the 0.1.1 category it is kept under ("Leaving or AFK", not "Disruption").
+    const category = reasonText(e.reportedReason) ?? categoryText(e.category);
     const message = compose(
       severe ? '**Severe report**' : '**New report**',
       [
@@ -578,7 +593,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     const severe = report !== null && isSevereCategory(report.category);
     if (onlySevere && !severe) return;
     const person = report === null ? null : personOf(report.targetPerson);
-    const category = report === null ? undefined : categoryText(report.category);
+    const category = report === null ? undefined : (reasonText(report.reportedReason) ?? categoryText(report.category));
     const message = compose(
       `**Report closed** · ${labelOf(VERDICT_LABELS, e.verdict) ?? 'Closed'}`,
       [category === undefined ? undefined : `Category: ${category}`],

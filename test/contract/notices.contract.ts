@@ -37,6 +37,32 @@ export function noticesContract(name: string, make: () => Store): void {
       expect(s.loadNotices(['s_a'])).toEqual([a, b]);
     });
 
+    it('the evidence kind (0.2.2) round-trips when given, in all three kinds, and the key is absent when none was given', () => {
+      const s = make();
+      s.insertNotice(notice('e1', { evidence: 'chat' }));
+      s.insertNotice(notice('e2', { evidence: 'play' }));
+      s.insertNotice(notice('e3', { evidence: 'name' }));
+      s.insertNotice(notice('e4'));
+      const rows = s.loadNotices(['s_a']);
+      expect(rows.map((r) => r.evidence)).toEqual(['chat', 'play', 'name', undefined]);
+      expect(Object.hasOwn(rows[3] as object, 'evidence')).toBe(false);
+      expect(rows[1]).toEqual(notice('e2', { evidence: 'play' }));
+      if (s.loadNotice !== undefined) expect(s.loadNotice('e3')?.evidence).toBe('name');
+    });
+
+    it('the evidence kind (0.2.2) round-trips when given, in all three kinds, and the key is absent when none was given', () => {
+      const s = make();
+      s.insertNotice(notice('e1', { evidence: 'chat' }));
+      s.insertNotice(notice('e2', { evidence: 'play' }));
+      s.insertNotice(notice('e3', { evidence: 'name' }));
+      s.insertNotice(notice('e4'));
+      const rows = s.loadNotices(['s_a']);
+      expect(rows.map((r) => r.evidence)).toEqual(['chat', 'play', 'name', undefined]);
+      expect(Object.hasOwn(rows[3] as object, 'evidence')).toBe(false);
+      expect(rows[1]).toEqual(notice('e2', { evidence: 'play' }));
+      if (s.loadNotice !== undefined) expect(s.loadNotice('e3')?.evidence).toBe('name');
+    });
+
     it('loadNotices matches any of the given subject ids, oldest first, ties in write order', () => {
       const s = make();
       s.insertNotice(notice('late', { createdAt: T + 10 }));

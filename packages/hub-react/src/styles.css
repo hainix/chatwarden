@@ -4322,6 +4322,83 @@
   width: 100%;
   min-width: 0;
 }
+.cw-hub .cw-principle {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+  margin: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-principle > legend {
+  padding: 0 var(--cw-space-1, var(--cwd-space-1));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-principle-structure,
+.cw-hub .cw-principle-add {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+}
+.cw-hub .cw-notes-list {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-note {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-note .cw-field {
+  width: 100%;
+  min-width: 0;
+}
+.cw-hub .cw-setup-choices {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-setup-list {
+  margin: 0;
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+}
+.cw-hub .cw-case-principles {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  justify-items: start;
+  min-width: 0;
+}
+.cw-hub .cw-case-principles-body {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-case-principles-body p,
+.cw-hub .cw-case-principles-body ul {
+  margin: 0;
+}
+.cw-hub .cw-field-warn {
+  margin: 0;
+  /* A warning line under a field ("left out of the AI's reading"): the warning pair, yellow ink on the soft yellow, as the warning tag and notice draw it (contrast is checked there). */
+  padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-yellow-soft, var(--cwd-yellow-soft));
+  color: var(--cw-yellow-ink, var(--cwd-yellow-ink));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
 
 /* The desk (0.2.0): the staff thread, the "Asked for a look" line, the ask form, the Overview line and the Insights tables. Words, not colour. */
 .cw-hub .cw-thread {

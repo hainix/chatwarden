@@ -31,6 +31,7 @@ export function createInertAi(): AiFacade {
     status: () => ({ ...status, invalid: {} }),
     read: () => null,
     expected: () => false,
+    chatOnly: () => false,
     readAgain: () => Promise.resolve('off'),
     briefs: () => new Map(),
     stats: (q) => emptyStats(q?.since ?? 0),

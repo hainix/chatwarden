@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": false,
   "description": "Chat moderation engine for games: reports, warnings, timeouts and bans, a moderator queue and player notices. No sockets, HTTP or disk.",
   "license": "Apache-2.0",
@@ -61,7 +61,7 @@
     "prepack": "tsc -b"
   },
   "devDependencies": {
-    "@chatwarden/store-memory": "0.2.1"
+    "@chatwarden/store-memory": "0.2.2"
   },
   "publishConfig": {
     "access": "public"

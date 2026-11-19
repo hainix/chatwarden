@@ -109,7 +109,7 @@ export class DeliveryService {
         words,
         locale,
         kind: 'sanction',
-        notice: { kind: view.kind, rule: view.rule, ruleLabel: view.ruleLabel, until: view.until, refCode: view.refCode, createdAt: view.createdAt },
+        notice: { kind: view.kind, rule: view.rule, ruleLabel: view.ruleLabel, until: view.until, refCode: view.refCode, createdAt: view.createdAt, ...(view.evidence === undefined ? {} : { evidence: view.evidence }) },
         appealUrl,
       });
       const sanction: Sanction = { kind: row.kind, until: row.kind === 'warning' ? null : row.until, rule: ruleRefOf(row.rule), source: group.source, automated: group.automated };

@@ -236,6 +236,14 @@ const STRIPPED_ASTRAL = /[\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
 /**
+ * Take the invisible characters out of a text and nothing else (the set `normalizeStatement` removes): control characters other than tab and the line breaks, bidi marks
+ * and overrides, zero-width characters, tag characters and lone surrogates. The emoji variation selector U+FE0F stays.
+ */
+export function stripInvisible(input: string): string {
+  return input.replace(LONE_SURROGATE, '').replace(STRIPPED, '').replace(STRIPPED_ASTRAL, '');
+}
+
+/**
  * Clean a statement before it is counted or stored: line and paragraph separators become newlines and tabs spaces; control, bidirectional
  * and zero-width characters, the soft hyphen, the Hangul fillers, the braille blank, the grapheme joiner, variation selectors, annotation
  * marks, tag characters, NUL and lone surrogates are removed; every line loses its trailing space; runs of blank lines

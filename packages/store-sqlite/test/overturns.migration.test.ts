@@ -88,16 +88,16 @@ function seeded26(db: DatabaseSync): void {
 }
 
 describe('migration 27 (release 0.2.1), block 1: overturn storage', () => {
-  it('versions run 1..27 without a gap and there is no 28', () => {
+  it('versions run 1..N without a gap, 27 is release 0.2.1, and 28 (release 0.2.2) is the last', () => {
     expect(M27).toBeDefined();
-    expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: 27 }, (_, i) => i + 1));
-    expect(MIGRATIONS.find((m) => m.version === 28)).toBeUndefined();
+    expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: 28 }, (_, i) => i + 1));
+    expect(MIGRATIONS.find((m) => m.version === 29)).toBeUndefined();
   });
 
   it('a fresh database has the columns, the table and its four indexes, and the new covering index replaces the old one', () => {
     const db = memDb();
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(27);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(info(db, 'kit_sanctions').term_id).toMatchObject({ type: 'TEXT', notnull: 0 });
     expect(info(db, 'kit_sanctions').overturned_at).toMatchObject({ type: 'INTEGER', notnull: 0 });
     expect(info(db, 'kit_strikes').overturned).toMatchObject({ type: 'INTEGER', notnull: 1, dflt: '0' });
@@ -151,7 +151,7 @@ describe('migration 27 (release 0.2.1), block 1: overturn storage', () => {
     };
     const tables = names(db, 'table');
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(27);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     for (const [table, rows] of Object.entries(before)) {
       const after = dump(db, table, 'rowid');
       expect(after, table).toHaveLength(rows.length);
@@ -207,7 +207,7 @@ describe('migration 27 (release 0.2.1), block 1: overturn storage', () => {
     expect(names(db, 'index')).toContain('kit_reports_by_reporter_outcome_reason');
     expect(names(db, 'index')).not.toContain('kit_reports_by_reporter_outcome_overturned');
     expect(dump(db, 'kit_strikes', 'rowid')).toHaveLength(6);
-    expect(openStore({ db }).schemaVersion()).toBe(27);
+    expect(openStore({ db }).schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(db.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
   });
 

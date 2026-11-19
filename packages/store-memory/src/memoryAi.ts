@@ -587,6 +587,11 @@ class MemoryAi extends MemoryStore {
     return n;
   }
 
+  /** Add the ids of `wanted` that carry a "do not automate" mark (the identity age-out). */
+  privacyNamedByNoAutomation(wanted: ReadonlySet<string>, into: Set<string>): void {
+    for (const subject of this.noAutomation?.keys() ?? []) if (wanted.has(subject)) into.add(subject);
+  }
+
   /** Delete the action rows of these reports. Returns how many. */
   privacyEraseAiActions(reportIds: ReadonlySet<string>): number {
     if (this.actionRows === undefined) return 0;

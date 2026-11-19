@@ -193,7 +193,8 @@ describe('GET /notices and GET /record', () => {
     expect(res.status).toBe(200);
     expect(Object.keys(body(res))).toEqual(['notices']);
     const [n] = body(res).notices as Array<{ excerpt: Array<Record<string, unknown>> }>;
-    expect(Object.keys(n as object).sort()).toEqual(NOTICE_KEYS);
+    // (0.2.2: a sanction notice also says what it is about, `evidence`; a report outcome and a timeout have none, below)
+    expect(Object.keys(n as object).sort()).toEqual([...NOTICE_KEYS, 'evidence'].sort());
     expect(n).toMatchObject({ kind: 'warning', rule: 2, until: null, mustAcknowledge: true });
     // passed through as-is
     expect(body(res).notices).toEqual(cw.notices.pending(ALICE));

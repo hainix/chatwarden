@@ -97,6 +97,11 @@ export function groupReasons(reasons: readonly ReasonItem[]): ReasonGroup[] {
  * thank-you). While the server's text still equals that English default the owner has not changed it, so the catalogue's words are used (the
  * language the page is in); a text the owner edited is the game's own and is shown as sent, and so is one the catalogue has no key for.
  */
+/** A reason group's heading: the catalogue's words while it is one of the three default headings (Chat, Gameplay, Players), else as the owner wrote it. */
+export function groupLabel(t: PlayerT, name: string): string {
+  return defaultText(t, `player.report.group.${name.toLowerCase()}`, name);
+}
+
 export function defaultText(t: PlayerT, key: string, sent: string): string {
   const english = (en as Record<string, string>)[key];
   if (english === undefined || sent.trim() !== english) return sent;

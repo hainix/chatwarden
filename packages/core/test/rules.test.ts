@@ -198,7 +198,7 @@ describe('STARTER_RULES', () => {
     expect(STARTER_RULES.map((x) => [x.number, x.title])).toEqual([
       [1, 'No slurs or hate aimed at who someone is'],
       [2, 'No insulting, threatening or targeting another player'],
-      [3, 'No sexual messages'],
+      [3, 'No sexual content'],
       [4, 'No spam, flooding or advertising'],
       [5, 'No cheating or exploiting'],
       [6, 'No throwing, stalling or ruining games on purpose'],

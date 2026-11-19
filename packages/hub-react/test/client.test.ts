@@ -161,7 +161,8 @@ describe('every staff route has a client method', () => {
       if ('deliver' in said) lineId = said.deliver.lineId;
     };
 
-    type Expect = { method: string; path: string | (() => string); query?: Record<string, string | number>; body?: unknown };
+    let applyVersion = -1;
+    type Expect = { method: string; path: string | (() => string); query?: Record<string, string | number>; body?: unknown | (() => unknown) };
     const calls: Array<[string, () => Promise<unknown>, Expect]> = [
       ['me', () => c.me(), { method: 'GET', path: '/me' }],
       ['listReports', () => c.listReports({ status: 'open', limit: 5 }), { method: 'GET', path: '/reports', query: { status: 'open', limit: 5 } }],
@@ -301,6 +302,10 @@ describe('every staff route has a client method', () => {
       ],
       ['reportBundle', () => c.reportBundle(renamed.id), { method: 'GET', path: `/reports/${renamed.id}/bundle` }],
       ['reportBundle with accounts', () => c.reportBundle(renamed.id, { accounts: true }), { method: 'GET', path: `/reports/${renamed.id}/bundle`, query: { accounts: '1' } }],
+      // The first-run setup (0.2.2): the state, the dismissal (an empty body) and the apply (the game and the version read from the kit just before the call, so it is current).
+      ['setup', () => c.setup(), { method: 'GET', path: '/setup' }],
+      ['dismissSetup', () => c.dismissSetup(), { method: 'POST', path: '/setup/dismiss', body: {} }],
+      ['applySetup', () => c.applySetup({ game: 'kids', version: (applyVersion = w.cw.policy.get().version) }), { method: 'POST', path: '/setup/apply', body: () => ({ game: 'kids', version: applyVersion }) }],
     ];
     expect(aiRead).not.toBeNull();
     const results: unknown[] = [];
@@ -310,8 +315,9 @@ describe('every staff route has a client method', () => {
       const req = w.sent[before]!;
       expect(req, name).toMatchObject({ method: want.method, path: typeof want.path === 'function' ? want.path() : want.path });
       expect(req.query ?? {}, name).toEqual(want.query ?? {});
-      if (want.body === undefined) expect(req.body, name).toBeUndefined();
-      else expect(req.body, name).toEqual(want.body);
+      const wantBody = typeof want.body === 'function' ? (want.body as () => unknown)() : want.body;
+      if (wantBody === undefined) expect(req.body, name).toBeUndefined();
+      else expect(req.body, name).toEqual(wantBody);
     }
     return { results, calls };
   }

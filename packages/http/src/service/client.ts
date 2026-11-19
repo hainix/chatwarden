@@ -68,6 +68,8 @@ export interface Notice {
   mustAcknowledge: boolean;
   /** A signed link to the appeal page for a sanction notice that can still be appealed (0.2.1). A capability for that one notice: do not log it. */
   appealUrl?: string;
+  /** What the sanction was about (0.2.2): `chat`, `play` or `name`; absent when it is neutral. */
+  evidence?: 'chat' | 'play' | 'name';
 }
 
 /** An appeal as the person sees it: its status and times, no reason, no staff ref, no group or person id. */

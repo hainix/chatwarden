@@ -1,5 +1,5 @@
-import { BULK_DISMISS_MAX, reasonLabel, safeWarn, suggestedRule } from '@chatwarden/core';
-import type { AiBrief, CaseClaim, Chatwarden, ReporterAccuracy, ReportQuery, StaffReport } from '@chatwarden/core';
+import { BULK_DISMISS_MAX, evidenceKindOf, reasonLabel, safeWarn, suggestedRule } from '@chatwarden/core';
+import type { AiBrief, CaseClaim, Chatwarden, EvidenceKind, ReporterAccuracy, ReportQuery, RuleRef, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { roleAtLeast } from '../permissions.js';
@@ -18,6 +18,12 @@ const HISTORY_REPORTS_DEFAULT = 20;
  * `'uncovered'` when they gave none (the moderator picks). Never decides anything.
  */
 const ruleOf = (cw: Chatwarden, report: StaffReport) => suggestedRule(cw.profile.reporting.reasons, report.reportedReason, cw.rules);
+
+/**
+ * What the report is about (0.2.2): the kind its reason says (from the reasons in force now), else the kind of the rule (CR 5 and 6 are play, CR 7 a name), else none. The hub words the case and
+ * attaches no chat line unless this is `chat`; the suggestion reads it too.
+ */
+const evidenceOf = (cw: Chatwarden, report: StaffReport, rule: RuleRef): EvidenceKind | undefined => evidenceKindOf(cw.profile.reporting.reasons, report.reportedReason, rule);
 
 /** The context the report's room had (its `context` tag as written, even one the profile does not declare: the hub shows it), or null. */
 const contextOf = (r: Pick<StaffReport, 'tags'>): string | null => (Object.hasOwn(r.tags, 'context') && typeof r.tags['context'] === 'string' ? r.tags['context'] : null);
@@ -356,7 +362,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const rule = ruleOf(cw, report);
       // A scoped caller reads the record as it stands in their scope: the history is the actions made from their reports, the suggestion is built from it and no signal is read.
       const history = Object.fromEntries(peopleOf(report).map((p) => [p, scope === undefined ? cw.history(p) : cw.scopedHistory(p, scope).history]));
-      const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report), ...hideSignalsFor(c), ...(scope === undefined ? {} : { scope }) });
+      const evidence = evidenceOf(cw, report, rule);
+      const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report), ...(evidence === undefined ? {} : { evidence }), ...hideSignalsFor(c), ...(scope === undefined ? {} : { scope }) });
       const claim = claimView(claimOf(report));
       // Opening a case is when a missing or stale read is asked for; the answer is whatever is stored now. The AI's read was made from the whole record, so a scoped caller is not shown it.
       const ai = scope === undefined ? cw.ai.read(id, { open: true }) : null;
@@ -364,6 +371,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // server with the AI off answers exactly as before. False in a degraded mode (breaker open, a daily cap reached, a read that ended
       // without an answer).
       const aiExpected = scope !== undefined || cw.ai.level() === 0 ? undefined : cw.ai.expected(id);
+      // The AI reads chat only: with it on, a report about play or a name has no read, and the case says why in one line.
+      const aiSkipped = scope === undefined && cw.ai.chatOnly(id);
       c.audit('report.view', { type: 'report', ref: id });
       // The handles the matcher flags (the report's two, and each excerpt line's): the hub masks them until shown. Absent when none is.
       const flagged = handleFlags(cw);
@@ -412,6 +421,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const shown = {
         ...plain,
         urgent: report.urgent,
+        ...(evidence === undefined ? {} : { evidenceKind: evidence }),
+        ...(aiSkipped ? { aiSkipped: 'chat_only' as const } : {}),
         context: contextOf(report),
         handoff: handoffAt === null ? null : { at: handoffAt, by: handoffBy },
         ...workflow,
@@ -465,8 +476,11 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // Only the people the report names: this is not a way to look up anyone's record.
       const named = namedIn(report);
       if (person !== undefined && !named.has(person)) throw new ValidationError();
-      const suggestion = cw.suggest(person ?? report.targetPerson, level, rule ?? ruleOf(cw, report), {
+      const suggestRule = rule ?? ruleOf(cw, report);
+      const evidence = evidenceOf(cw, report, suggestRule);
+      const suggestion = cw.suggest(person ?? report.targetPerson, level, suggestRule, {
         roomId: roomOf(report),
+        ...(evidence === undefined ? {} : { evidence }),
         ...hideSignalsFor(c),
         ...(scope === undefined ? {} : { scope }),
       });

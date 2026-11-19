@@ -209,7 +209,7 @@ describe('an appeal outcome', () => {
       sanction: { kind: 'chat', until: NOW + 6 * HOUR, rule: 2, source: 'moderator', automated: false },
     });
     expect(d.subject).toBe('We reviewed your appeal: the decision stands');
-    expect(d.text).toContain('Reason: The rule applies to what was said.');
+    expect(d.text).toContain('Reason: The rule applies to what happened.');
     expect(d.appealUrl).toMatch(/^https:\/\/game\.example\/appeal\?t=/);
     expect(d.text).toContain(d.appealUrl as string);
     expect(d.text).toContain('You can see the decision here.');
@@ -270,7 +270,7 @@ describe('an appeal outcome', () => {
     const d = calls[1] as NoticeDelivery;
     expect(d.appealUrl).toBeNull();
     expect(d.text).not.toContain('http');
-    expect(d.text).toContain('Reason: We looked at the whole conversation and lifted it.');
+    expect(d.text).toContain('Reason: We looked at the whole situation and lifted it.');
   });
 
   it('a decision without a code is delivered with the default reason', async () => {

@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { EvidenceKind } from '@chatwarden/core';
 import { useHub } from '../context.js';
 import { useScopedLimits } from '../features.js';
 import { CUSTOM_KINDS, GAP_NOTE_MAX, LINES_MAX, choiceKey, hasLength, needsBanPermission, resolveDraft } from '../decision.js';
@@ -73,6 +74,9 @@ export interface ActionProps {
   lengths?: LengthPolicy | undefined;
   canPermanent: boolean;
   lines: readonly ExcerptLine[];
+  /** What the report is about (0.2.2). Anything but chat keeps the lines behind "Add a line"; for play and name adding one says the decision is about chat (`onShowChat`). */
+  evidence?: EvidenceKind | undefined;
+  onShowChat?: (() => void) | undefined;
   problems: ActionProblems | undefined;
   onChange: (patch: Partial<Draft>) => void;
   onToggleLine: (id: string) => void;
@@ -109,7 +113,8 @@ export function ActionTitle({ draft }: { draft: Draft }) {
 
 /** One action: who, what, under which rule, and which of their lines the player sees. */
 export function ActionCard(props: ActionProps) {
-  const { n, base, draft, people, target, dismissal, rules, choices, lengths, canPermanent, lines, problems, onChange, onToggleLine, onRemove } = props;
+  const { n, base, draft, people, target, dismissal, rules, choices, lengths, canPermanent, lines, evidence, onShowChat, problems, onChange, onToggleLine, onRemove } = props;
+  const [asked, setAsked] = useState(false);
   const { t, locale } = useHub();
   const { reveal } = useCase();
   const idOf = (field: string): string => `${base}-${draft.uid}-${field}`;
@@ -128,6 +133,8 @@ export function ActionCard(props: ActionProps) {
   const options = people.filter((p) => !(dismissal && p.ref === target));
   const person = people.find((p) => p.ref === draft.person);
   const showLines = choice !== null && choice.kind !== 'note';
+  // A report that is not about chat attaches no line on its own: the lines wait behind "Add a line" until the moderator asks (or one is already chosen).
+  const hidden = evidence !== 'chat' && !asked && draft.lineIds.length === 0;
   const full = draft.lineIds.length >= LINES_MAX;
   const role = (p: ReportPerson): string => t(p.role === 'target' ? 'hub.decide.action.role.target' : p.role === 'reporter' ? 'hub.decide.action.role.reporter' : 'hub.decide.action.role.bystander');
 
@@ -208,7 +215,22 @@ export function ActionCard(props: ActionProps) {
           {(a) => <textarea {...a} rows={3} value={draft.gapNote} onChange={(e) => onChange({ gapNote: e.target.value })} />}
         </Field>
       )}
-      {showLines && (
+      {showLines && hidden && (
+        <div className="cw-picks-off">
+          <p className="cw-hint">{t('hub.decide.action.lines.off')}</p>
+          <button
+            type="button"
+            className="cw-btn"
+            onClick={() => {
+              setAsked(true);
+              if (evidence === 'play' || evidence === 'name') onShowChat?.();
+            }}
+          >
+            {t('hub.decide.action.lines.add')}
+          </button>
+        </div>
+      )}
+      {showLines && !hidden && (
         <fieldset className="cw-picks" {...(lines.length === 0 ? {} : { 'aria-describedby': `${idOf('lines')}-hint` })}>
           <legend>{t('hub.decide.action.lines')}</legend>
           {lines.length === 0 ? (

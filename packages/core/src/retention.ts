@@ -78,9 +78,16 @@ export interface RetentionPolicy {
   welfareReportsMs: number;
   /** A daily line count (`desk.insights`: a date and two counts, no player data) is deleted once its day is older than this. At least 31 days: Insights reads a 90 day window and the page says "counted from". */
   chatCountsMs: number;
+  /**
+   * The identity index (0.2.2): a person (the subject and every subject merged into it: the account id as the game gave it, the hashed client key and the hashed address)
+   * is deleted once the newest `last_seen` of their identifiers is older than this AND no table the privacy registry lists still names them (a sanction, a report, a
+   * mute or block, a legal hold, an appeal, an overturn, a strike, a signal, a claim, an audit row, ...). Optional: absent means 400 days, the longest other default. At
+   * least 90 days (a floor, not an off switch: 0 would take a player who is connected now).
+   */
+  subjectsMs?: number;
 }
 
-export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
+export const RETENTION_DEFAULTS: Readonly<Required<RetentionPolicy>> = {
   reportsMs: 90 * DAY_MS,
   sanctionAfterEndMs: 90 * DAY_MS,
   strikesMs: 30 * DAY_MS,
@@ -97,12 +104,13 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   filterHitsMs: 90 * DAY_MS,
   welfareReportsMs: 30 * DAY_MS,
   chatCountsMs: 400 * DAY_MS,
+  subjectsMs: 400 * DAY_MS,
 };
 
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
 
-const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'aiActionsMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs', 'filterHitsMs', 'welfareReportsMs', 'chatCountsMs'] as const;
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'aiActionsMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs', 'filterHitsMs', 'welfareReportsMs', 'chatCountsMs', 'subjectsMs'] as const;
 
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
@@ -119,6 +127,7 @@ const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'ba
  * - `filterHitsMs` at least 30 days: the hub's longest window of filter counts
  * - `welfareReportsMs` at least 1 day and `chatCountsMs` at least 31 days (neither is an off switch: 0 is refused)
  * - `appealStatementsMs` and `blockedNamesMs` at least 0 (0 keeps the text only until the next purge)
+ * - `subjectsMs` at least 90 days: the identity rows of a person with no record go that long after the person was last seen (0 would take a connected player)
  *
  * Every field present must also be a finite number (`reportsMs` and `strikesMs` have no floor, only this).
  *
@@ -171,6 +180,9 @@ export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWi
   if (below(policy.chatCountsMs, 31 * DAY_MS)) {
     throw new ProfileError('retention.chatCountsMs', 'must be at least 31 days: the Insights page reads a month of daily line counts');
   }
+  if (below(policy.subjectsMs, RECORD_FLOOR_MS)) {
+    throw new ProfileError('retention.subjectsMs', 'must be at least 90 days: the identity rows are what recognises a returning player');
+  }
   if (below(policy.appealStatementsMs, 0)) {
     throw new ProfileError('retention.appealStatementsMs', 'must be 0 or more: 0 clears a statement as soon as its appeal is decided');
   }
@@ -219,6 +231,11 @@ export interface PurgeResult {
   chatCounts: number;
   /** The shared pacer's rows not touched for an hour, deleted (operational state; no setting). 0 for a store without the pace methods. */
   pace: number;
+  /**
+   * Subject rows deleted by the identity age-out (`retention.subjectsMs`): people last seen before the window with no record in any registry table. Their identifier rows
+   * go with them and are not counted. 0 for a store without `purgeIdleSubjects`.
+   */
+  idleSubjects: number;
   /** Erasures that kept a remainder (a sanction in force) and were finished by this pass: the person's subject and identifier rows were deleted. */
   erasuresFinished: number;
   /** Strike, signal, notice and kept-name rows dropped because their subject has no subject row and they were older than ten minutes. */
@@ -264,7 +281,12 @@ function checkWindow(name: string, ms: number): void {
  *   the only ones left are held by a legal hold and are not in force. Finishing deletes the person's subject and identifier rows. Rows of a subject that has no
  *   subject row (written by a process that had not heard of an erase) are swept once they are older than ten minutes, unless `sweepStrays` is false.
  *
- * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are otherwise never touched (only the finish of an erase and the stray sweep delete
+ * - identity age-out: a person (a subject and everything merged into it) whose newest identifier `last_seen` is before `now - subjectsMs` (400 days by default, never less than
+ *   90) and who has no record in any table the privacy registry lists loses the subject and identifier rows (account id, key hash, address hash), after everything above, so a
+ *   person whose last record aged out in this pass goes in it. A person with any record (an in-force or recent sanction, a report naming them, a mute or block, a legal hold,
+ *   an appeal, an overturn, a strike, a signal, ...) keeps their rows until the record is gone. Counted as `idleSubjects`. A store without `purgeIdleSubjects` has none.
+ *
+ * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are otherwise never touched (only the finish of an erase, the identity age-out and the stray sweep delete
  * subject-keyed rows). The in-memory indexes need no update: they already ignore everything this removes.
  *
  * `options.sweepStrays` (default true) is false when the caller knows a person made in its own process has not been written to the store yet (the save failed): the
@@ -276,7 +298,7 @@ export async function purge(
   policy: Partial<RetentionPolicy> = {},
   options: { sweepStrays?: boolean } = {},
 ): Promise<PurgeResult> {
-  const p: RetentionPolicy = {
+  const p: Required<RetentionPolicy> = {
     reportsMs: policy.reportsMs ?? RETENTION_DEFAULTS.reportsMs,
     sanctionAfterEndMs: policy.sanctionAfterEndMs ?? RETENTION_DEFAULTS.sanctionAfterEndMs,
     strikesMs: policy.strikesMs ?? RETENTION_DEFAULTS.strikesMs,
@@ -293,6 +315,7 @@ export async function purge(
     filterHitsMs: policy.filterHitsMs ?? RETENTION_DEFAULTS.filterHitsMs,
     welfareReportsMs: policy.welfareReportsMs ?? RETENTION_DEFAULTS.welfareReportsMs,
     chatCountsMs: policy.chatCountsMs ?? RETENTION_DEFAULTS.chatCountsMs,
+    subjectsMs: policy.subjectsMs ?? RETENTION_DEFAULTS.subjectsMs,
   };
   if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
@@ -311,6 +334,7 @@ export async function purge(
   checkWindow('filterHitsMs', p.filterHitsMs);
   checkWindow('welfareReportsMs', p.welfareReportsMs);
   checkWindow('chatCountsMs', p.chatCountsMs);
+  checkWindow('subjectsMs', p.subjectsMs);
   return store.transaction(() => {
     // The most sensitive reports first, on their own shorter clock (a report held for legal reasons is skipped by the store); then every other report on `reportsMs`.
     const welfareReports = store.purgeReportsByReason?.('welfare', now - p.welfareReportsMs) ?? 0;
@@ -318,7 +342,7 @@ export async function purge(
     // Link rows (`cw.links`) are ids only and outlive the report they name by no useful time: the same clock as reports. Not counted in the result. A live row (an active EOS sanction, the EOS cursor) is kept by the store whatever its age.
     store.purgeLinks?.(now - p.reportsMs);
     const ai = store.purgeAi?.(now - p.reportsMs, now - p.aiOutcomesMs, now - p.aiExamplesMs) ?? { reads: 0, outcomes: 0 };
-    const result: Omit<PurgeResult, 'erasuresFinished' | 'strayRows'> = {
+    const result: Omit<PurgeResult, 'erasuresFinished' | 'strayRows' | 'idleSubjects'> = {
       reports,
       sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
       strikes: store.purgeStrikes(now - p.strikesMs),
@@ -357,7 +381,10 @@ export async function purge(
     // strike by a moment.
     let erasuresFinished = 0;
     for (const pending of store.loadPendingErasures()) if (store.finishErasure(pending.id, now)) erasuresFinished += 1;
+    // The identity age-out runs after every table above, so a person whose last record aged out in this very pass goes in it. It moves the erasure epoch, so the other
+    // processes forget the people it took.
+    const idleSubjects = store.purgeIdleSubjects?.(now - p.subjectsMs) ?? 0;
     const strayRows = options.sweepStrays === false ? 0 : store.purgeStrayRows(now - STRAY_AGE_MS);
-    return { ...result, erasuresFinished, strayRows };
+    return { ...result, idleSubjects, erasuresFinished, strayRows };
   });
 }

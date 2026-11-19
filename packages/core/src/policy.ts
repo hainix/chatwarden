@@ -2,6 +2,12 @@ import { isValidAuditActor, AUDIT_REASON_MAX } from './audit.js';
 import { sampleRecords, suggest } from './ladder.js';
 import { checkFilterRules } from './filters.js';
 import { checkNameRules } from './names.js';
+import { promptPrinciples } from './principles.js';
+import type { PromptExcluded } from './principles.js';
+import { CREATOR_TEAM_NOTE, isGameKind, recommendFor } from './recommend.js';
+import type { GameKind } from './recommend.js';
+import { checkTeamNoteRules, resolveTeamNotes } from './teamNotes.js';
+import type { TeamNote } from './teamNotes.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
 import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
 import { playerReporting } from './reporting.js';
@@ -82,6 +88,23 @@ export interface PolicyState {
    * far back a feed may look. Read only, deep-frozen.
    */
   limits: PolicyLimits;
+  /**
+   * What the AI prompt leaves out of the profile in force: indexes into `effective.guidelines` (`tiers`: screened, so the tier line keeps only
+   * its title and covers) and into `effective.teamNotes` (`notes`: screened and left out; `capped`: dropped for length), and whether the AI
+   * standard (`aiContext`) was screened and left out. Optional on the type for older servers; always set by `get()`, deep-frozen. It reflects
+   * the profile in force, so text from a code profile is screened too.
+   */
+  promptExcluded?: PromptExcluded;
+}
+
+/**
+ * What {@link PolicyService.setup} answers: whether to show the first-run setup panel, when it was dismissed (null when it has not been) and whether the
+ * dismissal survives a restart (`persists`: the store keeps the setup flag; without that it lasts for this process only).
+ */
+export interface PolicySetup {
+  show: boolean;
+  dismissedAt: number | null;
+  persists: boolean;
 }
 
 /** What {@link PolicyService.save} and {@link PolicyService.reset} answer. */
@@ -138,12 +161,19 @@ export class PolicyService {
   private readonly appealsWarn: ThrottledWarn;
   /** Whether a Community Rule number is an active rule of the registry: the filters may cite only those, checked when a layer is saved or previewed. */
   private readonly isActiveRule: (rule: number) => boolean;
+  /** Whether a Community Rule number exists in the registry (a retired rule does): a team note may cite one. Checked when a layer is saved or previewed. */
+  private readonly ruleExists: (rule: number) => boolean;
+  /** When the setup panel was dismissed, as far as this process knows (read from the store, or kept here when the store cannot keep it). A dismissal is never undone. */
+  private setupDismissed: number | null = null;
+  private readonly setupWarn: ThrottledWarn;
 
-  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean; workflowKept?: boolean; isActiveRule?: (rule: number) => boolean; accountAge?: boolean }) {
+  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean; workflowKept?: boolean; isActiveRule?: (rule: number) => boolean; ruleExists?: (rule: number) => boolean; accountAge?: boolean }) {
     this.isActiveRule = deps.isActiveRule ?? (() => true);
+    this.ruleExists = deps.ruleExists ?? (() => true);
     this.appealsKept = deps.appealsKept ?? true;
     this.workflowKept = deps.workflowKept ?? true;
     this.appealsWarn = new ThrottledWarn(deps.logger, deps.clock);
+    this.setupWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.signalsMs = deps.signalsMs ?? (() => RETENTION_DEFAULTS.signalsMs);
     this.filtersLimits = Object.freeze({ accountAge: deps.accountAge === true });
     this.chatRate = Object.freeze({ count: deps.chatRate?.count ?? RATE_LIMIT, windowMs: deps.chatRate?.windowMs ?? RATE_WINDOW_MS });
@@ -156,6 +186,85 @@ export class PolicyService {
 
   private get supported(): boolean {
     return typeof this.store.loadPolicyLayer === 'function' && typeof this.store.savePolicyLayer === 'function';
+  }
+
+  /** Whether the store keeps the setup flag (both optional methods). */
+  private get setupPersists(): boolean {
+    return typeof this.store.getSetupState === 'function' && typeof this.store.saveSetupState === 'function';
+  }
+
+  /** When the setup panel was dismissed, or null. The store is looked at until a dismissal is seen; a failure or an unreadable value reads as not dismissed (logged by class, throttled). */
+  private readDismissal(): number | null {
+    if (this.setupDismissed !== null) return this.setupDismissed;
+    if (!this.setupPersists) return null;
+    try {
+      const at: unknown = (this.store.getSetupState?.() as { dismissedAt?: unknown } | null | undefined)?.dismissedAt;
+      if (typeof at === 'number' && Number.isFinite(at)) {
+        this.setupDismissed = at;
+        return at;
+      }
+    } catch (err) {
+      this.setupWarn.warn('chatwarden.setup_state_failed', { error: errorClass(err) });
+    }
+    return null;
+  }
+
+  /**
+   * Whether to show the first-run setup panel: only when the store can save settings, nothing was ever saved (version 0: a reset counts as saved), the
+   * stored layer is usable and the panel was not dismissed. It looks at the store first, so a layer another process saved hides it. Never throws.
+   */
+  setup(): PolicySetup {
+    this.maybeRefresh();
+    const dismissedAt = this.readDismissal();
+    const show = this.supported && this.state.version === 0 && this.state.layerError === undefined && dismissedAt === null;
+    return { show, dismissedAt, persists: this.setupPersists };
+  }
+
+  /**
+   * Dismiss the setup panel. The first dismissal is kept (a second call writes nothing and keeps its time); it is written to the store when the store keeps the
+   * flag, and kept for this process only otherwise, or when the write failed (logged by class). Answers {@link PolicyService.setup}. Never throws.
+   */
+  dismissSetup(): PolicySetup {
+    try {
+      if (this.readDismissal() === null) {
+        const at = this.clock.now();
+        this.setupDismissed = at;
+        if (this.setupPersists) {
+          try {
+            this.store.saveSetupState?.({ dismissedAt: at });
+          } catch (err) {
+            this.setupWarn.warn('chatwarden.setup_state_failed', { error: errorClass(err) });
+          }
+        }
+      }
+    } catch {
+      // A clock that throws leaves the panel as it was.
+    }
+    return this.setup();
+  }
+
+  /**
+   * Save the recommended setup for a kind of game (see `recommendFor`) as ONE layer: the current layer with `guidelines`, `firstOffense`, `repeat`, `ladder` and
+   * `aiContext` replaced by the recommendation's (always, even when they equal the base), every other section untouched, and for `creator` the team note
+   * added to the existing notes unless it is already there. It goes through {@link PolicyService.save}, so `version`, `actor` and `reason` are checked as for any save
+   * and the answer carries `changed`: the sections whose stored value differs from the previous layer (what this save really changed, as for `save`: a customised section the apply resets is listed, a section already stored as recommended is not). An unknown game is `invalid` at path `game`; a store that cannot save is `unsupported`. A layer the kit could not use is
+   * replaced, not merged (it was ignored anyway). A store failure while looking at the store throws, as `reset` does.
+   */
+  applyRecommendation(game: GameKind, ctx: PolicySaveContext): PolicySaveResult {
+    if (!this.supported) return { ok: false, error: 'unsupported' };
+    if (!isGameKind(game)) return { ok: false, error: 'invalid', path: 'game' };
+    this.refresh();
+    const current: PolicyLayer = this.state.layerError === undefined ? this.state.layer : {};
+    const rec = recommendFor(game).layer;
+    const next: PolicyLayer = { ...current, guidelines: rec.guidelines, firstOffense: rec.firstOffense, repeat: rec.repeat, ladder: rec.ladder, aiContext: rec.aiContext };
+    if (game === 'creator') {
+      // The notes in force (the layer's, or the code profile's when the layer sets none), cleaned: a code profile's notes are kept, never replaced by the one note.
+      const notes: TeamNote[] = this.state.effective.teamNotes.map((n) => ({ ...n }));
+      const creator = resolveTeamNotes([{ text: CREATOR_TEAM_NOTE }])[0]!;
+      if (!notes.some((n) => n.text === creator.text)) notes.push(creator);
+      next.teamNotes = notes;
+    }
+    return this.save(next, ctx);
   }
 
   /** Read the stored layer once, at creation. A store failure here is the caller's (like every other load). */
@@ -278,6 +387,7 @@ export class PolicyService {
       ...(layerError === undefined ? {} : { layerError: { ...layerError } }),
       ...(dropped === undefined ? {} : { dropped }),
       limits: Object.freeze({ chatRate: this.chatRate, signalsMs: this.signalsMs(), filters: this.filtersLimits }),
+      promptExcluded: frozenCopy(promptPrinciples(effective).excluded),
     };
   }
 
@@ -337,6 +447,8 @@ export class PolicyService {
       // A filter may cite only an active Community Rule. Checked here, not when a stored layer is read: a rule switched off later fails the next save, never the chat path.
       checkFilterRules(effective.filters, this.isActiveRule, 'layer.filters');
       checkNameRules(effective.names, this.isActiveRule, 'layer.names');
+      // A note may cite any rule the registry has, a retired one too. Not checked on read: a rule cannot disappear, and the chat path never fails over it.
+      checkTeamNoteRules(effective.teamNotes, this.ruleExists, 'layer.teamNotes');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;
@@ -392,6 +504,7 @@ export class PolicyService {
       checkSignalFeeds(candidate.signals.feeds, candidate.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
       checkFilterRules(candidate.filters, this.isActiveRule, 'layer.filters');
       checkNameRules(candidate.names, this.isActiveRule, 'layer.names');
+      checkTeamNoteRules(candidate.teamNotes, this.ruleExists, 'layer.teamNotes');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;

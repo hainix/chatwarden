@@ -7,7 +7,7 @@ import { MARKERS, header, headerHash } from '../src/cli/templates/header.js';
 import { imp, impNs, impType, makeCtx, spec, t } from '../src/cli/templates/frag.js';
 import { renderAll } from '../src/cli/templates/index.js';
 import type { Answers } from '../src/cli/types.js';
-import { TS_OPTIONS, VERSIONS, answersOf, legalAnswers, syntaxProblems } from './cli-stubs.js';
+import { JS_OPTIONS, TS_OPTIONS, VERSIONS, answersOf, legalAnswers, syntaxProblems } from './cli-stubs.js';
 
 describe('every file renders', () => {
   it('for every legal answers combination, in ts and js', () => {
@@ -329,5 +329,47 @@ describe('synthetic words only', () => {
     expect(terms).toContain('syntheticTermPack()');
     expect(terms).toMatch(/TEST WORDS ONLY/);
     for (const word of ['zorbak', 'vlemmo', 'quissel', 'drakkuun', 'fenrisk', 'tarvo', 'snerp', 'glarn']) expect(terms).not.toContain(word);
+  });
+});
+
+describe('the creator kit (0.2.2)', () => {
+  const LINE = "    overrides: { teamNotes: [{ text: 'Protect the creator and their guests from targeted abuse' }] },";
+  const kitOf = (over: Partial<Answers>): string => renderAll(answersOf(over), VERSIONS).find((f) => /\/kit\.(ts|js)$/.test(f.path))!.content;
+
+  it('writes the overrides line right after the profile line, in ts and in js, and the file parses', () => {
+    for (const lang of ['ts', 'js'] as const) {
+      const text = kitOf({ lang, game: 'creator' });
+      expect(text, lang).toContain(`    profile: 'standard',\n${LINE}\n`);
+      expect(text.split('\n').filter((l) => l === LINE), lang).toHaveLength(1);
+      const file = renderAll(answersOf({ lang, game: 'creator' }), VERSIONS).find((f) => /\/kit\.(ts|js)$/.test(f.path))!;
+      expect(syntaxProblems(file, lang === 'ts' ? TS_OPTIONS : JS_OPTIONS), lang).toEqual([]);
+    }
+  });
+
+  it('is on top of every legal combination: the line is the only difference from the same answers without a game', () => {
+    for (const answers of legalAnswers('ts').filter((_, i) => i % 7 === 0)) {
+      const plain = renderAll(answers, VERSIONS);
+      const creator = renderAll({ ...answers, game: 'creator' }, VERSIONS);
+      expect(creator.map((f) => f.path)).toEqual(plain.map((f) => f.path));
+      for (const file of creator) {
+        const base = plain.find((f) => f.path === file.path)!;
+        if (file.path.endsWith('/kit.ts')) expect(file.content.replace(`${LINE}\n`, ''), file.path).toBe(base.content);
+        else expect(file.content, file.path).toBe(base.content);
+      }
+    }
+  });
+
+  it('every other game, and no game, write a byte-identical kit', () => {
+    for (const lang of ['ts', 'js'] as const) {
+      const none = kitOf({ lang });
+      for (const game of ['competitive', 'social', 'kids'] as const) expect(kitOf({ lang, game }), `${lang} ${game}`).toBe(none);
+      expect(none).not.toContain('teamNotes');
+    }
+  });
+
+  it('the creator line does not change the secret, the store or the marker rules', () => {
+    const text = kitOf({ game: 'creator' });
+    expect(contentProblems(text)).toEqual([]);
+    expect(text).not.toContain('TODO(');
   });
 });

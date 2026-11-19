@@ -11,6 +11,10 @@ import type { SanctionIndex } from './sanctions.js';
 import type { SubjectIndex } from './subjects.js';
 import { CONDUCT_LEVELS, isOriginReport } from './types.js';
 import { isNonPersonReporter } from './privacy.js';
+import { isEvidenceKind } from './evidenceKind.js';
+import type { EvidenceKind } from './evidenceKind.js';
+import { evidenceKindOf } from './reporting.js';
+import type { ReportReason } from './reporting.js';
 import type { AiOutcomeInsert, Clock, ConductLevel, Logger, ReportExcerptLine, ReportRecord, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
 
 /** True when someone filed the report and still is somebody: not a report a system filed, and not one whose reporter was erased (`erased:<id>`). */
@@ -56,7 +60,10 @@ export interface DecisionAction {
   gapNote?: string;
   /** Also sanction the subject's latest IP (at most 24 h). Not for a warning or a note. */
   includeIp?: boolean;
-  /** Up to five of THIS person's own lines in the report, shown to them in the notice (a note has no notice). */
+  /**
+   * Up to five of THIS person's own lines in the report, shown to them in the notice (a note has no notice). Taken whatever the decision's evidence kind: on a decision about `play`
+   * or a `name` they are stored and shown under the neutral heading, and the notice still says what it is about (0.2.2; a 0.2.1 hub attaches its default lines to every decision).
+   */
   lineIds?: string[];
 }
 
@@ -98,6 +105,12 @@ export interface DecisionInput {
    * part that is not well formed is ignored. Agreement is computed from the stored read and the decision, never from this echo.
    */
   ai?: DecisionAiEcho;
+  /**
+   * What this decision is about (0.2.2): `chat`, `play` or `name`, or `null` for neutral. Optional: it defaults to the kind of the report's reason, falling back to the rule of the
+   * action (CR 5 and 6 are `play`, CR 7 is `name`), else none. It words the player's notice and decides whether a chat line may be attached; it is not part of the idempotency key.
+   * Not the bad-faith `evidence` note above.
+   */
+  evidenceKind?: EvidenceKind | null;
 }
 
 /**
@@ -154,6 +167,8 @@ export interface DecisionServiceDeps {
   aiOutcome?: AiOutcomeHook;
   /** Told, after the commit and fenced, of each sanction notice a fresh decision made (the delivery hook). A replay and a decision that did not commit tell it nothing. Never throws. */
   delivery?: { sanctionNoticed(noticeId: string): void };
+  /** The reporting reasons in force now, for the evidence kind of a report's reason. Without it a decision reads the kind from the rule alone. */
+  reasons?: () => readonly ReportReason[];
 }
 
 /**
@@ -232,6 +247,8 @@ interface Normal {
   source: Source;
   /** Sorted by canonical subject, then kind. */
   actions: NormalAction[];
+  /** The decision's own evidence kind: `undefined` is not given (read it from the report), `null` is neutral. Not part of the key. */
+  evidenceKind: EvidenceKind | null | undefined;
   /** The AI echo, or null when absent or not well formed. Not part of the key. */
   ai: { readId: string | null; accepted: boolean; severity: ConductLevel | null; role: Role | null };
 }
@@ -281,6 +298,11 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
   } else if (input.evidence !== undefined) {
     return bad();
   }
+  let evidenceKind: EvidenceKind | null | undefined;
+  if (input.evidenceKind !== undefined) {
+    if (input.evidenceKind !== null && !isEvidenceKind(input.evidenceKind)) return bad();
+    evidenceKind = input.evidenceKind;
+  }
   const source: unknown = input.source === undefined ? 'moderator' : input.source;
   // `ai` is the kit's own AI actor's (design 6.1): a caller cannot decide as the AI, so the decision is refused before anything is keyed or written.
   if (!SANCTION_SOURCES.includes(source as Source) || isInternalSource(source)) return bad();
@@ -327,6 +349,7 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
     evidence,
     source: source as Source,
     actions,
+    evidenceKind,
     ai: normalizeAi(input.ai),
   };
 }
@@ -369,6 +392,8 @@ export function decisionKey(subjects: SubjectIndex, input: DecisionInput): strin
 interface Planned {
   action: NormalAction;
   lines: ReportExcerptLine[];
+  /** What the sanction is about, for its notice; undefined is neutral. */
+  evidence: EvidenceKind | undefined;
 }
 
 const lineIsSound = (l: ReportExcerptLine): boolean =>
@@ -395,6 +420,7 @@ export class DecisionService {
   private readonly reporterFeedback: boolean;
   private readonly aiOutcome: AiOutcomeHook | undefined;
   private readonly delivery: DecisionServiceDeps['delivery'];
+  private readonly reasons: () => readonly ReportReason[];
 
   constructor(deps: DecisionServiceDeps) {
     this.store = deps.store;
@@ -407,6 +433,7 @@ export class DecisionService {
     this.reporterFeedback = deps.reporterFeedback ?? true;
     this.aiOutcome = deps.aiOutcome;
     this.delivery = deps.delivery;
+    this.reasons = deps.reasons ?? (() => []);
   }
 
   /**
@@ -490,9 +517,12 @@ export class DecisionService {
       if (isDismissal(norm.verdict) && a.subject === target) return bad();
       if (!this.rules.isCitable(a.rule)) return bad();
       validateSanctionInput(this.sanctionInput(norm, a, report.roomId));
+      // What this is about: the decision's own kind, else the report's reason, else the rule. Lines are taken whatever the kind (a hub of 0.2.1 attaches its default lines to every
+      // decision): they are stored, the kind stays what it is and the words stay those of the kind.
+      const evidence = norm.evidenceKind === undefined ? evidenceKindOf(this.reasons(), report.reportedReason, a.rule) : (norm.evidenceKind ?? undefined);
       const lines = a.lineIds.length === 0 ? [] : ownLines(report, a.subject, a.lineIds, this.subjects);
       if (!lines.every(lineIsSound)) return bad();
-      return { action: a, lines };
+      return { action: a, lines, evidence };
     });
   }
 
@@ -532,7 +562,7 @@ export class DecisionService {
       const applied: AppliedGroup[] = [];
       const rows: SanctionRow[] = [];
       const told = new Set<SubjectId>();
-      for (const { action: a, lines } of plan) {
+      for (const { action: a, lines, evidence } of plan) {
         // No index here: the rows reach it only after the transaction has committed.
         const written = writeSanction(this.store, this.subjects, this.sanctionInput(norm, a, report.roomId, report.id), now, pending);
         // A note is on the record and tells the player nothing: no notice, so nobody to announce to either.
@@ -547,6 +577,7 @@ export class DecisionService {
                   until: a.kind === 'warning' ? null : written.endsAt,
                   rule: a.rule,
                   subject: a.subject,
+                  ...(evidence === undefined ? {} : { evidence }),
                 },
                 lines,
                 { notify: false },

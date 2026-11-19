@@ -29,21 +29,28 @@ const VERSION = readJson<Manifest>('packages', 'core', 'package.json').version a
 // bump in 0.x is outside every `^0.1.x` range, so every @chatwarden/* peer, required or optional, is `^0.2.0`. The floor is raised by hand
 // (RELEASING.md, "When a peer floor must rise"); after this release it stays where it is through a compatible release.
 const PEER_FLOOR = '^0.2.0';
-// 0.2.1 raises six floors by hand and leaves every other peer at ^0.2.0 (RELEASING.md, "When a peer floor must rise"; the release is a patch because every range is set before
-// `npm run version`, so changesets never sees one out of range). Each exception names the API that forced it; the stores, matcher, profanity, hub-element's other peers and
-// the optional peers of http stay at the 0.2.0 floor because a 0.2.1 build of them uses nothing that is new in core (the new Store methods are optional).
-const RAISED_FLOOR = '^0.2.1';
+// 0.2.1 raised six floors by hand and 0.2.2 raises five more, each by hand and before `npm run version` (RELEASING.md, "When a peer floor must rise"; the release stays a patch because every
+// range is set before the version run, so changesets never sees one out of range). Each exception names the API that forced it. What 0.2.1 raised and 0.2.2 does not need to move stays at ^0.2.1
+// (discord, player-react: they use nothing new in core 0.2.2); the memory store, matcher, profanity and the optional peers of http stay at the 0.2.0 floor.
+const FLOOR_021 = '^0.2.1';
+const FLOOR_022 = '^0.2.2';
 const RAISED: Record<string, Record<string, string>> = {
-  // http: `cw.appeals.caseByLink`, `fileByLink` and `landingOrigins`, `appealUrl` on a notice and a door refusal, `resolveLandingOptions` (the appeal landing routes and the delivery webhook).
-  '@chatwarden/http': { '@chatwarden/core': RAISED_FLOOR },
-  // discord: the `sanction.overturned` event type, which it posts to the feed.
-  '@chatwarden/discord': { '@chatwarden/core': RAISED_FLOOR },
-  // hub-react: `AppealDetail.cause` and `reasonCode`, the new admin fields (`reviewFlags`, the overturned counts, the three appeal settings) from core, and from http the routes that carry them.
-  '@chatwarden/hub-react': { '@chatwarden/core': RAISED_FLOOR, '@chatwarden/http': RAISED_FLOOR },
-  // player-react: `@chatwarden/core/notice-locales`, the words of the new AppealPage.
-  '@chatwarden/player-react': { '@chatwarden/core': RAISED_FLOOR },
+  // http: 0.2.1 `cw.appeals.caseByLink`, `fileByLink` and `landingOrigins`, `appealUrl` on a notice and a door refusal, `resolveLandingOptions` (the appeal landing routes and the delivery webhook);
+  // 0.2.2 `recommendFor`, `GAME_KINDS`, `isGameKind`, `cw.policy.setup`, `dismissSetup` and `applyRecommendation` (the /setup routes and `chatwarden init --game`) and the whole-form layer
+  // (`guidelines: { tiers }`, `teamNotes`, `aiContext`), `evidenceKind` on a decision, `PolicyState.promptExcluded`.
+  '@chatwarden/http': { '@chatwarden/core': FLOOR_022 },
+  // discord: the `sanction.overturned` event type, which it posts to the feed (0.2.1). 0.2.2 adds nothing it uses.
+  '@chatwarden/discord': { '@chatwarden/core': FLOOR_021 },
+  // hub-react: 0.2.1 `AppealDetail.cause` and `reasonCode`, the new admin fields. 0.2.2: `PolicyState.promptExcluded`, `TeamNote`, `GameKind`, the whole-form layer (the principles editor),
+  // the evidence kind on a report, a decision and a reason, from core; from http the /setup routes and the `evidenceKind` of a decision.
+  '@chatwarden/hub-react': { '@chatwarden/core': FLOOR_022, '@chatwarden/http': FLOOR_022 },
+  // player-react: `@chatwarden/core/notice-locales`, the words of the AppealPage (0.2.1). 0.2.2 reads the evidence kind from the server and uses nothing from core that 0.2.1 lacks at run time.
+  '@chatwarden/player-react': { '@chatwarden/core': FLOOR_021 },
   // hub-element: bundles the new hub, so its optional types-only peer on hub-react rises with it.
-  '@chatwarden/hub-element': { '@chatwarden/hub-react': RAISED_FLOOR },
+  '@chatwarden/hub-element': { '@chatwarden/hub-react': FLOOR_022 },
+  // store-sqlite: imports `registrySubjectColumns` from core at run time (the identity age-out `purgeIdleSubjects`), and its migration 28 holds the evidence column the 0.2.2 core writes. A core
+  // that lacks the export would fail at import.
+  '@chatwarden/store-sqlite': { '@chatwarden/core': FLOOR_022 },
 };
 const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
 const UI_PACKAGES = new Set(['@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/hub-element']);
@@ -113,7 +120,7 @@ describe('core is a peer, never a dependency', () => {
     expect(Object.keys(core.devDependencies ?? {}).filter(ownScope)).toEqual(['@chatwarden/store-memory']);
   });
   it.each(dependents.map((p) => [p.pkg.name, p.pkg] as const))(
-    '%s peers on core at its floor (^0.2.0, or ^0.2.1 where 0.2.1 needs new core API) and dev-depends on core at the group version',
+    '%s peers on core at its floor (^0.2.0, ^0.2.1 or ^0.2.2 where a release needs new core API) and dev-depends on core at the group version',
     (_n, pkg) => {
       expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(peerRangeOf(pkg.name, '@chatwarden/core'));
       expect(pkg.devDependencies?.['@chatwarden/core']).toBe(VERSION);
@@ -160,7 +167,7 @@ describe('store-memory', () => {
 
 describe('peer floors', () => {
   const byName = (n: string): Manifest => published.find((p) => p.pkg.name === n)!.pkg;
-  it('every @chatwarden/* peer of every package is ^0.2.0, optional ones included, except the six raised to ^0.2.1 in RAISED', () => {
+  it('every @chatwarden/* peer of every package is ^0.2.0, optional ones included, except the seven raised in RAISED (two to ^0.2.1, five to ^0.2.2)', () => {
     const seen: string[] = [];
     for (const { pkg } of published) {
       for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {}).filter(([n]) => ownScope(n))) {
@@ -190,7 +197,7 @@ describe('peer floors', () => {
       ].sort(),
     );
   });
-  it('the raised floors are exactly these six, each ^0.2.1, and every other peer is ^0.2.0 (0.2.1 raised only what uses new API)', () => {
+  it('the raised floors are exactly these seven (two ^0.2.1, five ^0.2.2), and every other peer is ^0.2.0 (a release raises only what uses new API)', () => {
     const raised: string[] = [];
     for (const { pkg } of published) {
       for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {}).filter(([n]) => ownScope(n))) {
@@ -200,15 +207,16 @@ describe('peer floors', () => {
     expect(raised.sort()).toEqual(
       [
         '@chatwarden/discord -> @chatwarden/core ^0.2.1',
-        '@chatwarden/http -> @chatwarden/core ^0.2.1',
-        '@chatwarden/hub-element -> @chatwarden/hub-react ^0.2.1',
-        '@chatwarden/hub-react -> @chatwarden/core ^0.2.1',
-        '@chatwarden/hub-react -> @chatwarden/http ^0.2.1',
+        '@chatwarden/http -> @chatwarden/core ^0.2.2',
+        '@chatwarden/hub-element -> @chatwarden/hub-react ^0.2.2',
+        '@chatwarden/hub-react -> @chatwarden/core ^0.2.2',
+        '@chatwarden/hub-react -> @chatwarden/http ^0.2.2',
         '@chatwarden/player-react -> @chatwarden/core ^0.2.1',
+        '@chatwarden/store-sqlite -> @chatwarden/core ^0.2.2',
       ].sort(),
     );
-    // the stores, matcher and profanity use nothing new in core, and http's optional peers stay where they were
-    for (const name of ['@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/matcher', '@chatwarden/profanity']) {
+    // the memory store, matcher and profanity use nothing new in core at run time, and http's optional peers stay where they were
+    for (const name of ['@chatwarden/store-memory', '@chatwarden/matcher', '@chatwarden/profanity']) {
       for (const range of Object.values(byName(name).peerDependencies ?? {})) expect(range, name).toBe(PEER_FLOOR);
     }
     for (const peer of ['@chatwarden/hub-element', '@chatwarden/matcher', '@chatwarden/profanity', '@chatwarden/store-sqlite']) {
@@ -332,7 +340,7 @@ describe('hub-react', () => {
     expect(Object.keys(hub().peerDependencies ?? {}).sort()).toEqual(['@chatwarden/core', '@chatwarden/http', 'react', 'react-dom']);
     expect(hub().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
     expect(hub().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
-    expect(hub().peerDependencies?.['@chatwarden/http']).toBe('^0.2.1');
+    expect(hub().peerDependencies?.['@chatwarden/http']).toBe('^0.2.2');
     expect(hub().dependencies).toBeUndefined();
   });
   it('ships the stylesheet as ./styles.css and the optional font as ./font.css, and lists only those under sideEffects', () => {
@@ -419,7 +427,7 @@ describe('hub-element', () => {
     published.find((p) => p.pkg.name === '@chatwarden/hub-element')!.pkg as Manifest & { sideEffects?: unknown; exports?: Record<string, unknown>; files?: string[] };
   it('bundles React, react-dom, hub-react and the part of core it needs: no react peer, no dependency, hub-react only as an optional peer for the types', () => {
     expect(Object.keys(element().peerDependencies ?? {})).toEqual(['@chatwarden/hub-react']);
-    expect(element().peerDependencies?.['@chatwarden/hub-react']).toBe('^0.2.1');
+    expect(element().peerDependencies?.['@chatwarden/hub-react']).toBe('^0.2.2');
     expect(element().peerDependenciesMeta?.['@chatwarden/hub-react']).toEqual({ optional: true });
     expect(element().dependencies).toBeUndefined();
   });

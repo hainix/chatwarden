@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCli } from '../src/cli/args.js';
 import type { Parsed } from '../src/cli/args.js';
-import { canPrompt, isAsked, resolveAnswers } from '../src/cli/answers.js';
+import { CREATOR_TEAM_NOTE, GAME_PRESETS, canPrompt, isAsked, resolveAnswers } from '../src/cli/answers.js';
 import { detect } from '../src/cli/detect.js';
 import type { Answers, Detected } from '../src/cli/types.js';
 import { createWorld } from './cli-world.js';
@@ -274,5 +274,50 @@ describe('Windows: the same answers with path.win32 and a C:\\ root', () => {
 
   it('a backslash --dir gives the same posix answer a slash one does', () => {
     expect(answers(['--dir', 'src\\chatwarden'])).toEqual(answers(['--dir', 'src/chatwarden']));
+  });
+});
+
+describe('--game: the kind of game picks the standard', () => {
+  it('the four games map to relaxed, standard, strict, standard', () => {
+    expect(GAME_PRESETS).toEqual({ competitive: 'relaxed', social: 'standard', kids: 'strict', creator: 'standard' });
+    for (const [game, profile] of [['competitive', 'relaxed'], ['social', 'standard'], ['kids', 'strict'], ['creator', 'standard']] as const) {
+      expect(answers(['--game', game]), game).toMatchObject({ game, profile });
+    }
+  });
+
+  it('--profile strict --game competitive gives profile strict and game competitive (the flag wins)', () => {
+    expect(answers(['--profile', 'strict', '--game', 'competitive'])).toMatchObject({ profile: 'strict', game: 'competitive' });
+    expect(answers(['--game', 'kids', '--profile', 'relaxed'])).toMatchObject({ profile: 'relaxed', game: 'kids' });
+  });
+
+  it('no --game leaves answers.game absent (the old shape still holds)', () => {
+    const a = answers([]);
+    expect(Object.hasOwn(a, 'game')).toBe(false);
+    expect(a.profile).toBe('standard');
+    expect(answers(['--profile', 'strict'])).toEqual({ ...a, profile: 'strict' });
+  });
+
+  it('the creator note is the one the core recommends, in plain text', () => {
+    expect(CREATOR_TEAM_NOTE).toBe('Protect the creator and their guests from targeted abuse');
+  });
+
+  it("isAsked('game') is true when not given and false when given", () => {
+    const d = detected();
+    expect(isAsked('game', {}, d)).toBe(true);
+    expect(isAsked('game', { game: 'kids' }, d)).toBe(false);
+    expect(isAsked('game', { profile: 'strict' }, d)).toBe(true);
+  });
+
+  it("isAsked('profile') is false when a game is given and true when neither is", () => {
+    const d = detected();
+    expect(isAsked('profile', {}, d)).toBe(true);
+    expect(isAsked('profile', { game: 'social' }, d)).toBe(false);
+    expect(isAsked('profile', { game: 'creator' }, d)).toBe(false);
+    expect(isAsked('profile', { profile: 'strict' }, d)).toBe(false);
+  });
+
+  it('the other questions are unchanged by a game', () => {
+    const d = detected();
+    for (const name of ['store', 'chat', 'hub', 'discord'] as const) expect(isAsked(name, { game: 'kids' }, d), name).toBe(true);
   });
 });

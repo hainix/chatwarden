@@ -177,7 +177,7 @@ export function DecisionBar() {
     }
     // What the AI's read was, if one was shown, and whether this is its suggestion as it stood (the server checks it against the decision).
     const ai = c.echo(undefined, form);
-    const input = toInput(form);
+    const input = toInput(form, report.evidenceKind);
     decidedRef.current = true;
     decisions.submit({ reportId: report.id, person: report.targetPerson, name: nameOfTarget, input: ai === undefined ? input : { ...input, ai }, snapshot: form });
     // On to the same person's next report, or the next case: one rule, in `continueFrom`.
@@ -244,7 +244,7 @@ export function DecisionBar() {
   // On a name report with renames unavailable: one plain line, where the row would be. Not for a role that cannot apply sanctions (nothing for it to switch on).
   const renameOff = nameReport && !features.renames && can('sanctions.apply') && !dismissal && me.scope === undefined;
   // Only the masked text the server sent for a line the person wrote is ever shown; a line without it is left out, never shown as it was typed.
-  const previewOp = decideOp(form, { target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order });
+  const previewOp = decideOp(form, { target, reporter: parts.reporter, lineOf: parts.lineOf, order: parts.order, evidence: parts.evidence });
   // A problem on an action that is shown in short opens the editor, where the field is.
   const goTo = (id: string): void => {
     if (field(id) === null) {
@@ -435,6 +435,8 @@ export function DecisionBar() {
                           lengths={draft.lengths}
                           canPermanent={draft.ctx.canPermanent}
                           lines={lineList.filter((l) => l.person === a.person)}
+                          evidence={draft.evidence}
+                          onShowChat={draft.showChatLines}
                           problems={shown.actions[a.uid]}
                           onChange={(patch) => draft.patchAction(a.uid, patch)}
                           onToggleLine={(id) => draft.toggleLine(a.uid, id)}

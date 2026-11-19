@@ -42,6 +42,8 @@ import type { CaseMarkResult } from './caseWorkflow.js';
 import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
+import type { PolicySetup } from './policy.js';
+import type { GameKind } from './recommend.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkFilterRules, mergeFilters, resolveFilters } from './filters.js';
 import type { FilterSettings } from './filters.js';
@@ -56,6 +58,7 @@ import type { EffectiveContext } from './contexts.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
 import { checkNameRules } from './names.js';
+import { checkTeamNoteRules } from './teamNotes.js';
 import type { NameCheckResult, NameKind } from './names.js';
 import { resolveLandingOptions } from './appealLink.js';
 import { checkDeliveryOptions, DeliveryService } from './delivery.js';
@@ -246,8 +249,9 @@ export interface ChatwardenOptions {
    * Floors, checked at creation (and on every `purge(policy)`), each a `ProfileError` naming the field:
    * `sanctionAfterEndMs` and `noticesMs` at least 90 days (the ladder and "My record" reach back that far),
    * `auditMs` at least 90 days (default 365), `appealsMs` at least 90 days (default 365), `badFaithMs` at least
-   * `limits.reports.suspendWindowMs`. `appealStatementsMs` (default 90 days) and `blockedNamesMs` (default 30 days) may be 0. Every field
-   * must be a finite number (Infinity and NaN are refused). Not enforced, but `strikesMs` should be at least
+   * `limits.reports.suspendWindowMs`. `appealStatementsMs` (default 90 days) and `blockedNamesMs` (default 30 days) may be 0. `subjectsMs`
+   * (default 400 days, at least 90) is how long a person with no record anywhere keeps their identity rows (account id, key and address hashes) after they were last seen.
+   * Every field must be a finite number (Infinity and NaN are refused). Not enforced, but `strikesMs` should be at least
    * `limits.strikes.windowMs`, or strikes are deleted before the window that counts them closes. When you leave
    * `badFaithMs` out it follows a longer suspension window.
    */
@@ -931,8 +935,10 @@ export interface Chatwarden {
   readonly profile: ResolvedProfile;
   /**
    * The editable profile. The profile from code is the base; a moderator's edits to the durations offered, the ladder, the first
-   * offences, the repeat rule, the area and severe rules and the guideline outcome texts are stored in your store as a
-   * versioned layer. Needs a store with `loadPolicyLayer` and `savePolicyLayer` (the memory and SQLite stores have them);
+   * offences, the repeat rule, the area and severe rules, the guidelines, the team notes, the AI standard (`aiContext`) and the other
+   * sections of `POLICY_SECTIONS` are stored in your store as a versioned layer. `guidelines` takes the whole form `{ tiers }`, which
+   * replaces the tiers (every conduct level covered once, with length caps), or the older positional list of outcome texts, which is
+   * still read. `teamNotes` is staff-only and each note may cite a Community Rule the registry has (a retired one too). Needs a store with `loadPolicyLayer` and `savePolicyLayer` (the memory and SQLite stores have them);
    * without them `save` and `reset` answer `{ ok: false, error: 'unsupported' }` and everything else works from code.
    */
   policy: {
@@ -955,6 +961,20 @@ export interface Chatwarden {
     reset(section?: PolicySection, o?: { version?: number }): PolicySaveResult;
     /** Look at the store now, instead of waiting for the 10 second interval. */
     refresh(): void;
+    /**
+     * Whether to show the first-run setup panel: `{ show, dismissedAt, persists }`. `show` is true only for a store that can save settings, with nothing
+     * ever saved (a reset counts as saved) and a usable stored layer, and not dismissed; a layer saved by another process hides it within the refresh interval.
+     * `persists` says whether the dismissal survives a restart (the store keeps the setup flag). Never throws.
+     */
+    setup(): PolicySetup;
+    /** Dismiss the setup panel (the first dismissal is kept). Written to the store when it keeps the flag, for this process only otherwise. Answers `setup()`. Never throws. */
+    dismissSetup(): PolicySetup;
+    /**
+     * Save the recommended starting point for a kind of game (`competitive`, `social`, `kids` or `creator`, see `recommendFor`) as one layer: the principles
+     * (guidelines), first-offence table, repeat rule, ladder and AI standard replaced, other sections kept, and for `creator` one team note added. Checked and
+     * answered like `save` (`conflict`, `invalid` with a path, `unsupported`), but `changed` lists the sections whose stored value differs from the previous layer (a customised section the apply resets is listed); an unknown game is `invalid` at path `game`.
+     */
+    applyRecommendation(game: GameKind, ctx: PolicySaveContext): PolicySaveResult;
   };
   /** The limits in force, defaults filled in. Deep-frozen. */
   limits: Limits;
@@ -1313,6 +1333,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   checkFilterRules(baseProfile.filters, isActiveRule, 'profile.filters');
   // The reserved-name rule likewise (a layer is checked when it is saved).
   checkNameRules(baseProfile.names, isActiveRule, 'profile.names');
+  // A team note may cite any rule of the registry, a retired one too (a layer is checked when it is saved or previewed).
+  const ruleExists = (n: number): boolean => rules.get(n) !== undefined;
+  checkTeamNoteRules(baseProfile.teamNotes, ruleExists, 'profile.teamNotes');
   // The staff workflow keeps a thread per report in the store: a code profile that asks for it over a store that cannot is refused here, plainly.
   if (baseProfile.desk.workflow && !hasWorkflowMethods(store)) {
     throw new Error('desk.workflow needs a store that keeps staff comments and escalation (insertComment, listComments, deleteComment, countComments, setEscalation, countOpenEscalated); this store lacks them');
@@ -1340,7 +1363,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await mutes.load();
   await strikes.load();
   // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
-  const policy = new PolicyService({ store, clock, logger, base: baseProfile, isActiveRule: isActiveRule, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store), workflowKept: hasWorkflowMethods(store), accountAge: typeof opts.signals?.accountAgeDays === 'function' });
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile, isActiveRule: isActiveRule, ruleExists, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store), workflowKept: hasWorkflowMethods(store), accountAge: typeof opts.signals?.accountAgeDays === 'function' });
   policy.load();
 
   // Room contexts: the lookup over the profile in force and the room's tag. The profanity handling of each context is built once, here: it is code-only, so a stored layer never
@@ -1616,6 +1639,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           audit: (input) => audit.record(input),
         });
   const decisions = new DecisionService({
+    reasons: () => policy.profileNow().reporting.reasons,
     store,
     subjects,
     rules,
@@ -1719,7 +1743,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     const result = await purge(store, clock.now(), policyNow, { sweepStrays: !subjects.hasUnsaved() });
     // The sweep is visible: a count and nothing else (no id, no line), so an integration that writes rows for people it never saved shows up in the log.
     if (result.strayRows > 0) safeWarn(logger, 'chatwarden.stray_rows_swept', { count: result.strayRows });
-    if (result.erasuresFinished > 0 || result.strayRows > 0) await subjects.refresh();
+    // The identity age-out took people out of the store: the index forgets them now (and the other processes on the epoch), as for a finished erase.
+    if (result.erasuresFinished > 0 || result.strayRows > 0 || result.idleSubjects > 0) await subjects.refresh();
     return result;
   };
 
@@ -2363,6 +2388,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       preview: (layer, rule) => policy.preview(layer, rule),
       reset: (section, o) => policy.reset(section, o),
       refresh: () => policy.refresh(),
+      setup: () => policy.setup(),
+      dismissSetup: () => policy.dismissSetup(),
+      applyRecommendation: (game, ctx) => policy.applyRecommendation(game, ctx),
     },
     limits,
     get summary() {

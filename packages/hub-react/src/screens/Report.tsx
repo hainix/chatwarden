@@ -7,6 +7,7 @@ import { EvidenceRow } from '../case/EvidenceRow.js';
 import { SurgeLine } from '../case/SurgeLine.js';
 import { HiddenExcerpt } from '../case/HiddenExcerpt.js';
 import { CaseMenu } from '../case/CaseMenu.js';
+import { CasePrinciples } from '../case/CasePrinciples.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
 import { ContextChip, EntityRow, useCase } from '../case/CaseContext.js';
 import { DecisionBar } from '../case/DecisionBar.js';
@@ -82,6 +83,7 @@ function Header({ detail }: { detail: ReportDetail }) {
           {t('hub.report.back')}
         </Link>
       </div>
+      <CasePrinciples rule={detail.rule} />
       <EvidenceRow />
     </header>
   );
