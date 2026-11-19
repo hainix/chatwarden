@@ -57,6 +57,8 @@ Write it for a person who is upset and has ten seconds.
 What it must not do: it does not promise an outcome ("we will review it" is true, "we will lift it" is not), it does not include the private reason a moderator wrote, and it does not name another player or a reporter. The text the kit writes follows these rules; if you
 write your own, hold to them.
 
+A game that does not want an email for every automatic timeout sets `deliverAutomatic: false` in `notices` (`CHATWARDEN_DELIVER_AUTOMATIC=0` in service mode): a moderator's sanction and every appeal outcome are still delivered.
+
 ## The link is a capability
 
 The link is a capability for one sanction: anyone who holds it can read that one sanction and file one appeal. It is not a login, it names no account, and it opens nothing else. It stops working when it expires

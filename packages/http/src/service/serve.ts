@@ -55,6 +55,8 @@ export interface ServeConfig {
   /** `CHATWARDEN_DELIVERY_URL` and `CHATWARDEN_DELIVERY_SECRET`: where a sanction notice and an appeal outcome are delivered, signed. Both or neither. */
   deliveryUrl?: string;
   deliverySecret?: string;
+  /** `CHATWARDEN_DELIVER_AUTOMATIC` (0.2.3): 1, 0, true or false. Whether the kit's own automatic timeouts are delivered too. Unset leaves the kit's default (on). Read only with the delivery webhook. */
+  deliverAutomatic?: boolean;
   /** `CHATWARDEN_TRUST_PROXY`: how many reverse proxies of your own are in front of this process (0 to 10), for the appeal page's address limits. Unset means none. */
   trustProxy?: string;
 }
@@ -109,6 +111,9 @@ export function resolveServeConfig(flags: ServeFlags, env: Env): ServeConfig {
     if (!/^\d{1,4}$/.test(rawProcesses) || Number(rawProcesses) < 1 || Number(rawProcesses) > 1000) throw new ServeError('CHATWARDEN_PROCESSES must be a whole number from 1 to 1000.');
     processes = Number(rawProcesses);
   }
+  const rawDeliverAutomatic = present(env.CHATWARDEN_DELIVER_AUTOMATIC)?.toLowerCase();
+  if (rawDeliverAutomatic !== undefined && !['1', '0', 'true', 'false'].includes(rawDeliverAutomatic)) throw new ServeError('CHATWARDEN_DELIVER_AUTOMATIC must be 1, 0, true or false.');
+  const deliverAutomatic = rawDeliverAutomatic === undefined ? undefined : rawDeliverAutomatic === '1' || rawDeliverAutomatic === 'true';
   const optional = <K extends keyof ServeConfig>(key: K, value: ServeConfig[K] | undefined): Partial<ServeConfig> => (value === undefined ? {} : { [key]: value });
   return {
     port: Number(port.value),
@@ -128,6 +133,7 @@ export function resolveServeConfig(flags: ServeFlags, env: Env): ServeConfig {
     ...optional('landingOrigins', present(env.CHATWARDEN_LANDING_ORIGINS)),
     ...optional('deliveryUrl', present(env.CHATWARDEN_DELIVERY_URL)),
     ...optional('deliverySecret', present(env.CHATWARDEN_DELIVERY_SECRET)),
+    ...optional('deliverAutomatic', deliverAutomatic),
     ...optional('trustProxy', present(env.CHATWARDEN_TRUST_PROXY)),
   };
 }
@@ -315,7 +321,7 @@ export async function startService(config: ServeConfig, deps: ServeDeps = {}): P
         ...(landingUrl === undefined && landingOrigins === undefined
           ? {}
           : { appeals: { ...(landingUrl === undefined ? {} : { landingUrl }), ...(landingOrigins === undefined ? {} : { landingOrigins }) } }),
-        ...(webhook === undefined ? {} : { notices: { deliver: webhook.deliver } }),
+        ...(webhook === undefined ? {} : { notices: { deliver: webhook.deliver, ...(config.deliverAutomatic === undefined ? {} : { deliverAutomatic: config.deliverAutomatic }) } }),
       });
     } catch (err) {
       const where = (err as { path?: unknown }).path;

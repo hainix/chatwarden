@@ -306,6 +306,8 @@ export function serveHelpText(): string {
     '                           http only for localhost). Set together with the secret, or neither.',
     '  CHATWARDEN_DELIVERY_SECRET  Signs those deliveries (sha256 HMAC of the body): its own secret of 32 or',
     '                           more characters. Set together with the URL, or neither.',
+    '  CHATWARDEN_DELIVER_AUTOMATIC  1, 0, true or false (default 1). 0 stops deliveries for automatic',
+    '                           timeouts; moderator sanctions and appeal outcomes are always sent.',
     '',
     'Exit codes:',
     '  0  stopped by a signal, or after printing the API description',

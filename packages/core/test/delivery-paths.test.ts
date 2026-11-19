@@ -20,11 +20,11 @@ const matcher: Matcher = {
   },
 };
 
-async function kit(settings: Record<string, unknown> = { perPlayerPerWeek: 20 }, over: Record<string, unknown> = {}, landing = true) {
+async function kit(settings: Record<string, unknown> = { perPlayerPerWeek: 20 }, over: Record<string, unknown> = {}, landing = true, notices: Record<string, unknown> = {}) {
   const calls: NoticeDelivery[] = [];
   const hook: { onCall?: (d: NoticeDelivery) => void } = {};
   const k = await appealsKit(
-    { matcher, ...(landing ? { appeals: { landingUrl: LANDING } } : {}), notices: { deliver: (d: NoticeDelivery) => (calls.push(d), hook.onCall?.(d)) }, ...over } as never,
+    { matcher, ...(landing ? { appeals: { landingUrl: LANDING } } : {}), notices: { deliver: (d: NoticeDelivery) => (calls.push(d), hook.onCall?.(d)), ...notices }, ...over } as never,
     settings,
   );
   return { k, calls, hook };
@@ -188,6 +188,86 @@ describe('an automatic restriction', () => {
     for (const word of ['zorbak', 'vlemmo', 'quissel']) k.cw.chat.accept(t.room, 'p2', word);
     expect(calls).toEqual([]);
     expect(k.cw.chat.accept(t.room, 'p2', 'hello')).toHaveProperty('refuse');
+  });
+});
+
+describe('deliverAutomatic (0.2.3): an option to leave automatic timeouts out of the hook', () => {
+  const autoChat = (k: AppealsKit, key: string): void => {
+    const t = k.table({ target: key });
+    for (const word of ['zorbak', 'vlemmo', 'quissel']) k.cw.chat.accept(t.room, 'p2', word);
+  };
+
+  it('on by default: an automatic timeout is delivered, and so with deliverAutomatic: true written out', async () => {
+    for (const notices of [{}, { deliverAutomatic: true }]) {
+      const { k, calls } = await kit(undefined, {}, true, notices);
+      withAccount(k, 'key-d1');
+      autoChat(k, 'key-d1');
+      expect(calls, JSON.stringify(notices)).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ kind: 'sanction', sanction: { source: 'auto_filter', automated: true } });
+    }
+  });
+
+  it('off: an automatic timeout is not delivered, but the restriction and its notice still stand', async () => {
+    const { k, calls } = await kit(undefined, {}, true, { deliverAutomatic: false });
+    withAccount(k, 'key-d2');
+    autoChat(k, 'key-d2');
+    expect(calls).toEqual([]);
+    expect(k.cw.notices.pending({ clientKey: 'key-d2' }).some((n) => n.kind === 'chat')).toBe(true);
+    expect(k.store.rawNotices().some((n) => n.kind === 'chat')).toBe(true);
+    // no skip is logged either: it is a choice, not a missing account
+    expect(k.logged.filter(([e]) => e === 'chatwarden.delivery_skipped_no_account')).toEqual([]);
+  });
+
+  it('off: the lines after an automatic timeout still deliver nothing', async () => {
+    const { k, calls } = await kit(undefined, {}, true, { deliverAutomatic: false });
+    withAccount(k, 'key-d3');
+    const t = k.table({ target: 'key-d3' });
+    for (const word of ['zorbak', 'vlemmo', 'quissel', 'zorbak', 'vlemmo']) k.cw.chat.accept(t.room, 'p2', word);
+    expect(calls).toEqual([]);
+  });
+
+  it('off: a moderator sanction is still delivered, for every kind', async () => {
+    const { k, calls } = await kit(undefined, {}, true, { deliverAutomatic: false });
+    for (const kind of ['warning', 'chat', 'area', 'ban'] as const) {
+      withAccount(k, `key-d4-${kind}`);
+      await k.sanction({ key: `key-d4-${kind}`, kind, durationMs: kind === 'ban' ? null : HOUR });
+    }
+    expect(calls.map((d) => d.sanction.kind)).toEqual(['warning', 'chat', 'area', 'ban']);
+    expect(calls.every((d) => d.sanction.automated === false && d.sanction.source === 'moderator')).toBe(true);
+  });
+
+  it('off: an automatic timeout and a moderator sanction for different people: only the moderator one is delivered', async () => {
+    const { k, calls } = await kit(undefined, {}, true, { deliverAutomatic: false });
+    withAccount(k, 'key-d5a');
+    withAccount(k, 'key-d5b');
+    autoChat(k, 'key-d5a');
+    const s = await k.sanction({ key: 'key-d5b' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.noticeId).toBe(s.noticeId);
+  });
+
+  it('off: an appeal outcome on an automatic sanction is still delivered (a person filed and waits)', async () => {
+    const { k, calls } = await kit(undefined, {}, true, { deliverAutomatic: false });
+    withAccount(k, 'key-d6');
+    autoChat(k, 'key-d6');
+    expect(calls).toEqual([]);
+    const notice = pendingOf(k, { clientKey: 'key-d6' }, 'chat') as { id: string };
+    const r = k.cw.appeals.file({ clientKey: 'key-d6' }, { noticeId: notice.id, statement: 'a filter false alarm' });
+    expect(r.ok).toBe(true);
+    await k.cw.appeals.decide(decision((r as { appeal: { id: string } }).appeal.id, { outcome: 'revoke', reasonCode: 'not_a_violation' }));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ kind: 'appeal_outcome', sanction: { kind: 'chat', source: 'auto_filter', automated: true }, outcome: { status: 'revoked' } });
+  });
+
+  it('off: the outcome of an upheld appeal on an automatic sanction is delivered too', async () => {
+    const { k, calls } = await kit(undefined, {}, true, { deliverAutomatic: false });
+    withAccount(k, 'key-d7');
+    autoChat(k, 'key-d7');
+    const notice = pendingOf(k, { clientKey: 'key-d7' }, 'chat') as { id: string };
+    const r = k.cw.appeals.file({ clientKey: 'key-d7' }, { noticeId: notice.id, statement: 'please look again' });
+    await k.cw.appeals.decide(decision((r as { appeal: { id: string } }).appeal.id, { outcome: 'uphold', reasonCode: 'rule_applies' }));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ kind: 'appeal_outcome', outcome: { status: 'upheld' } });
   });
 });
 
