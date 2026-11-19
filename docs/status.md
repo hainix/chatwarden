@@ -2,9 +2,9 @@
 
 Updated 2026-11-18. The full roadmap and the reasoning behind it: [design/2026-11-09-product-scope.md](design/2026-11-09-product-scope.md).
 
-## 0.2.2: built on branch `principles`, not yet published
+## 0.2.2: published (2026-11-18, all ten packages on npm, tag `v0.2.2`, PR #45)
 
-A patch release, additive: nothing in it breaks a 0.2.1 input. Moderation principles, team notes and a recommended setup, evidence kind (a decision knows whether it was about chat, play or a name), and an identity age-out. Not tagged, not published; the owner's steps are in [RELEASING.md](../RELEASING.md).
+A patch release, additive: nothing in it breaks a 0.2.1 input. Moderation principles, team notes and a recommended setup, evidence kind (a decision knows whether it was about chat, play or a name), and an identity age-out. Published from tag `v0.2.2` through npm trusted publishing; chatwarden.dev is redeployed.
 
 - **What 0.2.2 is.** The team's principles are a list it fully controls (a name, what it covers, examples, an outcome and which of six levels each covers), with staff-only team notes tied to a Community Rule and an editable AI standard, all in the hub; the AI read and the guide use them, and anything that reads like an instruction to the AI is screened out of the prompt and marked. A first-run panel (the owner's, once) and `chatwarden init --game` start from a recommendation for the kind of game. A report about play or a name no longer gets chat wording or a chat line: the notice, the email, the appeal page, the suggested step, the code of conduct and the hub follow the evidence kind, and the AI reads chat only. `retention.subjectsMs` (400 days, at least 90, no grace period) deletes the identity rows of a person with no record.
 - **Additive.** Every new setting is off or unset by default and every new `Store` method is optional (`getSetupState`, `saveSetupState`, `purgeIdleSubjects`). SQLite migration 28 (one-way: back up the database file) adds one nullable column, `kit_notices.evidence`; the setup flag is a `kit_meta` row. `AI_PROMPT_VERSION` is 6 and `AI_CONFIRM_PROMPT_VERSION` 2, so every stored read is read again once on demand, inside the daily call and spend caps (a cost, and a cold provider cache). A few required members are on types the kit produces; the changelog names them.
