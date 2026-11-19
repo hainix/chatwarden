@@ -77,7 +77,8 @@ describe('migration 26, the term-mode block', () => {
     expect(sql).toContain('match_mode');
     expect(() => db.exec(sql)).toThrow();
     expect(() => openStore({ db })).not.toThrow();
-    expect(MIGRATIONS.filter((m) => m.version > 25).map((m) => m.version)).toEqual([26, 27]);
+    // (28 is the one 0.2.2 migration: kit_notices.evidence)
+    expect(MIGRATIONS.filter((m) => m.version > 25).map((m) => m.version)).toEqual([26, 27, 28]);
   });
 });
 

@@ -418,11 +418,19 @@ describe('Preview', () => {
 
   it('waits 400 ms after the last edit and sends the draft once', async () => {
     const w = await owner();
-    const { user } = await open(w);
+    await open(w);
     await waitFor(() => expect(previews(w)).toHaveLength(1), WAIT);
-    await user.selectOptions(screen.getByLabelText('Hostile: how long'), '6 hours');
-    await user.selectOptions(screen.getByLabelText('Hostile: how long'), '12 hours');
-    await user.selectOptions(screen.getByLabelText('Rude: what happens'), 'Note');
+    // The three edits land in one synchronous block, so no 400 ms can pass between them on a slow runner (user-event's own awaits could, and then the
+    // debounce fired between edits and sent a second preview before the assertion).
+    const pick = (label: string, text: string): void => {
+      const select = screen.getByLabelText(label) as HTMLSelectElement;
+      const option = [...select.options].find((o) => o.textContent === text);
+      expect(option).toBeDefined();
+      fireEvent.change(select, { target: { value: option?.value } });
+    };
+    pick('Hostile: how long', '6 hours');
+    pick('Hostile: how long', '12 hours');
+    pick('Rude: what happens', 'Note');
     expect(previews(w)).toHaveLength(1);
     await waitFor(() => expect(previews(w)).toHaveLength(2), WAIT);
     await new Promise((r) => setTimeout(r, 600));

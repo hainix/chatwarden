@@ -9,7 +9,7 @@ import Demo from '../src/demo/Demo';
 import type { PlayerNotice } from '../src/demo/engine';
 import { KitEngine } from '../src/demo/kitEngine';
 import { LOOP } from '../src/demo/script';
-import { closeReport, composer, live, noticeBtn, oneTapReport, openCase, pickRule, RUDE, sendHeldDecision, setup, stubMatchMedia } from './helpers/demoUi';
+import { cardSettles, closeReport, composer, live, noticeBtn, oneTapReport, openCase, pickRule, reasonedReport, RUDE, sendHeldDecision, setup, stubMatchMedia } from './helpers/demoUi';
 
 async function say(user: ReturnType<typeof userEvent.setup>, text: string) {
   await user.clear(composer());
@@ -101,15 +101,17 @@ describe('a long timeout is dated and explained', () => {
 describe('the player notice is the kit’s own, in player-react’s dialog', () => {
   it('a warning quotes the lines the moderator chose with the blocked word starred out, never the word', async () => {
     const { user, engine } = await setup();
-    await oneTapReport(user);
+    // A report about chat (an insult reason): Simple sends the person's own lines with the warning, Bo's rude line and his refused one, masked.
+    await reasonedReport(user, undefined, 'harassment');
     await closeReport(user);
     const card = await openCase(user);
-    await pickRule(user);
-    // Simple sends the person's own lines with the warning: Bo's rude line, and his refused one, masked.
+    await within(card).findByRole('button', { name: /^send a warning/i });
+    await cardSettles();
     await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
     await sendHeldDecision();
     const notice = (await engine.notices.pending('bo'))[0];
     expect(notice?.kind).toBe('warning');
+    expect(notice?.evidence).toBe('chat');
     await user.click(await noticeBtn('Bo'));
     const dialog = await screen.findByRole('dialog');
     expect(dialog.textContent).toContain(RUDE);
@@ -118,6 +120,23 @@ describe('the player notice is the kit’s own, in player-react’s dialog', () 
     expect(dialog.textContent).toContain(notice?.refCode as string);
     // the staff's reason, the reporter and the room's other chat never reach the player
     expect(dialog.textContent).not.toMatch(/gg, that last clutch|ok that was close|demo-mod/);
+  });
+  it('a one-tap report has no reason, so the warning quotes only the line that was reported (the refused line stays with the staff)', async () => {
+    const { user, engine } = await setup();
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
+    await sendHeldDecision();
+    const notice = (await engine.notices.pending('bo'))[0];
+    expect(notice?.kind).toBe('warning');
+    await user.click(await noticeBtn('Bo'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain(RUDE);
+    expect(dialog.textContent).not.toContain('you absolute');
+    expect(dialog.textContent).not.toMatch(/zorbak/i);
+    expect(dialog.textContent).toContain(notice?.refCode as string);
   });
   it('is gone once acknowledged, and moves to the record', async () => {
     const { user, engine } = await setup();
