@@ -34,11 +34,14 @@ const PEER_FLOOR = '^0.2.0';
 // (discord, player-react: they use nothing new in core 0.2.2); the memory store, matcher, profanity and the optional peers of http stay at the 0.2.0 floor.
 const FLOOR_021 = '^0.2.1';
 const FLOOR_022 = '^0.2.2';
+// 0.2.3 raises one: http reads `notices.deliverAutomatic` in `chatwarden serve` (`CHATWARDEN_DELIVER_AUTOMATIC`). A core 0.2.2 ignores that option, so the variable would silently do nothing.
+const FLOOR_023 = '^0.2.3';
 const RAISED: Record<string, Record<string, string>> = {
   // http: 0.2.1 `cw.appeals.caseByLink`, `fileByLink` and `landingOrigins`, `appealUrl` on a notice and a door refusal, `resolveLandingOptions` (the appeal landing routes and the delivery webhook);
   // 0.2.2 `recommendFor`, `GAME_KINDS`, `isGameKind`, `cw.policy.setup`, `dismissSetup` and `applyRecommendation` (the /setup routes and `chatwarden init --game`) and the whole-form layer
   // (`guidelines: { tiers }`, `teamNotes`, `aiContext`), `evidenceKind` on a decision, `PolicyState.promptExcluded`.
-  '@chatwarden/http': { '@chatwarden/core': FLOOR_022 },
+  // 0.2.3 `notices.deliverAutomatic` (`NoticeDeliveryOptions`), which `chatwarden serve` passes from `CHATWARDEN_DELIVER_AUTOMATIC`: an older core would ignore it and still deliver every automatic timeout.
+  '@chatwarden/http': { '@chatwarden/core': FLOOR_023 },
   // discord: the `sanction.overturned` event type, which it posts to the feed (0.2.1). 0.2.2 adds nothing it uses.
   '@chatwarden/discord': { '@chatwarden/core': FLOOR_021 },
   // hub-react: 0.2.1 `AppealDetail.cause` and `reasonCode`, the new admin fields. 0.2.2: `PolicyState.promptExcluded`, `TeamNote`, `GameKind`, the whole-form layer (the principles editor),
@@ -120,7 +123,7 @@ describe('core is a peer, never a dependency', () => {
     expect(Object.keys(core.devDependencies ?? {}).filter(ownScope)).toEqual(['@chatwarden/store-memory']);
   });
   it.each(dependents.map((p) => [p.pkg.name, p.pkg] as const))(
-    '%s peers on core at its floor (^0.2.0, ^0.2.1 or ^0.2.2 where a release needs new core API) and dev-depends on core at the group version',
+    '%s peers on core at its floor (^0.2.0, ^0.2.1, ^0.2.2 or ^0.2.3 where a release needs new core API) and dev-depends on core at the group version',
     (_n, pkg) => {
       expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(peerRangeOf(pkg.name, '@chatwarden/core'));
       expect(pkg.devDependencies?.['@chatwarden/core']).toBe(VERSION);
@@ -167,7 +170,7 @@ describe('store-memory', () => {
 
 describe('peer floors', () => {
   const byName = (n: string): Manifest => published.find((p) => p.pkg.name === n)!.pkg;
-  it('every @chatwarden/* peer of every package is ^0.2.0, optional ones included, except the seven raised in RAISED (two to ^0.2.1, five to ^0.2.2)', () => {
+  it('every @chatwarden/* peer of every package is ^0.2.0, optional ones included, except the seven raised in RAISED (two to ^0.2.1, four to ^0.2.2, one to ^0.2.3)', () => {
     const seen: string[] = [];
     for (const { pkg } of published) {
       for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {}).filter(([n]) => ownScope(n))) {
@@ -197,7 +200,7 @@ describe('peer floors', () => {
       ].sort(),
     );
   });
-  it('the raised floors are exactly these seven (two ^0.2.1, five ^0.2.2), and every other peer is ^0.2.0 (a release raises only what uses new API)', () => {
+  it('the raised floors are exactly these seven (two ^0.2.1, four ^0.2.2, one ^0.2.3), and every other peer is ^0.2.0 (a release raises only what uses new API)', () => {
     const raised: string[] = [];
     for (const { pkg } of published) {
       for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {}).filter(([n]) => ownScope(n))) {
@@ -207,7 +210,7 @@ describe('peer floors', () => {
     expect(raised.sort()).toEqual(
       [
         '@chatwarden/discord -> @chatwarden/core ^0.2.1',
-        '@chatwarden/http -> @chatwarden/core ^0.2.2',
+        '@chatwarden/http -> @chatwarden/core ^0.2.3',
         '@chatwarden/hub-element -> @chatwarden/hub-react ^0.2.2',
         '@chatwarden/hub-react -> @chatwarden/core ^0.2.2',
         '@chatwarden/hub-react -> @chatwarden/http ^0.2.2',

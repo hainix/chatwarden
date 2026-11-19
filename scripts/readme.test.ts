@@ -1736,3 +1736,31 @@ describe('docs/status.md and the follow-ups after the 0.2.1 build', () => {
     for (const needle of ['`appeals.words`', 'strike forgiveness', 'delivery outbox', 'AI triage of appeals']) expect(part0201, needle).toContain(needle);
   });
 });
+
+describe('docs/status.md and the docs for 0.2.3 (notices.deliverAutomatic)', () => {
+  const status = flat(read('docs', 'status.md'));
+  const head = status.slice(0, status.indexOf('## 0.2.2: published'));
+
+  it('status.md has a 0.2.3 section above 0.2.2 that says built, not yet published, a patch, the option and the one floor', () => {
+    expect(status).toMatch(/## 0\.2\.3: built, not yet published/);
+    expect(status.indexOf('## 0.2.3')).toBeLessThan(status.indexOf('## 0.2.2: published'));
+    for (const needle of ['patch', 'additive', '`notices.deliverAutomatic`', '`CHATWARDEN_DELIVER_AUTOMATIC`', 'Moxgate', '`^0.2.3`', 'Verified', 'Still the owner\'s']) expect(head, needle).toContain(needle);
+  });
+
+  it('the core README, the http README and the appeal-emails recipe name the option and the serve variable', () => {
+    const core = flat(readme('core'));
+    expect(core).toContain('`notices.deliverAutomatic` (0.2.3, default `true`)');
+    expect(core).toContain('{ deliver?, localeOf?, deliverAutomatic? }');
+    expect(core).toMatch(/every appeal outcome \(even for an automatic sanction/);
+    const http = flat(readme('http'));
+    expect(http).toMatch(/\| `CHATWARDEN_DELIVER_AUTOMATIC` \| no \|/);
+    expect(http).toContain('`CHATWARDEN_DELIVER_AUTOMATIC` (see "The process" below)');
+    const recipe = flat(read('docs', 'recipes', 'appeal-emails.md'));
+    expect(recipe).toContain('`deliverAutomatic: false`');
+    expect(recipe).toContain('`CHATWARDEN_DELIVER_AUTOMATIC=0`');
+  });
+
+  it('RELEASING.md and the manifests test agree on the one raised floor', () => {
+    expect(read('scripts', 'manifests.test.ts')).toContain("'@chatwarden/http -> @chatwarden/core ^0.2.3'");
+  });
+});

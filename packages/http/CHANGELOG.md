@@ -1,5 +1,31 @@
 # @chatwarden/http
 
+## 0.2.3
+
+### Patch Changes
+
+- Release 0.2.3: one option, `notices.deliverAutomatic`, for the kit's own automatic timeouts. A game that sends an email for every notice can now leave out the ones the kit gives by itself.
+  
+  **Upgrade notes**
+  
+  - **Nothing changes unless you set it.** `notices.deliverAutomatic` is on by default, so an automatic chat restriction is still handed to `notices.deliver` exactly as in 0.2.2. Nothing is stored differently and there is no migration.
+  - **`deliverAutomatic: false` leaves out automatic sanctions.** The hook is not called for a sanction notice whose `sanction.automated` is true (in practice the kit's automatic chat restrictions). The notice itself, the restriction and "My record" are unchanged. A moderator's sanction is always delivered, and so is every appeal outcome, even for an automatic sanction, because a person filed that appeal and waits for the answer.
+  - **Checked at creation.** A `deliverAutomatic` that is not a boolean is a `TypeError` naming `notices.deliverAutomatic`, whether or not a `deliver` is given.
+  - **`chatwarden serve` reads `CHATWARDEN_DELIVER_AUTOMATIC`.** It accepts `1`, `0`, `true` or `false` (any case); anything else stops the start with a message that names the variable. It is passed to the delivery webhook, so a service-mode game has the same control. Unset means on. It has no effect without `CHATWARDEN_DELIVERY_URL`.
+  - **Peer floor** rises for one package, because it now uses API that is new in 0.2.3. It is set by hand, as `RELEASING.md` describes, so this stays a patch: `@chatwarden/http` asks for `@chatwarden/core` `^0.2.3` (`serve` passes `notices.deliverAutomatic`, which an older core ignores). Every other peer stays where it was.
+  
+  **New public names, by package**
+  
+  - `@chatwarden/core`: `NoticeDeliveryOptions.deliverAutomatic`.
+  - `@chatwarden/http`: the `deliverAutomatic` field of `ServeConfig` and the `CHATWARDEN_DELIVER_AUTOMATIC` variable.
+  - The other packages: no change except the version.
+  
+  **Turning it on**
+  
+  - To stop the email for an automatic timeout, set `notices: { deliver, deliverAutomatic: false }`, or `CHATWARDEN_DELIVER_AUTOMATIC=0` for `chatwarden serve`.
+  
+  What stays yours: the decision whether a person should hear about a timeout the kit gave on its own, and the mail system that sends the rest.
+
 ## 0.2.2
 
 ### Patch Changes

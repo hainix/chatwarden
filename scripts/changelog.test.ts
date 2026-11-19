@@ -859,3 +859,53 @@ describe('the 0.2.2 notes (moderation principles, evidence kind, identity age-ou
     }
   });
 });
+
+describe('the 0.2.3 notes (notices.deliverAutomatic; a patch), in all ten CHANGELOGs', () => {
+  const section0203 = (dir: string): string => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    const at = text.indexOf('## 0.2.3');
+    const end = text.indexOf('\n## 0.2.2', at);
+    return at < 0 ? '' : text.slice(at, end < 0 ? undefined : end);
+  };
+  const flat = (dir: string): string => section0203(dir).replace(/\s+/g, ' ');
+  const read = (...parts: string[]): string => readFileSync(join(root, ...parts), 'utf8');
+
+  it.each(dirs)('%s: has a 0.2.3 section above 0.2.2, as a patch change', (dir) => {
+    const text = read('packages', dir, 'CHANGELOG.md').replace(/\r\n/g, '\n');
+    expect(text.indexOf('## 0.2.3'), dir).toBeGreaterThan(-1);
+    expect(text.indexOf('## 0.2.3'), dir).toBeLessThan(text.indexOf('## 0.2.2'));
+    expect(section0203(dir), dir).toMatch(/### Patch Changes/);
+    expect(section0203(dir), dir).not.toMatch(/### (Minor|Major) Changes/);
+  });
+
+  it('all ten carry exactly the same text', () => {
+    const first = section0203(dirs[0] as string);
+    expect(first.length).toBeGreaterThan(1500);
+    for (const dir of dirs) expect(section0203(dir), dir).toBe(first);
+  });
+
+  it.each(dirs)('%s: names the option, its default, what is always delivered, the serve variable and the one raised floor', (dir) => {
+    const s = flat(dir);
+    for (const needle of [
+      '`notices.deliverAutomatic`',
+      'on by default',
+      '`sanction.automated`',
+      'every appeal outcome',
+      'A moderator\'s sanction is always delivered',
+      '`TypeError`',
+      '`CHATWARDEN_DELIVER_AUTOMATIC`',
+      '`@chatwarden/http` asks for `@chatwarden/core` `^0.2.3`',
+    ]) expect(s, `${dir}: ${needle}`).toContain(needle);
+  });
+
+  it('the names it gives are in the sources', () => {
+    expect(read('packages', 'core', 'src', 'delivery.ts')).toContain('deliverAutomatic');
+    expect(read('packages', 'http', 'src', 'service', 'serve.ts')).toContain('CHATWARDEN_DELIVER_AUTOMATIC');
+  });
+
+  it('uses no em dash and no emoji', () => {
+    const s = section0203('core');
+    expect(s).not.toContain('\u2014');
+    expect(s).not.toMatch(/[\u{1F300}-\u{1FAFF}\u2600-\u27bf]/u);
+  });
+});
