@@ -1741,8 +1741,8 @@ describe('docs/status.md and the docs for 0.2.3 (notices.deliverAutomatic)', () 
   const status = flat(read('docs', 'status.md'));
   const head = status.slice(0, status.indexOf('## 0.2.2: published'));
 
-  it('status.md has a 0.2.3 section above 0.2.2 that says built, not yet published, a patch, the option and the one floor', () => {
-    expect(status).toMatch(/## 0\.2\.3: built, not yet published/);
+  it('status.md has a 0.2.3 section above 0.2.2 that says published, a patch, the option and the one floor', () => {
+    expect(status).toMatch(/## 0\.2\.3: published \(2026-11-18, all ten packages on npm, tag `v0\.2\.3`/);
     expect(status.indexOf('## 0.2.3')).toBeLessThan(status.indexOf('## 0.2.2: published'));
     for (const needle of ['patch', 'additive', '`notices.deliverAutomatic`', '`CHATWARDEN_DELIVER_AUTOMATIC`', 'Moxgate', '`^0.2.3`', 'Verified', 'Still the owner\'s']) expect(head, needle).toContain(needle);
   });

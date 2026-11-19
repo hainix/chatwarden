@@ -2,9 +2,9 @@
 
 Updated 2026-11-18. The full roadmap and the reasoning behind it: [design/2026-11-09-product-scope.md](design/2026-11-09-product-scope.md).
 
-## 0.2.3: built, not yet published (PR open, tag `v0.2.3` not pushed)
+## 0.2.3: published (2026-11-18, all ten packages on npm, tag `v0.2.3`, PR #47)
 
-A patch release, additive: nothing in it breaks a 0.2.2 input. One option for emails on automatic timeouts. Built and packed on the branch `deliver-automatic`; nothing is tagged and nothing is on npm yet (the packages there are still 0.2.2).
+A patch release, additive: nothing in it breaks a 0.2.2 input. One option for emails on automatic timeouts. Published from tag `v0.2.3` through npm trusted publishing; chatwarden.dev is redeployed.
 
 - **What 0.2.3 is.** `notices.deliverAutomatic` (default `true`, so nothing changes unless it is set). With `false` the `notices.deliver` hook is not called for a sanction notice whose `sanction.automated` is true (the kit's automatic chat restrictions); a moderator's sanction and every appeal outcome, even for an automatic sanction, are still delivered, because a person filed that appeal and waits for the answer. A non-boolean is a `TypeError` at creation. `chatwarden serve` reads `CHATWARDEN_DELIVER_AUTOMATIC` (1, 0, true or false; anything else stops the start) and passes it to the delivery webhook, so a service-mode game has the same control. It was the owner's request (2026-11-18): an option, on by default, and Moxgate turns it off on its side.
 - **Additive.** No migration, no new `Store` method, nothing stored differently. The option and the variable are the only new names.
